@@ -1,0 +1,7 @@
+{
+  "description": "Shared contract fixture. Schema-only — exact values depend on model.",
+  "schema": {
+    "segments": [{ "start": "number", "end": "number", "speaker": "string", "embedding": "number[512]" }],
+    "num_speakers": "integer >= 1"
+  }
+}
