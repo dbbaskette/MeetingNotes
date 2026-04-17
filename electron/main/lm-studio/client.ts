@@ -57,7 +57,7 @@ export class LMStudioClient {
     if (input.language) form.append('language', input.language);
     form.append(
       'file',
-      new Blob([bytes], { type: 'audio/mpeg' }),
+      new Blob([bytes as BlobPart], { type: 'audio/mpeg' }),
       path.basename(input.audioPath),
     );
 
