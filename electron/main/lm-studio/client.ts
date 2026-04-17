@@ -19,6 +19,18 @@ export interface TranscribeResult {
   segments: { start: number; end: number; text: string }[];
 }
 
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatInput {
+  model: string;
+  messages: ChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
+}
+
 export class LMStudioClient {
   constructor(public readonly baseUrl: string) {}
 
@@ -65,5 +77,27 @@ export class LMStudioClient {
       segments?: { start: number; end: number; text: string }[];
     };
     return { text: body.text, segments: body.segments ?? [] };
+  }
+
+  async chat(input: ChatInput): Promise<string> {
+    let resp: Response;
+    try {
+      resp = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: input.model,
+          messages: input.messages,
+          temperature: input.temperature ?? 0.2,
+          max_tokens: input.maxTokens,
+        }),
+        signal: AbortSignal.timeout(2 * 60 * 1000),
+      });
+    } catch (e) {
+      throw new LMStudioError('LM Studio chat failed: network', e);
+    }
+    if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
+    const body = (await resp.json()) as { choices: { message: { content: string } }[] };
+    return body.choices?.[0]?.message?.content ?? '';
   }
 }

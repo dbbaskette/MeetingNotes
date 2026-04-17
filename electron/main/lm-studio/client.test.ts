@@ -54,3 +54,23 @@ describe('LMStudioClient.transcribe', () => {
     expect((init as RequestInit).method).toBe('POST');
   });
 });
+
+describe('LMStudioClient.chat', () => {
+  it('POSTs JSON to /v1/chat/completions and returns assistant content', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: 'Summary text' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    const result = await c.chat({
+      model: 'llama-3.1-8b',
+      messages: [{ role: 'user', content: 'hi' }],
+      temperature: 0.2,
+    });
+    expect(result).toBe('Summary text');
+  });
+});
