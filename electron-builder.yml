@@ -1,0 +1,20 @@
+appId: com.dbbaskette.meetingnotes
+productName: MeetingNotes
+directories:
+  output: release
+files:
+  - dist/**
+  - package.json
+extraResources:
+  - from: sidecar
+    to: sidecar
+    filter:
+      - "**/*"
+      - "!**/__pycache__"
+      - "!.venv"
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.productivity
+  hardenedRuntime: true

@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  font-family: theme('fontFamily.sans');
+  color: theme('colors.ink.DEFAULT');
+  background: theme('colors.surface.sunken');
+}
+
+.input {
+  @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
+}
