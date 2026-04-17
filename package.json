@@ -10,6 +10,7 @@
     "dev:main": "tsc -p tsconfig.node.json --watch & wait-on tcp:5173 && electron .",
     "build": "tsc -p tsconfig.node.json && vite build",
     "start": "electron .",
+    "dist": "npm run build && electron-builder --mac",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --ext .ts,.tsx",
