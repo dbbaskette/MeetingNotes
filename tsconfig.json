@@ -16,5 +16,9 @@
       "@renderer/*": ["electron/renderer/src/*"]
     }
   },
-  "include": ["electron/renderer/src/**/*", "electron/renderer/**/*.ts", "electron/renderer/**/*.tsx"]
+  "include": [
+    "electron/renderer/src/**/*",
+    "electron/renderer/**/*.ts",
+    "electron/renderer/**/*.tsx"
+  ]
 }

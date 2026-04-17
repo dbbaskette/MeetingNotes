@@ -154,6 +154,7 @@ Each task follows TDD: write failing test → verify failure → minimal impleme
 ### Task 1: Initialize Electron + Vite + TypeScript + React project
 
 **Files:**
+
 - Create: `package.json`, `tsconfig.json`, `tsconfig.node.json`, `vite.config.ts`, `electron/main/index.ts`, `electron/preload/index.ts`, `electron/renderer/index.html`, `electron/renderer/src/main.tsx`, `electron/renderer/src/App.tsx`, `.gitignore` updates
 
 - [ ] **Step 1: Create `package.json`**
@@ -231,7 +232,11 @@ Each task follows TDD: write failing test → verify failure → minimal impleme
       "@renderer/*": ["electron/renderer/src/*"]
     }
   },
-  "include": ["electron/renderer/src/**/*", "electron/renderer/**/*.ts", "electron/renderer/**/*.tsx"]
+  "include": [
+    "electron/renderer/src/**/*",
+    "electron/renderer/**/*.ts",
+    "electron/renderer/**/*.tsx"
+  ]
 }
 ```
 
@@ -356,7 +361,11 @@ import './index.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Root element missing');
-createRoot(container).render(<React.StrictMode><App /></React.StrictMode>);
+createRoot(container).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
 ```
 
 - [ ] **Step 9: Create `electron/renderer/src/App.tsx`**
@@ -396,6 +405,7 @@ git commit -m "scaffold: Electron + Vite + TypeScript + React project"
 ### Task 2: Add Tailwind CSS (Clean Studio theme)
 
 **Files:**
+
 - Create: `tailwind.config.js`, `postcss.config.js`, `electron/renderer/src/index.css`, `electron/renderer/src/theme/tokens.ts`
 
 - [ ] **Step 1: Create `tailwind.config.js`**
@@ -451,8 +461,16 @@ export default { plugins: { tailwindcss: {}, autoprefixer: {} } };
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { height: 100%; }
-body { font-family: theme('fontFamily.sans'); color: theme('colors.ink.DEFAULT'); background: theme('colors.surface.sunken'); }
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  font-family: theme('fontFamily.sans');
+  color: theme('colors.ink.DEFAULT');
+  background: theme('colors.surface.sunken');
+}
 ```
 
 - [ ] **Step 4: Create `electron/renderer/src/theme/tokens.ts`**
@@ -491,6 +509,7 @@ git commit -m "style: add Tailwind with Clean Studio theme tokens"
 ### Task 3: Add Vitest test infrastructure
 
 **Files:**
+
 - Create: `vitest.config.ts`, `electron/main/lib/.keep`, `electron/main/lib/sanity.test.ts`
 
 - [ ] **Step 1: Create `vitest.config.ts`**
@@ -544,6 +563,7 @@ git commit -m "test: add Vitest configuration and sanity test"
 ### Task 4: Add ESLint + Prettier
 
 **Files:**
+
 - Create: `.eslintrc.cjs`, `.prettierrc`, `.eslintignore`, `.prettierignore`
 
 - [ ] **Step 1: Create `.eslintrc.cjs`**
@@ -578,6 +598,7 @@ module.exports = {
 - [ ] **Step 3: Create `.eslintignore` and `.prettierignore`**
 
 `.eslintignore`:
+
 ```
 dist
 node_modules
@@ -586,6 +607,7 @@ mockups
 ```
 
 `.prettierignore`:
+
 ```
 dist
 node_modules
@@ -618,6 +640,7 @@ These are side-effect-free utilities consumed by storage, pipeline, and UI. TDD-
 ### Task 5: Slug generator
 
 **Files:**
+
 - Create: `electron/main/lib/slug.ts`, `electron/main/lib/slug.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -705,6 +728,7 @@ git commit -m "lib: add slug + shortId generators"
 ### Task 6: Filename → title parser
 
 **Files:**
+
 - Create: `electron/main/lib/title-from-filename.ts`, `electron/main/lib/title-from-filename.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -780,6 +804,7 @@ git commit -m "lib: parse Audio Hijack filenames into title + started-at"
 ### Task 7: Cosine similarity utility
 
 **Files:**
+
 - Create: `electron/main/lib/cosine.ts`, `electron/main/lib/cosine.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -865,14 +890,19 @@ git commit -m "lib: cosine similarity + vector normalize"
 ### Task 8: Transcript/diarization merger
 
 **Files:**
+
 - Create: `electron/main/lib/merge-transcript.ts`, `electron/main/lib/merge-transcript.test.ts`
 
 - [ ] **Step 1: Write failing test**
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { mergeTranscriptWithDiarization, mergedToMarkdown,
-  type WhisperSegment, type DiarSegment } from './merge-transcript';
+import {
+  mergeTranscriptWithDiarization,
+  mergedToMarkdown,
+  type WhisperSegment,
+  type DiarSegment,
+} from './merge-transcript';
 
 const whisper: WhisperSegment[] = [
   { start: 0.0, end: 2.0, text: 'Hello there.' },
@@ -895,9 +925,7 @@ describe('mergeTranscriptWithDiarization', () => {
   });
 
   it('labels UNKNOWN when no diar segment overlaps', () => {
-    const out = mergeTranscriptWithDiarization(
-      [{ start: 10, end: 11, text: 'lone' }], diar,
-    );
+    const out = mergeTranscriptWithDiarization([{ start: 10, end: 11, text: 'lone' }], diar);
     expect(out[0]!.speaker).toBe('UNKNOWN');
   });
 });
@@ -921,9 +949,19 @@ Expected: FAIL — module not found.
 
 ```ts
 // electron/main/lib/merge-transcript.ts
-export interface WhisperSegment { start: number; end: number; text: string; }
-export interface DiarSegment { start: number; end: number; speaker: string; }
-export interface MergedSegment extends WhisperSegment { speaker: string; }
+export interface WhisperSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+export interface DiarSegment {
+  start: number;
+  end: number;
+  speaker: string;
+}
+export interface MergedSegment extends WhisperSegment {
+  speaker: string;
+}
 
 function overlap(a: { start: number; end: number }, b: { start: number; end: number }): number {
   return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
@@ -938,15 +976,22 @@ export function mergeTranscriptWithDiarization(
     let bestOverlap = 0;
     for (const d of diar) {
       const o = overlap(w, d);
-      if (o > bestOverlap) { bestOverlap = o; best = d; }
+      if (o > bestOverlap) {
+        bestOverlap = o;
+        best = d;
+      }
     }
     return { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
   });
 }
 
 export function formatTimestamp(sec: number): string {
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
-  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  const m = Math.floor(sec / 60)
+    .toString()
+    .padStart(2, '0');
+  const s = Math.floor(sec % 60)
+    .toString()
+    .padStart(2, '0');
   return `${m}:${s}`;
 }
 
@@ -972,6 +1017,7 @@ git commit -m "lib: merge Whisper segments with pyannote diarization"
 ### Task 9: Stage machine
 
 **Files:**
+
 - Create: `electron/main/lib/stage-machine.ts`, `electron/main/lib/stage-machine.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -979,14 +1025,24 @@ git commit -m "lib: merge Whisper segments with pyannote diarization"
 ```ts
 import { describe, it, expect } from 'vitest';
 import {
-  STAGES, nextStage, previousCompletedOnCrash, downstreamOf, isValidTransition,
+  STAGES,
+  nextStage,
+  previousCompletedOnCrash,
+  downstreamOf,
+  isValidTransition,
 } from './stage-machine';
 
 describe('stage-machine', () => {
   it('lists stages in canonical order', () => {
     expect(STAGES).toEqual([
-      'discovered', 'transcribing', 'diarizing', 'merging',
-      'identifying', 'summarizing', 'extracting', 'done',
+      'discovered',
+      'transcribing',
+      'diarizing',
+      'merging',
+      'identifying',
+      'summarizing',
+      'extracting',
+      'done',
     ]);
   });
 
@@ -1029,8 +1085,14 @@ Expected: FAIL.
 ```ts
 // electron/main/lib/stage-machine.ts
 export const STAGES = [
-  'discovered', 'transcribing', 'diarizing', 'merging',
-  'identifying', 'summarizing', 'extracting', 'done',
+  'discovered',
+  'transcribing',
+  'diarizing',
+  'merging',
+  'identifying',
+  'summarizing',
+  'extracting',
+  'done',
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -1079,11 +1141,12 @@ git commit -m "lib: pipeline stage machine"
 ### Task 10: Action-item schema (zod) + lenient parser
 
 **Files:**
+
 - Create: `electron/main/lib/action-item-schema.ts`, `electron/main/lib/action-item-schema.test.ts`
 
 - [ ] **Step 1: Write failing test**
 
-```ts
+````ts
 import { describe, it, expect } from 'vitest';
 import { ActionItemSchema, parseActionItemsLoose } from './action-item-schema';
 
@@ -1114,7 +1177,7 @@ describe('parseActionItemsLoose', () => {
     expect(parseActionItemsLoose(raw)).toHaveLength(1);
   });
 });
-```
+````
 
 - [ ] **Step 2: Run, expect failure**
 
@@ -1130,7 +1193,10 @@ import { z } from 'zod';
 export const ActionItemSchema = z.object({
   text: z.string().min(1),
   owner: z.string().nullable(),
-  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  due_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .nullable(),
 });
 export type ActionItem = z.infer<typeof ActionItemSchema>;
 
@@ -1141,7 +1207,11 @@ export function parseActionItemsLoose(raw: string): ActionItem[] {
   const end = raw.lastIndexOf(']');
   if (start < 0 || end <= start) return [];
   let parsed: unknown;
-  try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { return []; }
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return [];
+  }
   if (!Array.isArray(parsed)) return [];
   const out: ActionItem[] = [];
   for (const item of parsed) {
@@ -1173,6 +1243,7 @@ SQLite index + filesystem artifacts. Every write goes through a repo; the filesy
 ### Task 11: SQLite migrations
 
 **Files:**
+
 - Create: `electron/main/storage/db.ts`, `electron/main/storage/migrations.ts`, `electron/main/storage/db.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1187,21 +1258,34 @@ import path from 'node:path';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'mn-db-'));
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('openDb', () => {
   it('creates schema with expected tables', () => {
-    const dir = tmp(); dirs.push(dir);
+    const dir = tmp();
+    dirs.push(dir);
     const db = openDb(path.join(dir, 'db.sqlite'));
-    const rows = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[];
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[];
     const names = rows.map((r) => r.name);
-    expect(names).toEqual(expect.arrayContaining([
-      'meetings', 'speakers', 'meeting_speakers', 'action_items', 'settings', 'schema_version',
-    ]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'meetings',
+        'speakers',
+        'meeting_speakers',
+        'action_items',
+        'settings',
+        'schema_version',
+      ]),
+    );
   });
 
   it('is idempotent (running twice keeps version)', () => {
-    const dir = tmp(); dirs.push(dir);
+    const dir = tmp();
+    dirs.push(dir);
     const dbPath = path.join(dir, 'db.sqlite');
     openDb(dbPath).close();
     const db = openDb(dbPath);
@@ -1222,7 +1306,10 @@ Expected: FAIL — module missing.
 // electron/main/storage/migrations.ts
 import type Database from 'better-sqlite3';
 
-interface Migration { version: number; up: string; }
+interface Migration {
+  version: number;
+  up: string;
+}
 
 export const MIGRATIONS: Migration[] = [
   {
@@ -1281,8 +1368,10 @@ export const MIGRATIONS: Migration[] = [
 ];
 
 export function runMigrations(db: Database.Database): void {
-  db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
-  const row = db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
+  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
+  const row = db.prepare('SELECT version FROM schema_version').get() as
+    | { version: number }
+    | undefined;
   const current = row?.version ?? 0;
   for (const m of MIGRATIONS) {
     if (m.version > current) {
@@ -1336,6 +1425,7 @@ git commit -m "storage: SQLite schema with versioned migrations"
 ### Task 12: Meeting folder helper
 
 **Files:**
+
 - Create: `electron/main/storage/meeting-folder.ts`, `electron/main/storage/meeting-folder.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1345,15 +1435,23 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createMeetingFolder, readMeetingJson, writeMeetingJson, type MeetingRecord } from './meeting-folder';
+import {
+  createMeetingFolder,
+  readMeetingJson,
+  writeMeetingJson,
+  type MeetingRecord,
+} from './meeting-folder';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'mn-folder-'));
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('createMeetingFolder', () => {
   it('creates folder and symlinks audio', () => {
-    const root = tmp(); dirs.push(root);
+    const root = tmp();
+    dirs.push(root);
     const audio = path.join(root, 'source.mp3');
     fs.writeFileSync(audio, Buffer.from('x'));
     const folder = createMeetingFolder(root, '2026-04-17-test-abc1', audio);
@@ -1365,14 +1463,21 @@ describe('createMeetingFolder', () => {
 
 describe('read/writeMeetingJson', () => {
   it('round-trips a meeting record', () => {
-    const root = tmp(); dirs.push(root);
+    const root = tmp();
+    dirs.push(root);
     const audio = path.join(root, 'a.mp3');
     fs.writeFileSync(audio, Buffer.from('x'));
     const folder = createMeetingFolder(root, '2026-04-17-t-xyz1', audio);
     const rec: MeetingRecord = {
-      id: 'xyz1', slug: '2026-04-17-t-xyz1', title: 'T',
-      startedAt: null, durationS: null, audioPath: audio,
-      pipelineStage: 'discovered', speakers: [], models: {},
+      id: 'xyz1',
+      slug: '2026-04-17-t-xyz1',
+      title: 'T',
+      startedAt: null,
+      durationS: null,
+      audioPath: audio,
+      pipelineStage: 'discovered',
+      speakers: [],
+      models: {},
     };
     writeMeetingJson(folder, rec);
     expect(readMeetingJson(folder)).toEqual(rec);
@@ -1401,11 +1506,13 @@ export const MeetingRecordSchema = z.object({
   durationS: z.number().nullable(),
   audioPath: z.string(),
   pipelineStage: z.string(),
-  speakers: z.array(z.object({
-    label: z.string(),
-    rosterId: z.string().nullable(),
-    confidence: z.number().nullable(),
-  })),
+  speakers: z.array(
+    z.object({
+      label: z.string(),
+      rosterId: z.string().nullable(),
+      confidence: z.number().nullable(),
+    }),
+  ),
   models: z.record(z.string(), z.string()),
 });
 export type MeetingRecord = z.infer<typeof MeetingRecordSchema>;
@@ -1450,6 +1557,7 @@ git commit -m "storage: meeting folder creator + meeting.json reader/writer"
 ### Task 13: Meetings repository
 
 **Files:**
+
 - Create: `electron/main/storage/meetings-repo.ts`, `electron/main/storage/meetings-repo.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1472,9 +1580,14 @@ beforeEach(() => {
 describe('MeetingsRepo', () => {
   it('insert + findById round-trips', () => {
     repo.insert({
-      id: 'a3f8', slug: '2026-04-17-q2-a3f8', title: 'Q2',
-      startedAt: '2026-04-17T14:32:00', durationS: 2341,
-      audioPath: '/x/a.mp3', status: 'processing', pipelineStage: 'transcribing',
+      id: 'a3f8',
+      slug: '2026-04-17-q2-a3f8',
+      title: 'Q2',
+      startedAt: '2026-04-17T14:32:00',
+      durationS: 2341,
+      audioPath: '/x/a.mp3',
+      status: 'processing',
+      pipelineStage: 'transcribing',
     });
     const got = repo.findById('a3f8');
     expect(got?.title).toBe('Q2');
@@ -1482,21 +1595,65 @@ describe('MeetingsRepo', () => {
   });
 
   it('updateStage updates pipeline_stage and updated_at', () => {
-    repo.insert({ id: 'x', slug: 's', title: 't', startedAt: null, durationS: null,
-      audioPath: '/a', status: 'processing', pipelineStage: 'discovered' });
+    repo.insert({
+      id: 'x',
+      slug: 's',
+      title: 't',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/a',
+      status: 'processing',
+      pipelineStage: 'discovered',
+    });
     repo.updateStage('x', 'transcribing');
     expect(repo.findById('x')?.pipelineStage).toBe('transcribing');
   });
 
   it('listAll returns newest first', () => {
-    repo.insert({ id: 'a', slug: 'a', title: 'A', startedAt: '2026-04-16', durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
-    repo.insert({ id: 'b', slug: 'b', title: 'B', startedAt: '2026-04-17', durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+    repo.insert({
+      id: 'a',
+      slug: 'a',
+      title: 'A',
+      startedAt: '2026-04-16',
+      durationS: null,
+      audioPath: '/a',
+      status: 'done',
+      pipelineStage: 'done',
+    });
+    repo.insert({
+      id: 'b',
+      slug: 'b',
+      title: 'B',
+      startedAt: '2026-04-17',
+      durationS: null,
+      audioPath: '/b',
+      status: 'done',
+      pipelineStage: 'done',
+    });
     expect(repo.listAll().map((m) => m.id)).toEqual(['b', 'a']);
   });
 
   it('findNonTerminal returns meetings not in `done`', () => {
-    repo.insert({ id: 'a', slug: 'a', title: 'A', startedAt: null, durationS: null, audioPath: '/a', status: 'processing', pipelineStage: 'transcribing' });
-    repo.insert({ id: 'b', slug: 'b', title: 'B', startedAt: null, durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+    repo.insert({
+      id: 'a',
+      slug: 'a',
+      title: 'A',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/a',
+      status: 'processing',
+      pipelineStage: 'transcribing',
+    });
+    repo.insert({
+      id: 'b',
+      slug: 'b',
+      title: 'B',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/b',
+      status: 'done',
+      pipelineStage: 'done',
+    });
     expect(repo.findNonTerminal().map((m) => m.id)).toEqual(['a']);
   });
 });
@@ -1514,16 +1671,27 @@ Expected: FAIL.
 import type Database from 'better-sqlite3';
 
 export interface MeetingRow {
-  id: string; slug: string; title: string;
-  startedAt: string | null; durationS: number | null;
-  audioPath: string; status: string; pipelineStage: string;
-  createdAt: string; updatedAt: string;
+  id: string;
+  slug: string;
+  title: string;
+  startedAt: string | null;
+  durationS: number | null;
+  audioPath: string;
+  status: string;
+  pipelineStage: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface MeetingInsert {
-  id: string; slug: string; title: string;
-  startedAt: string | null; durationS: number | null;
-  audioPath: string; status: string; pipelineStage: string;
+  id: string;
+  slug: string;
+  title: string;
+  startedAt: string | null;
+  durationS: number | null;
+  audioPath: string;
+  status: string;
+  pipelineStage: string;
 }
 
 function rowToMeeting(r: Record<string, unknown>): MeetingRow {
@@ -1546,44 +1714,58 @@ export class MeetingsRepo {
 
   insert(m: MeetingInsert): void {
     const now = new Date().toISOString();
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO meetings (id, slug, title, started_at, duration_s, audio_path, status, pipeline_stage, created_at, updated_at)
       VALUES (@id, @slug, @title, @startedAt, @durationS, @audioPath, @status, @pipelineStage, @createdAt, @updatedAt)
-    `).run({ ...m, createdAt: now, updatedAt: now });
+    `,
+      )
+      .run({ ...m, createdAt: now, updatedAt: now });
   }
 
   findById(id: string): MeetingRow | null {
-    const row = this.db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
     return row ? rowToMeeting(row) : null;
   }
 
   listAll(): MeetingRow[] {
-    const rows = this.db.prepare('SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC').all() as Record<string, unknown>[];
+    const rows = this.db
+      .prepare('SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC')
+      .all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
   findNonTerminal(): MeetingRow[] {
-    const rows = this.db.prepare("SELECT * FROM meetings WHERE pipeline_stage != 'done'").all() as Record<string, unknown>[];
+    const rows = this.db
+      .prepare("SELECT * FROM meetings WHERE pipeline_stage != 'done'")
+      .all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
   updateStage(id: string, stage: string): void {
-    this.db.prepare('UPDATE meetings SET pipeline_stage = ?, updated_at = ? WHERE id = ?')
+    this.db
+      .prepare('UPDATE meetings SET pipeline_stage = ?, updated_at = ? WHERE id = ?')
       .run(stage, new Date().toISOString(), id);
   }
 
   updateTitle(id: string, title: string): void {
-    this.db.prepare('UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?')
+    this.db
+      .prepare('UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?')
       .run(title, new Date().toISOString(), id);
   }
 
   updateStatus(id: string, status: string): void {
-    this.db.prepare('UPDATE meetings SET status = ?, updated_at = ? WHERE id = ?')
+    this.db
+      .prepare('UPDATE meetings SET status = ?, updated_at = ? WHERE id = ?')
       .run(status, new Date().toISOString(), id);
   }
 
   updateDuration(id: string, durationS: number): void {
-    this.db.prepare('UPDATE meetings SET duration_s = ?, updated_at = ? WHERE id = ?')
+    this.db
+      .prepare('UPDATE meetings SET duration_s = ?, updated_at = ? WHERE id = ?')
       .run(durationS, new Date().toISOString(), id);
   }
 }
@@ -1606,6 +1788,7 @@ git commit -m "storage: meetings repository"
 ### Task 14: Speakers repository
 
 **Files:**
+
 - Create: `electron/main/storage/speakers-repo.ts`, `electron/main/storage/speakers-repo.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1656,7 +1839,12 @@ Expected: FAIL.
 import type Database from 'better-sqlite3';
 import { shortId } from '../lib/slug';
 
-export interface SpeakerRow { id: string; displayName: string; createdAt: string; notes: string | null; }
+export interface SpeakerRow {
+  id: string;
+  displayName: string;
+  createdAt: string;
+  notes: string | null;
+}
 
 function row(r: Record<string, unknown>): SpeakerRow {
   return {
@@ -1672,18 +1860,24 @@ export class SpeakersRepo {
 
   create(input: { displayName: string; notes?: string }): string {
     const id = `spk_${shortId()}`;
-    this.db.prepare('INSERT INTO speakers (id, display_name, created_at, notes) VALUES (?, ?, ?, ?)')
+    this.db
+      .prepare('INSERT INTO speakers (id, display_name, created_at, notes) VALUES (?, ?, ?, ?)')
       .run(id, input.displayName, new Date().toISOString(), input.notes ?? null);
     return id;
   }
 
   findById(id: string): SpeakerRow | null {
-    const r = this.db.prepare('SELECT * FROM speakers WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const r = this.db.prepare('SELECT * FROM speakers WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
     return r ? row(r) : null;
   }
 
   list(): SpeakerRow[] {
-    const rows = this.db.prepare('SELECT * FROM speakers ORDER BY display_name').all() as Record<string, unknown>[];
+    const rows = this.db.prepare('SELECT * FROM speakers ORDER BY display_name').all() as Record<
+      string,
+      unknown
+    >[];
     return rows.map(row);
   }
 
@@ -1696,13 +1890,17 @@ export class SpeakersRepo {
   }
 
   linkToMeeting(meetingId: string, localLabel: string, rosterId: string, confidence: number): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO meeting_speakers (meeting_id, local_label, roster_speaker_id, confidence)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(meeting_id, local_label) DO UPDATE SET
         roster_speaker_id = excluded.roster_speaker_id,
         confidence = excluded.confidence
-    `).run(meetingId, localLabel, rosterId, confidence);
+    `,
+      )
+      .run(meetingId, localLabel, rosterId, confidence);
   }
 }
 ```
@@ -1724,6 +1922,7 @@ git commit -m "storage: speakers repository"
 ### Task 15: Action items repository
 
 **Files:**
+
 - Create: `electron/main/storage/action-items-repo.ts`, `electron/main/storage/action-items-repo.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1747,7 +1946,16 @@ beforeEach(() => {
   meetings = new MeetingsRepo(db);
   repo = new ActionItemsRepo(db);
   meetingId = 'm1';
-  meetings.insert({ id: meetingId, slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+  meetings.insert({
+    id: meetingId,
+    slug: 's',
+    title: 't',
+    startedAt: null,
+    durationS: null,
+    audioPath: '/a',
+    status: 'done',
+    pipelineStage: 'done',
+  });
 });
 
 describe('ActionItemsRepo', () => {
@@ -1791,9 +1999,14 @@ import { shortId } from '../lib/slug';
 import type { ActionItem } from '../lib/action-item-schema';
 
 export interface ActionItemRow {
-  id: string; meetingId: string; text: string;
-  ownerSpeakerId: string | null; dueDate: string | null;
-  status: string; exportedTo: string[]; createdAt: string;
+  id: string;
+  meetingId: string;
+  text: string;
+  ownerSpeakerId: string | null;
+  dueDate: string | null;
+  status: string;
+  exportedTo: string[];
+  createdAt: string;
 }
 
 function row(r: Record<string, unknown>): ActionItemRow {
@@ -1827,7 +2040,9 @@ export class ActionItemsRepo {
   }
 
   listByMeeting(meetingId: string): ActionItemRow[] {
-    const rows = this.db.prepare('SELECT * FROM action_items WHERE meeting_id = ? ORDER BY created_at').all(meetingId) as Record<string, unknown>[];
+    const rows = this.db
+      .prepare('SELECT * FROM action_items WHERE meeting_id = ? ORDER BY created_at')
+      .all(meetingId) as Record<string, unknown>[];
     return rows.map(row);
   }
 
@@ -1836,11 +2051,15 @@ export class ActionItemsRepo {
   }
 
   markExported(id: string, target: string): void {
-    const r = this.db.prepare('SELECT exported_to FROM action_items WHERE id = ?').get(id) as { exported_to: string } | undefined;
+    const r = this.db.prepare('SELECT exported_to FROM action_items WHERE id = ?').get(id) as
+      | { exported_to: string }
+      | undefined;
     if (!r) return;
     const list: string[] = JSON.parse(r.exported_to || '[]');
     if (!list.includes(target)) list.push(target);
-    this.db.prepare('UPDATE action_items SET exported_to = ? WHERE id = ?').run(JSON.stringify(list), id);
+    this.db
+      .prepare('UPDATE action_items SET exported_to = ? WHERE id = ?')
+      .run(JSON.stringify(list), id);
   }
 }
 ```
@@ -1862,6 +2081,7 @@ git commit -m "storage: action items repository"
 ### Task 16: Settings repository
 
 **Files:**
+
 - Create: `electron/main/storage/settings-repo.ts`, `electron/main/storage/settings-repo.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1940,21 +2160,30 @@ export class SettingsRepo {
   constructor(private readonly db: Database.Database) {}
 
   get<K extends Key>(key: K): Settings[K] {
-    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
+      | { value: string }
+      | undefined;
     if (!r) return DEFAULT_SETTINGS[key];
     return JSON.parse(r.value) as Settings[K];
   }
 
   set<K extends Key>(key: K, value: Settings[K]): void {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(key, JSON.stringify(value));
+    `,
+      )
+      .run(key, JSON.stringify(value));
   }
 
   getAll(): Settings {
     const out = { ...DEFAULT_SETTINGS };
-    const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as {
+      key: string;
+      value: string;
+    }[];
     for (const { key, value } of rows) {
       if (key in DEFAULT_SETTINGS) {
         (out as Record<string, unknown>)[key] = JSON.parse(value);
@@ -1982,6 +2211,7 @@ git commit -m "storage: settings repository with defaults"
 ### Task 17: Logger
 
 **Files:**
+
 - Create: `electron/main/logging/logger.ts`, `electron/main/logging/logger.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -1994,11 +2224,14 @@ import path from 'node:path';
 import { Logger } from './logger';
 
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('Logger', () => {
   it('writes newline-delimited JSON with level, msg, ts', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-log-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-log-'));
+    dirs.push(dir);
     const log = new Logger(path.join(dir, 'app.log'));
     log.info('hello', { k: 1 });
     log.error('bad', { e: 'boom' });
@@ -2038,11 +2271,21 @@ export class Logger {
     const entry = { ts: new Date().toISOString(), level, msg, ...(data ?? {}) };
     this.stream.write(JSON.stringify(entry) + '\n');
   }
-  debug(msg: string, data?: Record<string, unknown>): void { this.write('debug', msg, data); }
-  info(msg: string, data?: Record<string, unknown>): void { this.write('info', msg, data); }
-  warn(msg: string, data?: Record<string, unknown>): void { this.write('warn', msg, data); }
-  error(msg: string, data?: Record<string, unknown>): void { this.write('error', msg, data); }
-  close(): void { this.stream.end(); }
+  debug(msg: string, data?: Record<string, unknown>): void {
+    this.write('debug', msg, data);
+  }
+  info(msg: string, data?: Record<string, unknown>): void {
+    this.write('info', msg, data);
+  }
+  warn(msg: string, data?: Record<string, unknown>): void {
+    this.write('warn', msg, data);
+  }
+  error(msg: string, data?: Record<string, unknown>): void {
+    this.write('error', msg, data);
+  }
+  close(): void {
+    this.stream.end();
+  }
 }
 ```
 
@@ -2067,6 +2310,7 @@ FastAPI service that receives an audio path and returns pyannote speaker-labeled
 ### Task 18: Sidecar skeleton (pyproject + install script)
 
 **Files:**
+
 - Create: `sidecar/pyproject.toml`, `sidecar/meeting_notes_diarize/__init__.py`, `sidecar/scripts/install.sh`, `sidecar/README.md`
 
 - [ ] **Step 1: Create `sidecar/pyproject.toml`**
@@ -2122,13 +2366,14 @@ echo "Sidecar venv ready at sidecar/.venv"
 ```
 
 Make executable:
+
 ```bash
 chmod +x sidecar/scripts/install.sh
 ```
 
 - [ ] **Step 4: Create `sidecar/README.md`**
 
-```markdown
+````markdown
 # MeetingNotes Diarization Sidecar
 
 FastAPI service that runs pyannote.audio locally.
@@ -2139,6 +2384,7 @@ FastAPI service that runs pyannote.audio locally.
 ./scripts/install.sh
 export HF_TOKEN=<your-huggingface-token>  # pyannote model download
 ```
+````
 
 ## Run
 
@@ -2153,20 +2399,22 @@ uvicorn meeting_notes_diarize.app:app --host 127.0.0.1 --port 8765
 source .venv/bin/activate
 pytest
 ```
-```
+
+````
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add sidecar/pyproject.toml sidecar/meeting_notes_diarize/__init__.py sidecar/scripts/install.sh sidecar/README.md
 git commit -m "sidecar: pyproject + venv install script"
-```
+````
 
 ---
 
 ### Task 19: Pydantic schemas
 
 **Files:**
+
 - Create: `sidecar/meeting_notes_diarize/schemas.py`, `sidecar/tests/test_schemas.py`
 
 - [ ] **Step 1: Write failing test**
@@ -2199,6 +2447,7 @@ def test_response_serializes_to_json():
 ```bash
 cd sidecar && ./scripts/install.sh && source .venv/bin/activate && pytest tests/test_schemas.py
 ```
+
 Expected: FAIL — `schemas` module missing.
 
 - [ ] **Step 3: Implement `sidecar/meeting_notes_diarize/schemas.py`**
@@ -2233,6 +2482,7 @@ class DiarizeResponse(BaseModel):
 ```bash
 cd sidecar && source .venv/bin/activate && pytest tests/test_schemas.py -v
 ```
+
 Expected: pass.
 
 - [ ] **Step 5: Commit**
@@ -2247,6 +2497,7 @@ git commit -m "sidecar: pydantic schemas for diarize request/response"
 ### Task 20: Diarization wrapper (pyannote)
 
 **Files:**
+
 - Create: `sidecar/meeting_notes_diarize/diarize.py`, `sidecar/tests/test_diarize.py`
 
 - [ ] **Step 1: Write test (mocked pyannote)**
@@ -2285,6 +2536,7 @@ def test_diarize_audio_returns_segments_with_embeddings(mock_embed, mock_pipe):
 ```bash
 cd sidecar && source .venv/bin/activate && pytest tests/test_diarize.py
 ```
+
 Expected: FAIL — `diarize` module missing.
 
 - [ ] **Step 3: Implement**
@@ -2348,6 +2600,7 @@ def diarize_audio(audio_path: str) -> DiarizeResponse:
 ```bash
 pytest tests/test_diarize.py -v
 ```
+
 Expected: pass.
 
 - [ ] **Step 5: Commit**
@@ -2362,6 +2615,7 @@ git commit -m "sidecar: pyannote diarization wrapper with per-segment embeddings
 ### Task 21: FastAPI app + /health + /diarize endpoint
 
 **Files:**
+
 - Create: `sidecar/meeting_notes_diarize/app.py`, `sidecar/tests/test_app.py`
 
 - [ ] **Step 1: Write test**
@@ -2402,6 +2656,7 @@ def test_diarize_happy_path(mock_diarize, tmp_path):
 ```bash
 pytest tests/test_app.py
 ```
+
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
@@ -2434,6 +2689,7 @@ def diarize(req: DiarizeRequest) -> DiarizeResponse:
 ```bash
 pytest tests/ -v
 ```
+
 Expected: all sidecar tests pass.
 
 - [ ] **Step 5: Smoke-run the server locally**
@@ -2443,6 +2699,7 @@ uvicorn meeting_notes_diarize.app:app --host 127.0.0.1 --port 8765 &
 sleep 2 && curl -s http://127.0.0.1:8765/health
 kill %1
 ```
+
 Expected output: `{"status":"ok"}`.
 
 - [ ] **Step 6: Commit**
@@ -2457,6 +2714,7 @@ git commit -m "sidecar: FastAPI app with /health and /diarize endpoints"
 ### Task 22: Sidecar fixture capture for contract tests
 
 **Files:**
+
 - Create: `samples/short-meeting.mp3` (placeholder), `samples/short-meeting.expected.json`, `samples/README.md`
 
 - [ ] **Step 1: Create a 5-second synthetic MP3 with two alternating tones**
@@ -2467,6 +2725,7 @@ Run (requires ffmpeg, already installed):
 mkdir -p samples
 ffmpeg -y -f lavfi -i "sine=frequency=200:duration=2.5" -f lavfi -i "sine=frequency=500:duration=2.5" -filter_complex "[0][1]concat=n=2:v=0:a=1" samples/short-meeting.mp3
 ```
+
 Expected: `samples/short-meeting.mp3` (~5s) created.
 
 - [ ] **Step 2: Write expected contract JSON**
@@ -2475,7 +2734,9 @@ Expected: `samples/short-meeting.mp3` (~5s) created.
 {
   "description": "Shared contract fixture. Schema-only — exact values depend on model.",
   "schema": {
-    "segments": [{ "start": "number", "end": "number", "speaker": "string", "embedding": "number[512]" }],
+    "segments": [
+      { "start": "number", "end": "number", "speaker": "string", "embedding": "number[512]" }
+    ],
     "num_speakers": "integer >= 1"
   }
 }
@@ -2507,6 +2768,7 @@ git commit -m "samples: add synthetic MP3 fixture + contract schema"
 ### Task 23: LM Studio client — /v1/models
 
 **Files:**
+
 - Create: `electron/main/lm-studio/client.ts`, `electron/main/lm-studio/client.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -2516,14 +2778,22 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { LMStudioClient } from './client';
 
 let fetchMock: ReturnType<typeof vi.fn>;
-beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });
+beforeEach(() => {
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe('LMStudioClient.listModels', () => {
   it('returns model IDs from /v1/models', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      data: [{ id: 'whisper-large-v3' }, { id: 'llama-3.1-8b' }],
-    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          data: [{ id: 'whisper-large-v3' }, { id: 'llama-3.1-8b' }],
+        }),
+        { status: 200 },
+      ),
+    );
     const c = new LMStudioClient('http://localhost:1234');
     expect(await c.listModels()).toEqual(['whisper-large-v3', 'llama-3.1-8b']);
   });
@@ -2546,7 +2816,12 @@ Expected: FAIL.
 ```ts
 // electron/main/lm-studio/client.ts
 export class LMStudioError extends Error {
-  constructor(message: string, public cause?: unknown) { super(message); }
+  constructor(
+    message: string,
+    public cause?: unknown,
+  ) {
+    super(message);
+  }
 }
 
 export class LMStudioClient {
@@ -2584,6 +2859,7 @@ git commit -m "lm-studio: client skeleton + listModels"
 ### Task 24: LM Studio client — transcribe
 
 **Files:**
+
 - Modify: `electron/main/lm-studio/client.ts`, `electron/main/lm-studio/client.test.ts`
 
 - [ ] **Step 1: Add failing test**
@@ -2593,13 +2869,20 @@ Append to `client.test.ts`:
 ```ts
 describe('LMStudioClient.transcribe', () => {
   it('POSTs multipart form to /v1/audio/transcriptions and returns segments', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      text: 'hello world',
-      segments: [{ start: 0, end: 1, text: 'hello world' }],
-    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          text: 'hello world',
+          segments: [{ start: 0, end: 1, text: 'hello world' }],
+        }),
+        { status: 200 },
+      ),
+    );
     const c = new LMStudioClient('http://localhost:1234');
     const result = await c.transcribe({
-      audioPath: '/tmp/x.mp3', model: 'whisper-large-v3', language: 'en',
+      audioPath: '/tmp/x.mp3',
+      model: 'whisper-large-v3',
+      language: 'en',
       readFile: async () => new Uint8Array([1, 2, 3]),
     });
     expect(result.text).toBe('hello world');
@@ -2644,7 +2927,9 @@ declare module './client' {
   }
 }
 
-LMStudioClient.prototype.transcribe = async function (input: TranscribeInput): Promise<TranscribeResult> {
+LMStudioClient.prototype.transcribe = async function (
+  input: TranscribeInput,
+): Promise<TranscribeResult> {
   const read = input.readFile ?? ((p) => fs.readFile(p));
   const bytes = await read(input.audioPath);
   const form = new FormData();
@@ -2656,12 +2941,19 @@ LMStudioClient.prototype.transcribe = async function (input: TranscribeInput): P
   const url = `${(this as any).baseUrl}/v1/audio/transcriptions`;
   let resp: Response;
   try {
-    resp = await fetch(url, { method: 'POST', body: form, signal: AbortSignal.timeout(10 * 60 * 1000) });
+    resp = await fetch(url, {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(10 * 60 * 1000),
+    });
   } catch (e) {
     throw new LMStudioError(`LM Studio transcribe failed: network`, e);
   }
   if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/audio/transcriptions`);
-  const body = (await resp.json()) as { text: string; segments?: { start: number; end: number; text: string }[] };
+  const body = (await resp.json()) as {
+    text: string;
+    segments?: { start: number; end: number; text: string }[];
+  };
   return { text: body.text, segments: body.segments ?? [] };
 };
 ```
@@ -2671,7 +2963,9 @@ Note: declaring `baseUrl` as private interferes with the augmentation above. Adj
 ```ts
 export class LMStudioClient {
   constructor(public readonly baseUrl: string) {}
-  async listModels(): Promise<string[]> { /* unchanged */ }
+  async listModels(): Promise<string[]> {
+    /* unchanged */
+  }
 }
 ```
 
@@ -2692,6 +2986,7 @@ git commit -m "lm-studio: transcribe via /v1/audio/transcriptions"
 ### Task 25: LM Studio client — chat completions
 
 **Files:**
+
 - Modify: `electron/main/lm-studio/client.ts`, `electron/main/lm-studio/client.test.ts`
 
 - [ ] **Step 1: Add failing test**
@@ -2701,9 +2996,14 @@ Append:
 ```ts
 describe('LMStudioClient.chat', () => {
   it('POSTs JSON to /v1/chat/completions and returns assistant content', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      choices: [{ message: { role: 'assistant', content: 'Summary text' } }],
-    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: 'Summary text' } }],
+        }),
+        { status: 200 },
+      ),
+    );
     const c = new LMStudioClient('http://localhost:1234');
     const result = await c.chat({
       model: 'llama-3.1-8b',
@@ -2725,7 +3025,10 @@ Expected: FAIL — `chat` missing.
 Append to `client.ts`:
 
 ```ts
-export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string; }
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
 export interface ChatInput {
   model: string;
   messages: ChatMessage[];
@@ -2780,6 +3083,7 @@ git commit -m "lm-studio: chat completions"
 ### Task 26: Diarization HTTP client
 
 **Files:**
+
 - Create: `electron/main/diarization/client.ts`, `electron/main/diarization/client.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -2789,12 +3093,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DiarizationClient } from './client';
 
 let fetchMock: ReturnType<typeof vi.fn>;
-beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });
+beforeEach(() => {
+  fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe('DiarizationClient', () => {
   it('health returns true when sidecar responds ok', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: 'ok' }), { status: 200 }),
+    );
     const c = new DiarizationClient('http://127.0.0.1:8765');
     expect(await c.health()).toBe(true);
   });
@@ -2806,10 +3115,17 @@ describe('DiarizationClient', () => {
   });
 
   it('diarize POSTs audio path and returns segments', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
-      segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) }],
-      num_speakers: 1,
-    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          segments: [
+            { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) },
+          ],
+          num_speakers: 1,
+        }),
+        { status: 200 },
+      ),
+    );
     const c = new DiarizationClient('http://127.0.0.1:8765');
     const result = await c.diarize('/x/a.mp3');
     expect(result.segments[0]!.speaker).toBe('SPEAKER_00');
@@ -2831,7 +3147,10 @@ Expected: FAIL.
 import { z } from 'zod';
 
 export const DiarSegmentSchema = z.object({
-  start: z.number(), end: z.number(), speaker: z.string(), embedding: z.array(z.number()),
+  start: z.number(),
+  end: z.number(),
+  speaker: z.string(),
+  embedding: z.array(z.number()),
 });
 export const DiarResponseSchema = z.object({
   segments: z.array(DiarSegmentSchema),
@@ -2848,7 +3167,9 @@ export class DiarizationClient {
     try {
       const r = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(1500) });
       return r.ok;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
 
   async diarize(audioPath: string): Promise<DiarResponse> {
@@ -2887,6 +3208,7 @@ git commit -m "diarization: HTTP client with zod-validated response"
 ### Task 27: Sidecar supervisor (spawn + restart)
 
 **Files:**
+
 - Create: `electron/main/diarization/supervisor.ts`, `electron/main/diarization/supervisor.test.ts`
 
 - [ ] **Step 1: Write test (spawn abstraction injected)**
@@ -2920,7 +3242,12 @@ describe('DiarizationSupervisor', () => {
       setImmediate(() => p.emit('exit', 1, null));
       return p as any;
     });
-    const sup = new DiarizationSupervisor({ spawn, sidecarDir: '/tmp', maxRestarts: 2, restartDelayMs: 0 });
+    const sup = new DiarizationSupervisor({
+      spawn,
+      sidecarDir: '/tmp',
+      maxRestarts: 2,
+      restartDelayMs: 0,
+    });
     sup.start();
     await new Promise((r) => setTimeout(r, 50));
     expect(procs).toBe(3); // initial + 2 restarts
@@ -2994,7 +3321,9 @@ export class DiarizationSupervisor {
     this.proc = null;
   }
 
-  isRunning(): boolean { return this.proc !== null; }
+  isRunning(): boolean {
+    return this.proc !== null;
+  }
 }
 ```
 
@@ -3017,6 +3346,7 @@ git commit -m "diarization: supervisor with spawn + restart backoff"
 ### Task 28: Audio Hijack bridge (osascript)
 
 **Files:**
+
 - Create: `electron/main/audio-hijack/bridge.ts`, `electron/main/audio-hijack/bridge.test.ts`
 
 - [ ] **Step 1: Write test (injected runner)**
@@ -3066,7 +3396,9 @@ export class AudioHijackError extends Error {}
 
 export class AudioHijackBridge {
   private readonly runner: Runner;
-  constructor(deps: { runner?: Runner } = {}) { this.runner = deps.runner ?? defaultRunner; }
+  constructor(deps: { runner?: Runner } = {}) {
+    this.runner = deps.runner ?? defaultRunner;
+  }
 
   private async runScript(script: string): Promise<string> {
     const { stdout, stderr } = await this.runner('osascript', ['-e', script]);
@@ -3086,7 +3418,9 @@ export class AudioHijackBridge {
 
   async sessionState(name: string): Promise<'running' | 'stopped' | 'unknown'> {
     const safe = name.replace(/"/g, '\\"');
-    const s = await this.runScript(`tell application "Audio Hijack" to get running of session "${safe}"`);
+    const s = await this.runScript(
+      `tell application "Audio Hijack" to get running of session "${safe}"`,
+    );
     if (s === 'true') return 'running';
     if (s === 'false') return 'stopped';
     return 'unknown';
@@ -3111,6 +3445,7 @@ git commit -m "audio-hijack: AppleScript bridge (start/stop/state)"
 ### Task 29: Library watcher (chokidar with stability check)
 
 **Files:**
+
 - Create: `electron/main/library/watcher.ts`, `electron/main/library/watcher.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3123,11 +3458,14 @@ import path from 'node:path';
 import { LibraryWatcher } from './watcher';
 
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('LibraryWatcher', () => {
   it('emits a stable-file event once the file size stops changing', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-'));
+    dirs.push(dir);
     const w = new LibraryWatcher({ path: dir, stabilityMs: 100, pollMs: 40 });
     const seen: string[] = [];
     w.onStableFile((p) => seen.push(p));
@@ -3140,7 +3478,8 @@ describe('LibraryWatcher', () => {
   });
 
   it('filters to .mp3 only', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch2-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch2-'));
+    dirs.push(dir);
     const w = new LibraryWatcher({ path: dir, stabilityMs: 80, pollMs: 40 });
     const seen: string[] = [];
     w.onStableFile((p) => seen.push(p));
@@ -3182,7 +3521,9 @@ export class LibraryWatcher {
     this.poll = opts.pollMs ?? 500;
   }
 
-  onStableFile(fn: (p: string) => void): void { this.listeners.push(fn); }
+  onStableFile(fn: (p: string) => void): void {
+    this.listeners.push(fn);
+  }
 
   async start(): Promise<void> {
     this.watcher = chokidar.watch(this.opts.path, {
@@ -3192,7 +3533,11 @@ export class LibraryWatcher {
     });
     this.watcher.on('add', (p) => {
       if (!p.toLowerCase().endsWith('.mp3')) return;
-      try { fs.accessSync(p); } catch { return; }
+      try {
+        fs.accessSync(p);
+      } catch {
+        return;
+      }
       for (const fn of this.listeners) fn(p);
     });
   }
@@ -3221,6 +3566,7 @@ git commit -m "library: chokidar watcher with stability check"
 ### Task 30: ffprobe validation
 
 **Files:**
+
 - Create: `electron/main/library/ffprobe.ts`, `electron/main/library/ffprobe.test.ts`
 
 - [ ] **Step 1: Write failing test (injected runner)**
@@ -3232,7 +3578,8 @@ import { probeAudio } from './ffprobe';
 describe('probeAudio', () => {
   it('parses duration from ffprobe JSON output', async () => {
     const runner = vi.fn(async () => ({
-      stdout: JSON.stringify({ format: { duration: '12.5' } }), stderr: '',
+      stdout: JSON.stringify({ format: { duration: '12.5' } }),
+      stderr: '',
     }));
     const info = await probeAudio('/x.mp3', { runner });
     expect(info.durationS).toBe(12.5);
@@ -3260,14 +3607,22 @@ import { promisify } from 'node:util';
 const pExecFile = promisify(execFile);
 type Runner = (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 
-export interface AudioInfo { durationS: number; }
+export interface AudioInfo {
+  durationS: number;
+}
 
 export async function probeAudio(file: string, deps: { runner?: Runner } = {}): Promise<AudioInfo> {
   const runner: Runner = deps.runner ?? ((c, a) => pExecFile(c, a, { timeout: 10000 }));
   const { stdout, stderr } = await runner('ffprobe', [
-    '-v', 'error', '-print_format', 'json', '-show_format', file,
+    '-v',
+    'error',
+    '-print_format',
+    'json',
+    '-show_format',
+    file,
   ]);
-  if (stderr.trim() || !stdout.trim()) throw new Error(`ffprobe: invalid or empty file: ${stderr.trim()}`);
+  if (stderr.trim() || !stdout.trim())
+    throw new Error(`ffprobe: invalid or empty file: ${stderr.trim()}`);
   const parsed = JSON.parse(stdout) as { format?: { duration?: string } };
   const dur = parsed.format?.duration;
   if (!dur) throw new Error('ffprobe: no duration');
@@ -3294,6 +3649,7 @@ git commit -m "library: ffprobe-based MP3 validation"
 ### Task 31: Embedding file persistence
 
 **Files:**
+
 - Create: `electron/main/speakers/embeddings.ts`, `electron/main/speakers/embeddings.test.ts`
 
 Uses a simple binary format (magic bytes `MNEMB` + uint32 length + float32 vector) — not true .npy, which is overkill.
@@ -3308,11 +3664,14 @@ import path from 'node:path';
 import { writeEmbedding, readEmbedding, embeddingFilePath } from './embeddings';
 
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('embeddings', () => {
   it('writes and reads a 512-float vector round-trip', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-emb-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-emb-'));
+    dirs.push(dir);
     const vec = Array.from({ length: 512 }, (_, i) => i * 0.001);
     const file = embeddingFilePath(dir, 'spk_x1');
     writeEmbedding(file, vec);
@@ -3322,7 +3681,8 @@ describe('embeddings', () => {
   });
 
   it('rejects wrong magic bytes', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-emb2-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-emb2-'));
+    dirs.push(dir);
     const f = path.join(dir, 'bad.bin');
     fs.writeFileSync(f, Buffer.from('XXX'));
     expect(() => readEmbedding(f)).toThrow(/magic|format/i);
@@ -3388,6 +3748,7 @@ git commit -m "speakers: embedding file read/write (custom binary format)"
 ### Task 32: Speaker matcher
 
 **Files:**
+
 - Create: `electron/main/speakers/matcher.ts`, `electron/main/speakers/matcher.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3442,18 +3803,34 @@ import { cosineSimilarity } from '../lib/cosine';
 export const MATCH_THRESHOLD = 0.75;
 export const OLD_WEIGHT = 0.7;
 
-export interface RosterEntry { id: string; embedding: number[]; }
-export interface DetectedSpeaker { label: string; embedding: number[]; }
-export interface Match { label: string; rosterId: string | null; confidence: number | null; }
+export interface RosterEntry {
+  id: string;
+  embedding: number[];
+}
+export interface DetectedSpeaker {
+  label: string;
+  embedding: number[];
+}
+export interface Match {
+  label: string;
+  rosterId: string | null;
+  confidence: number | null;
+}
 
-export function matchSpeakers(detected: readonly DetectedSpeaker[], roster: readonly RosterEntry[]): Match[] {
+export function matchSpeakers(
+  detected: readonly DetectedSpeaker[],
+  roster: readonly RosterEntry[],
+): Match[] {
   return detected.map((d) => {
     let bestId: string | null = null;
     let bestScore = -Infinity;
     for (const r of roster) {
       if (r.embedding.length !== d.embedding.length) continue;
       const s = cosineSimilarity(d.embedding, r.embedding);
-      if (s > bestScore) { bestScore = s; bestId = r.id; }
+      if (s > bestScore) {
+        bestScore = s;
+        bestId = r.id;
+      }
     }
     if (bestId !== null && bestScore >= MATCH_THRESHOLD) {
       return { label: d.label, rosterId: bestId, confidence: bestScore };
@@ -3462,7 +3839,10 @@ export function matchSpeakers(detected: readonly DetectedSpeaker[], roster: read
   });
 }
 
-export function updateRunningAverage(old: readonly number[], observed: readonly number[]): number[] {
+export function updateRunningAverage(
+  old: readonly number[],
+  observed: readonly number[],
+): number[] {
   if (old.length !== observed.length) throw new Error('length mismatch');
   const out = new Array<number>(old.length);
   for (let i = 0; i < old.length; i++) {
@@ -3489,6 +3869,7 @@ git commit -m "speakers: matcher with cosine threshold + running-average update"
 ### Task 33: Roster service (combines repo + embeddings + matcher)
 
 **Files:**
+
 - Create: `electron/main/speakers/roster-service.ts`, `electron/main/speakers/roster-service.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3547,7 +3928,10 @@ import { embeddingFilePath, writeEmbedding, readEmbedding } from './embeddings';
 import { matchSpeakers, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher';
 
 export class RosterService {
-  constructor(private readonly repo: SpeakersRepo, private readonly libraryRoot: string) {}
+  constructor(
+    private readonly repo: SpeakersRepo,
+    private readonly libraryRoot: string,
+  ) {}
 
   confirmSpeaker(input: { displayName: string; embedding: number[]; notes?: string }): string {
     const id = this.repo.create({ displayName: input.displayName, notes: input.notes });
@@ -3566,13 +3950,19 @@ export class RosterService {
   }
 
   identifyUnknowns(detected: readonly DetectedSpeaker[]): Match[] {
-    const rosterEntries = this.repo.list().map((s) => ({ id: s.id, embedding: this.safeLoad(s.id) }))
+    const rosterEntries = this.repo
+      .list()
+      .map((s) => ({ id: s.id, embedding: this.safeLoad(s.id) }))
       .filter((r): r is { id: string; embedding: number[] } => r.embedding !== null);
     return matchSpeakers(detected, rosterEntries);
   }
 
   private safeLoad(id: string): number[] | null {
-    try { return this.loadEmbedding(id); } catch { return null; }
+    try {
+      return this.loadEmbedding(id);
+    } catch {
+      return null;
+    }
   }
 }
 ```
@@ -3596,6 +3986,7 @@ git commit -m "speakers: roster service combining repo + embeddings + matcher"
 ### Task 34: Stage context (shared dependencies passed to every stage)
 
 **Files:**
+
 - Create: `electron/main/pipeline/context.ts`
 
 - [ ] **Step 1: Define context type**
@@ -3623,7 +4014,9 @@ export interface PipelineContext {
   logger: Logger;
 }
 
-export interface StageInput { meetingId: string; }
+export interface StageInput {
+  meetingId: string;
+}
 export type StageHandler = (input: StageInput, ctx: PipelineContext) => Promise<void>;
 ```
 
@@ -3639,6 +4032,7 @@ git commit -m "pipeline: shared stage context type"
 ### Task 35: Transcribing stage
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/transcribing.ts`, `electron/main/pipeline/stages/transcribing.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3659,9 +4053,17 @@ describe('runTranscribing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
-      lmStudio: { transcribe: vi.fn(async () => ({ text: 'hi', segments: [{ start: 0, end: 1, text: 'hi' }] })) },
-      settings: { get: (k: string) => k === 'sttModel' ? 'whisper-large-v3' : 'en' },
-      meetings: { findById: () => ({ slug: 'slug', audioPath: path.join(mFolder, 'audio.mp3') }), updateStage: vi.fn() },
+      lmStudio: {
+        transcribe: vi.fn(async () => ({
+          text: 'hi',
+          segments: [{ start: 0, end: 1, text: 'hi' }],
+        })),
+      },
+      settings: { get: (k: string) => (k === 'sttModel' ? 'whisper-large-v3' : 'en') },
+      meetings: {
+        findById: () => ({ slug: 'slug', audioPath: path.join(mFolder, 'audio.mp3') }),
+        updateStage: vi.fn(),
+      },
       logger: { info: vi.fn(), error: vi.fn() },
     };
     await runTranscribing({ meetingId: 'm1' }, ctx);
@@ -3717,6 +4119,7 @@ git commit -m "pipeline: transcribing stage"
 ### Task 36: Diarizing stage
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/diarizing.ts`, `electron/main/pipeline/stages/diarizing.test.ts`
 
 - [ ] **Step 1: Write test (pattern mirrors transcribing)**
@@ -3731,14 +4134,19 @@ import { runDiarizing } from './diarizing';
 describe('runDiarizing', () => {
   it('calls diarization client and writes diarization.json', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-'));
-    const mFolder = path.join(dir, 'meetings', 'slug'); fs.mkdirSync(mFolder, { recursive: true });
+    const mFolder = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(mFolder, { recursive: true });
 
     const ctx: any = {
       libraryRoot: dir,
-      diarization: { diarize: vi.fn(async () => ({
-        segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) }],
-        num_speakers: 1,
-      })) },
+      diarization: {
+        diarize: vi.fn(async () => ({
+          segments: [
+            { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) },
+          ],
+          num_speakers: 1,
+        })),
+      },
       meetings: { findById: () => ({ slug: 'slug', audioPath: '/x.mp3' }) },
       logger: { info: vi.fn() },
     };
@@ -3791,6 +4199,7 @@ git commit -m "pipeline: diarizing stage"
 ### Task 37: Merging stage
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/merging.ts`, `electron/main/pipeline/stages/merging.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3805,17 +4214,33 @@ import { runMerging } from './merging';
 describe('runMerging', () => {
   it('reads transcript.raw.json + diarization.json, writes transcript.md', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-m-'));
-    const f = path.join(dir, 'meetings', 'slug'); fs.mkdirSync(f, { recursive: true });
-    fs.writeFileSync(path.join(f, 'transcript.raw.json'), JSON.stringify({
-      text: 'Hi. There.', segments: [{ start: 0, end: 1, text: 'Hi.' }, { start: 1, end: 2, text: 'There.' }],
-    }));
-    fs.writeFileSync(path.join(f, 'diarization.json'), JSON.stringify({
-      segments: [
-        { start: 0, end: 1.2, speaker: 'SPEAKER_00', embedding: [] },
-        { start: 1.2, end: 3, speaker: 'SPEAKER_01', embedding: [] },
-      ], num_speakers: 2,
-    }));
-    const ctx: any = { libraryRoot: dir, meetings: { findById: () => ({ slug: 'slug' }) }, logger: { info: () => {} } };
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(
+      path.join(f, 'transcript.raw.json'),
+      JSON.stringify({
+        text: 'Hi. There.',
+        segments: [
+          { start: 0, end: 1, text: 'Hi.' },
+          { start: 1, end: 2, text: 'There.' },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(f, 'diarization.json'),
+      JSON.stringify({
+        segments: [
+          { start: 0, end: 1.2, speaker: 'SPEAKER_00', embedding: [] },
+          { start: 1.2, end: 3, speaker: 'SPEAKER_01', embedding: [] },
+        ],
+        num_speakers: 2,
+      }),
+    );
+    const ctx: any = {
+      libraryRoot: dir,
+      meetings: { findById: () => ({ slug: 'slug' }) },
+      logger: { info: () => {} },
+    };
     await runMerging({ meetingId: 'm' }, ctx);
     const md = fs.readFileSync(path.join(f, 'transcript.md'), 'utf8');
     expect(md).toContain('[SPEAKER_00 00:00] Hi.');
@@ -3843,7 +4268,9 @@ export const runMerging: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
-  const whisper = JSON.parse(fs.readFileSync(path.join(folder, 'transcript.raw.json'), 'utf8')).segments;
+  const whisper = JSON.parse(
+    fs.readFileSync(path.join(folder, 'transcript.raw.json'), 'utf8'),
+  ).segments;
   const diar = JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')).segments;
   const merged = mergeTranscriptWithDiarization(whisper, diar);
   fs.writeFileSync(path.join(folder, 'transcript.md'), mergedToMarkdown(merged));
@@ -3868,6 +4295,7 @@ git commit -m "pipeline: merging stage"
 ### Task 38: Identifying stage
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/identifying.ts`, `electron/main/pipeline/stages/identifying.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3882,22 +4310,29 @@ import { runIdentifying } from './identifying';
 describe('runIdentifying', () => {
   it('averages embeddings per speaker and links via roster service', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-i-'));
-    const f = path.join(dir, 'meetings', 'slug'); fs.mkdirSync(f, { recursive: true });
-    fs.writeFileSync(path.join(f, 'diarization.json'), JSON.stringify({
-      segments: [
-        { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: [1, 0, 0] },
-        { start: 1, end: 2, speaker: 'SPEAKER_00', embedding: [1, 0, 0] },
-        { start: 2, end: 3, speaker: 'SPEAKER_01', embedding: [0, 1, 0] },
-      ], num_speakers: 2,
-    }));
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(
+      path.join(f, 'diarization.json'),
+      JSON.stringify({
+        segments: [
+          { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: [1, 0, 0] },
+          { start: 1, end: 2, speaker: 'SPEAKER_00', embedding: [1, 0, 0] },
+          { start: 2, end: 3, speaker: 'SPEAKER_01', embedding: [0, 1, 0] },
+        ],
+        num_speakers: 2,
+      }),
+    );
     const linkFn = vi.fn();
     const ctx: any = {
       libraryRoot: dir,
       meetings: { findById: () => ({ slug: 'slug' }) },
-      roster: { identifyUnknowns: vi.fn(() => [
-        { label: 'SPEAKER_00', rosterId: 'spk_a', confidence: 0.9 },
-        { label: 'SPEAKER_01', rosterId: null, confidence: null },
-      ]) },
+      roster: {
+        identifyUnknowns: vi.fn(() => [
+          { label: 'SPEAKER_00', rosterId: 'spk_a', confidence: 0.9 },
+          { label: 'SPEAKER_01', rosterId: null, confidence: null },
+        ]),
+      },
       speakers: { linkToMeeting: linkFn },
       logger: { info: () => {} },
     };
@@ -3933,12 +4368,14 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
     if (!byLabel[s.speaker]) byLabel[s.speaker] = { sum: s.embedding.slice(), count: 1 };
     else {
       const entry = byLabel[s.speaker]!;
-      for (let i = 0; i < s.embedding.length; i++) entry.sum[i] = (entry.sum[i] ?? 0) + s.embedding[i]!;
+      for (let i = 0; i < s.embedding.length; i++)
+        entry.sum[i] = (entry.sum[i] ?? 0) + s.embedding[i]!;
       entry.count += 1;
     }
   }
   const detected = Object.entries(byLabel).map(([label, { sum, count }]) => ({
-    label, embedding: sum.map((x) => x / count),
+    label,
+    embedding: sum.map((x) => x / count),
   }));
 
   const matches = ctx.roster.identifyUnknowns(detected);
@@ -3947,7 +4384,11 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
       ctx.speakers.linkToMeeting(meetingId, m.label, m.rosterId, m.confidence);
     }
   }
-  ctx.logger.info('identify:done', { meetingId, matched: matches.filter((m) => m.rosterId).length, total: matches.length });
+  ctx.logger.info('identify:done', {
+    meetingId,
+    matched: matches.filter((m) => m.rosterId).length,
+    total: matches.length,
+  });
 };
 ```
 
@@ -3968,6 +4409,7 @@ git commit -m "pipeline: identifying stage"
 ### Task 39: Summarizing stage (with prompt)
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/summarizing.ts`, `electron/main/pipeline/stages/summarizing.test.ts`, `electron/main/pipeline/prompts.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -3982,7 +4424,8 @@ import { runSummarizing } from './summarizing';
 describe('runSummarizing', () => {
   it('reads transcript.md, calls LLM, writes summary.md', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-'));
-    const f = path.join(dir, 'meetings', 'slug'); fs.mkdirSync(f, { recursive: true });
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
     fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
 
     const chat = vi.fn(async () => '## Overview\nshort meeting.');
@@ -4079,6 +4522,7 @@ git commit -m "pipeline: summarizing stage + prompt"
 ### Task 40: Extracting stage (action items)
 
 **Files:**
+
 - Create: `electron/main/pipeline/stages/extracting.ts`, `electron/main/pipeline/stages/extracting.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -4093,10 +4537,13 @@ import { runExtracting } from './extracting';
 describe('runExtracting', () => {
   it('calls LLM, parses JSON, writes action-items.json + repo', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-e-'));
-    const f = path.join(dir, 'meetings', 'slug'); fs.mkdirSync(f, { recursive: true });
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
     fs.writeFileSync(path.join(f, 'transcript.md'), '...');
 
-    const chat = vi.fn(async () => '[{"text":"Send update","owner":"Dan","due_date":"2026-04-22"}]');
+    const chat = vi.fn(
+      async () => '[{"text":"Send update","owner":"Dan","due_date":"2026-04-22"}]',
+    );
     const replace = vi.fn();
     const ctx: any = {
       libraryRoot: dir,
@@ -4107,9 +4554,10 @@ describe('runExtracting', () => {
       logger: { info: () => {} },
     };
     await runExtracting({ meetingId: 'm' }, ctx);
-    expect(replace).toHaveBeenCalledWith('m', expect.arrayContaining([
-      expect.objectContaining({ text: 'Send update' }),
-    ]));
+    expect(replace).toHaveBeenCalledWith(
+      'm',
+      expect.arrayContaining([expect.objectContaining({ text: 'Send update' })]),
+    );
     const written = JSON.parse(fs.readFileSync(path.join(f, 'action-items.json'), 'utf8'));
     expect(written).toHaveLength(1);
   });
@@ -4169,6 +4617,7 @@ git commit -m "pipeline: extracting stage"
 ### Task 41: Pipeline orchestrator (queue + stage dispatch)
 
 **Files:**
+
 - Create: `electron/main/pipeline/pipeline.ts`, `electron/main/pipeline/pipeline.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -4187,36 +4636,67 @@ describe('Pipeline', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-pl-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
     const meetings = new MeetingsRepo(db);
-    meetings.insert({ id: 'm', slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/x.mp3', status: 'processing', pipelineStage: 'discovered' });
+    meetings.insert({
+      id: 'm',
+      slug: 's',
+      title: 't',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/x.mp3',
+      status: 'processing',
+      pipelineStage: 'discovered',
+    });
 
     const calls: string[] = [];
-    const mk = (name: string) => async () => { calls.push(name); };
+    const mk = (name: string) => async () => {
+      calls.push(name);
+    };
     const p = new Pipeline({
       ctx: { meetings, logger: { info: () => {}, error: () => {} } } as any,
       stages: {
-        transcribing: mk('t'), diarizing: mk('d'), merging: mk('m'),
-        identifying: mk('i'), summarizing: mk('s'), extracting: mk('e'),
+        transcribing: mk('t'),
+        diarizing: mk('d'),
+        merging: mk('m'),
+        identifying: mk('i'),
+        summarizing: mk('s'),
+        extracting: mk('e'),
       },
     });
     await p.run('m');
     expect(meetings.findById('m')?.pipelineStage).toBe('done');
-    expect(calls).toContain('t'); expect(calls).toContain('d'); expect(calls).toContain('m');
+    expect(calls).toContain('t');
+    expect(calls).toContain('d');
+    expect(calls).toContain('m');
   });
 
   it('re-running from "transcribing" runs only transcribe + downstream (no diarize)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-pl2-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
     const meetings = new MeetingsRepo(db);
-    meetings.insert({ id: 'm', slug: 's', title: 't', startedAt: null, durationS: null,
-      audioPath: '/x.mp3', status: 'processing', pipelineStage: 'transcribing' });
+    meetings.insert({
+      id: 'm',
+      slug: 's',
+      title: 't',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/x.mp3',
+      status: 'processing',
+      pipelineStage: 'transcribing',
+    });
 
     const calls: string[] = [];
-    const mk = (name: string) => async () => { calls.push(name); };
+    const mk = (name: string) => async () => {
+      calls.push(name);
+    };
     const p = new Pipeline({
       ctx: { meetings, logger: { info: () => {}, error: () => {} } } as any,
       stages: {
-        transcribing: mk('t'), diarizing: mk('d'), merging: mk('m'),
-        identifying: mk('i'), summarizing: mk('s'), extracting: mk('e'),
+        transcribing: mk('t'),
+        diarizing: mk('d'),
+        merging: mk('m'),
+        identifying: mk('i'),
+        summarizing: mk('s'),
+        extracting: mk('e'),
       },
     });
     await p.run('m');
@@ -4266,10 +4746,15 @@ export class Pipeline {
     try {
       while (this.queue.length > 0) {
         const id = this.queue.shift()!;
-        try { await this.process(id); }
-        catch (e) { this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) }); }
+        try {
+          await this.process(id);
+        } catch (e) {
+          this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
+        }
       }
-    } finally { this.running = false; }
+    } finally {
+      this.running = false;
+    }
   }
 
   private async process(meetingId: string): Promise<void> {
@@ -4327,6 +4812,7 @@ git commit -m "pipeline: orchestrator with queue + parallel transcribe/diarize"
 ### Task 42: Crash recovery
 
 **Files:**
+
 - Create: `electron/main/pipeline/recovery.ts`, `electron/main/pipeline/recovery.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -4345,8 +4831,26 @@ describe('recoverPendingMeetings', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-rec-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
     const meetings = new MeetingsRepo(db);
-    meetings.insert({ id: 'a', slug: 'a', title: 'A', startedAt: null, durationS: null, audioPath: '/a', status: 'processing', pipelineStage: 'transcribing' });
-    meetings.insert({ id: 'b', slug: 'b', title: 'B', startedAt: null, durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+    meetings.insert({
+      id: 'a',
+      slug: 'a',
+      title: 'A',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/a',
+      status: 'processing',
+      pipelineStage: 'transcribing',
+    });
+    meetings.insert({
+      id: 'b',
+      slug: 'b',
+      title: 'B',
+      startedAt: null,
+      durationS: null,
+      audioPath: '/b',
+      status: 'done',
+      pipelineStage: 'done',
+    });
 
     const enqueue = vi.fn();
     const logger = { info: vi.fn() };
@@ -4407,6 +4911,7 @@ git commit -m "pipeline: crash recovery on startup"
 ### Task 43: Exporter interface + Markdown exporter
 
 **Files:**
+
 - Create: `electron/main/exporters/interface.ts`, `electron/main/exporters/markdown.ts`, `electron/main/exporters/markdown.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -4419,11 +4924,14 @@ import path from 'node:path';
 import { MarkdownExporter } from './markdown';
 
 const dirs: string[] = [];
-afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true });
+});
 
 describe('MarkdownExporter', () => {
   it('writes a markdown file with items as a checklist', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-md-')); dirs.push(dir);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-md-'));
+    dirs.push(dir);
     const exp = new MarkdownExporter();
     const outPath = await exp.export({
       items: [
@@ -4451,7 +4959,11 @@ Expected: FAIL.
 ```ts
 // electron/main/exporters/interface.ts
 export interface ExportableItem {
-  id: string; text: string; ownerName: string | null; dueDate: string | null; status: string;
+  id: string;
+  text: string;
+  ownerName: string | null;
+  dueDate: string | null;
+  status: string;
 }
 export interface ExportInput {
   items: ExportableItem[];
@@ -4509,6 +5021,7 @@ git commit -m "exporters: interface + Markdown exporter"
 ### Task 44: Apple Reminders exporter
 
 **Files:**
+
 - Create: `electron/main/exporters/apple-reminders.ts`, `electron/main/exporters/apple-reminders.test.ts`
 
 - [ ] **Step 1: Write failing test (injected runner)**
@@ -4600,6 +5113,7 @@ git commit -m "exporters: Apple Reminders via osascript"
 ### Task 45: Google Tasks stub
 
 **Files:**
+
 - Create: `electron/main/exporters/google-tasks-stub.ts`, `electron/main/exporters/google-tasks-stub.test.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -4611,10 +5125,13 @@ import { GoogleTasksStub } from './google-tasks-stub';
 describe('GoogleTasksStub', () => {
   it('throws NotImplemented so UI can surface "coming soon"', async () => {
     const exp = new GoogleTasksStub();
-    await expect(exp.export({ items: [], meetingTitle: 'x', meetingFolder: '/' }))
-      .rejects.toThrow(/not implemented/i);
+    await expect(exp.export({ items: [], meetingTitle: 'x', meetingFolder: '/' })).rejects.toThrow(
+      /not implemented/i,
+    );
   });
-  it('name is "google-tasks"', () => { expect(new GoogleTasksStub().name).toBe('google-tasks'); });
+  it('name is "google-tasks"', () => {
+    expect(new GoogleTasksStub().name).toBe('google-tasks');
+  });
 });
 ```
 
@@ -4654,6 +5171,7 @@ git commit -m "exporters: Google Tasks stub"
 ### Task 46: Exporter registry
 
 **Files:**
+
 - Create: `electron/main/exporters/registry.ts`
 
 - [ ] **Step 1: Implement**
@@ -4688,6 +5206,7 @@ git commit -m "exporters: registry for UI lookup"
 ### Task 47: IPC contracts (zod schemas + request/response types)
 
 **Files:**
+
 - Create: `electron/main/ipc/contracts.ts`
 
 - [ ] **Step 1: Implement**
@@ -4706,12 +5225,14 @@ export const MeetingSummarySchema = z.object({
   status: z.string(),
   unidentifiedCount: z.number(),
   actionItemsCount: z.number(),
-  speakers: z.array(z.object({
-    localLabel: z.string(),
-    rosterId: z.string().nullable(),
-    displayName: z.string().nullable(),
-    confidence: z.number().nullable(),
-  })),
+  speakers: z.array(
+    z.object({
+      localLabel: z.string(),
+      rosterId: z.string().nullable(),
+      displayName: z.string().nullable(),
+      confidence: z.number().nullable(),
+    }),
+  ),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
@@ -4719,14 +5240,16 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
   transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
-  actionItems: z.array(z.object({
-    id: z.string(),
-    text: z.string(),
-    ownerName: z.string().nullable(),
-    dueDate: z.string().nullable(),
-    status: z.string(),
-    exportedTo: z.array(z.string()),
-  })),
+  actionItems: z.array(
+    z.object({
+      id: z.string(),
+      text: z.string(),
+      ownerName: z.string().nullable(),
+      dueDate: z.string().nullable(),
+      status: z.string(),
+      exportedTo: z.array(z.string()),
+    }),
+  ),
   models: z.object({ stt: z.string().optional(), llm: z.string().optional() }),
 });
 export type MeetingDetail = z.infer<typeof MeetingDetailSchema>;
@@ -4764,6 +5287,7 @@ git commit -m "ipc: contracts (zod + channel names)"
 ### Task 48: Main-side IPC handlers
 
 **Files:**
+
 - Create: `electron/main/ipc/handlers.ts`, `electron/main/ipc/handlers.test.ts`
 
 - [ ] **Step 1: Write failing test (exercises the registerHandlers wiring with a fake ipcMain)**
@@ -4782,7 +5306,11 @@ describe('registerIpcHandlers', () => {
       actionItems: { listByMeeting: () => [] },
       settings: { getAll: () => ({}), get: () => '', set: () => {} },
       lmStudio: { listModels: async () => [] },
-      audioHijack: { startSession: async () => {}, stopSession: async () => {}, sessionState: async () => 'stopped' },
+      audioHijack: {
+        startSession: async () => {},
+        stopSession: async () => {},
+        sessionState: async () => 'stopped',
+      },
       roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
       pipeline: { enqueue: () => {} },
       exporters: {},
@@ -4839,9 +5367,13 @@ export interface IpcServices {
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.meetingsList, () => {
     return s.meetings.listAll().map((m) => ({
-      id: m.id, slug: m.slug, title: m.title,
-      startedAt: m.startedAt, durationS: m.durationS,
-      pipelineStage: m.pipelineStage, status: m.status,
+      id: m.id,
+      slug: m.slug,
+      title: m.title,
+      startedAt: m.startedAt,
+      durationS: m.durationS,
+      pipelineStage: m.pipelineStage,
+      status: m.status,
       unidentifiedCount: 0, // filled by join in real impl
       actionItemsCount: s.actionItems.listByMeeting(m.id).length,
       speakers: [], // populated by meetingsGet
@@ -4852,9 +5384,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const m = s.meetings.findById(id);
     if (!m) return null;
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
-    const read = (p: string) => fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+    const read = (p: string) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null);
     return {
-      ...m, slug: m.slug,
+      ...m,
+      slug: m.slug,
       unidentifiedCount: 0,
       actionItemsCount: s.actionItems.listByMeeting(id).length,
       speakers: [],
@@ -4862,54 +5395,94 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       summaryMd: read(path.join(folder, 'summary.md')),
       audioPath: m.audioPath,
       actionItems: s.actionItems.listByMeeting(id).map((ai) => ({
-        id: ai.id, text: ai.text, ownerName: null,
-        dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
+        id: ai.id,
+        text: ai.text,
+        ownerName: null,
+        dueDate: ai.dueDate,
+        status: ai.status,
+        exportedTo: ai.exportedTo,
       })),
       models: {},
     };
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsRename, (_e, id: string, title: string) => s.meetings.updateTitle(id, title));
+  ipc.handle(IPC_CHANNELS.meetingsRename, (_e, id: string, title: string) =>
+    s.meetings.updateTitle(id, title),
+  );
 
   ipc.handle(IPC_CHANNELS.meetingsRerun, (_e, id: string, fromStage: string) => {
     s.meetings.updateStage(id, fromStage);
     s.pipeline.enqueue(id);
   });
 
-  ipc.handle(IPC_CHANNELS.recordStart, async (_e, sessionName: string) => s.audioHijack.startSession(sessionName));
-  ipc.handle(IPC_CHANNELS.recordStop, async (_e, sessionName: string) => s.audioHijack.stopSession(sessionName));
-  ipc.handle(IPC_CHANNELS.recordState, async (_e, sessionName: string) => s.audioHijack.sessionState(sessionName));
+  ipc.handle(IPC_CHANNELS.recordStart, async (_e, sessionName: string) =>
+    s.audioHijack.startSession(sessionName),
+  );
+  ipc.handle(IPC_CHANNELS.recordStop, async (_e, sessionName: string) =>
+    s.audioHijack.stopSession(sessionName),
+  );
+  ipc.handle(IPC_CHANNELS.recordState, async (_e, sessionName: string) =>
+    s.audioHijack.sessionState(sessionName),
+  );
 
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
-  ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] }) => {
-    const id = s.roster.confirmSpeaker({ displayName: input.displayName, embedding: input.embedding });
-    s.speakers.linkToMeeting(input.meetingId, input.localLabel, id, 1.0);
-    return id;
-  });
-  ipc.handle(IPC_CHANNELS.speakersRename, (_e, id: string, name: string) => s.speakers.rename(id, name));
+  ipc.handle(
+    IPC_CHANNELS.speakersConfirm,
+    (
+      _e,
+      input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] },
+    ) => {
+      const id = s.roster.confirmSpeaker({
+        displayName: input.displayName,
+        embedding: input.embedding,
+      });
+      s.speakers.linkToMeeting(input.meetingId, input.localLabel, id, 1.0);
+      return id;
+    },
+  );
+  ipc.handle(IPC_CHANNELS.speakersRename, (_e, id: string, name: string) =>
+    s.speakers.rename(id, name),
+  );
 
-  ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: string, status: string) => s.actionItems.setStatus(id, status));
+  ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: string, status: string) =>
+    s.actionItems.setStatus(id, status),
+  );
 
   ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: { exporter: string; meetingId: string }) => {
     const meeting = s.meetings.findById(input.meetingId);
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const items = s.actionItems.listByMeeting(input.meetingId).map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: null, dueDate: ai.dueDate, status: ai.status,
+      id: ai.id,
+      text: ai.text,
+      ownerName: null,
+      dueDate: ai.dueDate,
+      status: ai.status,
     }));
     const exporter = s.exporters[input.exporter];
     if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
-    const result = await exporter.export({ items, meetingTitle: meeting.title, meetingFolder: folder });
+    const result = await exporter.export({
+      items,
+      meetingTitle: meeting.title,
+      meetingFolder: folder,
+    });
     for (const it of items) s.actionItems.markExported(it.id, input.exporter);
     return result;
   });
 
   ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
-  ipc.handle(IPC_CHANNELS.settingsSet, <K extends keyof Settings>(_e: unknown, key: K, value: Settings[K]) => s.settings.set(key, value));
+  ipc.handle(
+    IPC_CHANNELS.settingsSet,
+    <K extends keyof Settings>(_e: unknown, key: K, value: Settings[K]) =>
+      s.settings.set(key, value),
+  );
 
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
-    try { return await s.lmStudio.listModels(); }
-    catch { return []; }
+    try {
+      return await s.lmStudio.listModels();
+    } catch {
+      return [];
+    }
   });
 }
 ```
@@ -4931,6 +5504,7 @@ git commit -m "ipc: main-side handlers for all channels"
 ### Task 49: Preload bridge + renderer client
 
 **Files:**
+
 - Modify: `electron/preload/index.ts`
 - Create: `electron/renderer/src/ipc/client.ts`
 
@@ -4945,8 +5519,10 @@ const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
-    rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
-    rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
+    rename: (id: string, title: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
+    rerun: (id: string, fromStage: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
   },
   record: {
     start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),
@@ -4955,15 +5531,21 @@ const api = {
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
-    confirm: (input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] }) =>
-      ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
+    confirm: (input: {
+      meetingId: string;
+      localLabel: string;
+      displayName: string;
+      embedding: number[];
+    }) => ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
   },
   actionItems: {
-    setStatus: (id: string, status: string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
+    setStatus: (id: string, status: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
   },
   export: {
-    run: (exporter: string, meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.exportRun, { exporter, meetingId }),
+    run: (exporter: string, meetingId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.exportRun, { exporter, meetingId }),
   },
   settings: {
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
@@ -4990,7 +5572,9 @@ export type MeetingNotesApi = typeof api;
 import type { MeetingNotesApi } from '../../../preload';
 
 declare global {
-  interface Window { api: MeetingNotesApi; }
+  interface Window {
+    api: MeetingNotesApi;
+  }
 }
 
 export const api: MeetingNotesApi = window.api;
@@ -5012,6 +5596,7 @@ git commit -m "ipc: preload bridge + renderer typed client"
 ### Task 50: Zustand meetings store
 
 **Files:**
+
 - Create: `electron/renderer/src/store/meetings.ts`
 
 - [ ] **Step 1: Implement**
@@ -5022,11 +5607,21 @@ import { create } from 'zustand';
 import { api } from '../ipc/client';
 
 interface MeetingSummary {
-  id: string; slug: string; title: string;
-  startedAt: string | null; durationS: number | null;
-  pipelineStage: string; status: string;
-  unidentifiedCount: number; actionItemsCount: number;
-  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[];
+  id: string;
+  slug: string;
+  title: string;
+  startedAt: string | null;
+  durationS: number | null;
+  pipelineStage: string;
+  status: string;
+  unidentifiedCount: number;
+  actionItemsCount: number;
+  speakers: {
+    localLabel: string;
+    rosterId: string | null;
+    displayName: string | null;
+    confidence: number | null;
+  }[];
 }
 
 interface MeetingsState {
@@ -5058,6 +5653,7 @@ git commit -m "renderer: zustand meetings store"
 ### Task 51: Library view
 
 **Files:**
+
 - Create: `electron/renderer/src/views/LibraryView.tsx`, `electron/renderer/src/components/MeetingCard.tsx`, `electron/renderer/src/components/RecordButton.tsx`
 
 - [ ] **Step 1: Implement RecordButton**
@@ -5073,10 +5669,17 @@ export function RecordButton({ sessionName }: { sessionName: string }): JSX.Elem
 
   async function toggle(): Promise<void> {
     try {
-      if (recording) { await api.record.stop(sessionName); setRecording(false); }
-      else { await api.record.start(sessionName); setRecording(true); }
+      if (recording) {
+        await api.record.stop(sessionName);
+        setRecording(false);
+      } else {
+        await api.record.start(sessionName);
+        setRecording(true);
+      }
       setError(null);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   return (
@@ -5102,8 +5705,13 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 
 interface Props {
   meeting: {
-    id: string; title: string; startedAt: string | null; durationS: number | null;
-    pipelineStage: string; unidentifiedCount: number; actionItemsCount: number;
+    id: string;
+    title: string;
+    startedAt: string | null;
+    durationS: number | null;
+    pipelineStage: string;
+    unidentifiedCount: number;
+    actionItemsCount: number;
     speakers: { localLabel: string; displayName: string | null }[];
   };
   onOpen: (id: string) => void;
@@ -5111,7 +5719,10 @@ interface Props {
 
 function fmtDur(s: number | null): string {
   if (s === null) return '';
-  const m = Math.floor(s / 60); const sec = Math.floor(s % 60).toString().padStart(2, '0');
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60)
+    .toString()
+    .padStart(2, '0');
   return `${m}m ${sec}s`;
 }
 
@@ -5124,8 +5735,11 @@ export function MeetingCard({ meeting, onOpen }: Props): JSX.Element {
     >
       <div className="flex">
         {meeting.speakers.slice(0, 4).map((sp, i) => (
-          <div key={i} style={{ background: colorForSpeakerIndex(i), marginLeft: i === 0 ? 0 : -6 }}
-               className="w-7 h-7 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-surface">
+          <div
+            key={i}
+            style={{ background: colorForSpeakerIndex(i), marginLeft: i === 0 ? 0 : -6 }}
+            className="w-7 h-7 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-surface"
+          >
             {(sp.displayName?.[0] ?? '?').toUpperCase()}
           </div>
         ))}
@@ -5135,7 +5749,9 @@ export function MeetingCard({ meeting, onOpen }: Props): JSX.Element {
         <div className="text-xs text-ink-muted">
           {meeting.startedAt?.slice(0, 10) ?? ''} · {fmtDur(meeting.durationS)}
           {meeting.unidentifiedCount > 0 && (
-            <span className="ml-1 text-status-warnText">· {meeting.unidentifiedCount} to identify</span>
+            <span className="ml-1 text-status-warnText">
+              · {meeting.unidentifiedCount} to identify
+            </span>
           )}
         </div>
       </div>
@@ -5144,8 +5760,10 @@ export function MeetingCard({ meeting, onOpen }: Props): JSX.Element {
           {meeting.actionItemsCount} actions
         </div>
       )}
-      <span className={`text-xs font-semibold px-2 py-0.5 rounded-xl
-        ${processing ? 'bg-status-processingBg text-status-processing' : 'bg-status-okBg text-status-ok'}`}>
+      <span
+        className={`text-xs font-semibold px-2 py-0.5 rounded-xl
+        ${processing ? 'bg-status-processingBg text-status-processing' : 'bg-status-okBg text-status-ok'}`}
+      >
         {processing ? meeting.pipelineStage.toUpperCase() : 'DONE'}
       </span>
     </div>
@@ -5162,13 +5780,20 @@ import { useMeetingsStore } from '../store/meetings';
 import { MeetingCard } from '../components/MeetingCard';
 import { RecordButton } from '../components/RecordButton';
 
-interface Props { onOpen: (id: string) => void; onSettings: () => void; }
+interface Props {
+  onOpen: (id: string) => void;
+  onSettings: () => void;
+}
 
 export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [query, setQuery] = useState('');
 
-  useEffect(() => { void refresh(); const t = setInterval(refresh, 3000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+    const t = setInterval(refresh, 3000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
   const visible = meetings.filter((m) => m.title.toLowerCase().includes(query.toLowerCase()));
 
@@ -5177,14 +5802,25 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
       <div className="flex items-center gap-4 mb-6">
         <h1 className="text-lg font-semibold flex-1">MeetingNotes</h1>
         <RecordButton sessionName="Meeting" />
-        <button onClick={onSettings} className="text-ink-muted hover:text-ink px-2">⚙</button>
+        <button onClick={onSettings} className="text-ink-muted hover:text-ink px-2">
+          ⚙
+        </button>
       </div>
-      <input placeholder="Search meetings, speakers, topics…"
-             value={query} onChange={(e) => setQuery(e.target.value)}
-             className="w-full p-3 border border-surface-border rounded-xl mb-4 text-sm" />
-      {visible.length === 0 && <div className="text-ink-muted text-sm py-8 text-center">Hit Record or drop an MP3 in ~/Music/Audio Hijack.</div>}
+      <input
+        placeholder="Search meetings, speakers, topics…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        className="w-full p-3 border border-surface-border rounded-xl mb-4 text-sm"
+      />
+      {visible.length === 0 && (
+        <div className="text-ink-muted text-sm py-8 text-center">
+          Hit Record or drop an MP3 in ~/Music/Audio Hijack.
+        </div>
+      )}
       <div className="space-y-2">
-        {visible.map((m) => <MeetingCard key={m.id} meeting={m} onOpen={onOpen} />)}
+        {visible.map((m) => (
+          <MeetingCard key={m.id} meeting={m} onOpen={onOpen} />
+        ))}
       </div>
     </div>
   );
@@ -5203,6 +5839,7 @@ git commit -m "renderer: library view + meeting cards + record button"
 ### Task 52: Meeting detail view — layout + tabs
 
 **Files:**
+
 - Create: `electron/renderer/src/views/MeetingDetailView.tsx`
 
 - [ ] **Step 1: Implement**
@@ -5215,10 +5852,23 @@ import { api } from '../ipc/client';
 type Tab = 'summary' | 'transcript' | 'audio';
 
 interface MeetingDetail {
-  id: string; title: string; startedAt: string | null; durationS: number | null;
-  pipelineStage: string; transcriptMd: string | null; summaryMd: string | null;
-  audioPath: string; speakers: { localLabel: string; rosterId: string | null; displayName: string | null }[];
-  actionItems: { id: string; text: string; ownerName: string | null; dueDate: string | null; status: string; exportedTo: string[] }[];
+  id: string;
+  title: string;
+  startedAt: string | null;
+  durationS: number | null;
+  pipelineStage: string;
+  transcriptMd: string | null;
+  summaryMd: string | null;
+  audioPath: string;
+  speakers: { localLabel: string; rosterId: string | null; displayName: string | null }[];
+  actionItems: {
+    id: string;
+    text: string;
+    ownerName: string | null;
+    dueDate: string | null;
+    status: string;
+    exportedTo: string[];
+  }[];
   models: { stt?: string; llm?: string };
 }
 
@@ -5234,7 +5884,10 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
     }
     void load();
     const t = setInterval(load, 2000);
-    return () => { alive = false; clearInterval(t); };
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
   }, [id]);
 
   if (!m) return <div className="p-8 text-ink-muted">Loading…</div>;
@@ -5242,10 +5895,14 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
   return (
     <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm">← Library</button>
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm">
+          ← Library
+        </button>
         <div className="flex-1 text-center font-semibold">{m.title}</div>
-        <span className={`text-xs font-semibold px-2 py-0.5 rounded-xl
-          ${m.pipelineStage === 'done' ? 'bg-status-okBg text-status-ok' : 'bg-status-processingBg text-status-processing'}`}>
+        <span
+          className={`text-xs font-semibold px-2 py-0.5 rounded-xl
+          ${m.pipelineStage === 'done' ? 'bg-status-okBg text-status-ok' : 'bg-status-processingBg text-status-processing'}`}
+        >
           {m.pipelineStage.toUpperCase()}
         </span>
       </div>
@@ -5278,8 +5935,11 @@ function LeftRail({ meeting }: { meeting: MeetingDetail }): JSX.Element {
       <div className="pt-3 border-t border-surface-border space-y-1">
         <div className="text-xs font-bold text-ink-muted uppercase mb-1">Re-run</div>
         {(['transcribing', 'diarizing', 'summarizing'] as const).map((stage) => (
-          <button key={stage} onClick={() => api.meetings.rerun(meeting.id, stage)}
-                  className="w-full text-left bg-surface-sunken border border-surface-border rounded-lg py-1 px-2 text-xs hover:border-brand-indigo hover:text-brand-indigo">
+          <button
+            key={stage}
+            onClick={() => api.meetings.rerun(meeting.id, stage)}
+            className="w-full text-left bg-surface-sunken border border-surface-border rounded-lg py-1 px-2 text-xs hover:border-brand-indigo hover:text-brand-indigo"
+          >
             ↻ {stage}
           </button>
         ))}
@@ -5288,23 +5948,38 @@ function LeftRail({ meeting }: { meeting: MeetingDetail }): JSX.Element {
   );
 }
 
-function CenterPane({ meeting, tab, onTab }: { meeting: MeetingDetail; tab: Tab; onTab: (t: Tab) => void }): JSX.Element {
+function CenterPane({
+  meeting,
+  tab,
+  onTab,
+}: {
+  meeting: MeetingDetail;
+  tab: Tab;
+  onTab: (t: Tab) => void;
+}): JSX.Element {
   return (
     <div>
       <div className="flex border-b border-surface-border px-4">
         {(['summary', 'transcript', 'audio'] as const).map((t) => (
-          <button key={t} onClick={() => onTab(t)}
-                  className={`px-3 py-3 text-sm ${tab === t ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold' : 'text-ink-muted'}`}>
+          <button
+            key={t}
+            onClick={() => onTab(t)}
+            className={`px-3 py-3 text-sm ${tab === t ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold' : 'text-ink-muted'}`}
+          >
             {t[0]!.toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
       <div className="p-5">
         {tab === 'summary' && (
-          <div className="prose prose-sm max-w-none whitespace-pre-wrap">{meeting.summaryMd ?? 'No summary yet.'}</div>
+          <div className="prose prose-sm max-w-none whitespace-pre-wrap">
+            {meeting.summaryMd ?? 'No summary yet.'}
+          </div>
         )}
         {tab === 'transcript' && (
-          <pre className="text-sm whitespace-pre-wrap leading-relaxed">{meeting.transcriptMd ?? 'No transcript yet.'}</pre>
+          <pre className="text-sm whitespace-pre-wrap leading-relaxed">
+            {meeting.transcriptMd ?? 'No transcript yet.'}
+          </pre>
         )}
         {tab === 'audio' && (
           <audio controls src={`file://${meeting.audioPath}`} className="w-full" />
@@ -5316,21 +5991,43 @@ function CenterPane({ meeting, tab, onTab }: { meeting: MeetingDetail; tab: Tab;
 
 function RightRail({ meeting }: { meeting: MeetingDetail }): JSX.Element {
   async function runExport(which: string): Promise<void> {
-    try { await api.export.run(which, meeting.id); } catch (e) { alert((e as Error).message); }
+    try {
+      await api.export.run(which, meeting.id);
+    } catch (e) {
+      alert((e as Error).message);
+    }
   }
   return (
     <div className="border-l border-surface-border p-4 space-y-3">
       <div className="text-xs font-bold text-ink-muted uppercase">Speakers</div>
       {meeting.speakers.map((sp) => (
-        <div key={sp.localLabel} className={`rounded-lg p-2 ${sp.rosterId ? 'bg-surface-sunken' : 'bg-status-warnBg border border-dashed border-status-warn'}`}>
+        <div
+          key={sp.localLabel}
+          className={`rounded-lg p-2 ${sp.rosterId ? 'bg-surface-sunken' : 'bg-status-warnBg border border-dashed border-status-warn'}`}
+        >
           <div className="text-sm font-semibold">{sp.displayName ?? sp.localLabel}</div>
         </div>
       ))}
       <div className="pt-3 border-t border-surface-border space-y-2">
         <div className="text-xs font-bold text-ink-muted uppercase">Export</div>
-        <button onClick={() => runExport('reminders')} className="w-full bg-brand-indigo text-white text-xs font-semibold rounded-lg py-2">→ Apple Reminders</button>
-        <button onClick={() => runExport('markdown')} className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2">↓ Markdown</button>
-        <button disabled className="w-full bg-surface-sunken text-ink-muted text-xs font-semibold rounded-lg py-2 cursor-not-allowed">→ Google Tasks (soon)</button>
+        <button
+          onClick={() => runExport('reminders')}
+          className="w-full bg-brand-indigo text-white text-xs font-semibold rounded-lg py-2"
+        >
+          → Apple Reminders
+        </button>
+        <button
+          onClick={() => runExport('markdown')}
+          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2"
+        >
+          ↓ Markdown
+        </button>
+        <button
+          disabled
+          className="w-full bg-surface-sunken text-ink-muted text-xs font-semibold rounded-lg py-2 cursor-not-allowed"
+        >
+          → Google Tasks (soon)
+        </button>
       </div>
     </div>
   );
@@ -5349,6 +6046,7 @@ git commit -m "renderer: meeting detail view with three-pane layout"
 ### Task 53: App shell (navigation between Library / Detail / Settings)
 
 **Files:**
+
 - Modify: `electron/renderer/src/App.tsx`
 - Create: `electron/renderer/src/views/SettingsView.tsx`
 
@@ -5366,7 +6064,12 @@ type View = { kind: 'library' } | { kind: 'detail'; id: string } | { kind: 'sett
 export function App(): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'library' });
   if (view.kind === 'library')
-    return <LibraryView onOpen={(id) => setView({ kind: 'detail', id })} onSettings={() => setView({ kind: 'settings' })} />;
+    return (
+      <LibraryView
+        onOpen={(id) => setView({ kind: 'detail', id })}
+        onSettings={() => setView({ kind: 'settings' })}
+      />
+    );
   if (view.kind === 'detail')
     return <MeetingDetailView id={view.id} onBack={() => setView({ kind: 'library' })} />;
   return <SettingsView onBack={() => setView({ kind: 'library' })} />;
@@ -5381,9 +6084,15 @@ import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 
 interface Settings {
-  lmStudioUrl: string; sttModel: string; llmModel: string;
-  audioHijackSessionName: string; libraryPath: string; audioWatchPath: string;
-  sttLanguage: string; exporterApple: boolean; exporterMarkdown: boolean;
+  lmStudioUrl: string;
+  sttModel: string;
+  llmModel: string;
+  audioHijackSessionName: string;
+  libraryPath: string;
+  audioWatchPath: string;
+  sttLanguage: string;
+  exporterApple: boolean;
+  exporterMarkdown: boolean;
 }
 
 export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
@@ -5400,36 +6109,82 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   if (!s) return <div className="p-8">Loading…</div>;
 
   async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
-    setS((prev) => prev ? { ...prev, [key]: value } : prev);
+    setS((prev) => (prev ? { ...prev, [key]: value } : prev));
     await api.settings.set(key, value);
   }
 
   return (
     <div className="max-w-2xl mx-auto p-8 space-y-5">
       <div className="flex items-center gap-3">
-        <button onClick={onBack} className="text-ink-muted text-sm">← Back</button>
+        <button onClick={onBack} className="text-ink-muted text-sm">
+          ← Back
+        </button>
         <h1 className="font-semibold">Settings</h1>
       </div>
 
-      <Field label="LM Studio URL"><input value={s.lmStudioUrl} onChange={(e) => update('lmStudioUrl', e.target.value)} className="input" /></Field>
+      <Field label="LM Studio URL">
+        <input
+          value={s.lmStudioUrl}
+          onChange={(e) => update('lmStudioUrl', e.target.value)}
+          className="input"
+        />
+      </Field>
       <Field label="STT Model">
-        <select value={s.sttModel} onChange={(e) => update('sttModel', e.target.value)} className="input">
+        <select
+          value={s.sttModel}
+          onChange={(e) => update('sttModel', e.target.value)}
+          className="input"
+        >
           <option value="">(choose)</option>
-          {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
         </select>
       </Field>
       <Field label="LLM Model">
-        <select value={s.llmModel} onChange={(e) => update('llmModel', e.target.value)} className="input">
+        <select
+          value={s.llmModel}
+          onChange={(e) => update('llmModel', e.target.value)}
+          className="input"
+        >
           <option value="">(choose)</option>
-          {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
         </select>
       </Field>
       <Field label="Audio Hijack Session Name">
-        <input value={s.audioHijackSessionName} onChange={(e) => update('audioHijackSessionName', e.target.value)} className="input" />
+        <input
+          value={s.audioHijackSessionName}
+          onChange={(e) => update('audioHijackSessionName', e.target.value)}
+          className="input"
+        />
       </Field>
-      <Field label="Library Path"><input value={s.libraryPath} onChange={(e) => update('libraryPath', e.target.value)} className="input" /></Field>
-      <Field label="Audio Watch Path"><input value={s.audioWatchPath} onChange={(e) => update('audioWatchPath', e.target.value)} className="input" /></Field>
-      <Field label="STT Language"><input value={s.sttLanguage} onChange={(e) => update('sttLanguage', e.target.value)} className="input" /></Field>
+      <Field label="Library Path">
+        <input
+          value={s.libraryPath}
+          onChange={(e) => update('libraryPath', e.target.value)}
+          className="input"
+        />
+      </Field>
+      <Field label="Audio Watch Path">
+        <input
+          value={s.audioWatchPath}
+          onChange={(e) => update('audioWatchPath', e.target.value)}
+          className="input"
+        />
+      </Field>
+      <Field label="STT Language">
+        <input
+          value={s.sttLanguage}
+          onChange={(e) => update('sttLanguage', e.target.value)}
+          className="input"
+        />
+      </Field>
     </div>
   );
 }
@@ -5447,7 +6202,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 Add to `index.css`:
 
 ```css
-.input { @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface; }
+.input {
+  @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
+}
 ```
 
 - [ ] **Step 3: Commit**
@@ -5462,6 +6219,7 @@ git commit -m "renderer: app shell + settings view"
 ### Task 54: Wire up main process to instantiate all services + register IPC
 
 **Files:**
+
 - Modify: `electron/main/index.ts`
 
 - [ ] **Step 1: Replace `electron/main/index.ts`**
@@ -5503,8 +6261,15 @@ const isDev = !app.isPackaged;
 
 async function createWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
-    width: 1200, height: 800, titleBarStyle: 'hiddenInset', backgroundColor: '#fafaf9',
-    webPreferences: { preload: path.join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false },
+    width: 1200,
+    height: 800,
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#fafaf9',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
   });
   if (isDev) await win.loadURL('http://localhost:5173');
   else await win.loadFile(path.join(__dirname, '../renderer/index.html'));
@@ -5525,18 +6290,35 @@ app.whenReady().then(async () => {
 
   const lmStudio = new LMStudioClient(s.lmStudioUrl);
   const diarization = new DiarizationClient('http://127.0.0.1:8765');
-  const supervisor = new DiarizationSupervisor({ sidecarDir: path.join(app.getAppPath(), 'sidecar'), onLog: (l) => logger.info('sidecar', { line: l }) });
+  const supervisor = new DiarizationSupervisor({
+    sidecarDir: path.join(app.getAppPath(), 'sidecar'),
+    onLog: (l) => logger.info('sidecar', { line: l }),
+  });
   supervisor.start();
 
   const audioHijack = new AudioHijackBridge();
   const roster = new RosterService(speakers, libraryRoot);
 
-  const ctx = { libraryRoot, lmStudio, diarization, meetings, speakers, actionItems, settings, roster, logger };
+  const ctx = {
+    libraryRoot,
+    lmStudio,
+    diarization,
+    meetings,
+    speakers,
+    actionItems,
+    settings,
+    roster,
+    logger,
+  };
   const pipeline = new Pipeline({
     ctx,
     stages: {
-      transcribing: runTranscribing, diarizing: runDiarizing, merging: runMerging,
-      identifying: runIdentifying, summarizing: runSummarizing, extracting: runExtracting,
+      transcribing: runTranscribing,
+      diarizing: runDiarizing,
+      merging: runMerging,
+      identifying: runIdentifying,
+      summarizing: runSummarizing,
+      extracting: runExtracting,
     },
   });
 
@@ -5550,27 +6332,54 @@ app.whenReady().then(async () => {
       const slug = makeSlug(dateIso, parsed.autoTitle, id);
       createMeetingFolder(libraryRoot, slug, audioPath);
       meetings.insert({
-        id, slug, title: parsed.autoTitle, startedAt: parsed.startedAtIso,
-        durationS: info.durationS, audioPath, status: 'processing', pipelineStage: 'discovered',
+        id,
+        slug,
+        title: parsed.autoTitle,
+        startedAt: parsed.startedAtIso,
+        durationS: info.durationS,
+        audioPath,
+        status: 'processing',
+        pipelineStage: 'discovered',
       });
       logger.info('library:discovered', { id, slug, audioPath });
       pipeline.enqueue(id);
-    } catch (e) { logger.error('library:discover-fail', { audioPath, err: String(e) }); }
+    } catch (e) {
+      logger.error('library:discover-fail', { audioPath, err: String(e) });
+    }
   });
   await watcher.start();
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger } as never);
 
   const exporters = buildExporterRegistry();
-  registerIpcHandlers(ipcMain, { meetings, speakers, actionItems, settings, lmStudio, audioHijack, roster, pipeline, exporters, libraryRoot });
+  registerIpcHandlers(ipcMain, {
+    meetings,
+    speakers,
+    actionItems,
+    settings,
+    lmStudio,
+    audioHijack,
+    roster,
+    pipeline,
+    exporters,
+    libraryRoot,
+  });
 
   await createWindow();
 
-  app.on('before-quit', () => { supervisor.stop(); void watcher.stop(); logger.close(); });
+  app.on('before-quit', () => {
+    supervisor.stop();
+    void watcher.stop();
+    logger.close();
+  });
 });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+});
 ```
 
 - [ ] **Step 2: Verify compile**
@@ -5617,6 +6426,7 @@ No commit for this task — observational only.
 ### Task 56: Manual smoke-test checklist
 
 **Files:**
+
 - Create: `docs/testing.md`
 
 - [ ] **Step 1: Write checklist**
@@ -5627,6 +6437,7 @@ No commit for this task — observational only.
 Run before every release.
 
 ## Preflight
+
 - [ ] LM Studio running at configured URL
 - [ ] LM Studio has a Whisper model and a chat LLM loaded
 - [ ] Sidecar venv installed (`sidecar/.venv/bin/python` exists)
@@ -5634,6 +6445,7 @@ Run before every release.
 - [ ] Audio Hijack installed with a "Meeting" session
 
 ## Test flow
+
 1. [ ] Launch app — Library view appears, no crashes
 2. [ ] Open Settings, verify LM Studio models populate the dropdowns
 3. [ ] Click Record — recording overlay shows, Audio Hijack starts
@@ -5660,6 +6472,7 @@ git commit -m "docs: manual smoke-test checklist"
 ### Task 57: First-run setup helper
 
 **Files:**
+
 - Create: `scripts/setup.sh`
 
 - [ ] **Step 1: Implement**
@@ -5714,6 +6527,7 @@ git commit -m "scripts: first-run setup helper"
 ### Task 58: electron-builder packaging config
 
 **Files:**
+
 - Create: `electron-builder.yml`
 
 - [ ] **Step 1: Create config**
@@ -5730,9 +6544,9 @@ extraResources:
   - from: sidecar
     to: sidecar
     filter:
-      - "**/*"
-      - "!**/__pycache__"
-      - "!.venv"
+      - '**/*'
+      - '!**/__pycache__'
+      - '!.venv'
 mac:
   target:
     - dmg
@@ -5768,4 +6582,3 @@ After all tasks complete, verify:
 - [ ] Manual smoke-test checklist (`docs/testing.md`) passes end-to-end
 - [ ] No TODO/FIXME comments left in source files
 - [ ] All commits follow the commit-message style established in earlier tasks
-

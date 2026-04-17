@@ -13,6 +13,7 @@ The output is intended to stand on its own as meeting notes for business use: en
 ## 2. Scope
 
 **In scope:**
+
 - Trigger Audio Hijack recording from the app (AppleScript)
 - Watch the Audio Hijack output folder and auto-process any new MP3s (whether recorded via the app or directly in Audio Hijack)
 - Transcribe audio via LM Studio's OpenAI-compatible `/v1/audio/transcriptions` endpoint
@@ -25,6 +26,7 @@ The output is intended to stand on its own as meeting notes for business use: en
 - Crash-safe pipeline that resumes from the last completed stage
 
 **Out of scope (for this release):**
+
 - Cloud sync, multi-device sync, multi-user features
 - Live/streaming transcription during a recording
 - Video input, screen recording
@@ -35,6 +37,7 @@ The output is intended to stand on its own as meeting notes for business use: en
 ## 3. Users and usage
 
 A single user (the operator's Mac), running business meetings via Audio Hijack. The user:
+
 1. Clicks Record in the app (or starts Audio Hijack directly)
 2. The meeting happens
 3. The app processes the MP3 when Audio Hijack finishes writing it
@@ -50,9 +53,11 @@ A single user (the operator's Mac), running business meetings via Audio Hijack. 
 Four cooperating components, each with one clear responsibility:
 
 ### 5.1 Electron Renderer (React + Tailwind)
+
 The entire UI. Meeting library, detail view, speaker identification, recording overlay, settings. Talks to the main process only via IPC — no direct access to the filesystem, subprocess APIs, or HTTP clients. State managed via a small store (Zustand); data fetched reactively over IPC.
 
 ### 5.2 Electron Main Process (Node.js)
+
 The orchestrator and owner of all side effects:
 
 - **`AudioHijackBridge`** — wraps `osascript` calls to start/stop Audio Hijack and query session state. Defaults to a configured session name (Settings).
@@ -65,18 +70,22 @@ The orchestrator and owner of all side effects:
 - **`Exporters`** — pluggable exporter interface with implementations for `AppleReminders`, `Markdown`, and a stub for `GoogleTasks`.
 
 ### 5.3 Python Sidecar (`meeting_notes_diarize`)
+
 FastAPI + uvicorn process, spawned by the main process on app startup, shut down on app quit. Single responsibility: speaker diarization.
 
 Endpoints:
+
 - `GET /health` — readiness check
 - `POST /diarize` — accepts audio file path (shared filesystem); returns JSON `{ segments: [{start, end, speaker, embedding}], num_speakers }`
 
 Uses `pyannote.audio 3.x`. Hugging Face token read from env or config file. Supervised by the main process (restart up to 3 times with backoff).
 
 ### 5.4 LM Studio (external)
+
 User-managed. The app discovers running models via `/v1/models` and presents them in the Settings dropdown. App does not start, stop, or install LM Studio.
 
 ### 5.5 Boundary rule
+
 The renderer knows about meetings and their states. It does not know about subprocesses, HTTP, or AppleScript. All side effects live in the main process or the sidecar.
 
 ## 6. Data flow (pipeline)
@@ -99,12 +108,15 @@ Stage transitions are written to `meeting.json` and the SQLite `meetings.pipelin
 8. **done** — visible in library with full detail view.
 
 ### 6.1 Re-run semantics
+
 Any stage past `discovered` can be manually re-run from the UI (new model, renamed speaker, etc.). Re-running a stage invalidates all downstream stages and re-runs them automatically.
 
 ### 6.2 Concurrency
+
 Default: one pipeline at a time. Queue visible as a chip in the UI ("2 meetings processing…"). Transcribe + diarize within a meeting run concurrently.
 
 ### 6.3 Crash recovery
+
 On app launch, `PipelineRecovery` finds every meeting in a non-terminal state and resumes from the last completed stage (assuming any in-progress stage was interrupted and re-runs it).
 
 ## 7. Storage layout
@@ -140,6 +152,7 @@ On app launch, `PipelineRecovery` finds every meeting in a non-terminal state an
 - `settings` — `key, value`
 
 ### 7.3 Rebuildability
+
 Every meeting can be reconstructed from its folder alone. Deleting `db.sqlite` and re-scanning must yield the same library. Filesystem artifacts are authoritative.
 
 ### 7.4 `meeting.json` shape
@@ -152,9 +165,7 @@ Every meeting can be reconstructed from its folder alone. Deleting `db.sqlite` a
   "started_at": "2026-04-17T14:32:00-04:00",
   "audio": { "path": "/Users/.../Session 2026-04-17 14.32.mp3", "duration_s": 2341 },
   "pipeline": { "stage": "done", "errors": [] },
-  "speakers": [
-    { "label": "Speaker 1", "roster_id": "spk_07", "confidence": 0.91 }
-  ],
+  "speakers": [{ "label": "Speaker 1", "roster_id": "spk_07", "confidence": 0.91 }],
   "models": { "stt": "whisper-large-v3", "llm": "llama-3.1-8b-instruct" }
 }
 ```
@@ -162,29 +173,36 @@ Every meeting can be reconstructed from its folder alone. Deleting `db.sqlite` a
 ## 8. UI structure
 
 ### 8.1 Library (home)
+
 - Top bar: app title, ⏺ Record button (indigo/violet gradient), Settings gear
 - Filter row: search, date range, speaker chip filter, status filter
 - Meeting list as cards: title, date/duration, speaker avatars, status pill, action-item count. Cards with unidentified speakers show an amber "N speakers to identify" nudge.
 - Empty state: friendly illustration + "Hit record or drop an MP3 in `~/Music/Audio Hijack`"
 
 ### 8.2 Meeting detail
+
 Three-pane layout:
+
 - **Left rail:** inline-editable title, date, duration, models used, re-run buttons per stage
-- **Center:** tabbed — *Summary* (markdown with interactive action-item checkboxes), *Transcript* (speaker-labeled, timestamp click seeks audio), *Audio* (waveform scrubber)
+- **Center:** tabbed — _Summary_ (markdown with interactive action-item checkboxes), _Transcript_ (speaker-labeled, timestamp click seeks audio), _Audio_ (waveform scrubber)
 - **Right rail:** Speakers panel (avatar, snippet, autocomplete "Who is this?" for unknowns, edit pencil for knowns). Export panel: Apple Reminders, Markdown, Google Tasks (greyed, "coming soon").
 
 ### 8.3 Recording overlay
+
 Minimal modal: live elapsed timer, animated waveform, Audio Hijack session indicator, Stop button. On stop, closes and navigates to the detail view as processing begins.
 
 ### 8.4 Settings
+
 Model dropdowns (from LM Studio `/v1/models`), STT language, summary prompt tweaks (collapsed), library paths, exporter toggles, Audio Hijack session name, speaker roster management (list, rename, delete, merge).
 
 ### 8.5 Keyboard shortcuts
+
 - `⌘R` record/stop · `⌘F` search library · `⌘,` settings
 - `J/K` move between meetings in list view
 - `Space` play/pause in detail view
 
 ### 8.6 Processing feedback
+
 - Thin top-of-window progress bar during active pipeline stages
 - Stage name toast ("Transcribing… 47%")
 - Error banners dismissible with a Retry button
@@ -192,9 +210,11 @@ Model dropdowns (from LM Studio `/v1/models`), STT language, summary prompt twea
 ## 9. Integration details
 
 ### 9.1 Audio Hijack control
+
 `osascript` subprocess calls to a named session. Commands: `start session "<name>"`, `stop session "<name>"`, `get session state "<name>"`. Failure on any command surfaces as an error toast with the user-actionable hint.
 
 ### 9.2 LM Studio client
+
 - Base URL from Settings (default `http://localhost:1234`)
 - `/v1/models` on startup and every 30 s for Settings population
 - `/v1/audio/transcriptions` with `model`, `file` (multipart), `response_format=verbose_json`
@@ -203,12 +223,14 @@ Model dropdowns (from LM Studio `/v1/models`), STT language, summary prompt twea
 - Retries: 3 with exponential backoff for 5xx and connection errors; fail fast on 4xx
 
 ### 9.3 Diarization sidecar protocol
+
 - `POST /diarize` with JSON `{ "audio_path": "/abs/path.mp3" }`
 - Response: `{ "segments": [{"start": float, "end": float, "speaker": "SPEAKER_00", "embedding": [float…]}], "num_speakers": int }`
 - Embeddings are 512-dim float vectors (pyannote default)
 - Shared-fixture contract test ensures Node and Python don't drift
 
 ### 9.4 Speaker matching
+
 Cosine similarity between a meeting's per-speaker averaged embedding and each roster embedding. Threshold ≥ 0.75 auto-links. User confirmation updates the roster embedding via running-average update (`new = 0.7 * old + 0.3 * observed`).
 
 ## 10. Error handling and resilience
@@ -222,6 +244,7 @@ Cosine similarity between a meeting's per-speaker averaged embedding and each ro
 - **Disk full / write error** — surface immediately; never silently drop data.
 
 ### 10.1 Observability
+
 - Structured JSON-lines logs at `~/Library/Logs/MeetingNotes/app.log` (rotated)
 - In-app "Activity" drawer shows last 50 pipeline events
 
@@ -279,6 +302,7 @@ MeetingNotes/
 ## 14. Dependencies
 
 ### 14.1 Runtime
+
 - **Node.js 20+** (Electron 30+)
 - **Python 3.11+** with `pyannote.audio`, `fastapi`, `uvicorn`, `torch` (MPS)
 - **LM Studio** (user-installed) with at least one Whisper model and one chat LLM
@@ -286,11 +310,13 @@ MeetingNotes/
 - **Hugging Face token** for pyannote model download
 
 ### 14.2 Key npm packages (provisional)
+
 `electron`, `react`, `tailwindcss`, `zustand`, `better-sqlite3`, `chokidar`, `zod` (validation), `openai` (LM Studio client), `vitest`, `playwright` (later)
 
 ## 15. Open questions deferred to implementation
 
 These are acknowledged and intentionally deferred; they don't block a plan:
+
 - Exact prompt text for summarization and action-item extraction (to be iterated during implementation)
 - Whether to bundle a venv installer or require `pip install` (lean toward a first-run setup wizard)
 - App distribution format (dmg vs. unpackaged for personal use)

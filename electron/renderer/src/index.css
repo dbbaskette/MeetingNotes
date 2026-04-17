@@ -2,5 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { height: 100%; }
-body { font-family: theme('fontFamily.sans'); color: theme('colors.ink.DEFAULT'); background: theme('colors.surface.sunken'); }
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  font-family: theme('fontFamily.sans');
+  color: theme('colors.ink.DEFAULT');
+  background: theme('colors.surface.sunken');
+}
