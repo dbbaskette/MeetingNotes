@@ -12,3 +12,7 @@ body {
   color: theme('colors.ink.DEFAULT');
   background: theme('colors.surface.sunken');
 }
+
+.input {
+  @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
+}
