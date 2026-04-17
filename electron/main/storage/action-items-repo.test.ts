@@ -1,0 +1,46 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openDb } from './db';
+import { MeetingsRepo } from './meetings-repo';
+import { ActionItemsRepo } from './action-items-repo';
+
+let repo: ActionItemsRepo;
+let meetings: MeetingsRepo;
+let meetingId: string;
+
+beforeEach(() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-ai-'));
+  const db = openDb(path.join(dir, 'db.sqlite'));
+  meetings = new MeetingsRepo(db);
+  repo = new ActionItemsRepo(db);
+  meetingId = 'm1';
+  meetings.insert({ id: meetingId, slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+});
+
+describe('ActionItemsRepo', () => {
+  it('replace + listByMeeting', () => {
+    repo.replaceForMeeting(meetingId, [
+      { text: 'a', owner: null, due_date: null },
+      { text: 'b', owner: 'Dan', due_date: '2026-04-22' },
+    ]);
+    const all = repo.listByMeeting(meetingId);
+    expect(all).toHaveLength(2);
+    expect(all[0]!.text).toBe('a');
+  });
+
+  it('setStatus', () => {
+    repo.replaceForMeeting(meetingId, [{ text: 'x', owner: null, due_date: null }]);
+    const [item] = repo.listByMeeting(meetingId);
+    repo.setStatus(item!.id, 'done');
+    expect(repo.listByMeeting(meetingId)[0]!.status).toBe('done');
+  });
+
+  it('markExported appends to exported_to JSON', () => {
+    repo.replaceForMeeting(meetingId, [{ text: 'x', owner: null, due_date: null }]);
+    const [item] = repo.listByMeeting(meetingId);
+    repo.markExported(item!.id, 'reminders');
+    expect(repo.listByMeeting(meetingId)[0]!.exportedTo).toEqual(['reminders']);
+  });
+});
