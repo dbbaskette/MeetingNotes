@@ -1,6 +1,6 @@
-import type { SpeakersRepo } from '../storage/speakers-repo';
-import { embeddingFilePath, writeEmbedding, readEmbedding } from './embeddings';
-import { matchSpeakers, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher';
+import type { SpeakersRepo } from '../storage/speakers-repo.js';
+import { embeddingFilePath, writeEmbedding, readEmbedding } from './embeddings.js';
+import { matchSpeakers, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher.js';
 
 export class RosterService {
   constructor(private readonly repo: SpeakersRepo, private readonly libraryRoot: string) {}

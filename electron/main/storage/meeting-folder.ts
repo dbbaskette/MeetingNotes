@@ -28,7 +28,16 @@ export function createMeetingFolder(root: string, slug: string, audioPath: strin
   fs.mkdirSync(folder, { recursive: true });
   fs.mkdirSync(path.join(folder, 'exports'), { recursive: true });
   const link = path.join(folder, 'audio.mp3');
-  if (!fs.existsSync(link)) fs.symlinkSync(audioPath, link);
+  // Heal a broken/stale symlink: stat() follows the link and throws if its
+  // target is missing, distinguishing "link points at a real file" from
+  // "link is dangling". Race-free: we only unlink/recreate when needed.
+  try {
+    fs.statSync(link);
+    return folder; // link exists and points at a live file
+  } catch {
+    try { fs.unlinkSync(link); } catch { /* not present */ }
+    fs.symlinkSync(audioPath, link);
+  }
   return folder;
 }
 

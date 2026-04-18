@@ -14,6 +14,6 @@
       "@main/*": ["electron/main/*"]
     }
   },
-  "include": ["electron/main/**/*", "electron/preload/**/*"],
+  "include": ["electron/main/**/*"],
   "exclude": ["electron/main/**/*.test.ts", "electron/main/**/*.test.tsx"]
 }

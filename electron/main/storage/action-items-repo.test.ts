@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openDb } from './db';
-import { MeetingsRepo } from './meetings-repo';
-import { ActionItemsRepo } from './action-items-repo';
+import { openDb } from './db.js';
+import { MeetingsRepo } from './meetings-repo.js';
+import { ActionItemsRepo } from './action-items-repo.js';
 
 let repo: ActionItemsRepo;
 let meetings: MeetingsRepo;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchSpeakers, updateRunningAverage, MATCH_THRESHOLD } from './matcher';
+import { matchSpeakers, updateRunningAverage, MATCH_THRESHOLD } from './matcher.js';
 
 describe('matchSpeakers', () => {
   const roster = [

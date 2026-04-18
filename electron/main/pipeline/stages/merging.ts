@@ -1,9 +1,9 @@
 // electron/main/pipeline/stages/merging.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import type { StageHandler } from '../context';
-import { meetingFolderPath } from '../../storage/meeting-folder';
-import { mergeTranscriptWithDiarization, mergedToMarkdown } from '../../lib/merge-transcript';
+import type { StageHandler } from '../context.js';
+import { meetingFolderPath } from '../../storage/meeting-folder.js';
+import { mergeTranscriptWithDiarization, mergedToMarkdown } from '../../lib/merge-transcript.js';
 
 export const runMerging: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);

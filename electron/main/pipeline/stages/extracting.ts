@@ -1,10 +1,10 @@
 // electron/main/pipeline/stages/extracting.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import type { StageHandler } from '../context';
-import { meetingFolderPath } from '../../storage/meeting-folder';
-import { ACTION_ITEM_SYSTEM_PROMPT } from '../prompts';
-import { parseActionItemsLoose } from '../../lib/action-item-schema';
+import type { StageHandler } from '../context.js';
+import { meetingFolderPath } from '../../storage/meeting-folder.js';
+import { ACTION_ITEM_SYSTEM_PROMPT } from '../prompts.js';
+import { parseActionItemsLoose } from '../../lib/action-item-schema.js';
 
 export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);

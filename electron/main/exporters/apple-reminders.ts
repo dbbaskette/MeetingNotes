@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Exporter, ExportInput } from './interface';
+import { type Exporter, type ExportInput, escapeAppleScript } from './interface.js';
 
 const pExecFile = promisify(execFile);
 type Runner = (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
 const defaultRunner: Runner = (c, a) => pExecFile(c, a, { timeout: 10000 });
+
+// AppleScript date literals: tolerate ISO YYYY-MM-DD only.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class AppleRemindersExporter implements Exporter {
   name = 'reminders';
@@ -17,18 +20,31 @@ export class AppleRemindersExporter implements Exporter {
   }
 
   async export(input: ExportInput): Promise<string> {
-    const list = this.listName.replace(/"/g, '\\"');
+    const list = escapeAppleScript(this.listName);
     const open = input.items.filter((i) => i.status !== 'done');
+    let exported = 0;
+    const failures: string[] = [];
     for (const it of open) {
-      const body = it.text.replace(/"/g, '\\"');
-      const nameParts = [body];
-      if (it.ownerName) nameParts.push(`(${it.ownerName})`);
-      const name = nameParts.join(' ');
-      const due = it.dueDate ? `, remind me date: date "${it.dueDate}"` : '';
+      const body = escapeAppleScript(it.text);
+      const owner = it.ownerName ? ` (${escapeAppleScript(it.ownerName)})` : '';
+      const name = body + owner;
+      const due = it.dueDate && ISO_DATE.test(it.dueDate)
+        ? `, remind me date: date "${it.dueDate}"`
+        : '';
       const script = `tell application "Reminders" to make new reminder at list "${list}" with properties {name:"${name}"${due}}`;
-      const { stderr } = await this.runner('osascript', ['-e', script]);
-      if (stderr.trim()) throw new Error(`Reminders export failed: ${stderr.trim()}`);
+      try {
+        const { stderr } = await this.runner('osascript', ['-e', script]);
+        if (stderr.trim()) throw new Error(stderr.trim());
+        input.onItemExported?.(it.id);
+        exported += 1;
+      } catch (e) {
+        failures.push(`${it.id}: ${String(e)}`);
+      }
     }
-    return `${open.length} reminders added to "${this.listName}"`;
+    if (failures.length > 0 && exported === 0) {
+      throw new Error(`Reminders export failed: ${failures.join('; ')}`);
+    }
+    const suffix = failures.length > 0 ? ` (${failures.length} failed)` : '';
+    return `${exported} reminders added to "${this.listName}"${suffix}`;
   }
 }

@@ -1,8 +1,9 @@
 // electron/main/pipeline/stages/identifying.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import type { StageHandler } from '../context';
-import { meetingFolderPath } from '../../storage/meeting-folder';
+import type { StageHandler } from '../context.js';
+import { meetingFolderPath } from '../../storage/meeting-folder.js';
+import { normalize } from '../../lib/cosine.js';
 
 export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
@@ -21,9 +22,11 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
       entry.count += 1;
     }
   }
+  // Average then L2-normalize so cosine matching weighs each speaker equally
+  // regardless of how many short segments they had.
   const detected = Object.entries(byLabel).map(([label, { sum, count }]) => ({
     label,
-    embedding: sum.map((x) => x / count),
+    embedding: normalize(sum.map((x) => x / count)),
   }));
 
   const matches = ctx.roster.identifyUnknowns(detected);

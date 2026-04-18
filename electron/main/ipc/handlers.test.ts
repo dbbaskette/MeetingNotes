@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { registerIpcHandlers } from './handlers';
+import { registerIpcHandlers } from './handlers.js';
 
 describe('registerIpcHandlers', () => {
   it('registers all known channels', () => {

@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openDb } from '../storage/db';
-import { MeetingsRepo } from '../storage/meetings-repo';
-import { recoverPendingMeetings } from './recovery';
+import { openDb } from '../storage/db.js';
+import { MeetingsRepo } from '../storage/meetings-repo.js';
+import { recoverPendingMeetings } from './recovery.js';
 
 describe('recoverPendingMeetings', () => {
   it('rolls non-terminal meetings back one stage and enqueues them', () => {

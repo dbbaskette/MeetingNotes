@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openDb } from './db';
-import { MeetingsRepo } from './meetings-repo';
+import { openDb } from './db.js';
+import { MeetingsRepo } from './meetings-repo.js';
 
 let repo: MeetingsRepo;
 

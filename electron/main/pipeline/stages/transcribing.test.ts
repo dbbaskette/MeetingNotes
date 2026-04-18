@@ -2,10 +2,10 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runTranscribing } from './transcribing';
+import { runTranscribing } from './transcribing.js';
 
 describe('runTranscribing', () => {
-  it('calls LMStudio.transcribe and writes transcript.raw.json', async () => {
+  it('calls the STT client transcribe and writes transcript.raw.json', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-t-'));
     const mFolder = path.join(dir, 'meetings', 'slug');
     fs.mkdirSync(mFolder, { recursive: true });
@@ -13,7 +13,7 @@ describe('runTranscribing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
-      lmStudio: {
+      stt: {
         transcribe: vi.fn(async () => ({
           text: 'hi',
           segments: [{ start: 0, end: 1, text: 'hi' }],

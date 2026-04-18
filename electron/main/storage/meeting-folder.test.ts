@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createMeetingFolder, readMeetingJson, writeMeetingJson, type MeetingRecord } from './meeting-folder';
+import { createMeetingFolder, readMeetingJson, writeMeetingJson, type MeetingRecord } from './meeting-folder.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'mn-folder-'));
 const dirs: string[] = [];

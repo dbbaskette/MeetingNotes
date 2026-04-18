@@ -31,15 +31,21 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
 
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     async function load(): Promise<void> {
       const d = (await api.meetings.get(id)) as MeetingDetail;
-      if (alive) setM(d);
+      if (!alive) return;
+      setM(d);
+      // Stop polling once the pipeline finishes — terminal state never changes
+      // unless the user clicks rerun, which re-mounts via state change.
+      if (d.pipelineStage !== 'done') {
+        timer = setTimeout(load, 2000);
+      }
     }
     void load();
-    const t = setInterval(load, 2000);
     return () => {
       alive = false;
-      clearInterval(t);
+      if (timer) clearTimeout(timer);
     };
   }, [id]);
 
@@ -86,14 +92,19 @@ function LeftRail({ meeting }: { meeting: MeetingDetail }): JSX.Element {
         {meeting.models.llm && <div className="text-xs">LLM: {meeting.models.llm}</div>}
       </div>
       <div className="pt-3 border-t border-surface-border space-y-1">
-        <div className="text-xs font-bold text-ink-muted uppercase mb-1">Re-run</div>
-        {(['transcribing', 'diarizing', 'summarizing'] as const).map((stage) => (
+        <div className="text-xs font-bold text-ink-muted uppercase mb-1">Re-run pipeline from…</div>
+        {([
+          ['transcribing', 'transcribe + everything after'],
+          ['diarizing', 'diarize + everything after'],
+          ['summarizing', 'just summary + actions'],
+        ] as const).map(([stage, label]) => (
           <button
             key={stage}
             onClick={() => api.meetings.rerun(meeting.id, stage)}
             className="w-full text-left bg-surface-sunken border border-surface-border rounded-lg py-1 px-2 text-xs hover:border-brand-indigo hover:text-brand-indigo"
+            title={label}
           >
-            ↻ {stage}
+            ↻ {label}
           </button>
         ))}
       </div>

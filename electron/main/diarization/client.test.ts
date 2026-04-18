@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { DiarizationClient } from './client';
+import { DiarizationClient } from './client.js';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => { fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock); });

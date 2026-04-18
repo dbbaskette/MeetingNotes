@@ -26,12 +26,30 @@ interface MeetingsState {
   refresh: () => Promise<void>;
 }
 
-export const useMeetingsStore = create<MeetingsState>((set) => ({
+function shallowEqual(a: MeetingSummary[], b: MeetingSummary[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.id !== y.id ||
+      x.pipelineStage !== y.pipelineStage ||
+      x.status !== y.status ||
+      x.title !== y.title ||
+      x.actionItemsCount !== y.actionItemsCount ||
+      x.unidentifiedCount !== y.unidentifiedCount ||
+      x.speakers.length !== y.speakers.length
+    ) return false;
+  }
+  return true;
+}
+
+export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   meetings: [],
   loading: false,
   refresh: async () => {
-    set({ loading: true });
     const list = (await api.meetings.list()) as MeetingSummary[];
-    set({ meetings: list, loading: false });
+    if (shallowEqual(get().meetings, list)) return;
+    set({ meetings: list });
   },
 }));

@@ -40,6 +40,8 @@ export const IPC_CHANNELS = {
   meetingsGet: 'meetings:get',
   meetingsRename: 'meetings:rename',
   meetingsRerun: 'meetings:rerun',
+  meetingsStart: 'meetings:start',
+  meetingsStartMany: 'meetings:start-many',
   recordStart: 'record:start',
   recordStop: 'record:stop',
   recordState: 'record:state',
@@ -51,6 +53,4 @@ export const IPC_CHANNELS = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   modelsList: 'models:list',
-  activity: 'activity:subscribe',
-  meetingChanged: 'event:meeting-changed',
 } as const;

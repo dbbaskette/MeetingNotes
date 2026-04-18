@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ExportInput, Exporter } from './interface';
+import type { ExportInput, Exporter } from './interface.js';
 
 export class MarkdownExporter implements Exporter {
   name = 'markdown';

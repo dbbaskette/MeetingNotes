@@ -1,8 +1,8 @@
 // electron/main/pipeline/stages/diarizing.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import type { StageHandler } from '../context';
-import { meetingFolderPath } from '../../storage/meeting-folder';
+import type { StageHandler } from '../context.js';
+import { meetingFolderPath } from '../../storage/meeting-folder.js';
 
 export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
