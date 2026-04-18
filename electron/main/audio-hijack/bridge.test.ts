@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AudioHijackBridge } from './bridge';
+import { AudioHijackBridge } from './bridge.js';
 
 describe('AudioHijackBridge', () => {
   it('startSession issues the expected AppleScript tell', async () => {
@@ -9,7 +9,9 @@ describe('AudioHijackBridge', () => {
     expect(runner).toHaveBeenCalled();
     const [cmd, args] = runner.mock.calls[0]!;
     expect(cmd).toBe('osascript');
-    expect((args as string[]).some((a) => a.includes('start session "Meeting"'))).toBe(true);
+    expect(args as string[]).toContain('tell application "Audio Hijack"');
+    expect(args as string[]).toContain('start session named "Meeting"');
+    expect(args as string[]).toContain('end tell');
   });
 
   it('throws friendly error if stderr non-empty', async () => {

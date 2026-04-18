@@ -1,15 +1,15 @@
 // electron/main/pipeline/stages/transcribing.ts
 import fs from 'node:fs';
 import path from 'node:path';
-import type { StageHandler } from '../context';
-import { meetingFolderPath } from '../../storage/meeting-folder';
+import type { StageHandler } from '../context.js';
+import { meetingFolderPath } from '../../storage/meeting-folder.js';
 
 export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   ctx.logger.info('transcribe:start', { meetingId });
-  const result = await ctx.lmStudio.transcribe({
+  const result = await ctx.stt.transcribe({
     audioPath: meeting.audioPath,
     model: ctx.settings.get('sttModel'),
     language: ctx.settings.get('sttLanguage'),

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { openDb } from './db';
+import { openDb } from './db.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

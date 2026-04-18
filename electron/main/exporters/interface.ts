@@ -5,8 +5,16 @@ export interface ExportInput {
   items: ExportableItem[];
   meetingTitle: string;
   meetingFolder: string;
+  /** Called after each item successfully exports. */
+  onItemExported?: (id: string) => void;
 }
 export interface Exporter {
   name: string;
   export(input: ExportInput): Promise<string>;
+}
+
+// AppleScript double-quoted string literals only escape `\` and `"`. Backslash
+// MUST be escaped first; otherwise a trailing `\` in user input breaks out.
+export function escapeAppleScript(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }

@@ -1,5 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_CHANNELS } from '../main/ipc/contracts';
+
+// Inlined to keep the preload (CJS) and main (ESM) builds independent — sharing
+// a compiled module across both modes causes the file in dist/ to flip between
+// formats depending on tsc invocation order. The constants here MUST match
+// electron/main/ipc/contracts.ts; a unit test enforces parity.
+const IPC_CHANNELS = {
+  meetingsList: 'meetings:list',
+  meetingsGet: 'meetings:get',
+  meetingsRename: 'meetings:rename',
+  meetingsRerun: 'meetings:rerun',
+  meetingsStart: 'meetings:start',
+  meetingsStartMany: 'meetings:start-many',
+  recordStart: 'record:start',
+  recordStop: 'record:stop',
+  recordState: 'record:state',
+  speakersList: 'speakers:list',
+  speakersConfirm: 'speakers:confirm',
+  speakersRename: 'speakers:rename',
+  actionItemsSetStatus: 'action-items:set-status',
+  exportRun: 'export:run',
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
+  modelsList: 'models:list',
+} as const;
 
 const api = {
   meetings: {
@@ -7,6 +30,8 @@ const api = {
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
     rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
+    start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
+    startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
   },
   record: {
     start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runDiarizing } from './diarizing';
+import { runDiarizing } from './diarizing.js';
 
 describe('runDiarizing', () => {
   it('calls diarization client and writes diarization.json', async () => {

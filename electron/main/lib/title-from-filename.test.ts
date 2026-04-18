@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAudioHijackFilename } from './title-from-filename';
+import { parseAudioHijackFilename } from './title-from-filename.js';
 
 describe('parseAudioHijackFilename', () => {
   it('extracts ISO date and title from AH default format', () => {

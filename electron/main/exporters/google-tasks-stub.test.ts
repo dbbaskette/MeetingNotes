@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { GoogleTasksStub } from './google-tasks-stub';
+import { GoogleTasksStub } from './google-tasks-stub.js';
 
 describe('GoogleTasksStub', () => {
   it('throws NotImplemented so UI can surface "coming soon"', async () => {

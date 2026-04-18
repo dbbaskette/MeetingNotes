@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runIdentifying } from './identifying';
+import { runIdentifying } from './identifying.js';
 
 describe('runIdentifying', () => {
   it('averages embeddings per speaker and links via roster service', async () => {

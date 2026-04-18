@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeSlug, shortId } from './slug';
+import { makeSlug, shortId } from './slug.js';
 
 describe('makeSlug', () => {
   it('combines date, kebab title, and short id', () => {
@@ -20,12 +20,12 @@ describe('makeSlug', () => {
 });
 
 describe('shortId', () => {
-  it('returns 4 lowercase alphanumeric chars', () => {
+  it('returns 8 base32 chars', () => {
     const id = shortId();
-    expect(id).toMatch(/^[a-z0-9]{4}$/);
+    expect(id).toMatch(/^[a-z2-7]{8}$/);
   });
-  it('is reasonably unique across calls', () => {
-    const set = new Set(Array.from({ length: 500 }, () => shortId()));
-    expect(set.size).toBeGreaterThan(490);
+  it('is unique across calls (crypto-random)', () => {
+    const set = new Set(Array.from({ length: 1000 }, () => shortId()));
+    expect(set.size).toBe(1000);
   });
 });

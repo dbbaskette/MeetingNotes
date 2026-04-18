@@ -6,12 +6,18 @@ files:
   - dist/**
   - package.json
 extraResources:
+  # Ship only the PyInstaller bundle — the user does not need Python installed.
+  # Dev runs out of the source tree where the .venv path is used instead.
+  - from: sidecar/dist/meeting-notes-diarize
+    to: sidecar/dist/meeting-notes-diarize
+    filter:
+      - "**/*"
   - from: sidecar
     to: sidecar
     filter:
-      - "**/*"
-      - "!**/__pycache__"
-      - "!.venv"
+      - "meeting_notes_diarize/**/*.py"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
 mac:
   target:
     - dmg

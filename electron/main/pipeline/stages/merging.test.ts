@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runMerging } from './merging';
+import { runMerging } from './merging.js';
 
 describe('runMerging', () => {
   it('reads transcript.raw.json + diarization.json, writes transcript.md', async () => {

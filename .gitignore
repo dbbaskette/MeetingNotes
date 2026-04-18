@@ -12,3 +12,13 @@ __pycache__/
 .venv/
 venv/
 sidecar/.venv*/
+
+# Build artifacts
+release/
+sidecar/dist/
+sidecar/build/
+sidecar/*.spec
+sidecar/*.egg-info/
+
+# Worktrees / local tooling
+.claude/

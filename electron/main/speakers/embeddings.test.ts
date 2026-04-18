@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeEmbedding, readEmbedding, embeddingFilePath } from './embeddings';
+import { writeEmbedding, readEmbedding, embeddingFilePath } from './embeddings.js';
 
 const dirs: string[] = [];
 afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });

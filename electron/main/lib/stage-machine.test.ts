@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   STAGES, nextStage, previousCompletedOnCrash, downstreamOf, isValidTransition,
-} from './stage-machine';
+} from './stage-machine.js';
 
 describe('stage-machine', () => {
   it('lists stages in canonical order', () => {

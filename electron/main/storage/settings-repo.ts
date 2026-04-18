@@ -4,6 +4,9 @@ import path from 'node:path';
 
 export interface Settings {
   lmStudioUrl: string;
+  /** OpenAI-compatible STT endpoint (whisper.cpp's whisper-server, etc.). */
+  sttUrl: string;
+  /** Model id for STT. For whisper.cpp this is informational; the loaded model is set at server start. */
   sttModel: string;
   llmModel: string;
   audioHijackSessionName: string;
@@ -16,7 +19,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   lmStudioUrl: 'http://localhost:1234',
-  sttModel: '',
+  sttUrl: 'http://127.0.0.1:8080',
+  sttModel: 'whisper-1',
   llmModel: '',
   audioHijackSessionName: 'Meeting',
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),

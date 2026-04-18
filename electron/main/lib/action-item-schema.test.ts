@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ActionItemSchema, parseActionItemsLoose } from './action-item-schema';
+import { ActionItemSchema, parseActionItemsLoose } from './action-item-schema.js';
 
 describe('ActionItemSchema', () => {
   it('accepts a full item', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AppleRemindersExporter } from './apple-reminders';
+import { AppleRemindersExporter } from './apple-reminders.js';
 
 describe('AppleRemindersExporter', () => {
   it('creates one reminder per item via osascript', async () => {

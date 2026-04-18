@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
-import { shortId } from '../lib/slug';
-import type { ActionItem } from '../lib/action-item-schema';
+import { shortId } from '../lib/slug.js';
+import type { ActionItem } from '../lib/action-item-schema.js';
 
 export interface ActionItemRow {
   id: string; meetingId: string; text: string;
@@ -41,6 +41,15 @@ export class ActionItemsRepo {
   listByMeeting(meetingId: string): ActionItemRow[] {
     const rows = this.db.prepare('SELECT * FROM action_items WHERE meeting_id = ? ORDER BY created_at').all(meetingId) as Record<string, unknown>[];
     return rows.map(row);
+  }
+
+  countsByMeeting(): Map<string, number> {
+    const rows = this.db.prepare(
+      'SELECT meeting_id, COUNT(*) AS n FROM action_items GROUP BY meeting_id',
+    ).all() as { meeting_id: string; n: number }[];
+    const out = new Map<string, number>();
+    for (const r of rows) out.set(r.meeting_id, r.n);
+    return out;
   }
 
   setStatus(id: string, status: string): void {

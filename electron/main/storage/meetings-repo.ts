@@ -39,6 +39,11 @@ export class MeetingsRepo {
     `).run({ ...m, createdAt: now, updatedAt: now });
   }
 
+  findByAudioPath(audioPath: string): MeetingRow | null {
+    const row = this.db.prepare('SELECT * FROM meetings WHERE audio_path = ?').get(audioPath) as Record<string, unknown> | undefined;
+    return row ? rowToMeeting(row) : null;
+  }
+
   findById(id: string): MeetingRow | null {
     const row = this.db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? rowToMeeting(row) : null;
@@ -51,6 +56,14 @@ export class MeetingsRepo {
 
   findNonTerminal(): MeetingRow[] {
     const rows = this.db.prepare("SELECT * FROM meetings WHERE pipeline_stage != 'done'").all() as Record<string, unknown>[];
+    return rows.map(rowToMeeting);
+  }
+
+  /** Meetings to auto-resume on launch: in-progress, never failed. */
+  findResumable(): MeetingRow[] {
+    const rows = this.db.prepare(
+      "SELECT * FROM meetings WHERE pipeline_stage != 'done' AND status = 'processing'",
+    ).all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 

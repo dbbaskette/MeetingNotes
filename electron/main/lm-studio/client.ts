@@ -51,27 +51,47 @@ export class LMStudioClient {
   async transcribe(input: TranscribeInput): Promise<TranscribeResult> {
     const read = input.readFile ?? ((p: string) => fs.readFile(p));
     const bytes = await read(input.audioPath);
-    const form = new FormData();
-    form.append('model', input.model);
-    form.append('response_format', 'verbose_json');
-    if (input.language) form.append('language', input.language);
-    form.append(
-      'file',
-      new Blob([bytes as BlobPart], { type: 'audio/mpeg' }),
-      path.basename(input.audioPath),
-    );
 
-    let resp: Response;
-    try {
-      resp = await fetch(`${this.baseUrl}/v1/audio/transcriptions`, {
-        method: 'POST',
-        body: form,
-        signal: AbortSignal.timeout(10 * 60 * 1000),
-      });
-    } catch (e) {
-      throw new LMStudioError('LM Studio transcribe failed: network', e);
+    // whisper.cpp's whisper-server exposes BOTH /inference (native, always
+    // available) and /v1/audio/transcriptions (OpenAI-compat, newer builds).
+    // Try OpenAI first for consistency with other STT servers, fall back to
+    // /inference on 404 so older whisper-cpp builds still work.
+    const buildForm = (modelField: boolean): FormData => {
+      const f = new FormData();
+      if (modelField) f.append('model', input.model);
+      f.append('response_format', 'verbose_json');
+      if (input.language) f.append('language', input.language);
+      f.append(
+        'file',
+        new Blob([bytes as BlobPart], { type: 'audio/mpeg' }),
+        path.basename(input.audioPath),
+      );
+      return f;
+    };
+
+    const post = async (path: string, modelField: boolean): Promise<Response> => {
+      try {
+        return await fetch(`${this.baseUrl}${path}`, {
+          method: 'POST',
+          body: buildForm(modelField),
+          signal: AbortSignal.timeout(10 * 60 * 1000),
+        });
+      } catch (e) {
+        throw new LMStudioError(`STT POST ${this.baseUrl}${path} failed: network`, e);
+      }
+    };
+
+    let resp = await post('/v1/audio/transcriptions', true);
+    if (resp.status === 404) {
+      // Older whisper.cpp or a server that only exposes /inference.
+      resp = await post('/inference', false);
     }
-    if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/audio/transcriptions`);
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new LMStudioError(
+        `STT ${resp.status} from ${this.baseUrl} (${detail.slice(0, 200) || 'no body'})`,
+      );
+    }
     const body = (await resp.json()) as {
       text: string;
       segments?: { start: number; end: number; text: string }[];

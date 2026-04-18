@@ -6,9 +6,7 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 1,
     up: `
-      INSERT INTO schema_version (version) VALUES (0);
-
-      CREATE TABLE meetings (
+      CREATE TABLE IF NOT EXISTS meetings (
         id TEXT PRIMARY KEY,
         slug TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL,
@@ -20,17 +18,18 @@ export const MIGRATIONS: Migration[] = [
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
-      CREATE INDEX idx_meetings_stage ON meetings(pipeline_stage);
-      CREATE INDEX idx_meetings_started ON meetings(started_at);
+      CREATE INDEX IF NOT EXISTS idx_meetings_stage ON meetings(pipeline_stage);
+      CREATE INDEX IF NOT EXISTS idx_meetings_started ON meetings(started_at);
+      CREATE INDEX IF NOT EXISTS idx_meetings_audio_path ON meetings(audio_path);
 
-      CREATE TABLE speakers (
+      CREATE TABLE IF NOT EXISTS speakers (
         id TEXT PRIMARY KEY,
         display_name TEXT NOT NULL,
         created_at TEXT NOT NULL,
         notes TEXT
       );
 
-      CREATE TABLE meeting_speakers (
+      CREATE TABLE IF NOT EXISTS meeting_speakers (
         meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
         local_label TEXT NOT NULL,
         roster_speaker_id TEXT REFERENCES speakers(id),
@@ -38,7 +37,7 @@ export const MIGRATIONS: Migration[] = [
         PRIMARY KEY (meeting_id, local_label)
       );
 
-      CREATE TABLE action_items (
+      CREATE TABLE IF NOT EXISTS action_items (
         id TEXT PRIMARY KEY,
         meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
         text TEXT NOT NULL,
@@ -49,7 +48,7 @@ export const MIGRATIONS: Migration[] = [
         created_at TEXT NOT NULL
       );
 
-      CREATE TABLE settings (
+      CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
@@ -58,9 +57,13 @@ export const MIGRATIONS: Migration[] = [
 ];
 
 export function runMigrations(db: Database.Database): void {
-  db.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
-  const row = db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
-  const current = row?.version ?? 0;
+  db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)');
+  // Seed the version row exactly once. Idempotent across launches.
+  const seeded = db.prepare('SELECT COUNT(*) AS n FROM schema_version').get() as { n: number };
+  if (seeded.n === 0) db.prepare('INSERT INTO schema_version (version) VALUES (0)').run();
+
+  const row = db.prepare('SELECT version FROM schema_version').get() as { version: number };
+  let current = row.version;
   for (const m of MIGRATIONS) {
     if (m.version > current) {
       db.exec('BEGIN');
@@ -68,6 +71,7 @@ export function runMigrations(db: Database.Database): void {
         db.exec(m.up);
         db.prepare('UPDATE schema_version SET version = ?').run(m.version);
         db.exec('COMMIT');
+        current = m.version;
       } catch (e) {
         db.exec('ROLLBACK');
         throw e;

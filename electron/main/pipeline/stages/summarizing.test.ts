@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runSummarizing } from './summarizing';
+import { runSummarizing } from './summarizing.js';
 
 describe('runSummarizing', () => {
   it('reads transcript.md, calls LLM, writes summary.md', async () => {

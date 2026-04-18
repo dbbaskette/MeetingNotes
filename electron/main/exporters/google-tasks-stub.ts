@@ -1,4 +1,4 @@
-import type { Exporter } from './interface';
+import type { Exporter } from './interface.js';
 
 export class GoogleTasksStub implements Exporter {
   name = 'google-tasks';

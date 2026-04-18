@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { LMStudioClient } from './client';
+import { LMStudioClient } from './client.js';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {

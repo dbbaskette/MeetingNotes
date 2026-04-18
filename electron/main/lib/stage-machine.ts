@@ -4,6 +4,13 @@ export const STAGES = [
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
+export const STATUSES = ['pending', 'processing', 'done', 'failed'] as const;
+export type Status = (typeof STATUSES)[number];
+
+export function isStage(v: unknown): v is Stage {
+  return typeof v === 'string' && (STAGES as readonly string[]).includes(v);
+}
+
 export function nextStage(s: Stage): Stage | null {
   const i = STAGES.indexOf(s);
   if (i < 0 || i === STAGES.length - 1) return null;
@@ -18,6 +25,8 @@ export function isValidTransition(from: Stage, to: Stage): boolean {
   return ti === fi + 1;
 }
 
+// On unclean shutdown, roll back any stage in the parallel block
+// (transcribing/diarizing) to 'discovered' so both branches re-run together.
 export function previousCompletedOnCrash(stage: Stage): Stage {
   if (stage === 'transcribing' || stage === 'diarizing') return 'discovered';
   return stage;

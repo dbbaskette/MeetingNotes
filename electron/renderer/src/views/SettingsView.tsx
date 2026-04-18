@@ -5,6 +5,7 @@ import { api } from '../ipc/client';
 
 interface Settings {
   lmStudioUrl: string;
+  sttUrl: string;
   sttModel: string;
   llmModel: string;
   audioHijackSessionName: string;
@@ -42,28 +43,14 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         <h1 className="font-semibold">Settings</h1>
       </div>
 
-      <Field label="LM Studio URL">
+      <Field label="LM Studio URL (chat / LLM)">
         <input
           value={s.lmStudioUrl}
           onChange={(e) => update('lmStudioUrl', e.target.value)}
           className="input"
         />
       </Field>
-      <Field label="STT Model">
-        <select
-          value={s.sttModel}
-          onChange={(e) => update('sttModel', e.target.value)}
-          className="input"
-        >
-          <option value="">(choose)</option>
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="LLM Model">
+      <Field label="LLM Model (loaded in LM Studio)">
         <select
           value={s.llmModel}
           onChange={(e) => update('llmModel', e.target.value)}
@@ -76,6 +63,29 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
             </option>
           ))}
         </select>
+        <div className="text-xs text-ink-muted mt-1">
+          Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
+        </div>
+      </Field>
+      <Field label="STT URL (whisper.cpp server)">
+        <input
+          value={s.sttUrl}
+          onChange={(e) => update('sttUrl', e.target.value)}
+          className="input"
+        />
+        <div className="text-xs text-ink-muted mt-1">
+          Default http://127.0.0.1:8080. Start with: ./scripts/whisper-server.sh daemon
+        </div>
+      </Field>
+      <Field label="STT Model name">
+        <input
+          value={s.sttModel}
+          onChange={(e) => update('sttModel', e.target.value)}
+          className="input"
+        />
+        <div className="text-xs text-ink-muted mt-1">
+          Informational. The actual model is whichever one whisper-server was started with.
+        </div>
       </Field>
       <Field label="Audio Hijack Session Name">
         <input

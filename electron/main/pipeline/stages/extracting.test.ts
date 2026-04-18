@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runExtracting } from './extracting';
+import { runExtracting } from './extracting.js';
 
 describe('runExtracting', () => {
   it('calls LLM, parses JSON, writes action-items.json + repo', async () => {

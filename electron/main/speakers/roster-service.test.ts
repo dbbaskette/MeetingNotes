@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openDb } from '../storage/db';
-import { SpeakersRepo } from '../storage/speakers-repo';
-import { RosterService } from './roster-service';
+import { openDb } from '../storage/db.js';
+import { SpeakersRepo } from '../storage/speakers-repo.js';
+import { RosterService } from './roster-service.js';
 
 let svc: RosterService;
 let tmp: string;

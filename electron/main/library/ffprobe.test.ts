@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { probeAudio } from './ffprobe';
+import { probeAudio } from './ffprobe.js';
 
 describe('probeAudio', () => {
   it('parses duration from ffprobe JSON output', async () => {

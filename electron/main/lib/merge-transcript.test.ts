@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { mergeTranscriptWithDiarization, mergedToMarkdown,
-  type WhisperSegment, type DiarSegment } from './merge-transcript';
+  type WhisperSegment, type DiarSegment } from './merge-transcript.js';
 
 const whisper: WhisperSegment[] = [
   { start: 0.0, end: 2.0, text: 'Hello there.' },

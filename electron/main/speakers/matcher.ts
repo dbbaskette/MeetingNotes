@@ -1,4 +1,4 @@
-import { cosineSimilarity } from '../lib/cosine';
+import { cosineSimilarity } from '../lib/cosine.js';
 
 export const MATCH_THRESHOLD = 0.75;
 export const OLD_WEIGHT = 0.7;
