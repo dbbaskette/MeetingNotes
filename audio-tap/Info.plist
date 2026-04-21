@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.dbbaskette.meetingnotes.audio-tap</string>
+    <key>CFBundleName</key>
+    <string>MeetingNotes Audio Tap</string>
+    <key>CFBundleExecutable</key>
+    <string>meeting-notes-tap</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.2</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MeetingNotes captures your microphone to record meetings.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>MeetingNotes captures audio you're playing to record meetings.</string>
+    <key>NSSystemAdministrationUsageDescription</key>
+    <string>MeetingNotes captures system audio to record meetings.</string>
+</dict>
+</plist>

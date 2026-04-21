@@ -1,0 +1,4 @@
+.build/
+build/
+*.xcodeproj
+BUILD_ID

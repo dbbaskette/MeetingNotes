@@ -114,14 +114,45 @@ These are time-boxed research tasks. Document findings inline in the plan as com
 
   In a scratch directory, write a 30-line Swift program that calls `AudioHardwareCreateProcessTap` with a hardcoded PID, signs it with each candidate entitlement combination, runs it, and observes which combinations succeed. Record the minimum set that works.
 
-- [ ] **Step 4: Document findings**
+- [x] **Step 4: Document findings**
 
-  Append to this task in the plan: list of entitlement keys, the codesign command line that worked, any TCC behavior observed (whether the OS prompts or silently denies). Commit:
+  ## R1 findings (2026-04-20, macOS 26.4.1 Apple Silicon)
 
-  ```bash
-  git add docs/superpowers/plans/2026-04-20-builtin-audio-capture.md
-  git commit -m "research: Process Tap entitlement keys for audio capture helper"
+  **Bottom line: Process Tap requires zero entitlements on macOS 14.2+.**
+
+  Empirical test: an unsigned, ad-hoc-signed Swift CLI (`probe-tap.swift`)
+  with **no** entitlements plist called `AudioHardwareCreateProcessTap`
+  with an empty PID list (system-wide tap). Result: `noErr (0)`, valid
+  tapID returned, clean destroy. **No TCC prompt fired.**
+
+  Per-PID variants behaved as expected:
+  - PID of a non-audio process (a shell): returns `'!obj'`
+    (`kAudioHardwareBadObjectError`) — expected; not an audio object.
+  - PID of an audio-producing process: returns `noErr` and a valid tapID.
+
+  **Implications for the helper:**
+  - The helper does NOT need a Process Tap-specific entitlement.
+  - Mic capture (`AVAudioEngine.inputNode`) DOES still need
+    `com.apple.security.device.audio-input` for hardened runtime in the
+    packaged `.app`, plus the Mic TCC grant (which DOES prompt the user
+    on first call).
+  - Codesign with `--options runtime` and the audio-input entitlement
+    is the minimum set. No special "system audio recording" key.
+
+  **Production helper entitlements.plist (for Task 12):**
+  ```xml
+  <plist version="1.0">
+  <dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+  </plist>
   ```
+
+  **Caveats:**
+  - Tested on macOS 26.4.1; may differ on a 14.2 baseline.
+  - Hardened-runtime + Developer ID-signed binary distributed via DMG
+    not yet tested; revalidate during Task 13 on a fresh user account.
 
 ### Research R2: Browser process trees
 
@@ -145,17 +176,32 @@ These are time-boxed research tasks. Document findings inline in the plan as com
 
   Using `proc_listpids`/`proc_pidinfo`, enumerate the parent's children. Test attaching a Process Tap to multiple PIDs simultaneously (the API takes an array).
 
-- [ ] **Step 4: Document the decision**
+- [x] **Step 4: Decision documented**
 
-  Pick one of two paths for the implementation:
-  - **A:** When user picks "Chrome / browser meetings," helper enumerates Chrome's process tree and taps all PIDs. Pros: clean signal; Cons: includes other tabs.
-  - **B:** When user picks "Chrome / browser meetings," helper falls back to system-wide audio capture. Pros: simpler, matches user expectation that "browser audio is messy"; Cons: pulls in non-browser audio too.
+  ## R2 decision (2026-04-20)
 
-  Append findings + chosen path to this task. Commit:
-  ```bash
-  git add docs/superpowers/plans/2026-04-20-builtin-audio-capture.md
-  git commit -m "research: browser process tree handling for audio capture"
-  ```
+  **Chosen: B — for "Chrome / browser meetings," fall back to system-wide capture.**
+
+  Rationale: R1 confirmed both per-PID and system-wide taps work without
+  entitlements, so we have full freedom. But per-PID for browsers is a
+  losing battle — Chrome's audio process is a separate child PID, the
+  audio child's identity changes between tab navigations, and even when
+  we tap the right child we get every tab's audio anyway (no tab-level
+  isolation in the audio subsystem). System-wide is what the user
+  expects when they pick "browser meetings" because they intuit that
+  browser audio is messy.
+
+  **Source picker UX (Task 24) reflects this:**
+  - Native meeting apps (Zoom, Teams native, FaceTime, etc.): per-PID tap.
+  - "Chrome / browser meetings ⓘ": system-wide tap (tooltip explains).
+  - "All system audio (catch-all)": system-wide tap (explicit).
+
+  Implementation: when targetPid is a browser bundle ID, the renderer
+  still passes `targetPid: 'system'` to `recording.start`, not the
+  browser's PID. Keeps the helper-side logic simple (one branch for
+  per-PID, one for system-wide).
+
+  No further investigation needed during implementation.
 
 ### Research R3: Audio Capture System Settings deep link
 
@@ -175,13 +221,30 @@ These are time-boxed research tasks. Document findings inline in the plan as com
 
   If no URL hits the audio-capture pane directly, document that we deep-link to the top-level Privacy & Security pane (`x-apple.systempreferences:com.apple.preference.security?Privacy`) and instruct the user to scroll to "System Audio Recording" / "Audio Capture."
 
-- [ ] **Step 3: Document findings + commit**
+- [x] **Step 3: Findings documented**
 
-  Append the chosen URL (and fallback if any) to this task. Commit:
-  ```bash
-  git add docs/superpowers/plans/2026-04-20-builtin-audio-capture.md
-  git commit -m "research: audio-capture System Settings deep link"
-  ```
+  ## R3 findings (2026-04-20, macOS 26.4.1)
+
+  - **Mic pane URL** (verified to work):
+    `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`
+  - **System audio pane**: macOS calls this **"Screen & System Audio
+    Recording"** (one combined pane for screen recording + audio capture).
+    Deep link to try in implementation:
+    `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`
+    (Apple's pattern for the screen-capture variant; if exact key is
+    different on a specific macOS version, the URL still lands on
+    Privacy & Security and the user can find the right entry.)
+  - **Fallback URL** (always works, opens top-level Privacy pane):
+    `x-apple.systempreferences:com.apple.preference.security?Privacy`
+
+  **Important context from R1:** Process Tap doesn't appear to need a
+  TCC grant on macOS 14.2+ for ad-hoc-signed binaries. The
+  PermissionsModal probes state at runtime, so it only surfaces a
+  Grant button if the runtime probe actually returns "denied." For
+  most users on supported macOS, only the Mic permission will need
+  granting; the System Audio Recording permission may never come into
+  play. PermissionsModal handles both cases by being state-driven, not
+  by hardcoding "ask for both."
 
 ---
 

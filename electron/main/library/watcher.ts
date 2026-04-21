@@ -4,10 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 export interface WatcherOptions {
-  path: string;
+  /** A single watch path, or an array. Both new (.m4a from helper) and legacy
+   *  (.mp3 from Audio Hijack) folders may be configured simultaneously. */
+  path?: string;
+  paths?: string[];
   stabilityMs?: number;
   pollMs?: number;
 }
+
+const SUPPORTED_EXT = /\.(mp3|m4a)$/i;
 
 function expandHome(p: string): string {
   if (p === '~') return os.homedir();
@@ -16,7 +21,7 @@ function expandHome(p: string): string {
 }
 
 export class LibraryWatcher {
-  private watcher: chokidar.FSWatcher | null = null;
+  private watchers: chokidar.FSWatcher[] = [];
   private readonly listeners: Array<(p: string) => void> = [];
   private readonly stability: number;
   private readonly poll: number;
@@ -30,9 +35,18 @@ export class LibraryWatcher {
   onStableFile(fn: (p: string) => void): void { this.listeners.push(fn); }
 
   async start(): Promise<void> {
-    const watchPath = expandHome(this.opts.path);
+    const rawPaths = this.opts.paths ?? (this.opts.path ? [this.opts.path] : []);
+    if (rawPaths.length === 0) throw new Error('LibraryWatcher requires `path` or `paths`');
+    for (const raw of rawPaths) await this.startOne(raw);
+  }
+
+  private async startOne(raw: string): Promise<void> {
+    const watchPath = expandHome(raw);
     if (!fs.existsSync(watchPath)) {
-      throw new Error(`watch path does not exist: ${watchPath}`);
+      // Skip non-existent paths instead of failing the whole watcher — the
+      // legacy Audio Hijack folder is optional, and users without AH installed
+      // shouldn't see a startup error.
+      return;
     }
     let realWatchPath = watchPath;
     try { realWatchPath = fs.realpathSync(watchPath); } catch { /* ignore */ }
@@ -43,7 +57,7 @@ export class LibraryWatcher {
     // chokidar only for *new* arrivals.
     try {
       for (const name of fs.readdirSync(watchPath)) {
-        if (!name.toLowerCase().endsWith('.mp3')) continue;
+        if (!SUPPORTED_EXT.test(name)) continue;
         const full = path.join(watchPath, name);
         try {
           const st = fs.statSync(full);
@@ -54,18 +68,18 @@ export class LibraryWatcher {
     } catch { /* unreadable dir is reported by chokidar 'error' below */ }
 
     // Now watch for *new* files. ignoreInitial=true so we don't double-fire
-    // for the ones we just emitted; awaitWriteFinish gives Audio Hijack time
+    // for the ones we just emitted; awaitWriteFinish gives the recorder time
     // to finish writing before we start processing.
-    this.watcher = chokidar.watch(watchPath, {
+    const watcher = chokidar.watch(watchPath, {
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: { stabilityThreshold: this.stability, pollInterval: this.poll },
     });
     await new Promise<void>((resolve) => {
-      this.watcher!.once('ready', () => resolve());
+      watcher.once('ready', () => resolve());
     });
-    this.watcher.on('add', (p) => {
-      if (!p.toLowerCase().endsWith('.mp3')) return;
+    watcher.on('add', (p) => {
+      if (!SUPPORTED_EXT.test(p)) return;
       // Re-root resolved paths so consumers store stable identifiers — without
       // this, a watch path that's a symlink would get its real-path version
       // into the DB and later restarts couldn't dedupe by audio_path.
@@ -75,6 +89,7 @@ export class LibraryWatcher {
       }
       this.emit(out);
     });
+    this.watchers.push(watcher);
   }
 
   private emit(p: string): void {
@@ -84,7 +99,7 @@ export class LibraryWatcher {
   }
 
   async stop(): Promise<void> {
-    await this.watcher?.close();
-    this.watcher = null;
+    await Promise.all(this.watchers.map((w) => w.close()));
+    this.watchers = [];
   }
 }

@@ -14,9 +14,15 @@ const IPC_CHANNELS = {
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
-  recordStart: 'record:start',
-  recordStop: 'record:stop',
-  recordState: 'record:state',
+  recordingListSources: 'recording:list-sources',
+  recordingStart: 'recording:start',
+  recordingStop: 'recording:stop',
+  recordingState: 'recording:state',
+  recordingLevelEvent: 'recording:level',
+  recordingStateEvent: 'recording:state-change',
+  permissionsAudioGet: 'permissions:audio-get',
+  permissionsRequestMic: 'permissions:request-mic',
+  permissionsMicStatus: 'permissions:mic-status',
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
@@ -55,10 +61,22 @@ const api = {
     saveSummary: (id: string, markdown: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsSaveSummary, id, markdown) as Promise<string>,
   },
-  record: {
-    start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),
-    stop: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStop, sessionName),
-    state: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordState, sessionName),
+  recording: {
+    listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
+    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
+    stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
+    state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
+    onLevel: (cb: (e: { sessionId: string; peakDb: number }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; peakDb: number }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingLevelEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingLevelEvent, wrapped);
+    },
+    onStateChange: (cb: (e: { sessionId: string; state: string }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; state: string }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
+    },
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
@@ -108,6 +126,14 @@ const api = {
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),
+  },
+  permissions: {
+    audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{
+      mic: 'granted' | 'denied' | 'not-determined' | 'unknown';
+      audioCapture: 'granted' | 'denied' | 'not-determined' | 'unknown';
+    }>,
+    requestMic: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsRequestMic) as Promise<boolean>,
+    micStatus: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsMicStatus) as Promise<'granted' | 'denied' | 'not-determined' | 'unknown'>,
   },
   on: (channel: string, handler: (...args: unknown[]) => void) => {
     const wrapped = (_e: unknown, ...args: unknown[]) => handler(...args);
