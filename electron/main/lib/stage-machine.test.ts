@@ -7,12 +7,15 @@ describe('stage-machine', () => {
   it('lists stages in canonical order', () => {
     expect(STAGES).toEqual([
       'discovered', 'transcribing', 'diarizing', 'merging',
-      'identifying', 'summarizing', 'extracting', 'done',
+      'identifying', 'awaiting_speaker_id',
+      'summarizing', 'extracting', 'done',
     ]);
   });
 
   it('nextStage advances one step; null at done', () => {
     expect(nextStage('discovered')).toBe('transcribing');
+    expect(nextStage('identifying')).toBe('awaiting_speaker_id');
+    expect(nextStage('awaiting_speaker_id')).toBe('summarizing');
     expect(nextStage('extracting')).toBe('done');
     expect(nextStage('done')).toBeNull();
   });
@@ -33,6 +36,8 @@ describe('stage-machine', () => {
   });
 
   it('downstreamOf returns all stages after a given one', () => {
-    expect(downstreamOf('merging')).toEqual(['identifying', 'summarizing', 'extracting', 'done']);
+    expect(downstreamOf('merging')).toEqual([
+      'identifying', 'awaiting_speaker_id', 'summarizing', 'extracting', 'done',
+    ]);
   });
 });

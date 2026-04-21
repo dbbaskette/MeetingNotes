@@ -30,7 +30,10 @@ describe('runIdentifying', () => {
           { label: 'SPEAKER_01', rosterId: null, confidence: null },
         ]),
       },
-      speakers: { linkToMeeting: linkFn },
+      // Empty listForMeeting simulates a fresh run (no prior user assignments)
+      // — identifying should write every auto-match without being told to
+      // skip any.
+      speakers: { linkToMeeting: linkFn, listForMeeting: () => [] },
       logger: { info: () => {} },
     };
     await runIdentifying({ meetingId: 'm' }, ctx);

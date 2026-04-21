@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,6 +13,9 @@ describe('Pipeline', () => {
     const meetings = new MeetingsRepo(db);
     meetings.insert({ id: 'm', slug: 's', title: 't', startedAt: null, durationS: null,
       audioPath: '/x.mp3', status: 'processing', pipelineStage: 'discovered' });
+    // Bypass the speaker-ID gate for the "runs end-to-end" happy path — that
+    // gate is exercised by its own test below.
+    meetings.updateSkipSpeakerId('m', true);
 
     const calls: string[] = [];
     const mk = (name: string) => async () => { calls.push(name); };
@@ -37,6 +40,7 @@ describe('Pipeline', () => {
     const meetings = new MeetingsRepo(db);
     meetings.insert({ id: 'm', slug: 's', title: 't', startedAt: null, durationS: null,
       audioPath: '/x.mp3', status: 'processing', pipelineStage: 'transcribing' });
+    meetings.updateSkipSpeakerId('m', true);
 
     const calls: string[] = [];
     const mk = (name: string) => async () => { calls.push(name); };
@@ -51,6 +55,39 @@ describe('Pipeline', () => {
     expect(calls).toContain('t');
     expect(calls).toContain('d');
     expect(calls).toContain('m');
+    expect(meetings.findById('m')?.pipelineStage).toBe('done');
+  });
+
+  it('stops at awaiting_speaker_id when skip flag is false, resumes when set', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-pl-gate-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const meetings = new MeetingsRepo(db);
+    meetings.insert({ id: 'm', slug: 's', title: 't', startedAt: null, durationS: null,
+      audioPath: '/x.mp3', status: 'processing', pipelineStage: 'discovered' });
+
+    const calls: string[] = [];
+    const mk = (name: string) => async () => { calls.push(name); };
+    const p = new Pipeline({
+      ctx: { meetings, logger: { info: () => {}, error: () => {} } } as any,
+      stages: {
+        transcribing: mk('t'), diarizing: mk('d'), merging: mk('m'),
+        identifying: mk('i'), summarizing: mk('s'), extracting: mk('e'),
+      },
+    });
+    await p.run('m');
+    // First pass: identify ran, summarize did NOT — pipeline parked at gate.
+    expect(calls).toContain('i');
+    expect(calls).not.toContain('s');
+    const parked = meetings.findById('m')!;
+    expect(parked.pipelineStage).toBe('awaiting_speaker_id');
+    expect(parked.status).toBe('awaiting_user');
+
+    // User flips skip flag (or identifies speakers + clicks Continue — same
+    // effect: re-enqueue). Second pass should sail past the gate to done.
+    meetings.updateSkipSpeakerId('m', true);
+    await p.run('m');
+    expect(calls).toContain('s');
+    expect(calls).toContain('e');
     expect(meetings.findById('m')?.pipelineStage).toBe('done');
   });
 

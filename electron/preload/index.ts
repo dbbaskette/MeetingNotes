@@ -11,14 +11,21 @@ const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
+  meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
+  meetingsSaveSummary: 'meetings:save-summary',
   recordStart: 'record:start',
   recordStop: 'record:stop',
   recordState: 'record:state',
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
+  speakersSample: 'speakers:sample',
+  speakersAssign: 'speakers:assign',
+  speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
   exportRun: 'export:run',
+  dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   modelsList: 'models:list',
@@ -32,6 +39,21 @@ const api = {
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
     startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
+    // Toggles the per-meeting speaker-ID gate. When `skip` is true and the
+    // meeting is currently parked at `awaiting_speaker_id`, the main process
+    // also re-enqueues it so the pipeline sails past the gate immediately.
+    setSkipSpeakerId: (id: string, skip: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsSetSkipSpeakerId, id, skip),
+    // Manual "I'm done identifying speakers — continue." Only valid when the
+    // meeting is at `awaiting_speaker_id`; otherwise no-ops.
+    continueFromSpeakerId: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsContinueFromSpeakerId, id),
+    // Overwrite summary.md on disk with user-edited markdown. The renderer
+    // owns the editing UX; the main process just writes bytes. Returns the
+    // saved markdown so the caller can confirm round-trip without needing
+    // an extra meetings.get fetch.
+    saveSummary: (id: string, markdown: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsSaveSummary, id, markdown) as Promise<string>,
   },
   record: {
     start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),
@@ -43,12 +65,42 @@ const api = {
     confirm: (input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] }) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
+    // Returns the sample clip for a diarized speaker as a data URI so the
+    // renderer can play it with <audio src={dataUri}> without any custom
+    // protocol / webSecurity juggling.
+    sample: (meetingId: string, localLabel: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersSample, meetingId, localLabel) as Promise<{
+        dataUri: string;
+        startS: number;
+        endS: number;
+      } | null>,
+    // Unified assign endpoint — covers "link to an existing roster entry",
+    // "create a new roster entry from this voice", and "update the display
+    // name of the linked roster entry" in a single call.
+    assign: (input: {
+      meetingId: string;
+      localLabel: string;
+      mode: 'existing' | 'new';
+      rosterId?: string;
+      displayName?: string;
+    }) => ipcRenderer.invoke(IPC_CHANNELS.speakersAssign, input) as Promise<string>,
+    unlink: (meetingId: string, localLabel: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersUnlink, meetingId, localLabel),
   },
   actionItems: {
     setStatus: (id: string, status: string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
   },
   export: {
-    run: (exporter: string, meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.exportRun, { exporter, meetingId }),
+    // `itemIds` is optional — omitting it falls back to exporting every
+    // open action item (the pre-modal behavior), so old callers still work.
+    run: (exporter: string, meetingId: string, itemIds?: string[], outputPath?: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.exportRun, { exporter, meetingId, itemIds, outputPath }),
+  },
+  dialog: {
+    // Prompts the user with a native "Save As…" sheet. Returns the chosen
+    // absolute path, or null if the user cancelled.
+    save: (opts: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.dialogSave, opts) as Promise<string | null>,
   },
   settings: {
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),

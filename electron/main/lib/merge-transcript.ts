@@ -27,6 +27,21 @@ export function formatTimestamp(sec: number): string {
   return `${m}:${s}`;
 }
 
-export function mergedToMarkdown(merged: readonly MergedSegment[]): string {
-  return merged.map((s) => `[${s.speaker} ${formatTimestamp(s.start)}] ${s.text}`).join('\n');
+/**
+ * `labelMap` maps local diarization labels (SPEAKER_00) to roster display
+ * names ("Alice"). Unmapped labels are emitted verbatim, so first-pass
+ * merges — before the user has identified anyone — keep the SPEAKER_00
+ * style, and post-identify re-merges replace them with real names. An
+ * unmapped speaker is not a bug; it means the voice is still anonymous.
+ */
+export function mergedToMarkdown(
+  merged: readonly MergedSegment[],
+  labelMap: Readonly<Record<string, string>> = {},
+): string {
+  return merged
+    .map((s) => {
+      const name = labelMap[s.speaker] ?? s.speaker;
+      return `[${name} ${formatTimestamp(s.start)}] ${s.text}`;
+    })
+    .join('\n');
 }
