@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
   meetingsRename: 'meetings:rename',
+  meetingsDelete: 'meetings:delete',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',

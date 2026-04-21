@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { api } from '../ipc/client';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { colorForSpeakerIndex } from '../theme/tokens';
+import { MeetingRowMenu } from '../components/MeetingRowMenu';
 
 type Tab = 'summary' | 'transcript' | 'audio';
 
@@ -103,11 +104,16 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
           ← Library
         </button>
         <div className="flex-1 text-center font-semibold">{m.title}</div>
-        {/* Right-side spacer matches the "← Library" button width so the
-            centered title stays optically centered. Status pill that used to
-            live here was removed — the StageTimeline below is the canonical
-            pipeline display. */}
-        <div className="w-[68px]" />
+        {/* Actions menu: rename/delete from the detail view. When the user
+            deletes from here, route back to Library since the detail we're
+            viewing no longer exists. */}
+        <div className="relative w-[68px] flex justify-end">
+          <MeetingRowMenu
+            meeting={{ id: m.id, title: m.title }}
+            onChanged={() => void reload()}
+            onDeleted={() => onBack()}
+          />
+        </div>
       </div>
 
       {/* The timeline is the canonical "where is this meeting in the pipeline"

@@ -6,6 +6,7 @@
 // text opens the detail view (rare — pending meetings don't have much to
 // look at).
 import { api } from '../ipc/client';
+import { MeetingRowMenu } from './MeetingRowMenu';
 
 interface Meeting {
   id: string;
@@ -21,6 +22,7 @@ interface Props {
   checked: boolean;
   onToggle: () => void;
   onOpen: () => void;
+  onChanged: () => void;
 }
 
 function fmtDur(s: number | null): string {
@@ -40,7 +42,7 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function InboxRow({ meeting, checked, onToggle, onOpen }: Props): JSX.Element {
+export function InboxRow({ meeting, checked, onToggle, onOpen, onChanged }: Props): JSX.Element {
   async function processOne(e: React.MouseEvent): Promise<void> {
     e.stopPropagation();
     await api.meetings.start(meeting.id);
@@ -50,7 +52,7 @@ export function InboxRow({ meeting, checked, onToggle, onOpen }: Props): JSX.Ele
     <div
       onClick={onToggle}
       className={`
-        flex items-center gap-3 px-4 py-3 cursor-pointer group transition-colors
+        relative flex items-center gap-3 px-4 py-3 cursor-pointer group transition-colors
         ${checked ? 'bg-brand-indigo/5' : 'hover:bg-surface-sunken'}
       `}
     >
@@ -102,6 +104,8 @@ export function InboxRow({ meeting, checked, onToggle, onOpen }: Props): JSX.Ele
       >
         ▶ Process
       </button>
+
+      <MeetingRowMenu meeting={meeting} onChanged={onChanged} />
     </div>
   );
 }
