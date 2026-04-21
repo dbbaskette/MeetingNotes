@@ -266,9 +266,31 @@ final class Recorder {
                     userInfo: [NSLocalizedDescriptionKey: "read tap stream format failed: \(sf)"])
     }
     self.tapFormat = streamFormat
+    // Tap reports its native rate via kAudioTapPropertyFormat, but the
+    // AGGREGATE device resamples tap data to its own clock before delivering
+    // it through the IOProc. If the user's default output device runs at
+    // 96k (Bluetooth / some USB interfaces / certain virtual drivers),
+    // tap data arrives at 96k while the code thinks it's 48k — so every
+    // 512-frame ABL is written as if it were 48k, playback sounds 2× fast
+    // (chipmunks). Override the source rate with the aggregate's actual
+    // nominal rate.
+    var nominalRate: Float64 = 0
+    var nrSize = UInt32(MemoryLayout<Float64>.size)
+    var nrAddr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyNominalSampleRate,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    let nrStatus = AudioObjectGetPropertyData(aggregateID, &nrAddr, 0, nil, &nrSize, &nominalRate)
+    let deliveredRate: Float64 = (nrStatus == noErr && nominalRate > 0) ? nominalRate : streamFormat.mSampleRate
+    if deliveredRate != streamFormat.mSampleRate {
+      streamFormat.mSampleRate = deliveredRate
+    }
     StatusEvent.emit([
       "event": "diag",
       "stage": "tap_format",
+      "tap_sr": self.tapFormat.mSampleRate,
+      "agg_sr": deliveredRate,
       "sr": streamFormat.mSampleRate,
       "ch": Int(streamFormat.mChannelsPerFrame),
       "bits": Int(streamFormat.mBitsPerChannel),

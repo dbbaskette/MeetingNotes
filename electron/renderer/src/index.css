@@ -16,3 +16,20 @@ body {
 .input {
   @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
 }
+
+/* Frameless window (titleBarStyle: 'hiddenInset') has no OS chrome for the
+   renderer to hand drag events to. Overlay a thin draggable strip across the
+   top, leaving room for the macOS traffic lights on the left. Must be a real
+   element — `-webkit-app-region` is ignored on pseudo-elements. */
+.window-drag-strip {
+  position: fixed;
+  top: 0;
+  left: 80px;
+  right: 0;
+  height: 28px;
+  -webkit-app-region: drag;
+  z-index: 9999;
+}
+button, a, input, select, textarea {
+  -webkit-app-region: no-drag;
+}
