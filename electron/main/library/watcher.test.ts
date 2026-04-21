@@ -59,4 +59,47 @@ describe('LibraryWatcher', () => {
     await w.stop();
     expect(seen.length).toBe(0);
   });
+
+  it('detects .m4a files (built-in capture output)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-m4a-')); dirs.push(dir);
+    fs.writeFileSync(path.join(dir, 'pre.m4a'), Buffer.alloc(10));
+    const w = new LibraryWatcher({ path: dir, stabilityMs: 80, pollMs: 40 });
+    const seen: string[] = [];
+    w.onStableFile((p) => seen.push(p));
+    await w.start();
+    const newFile = path.join(dir, 'new.m4a');
+    fs.writeFileSync(newFile, Buffer.alloc(50));
+    await new Promise((r) => setTimeout(r, 350));
+    await w.stop();
+    expect(seen).toContain(path.join(dir, 'pre.m4a'));
+    expect(seen).toContain(newFile);
+  });
+
+  it('watches multiple paths when configured', async () => {
+    const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-a-')); dirs.push(dirA);
+    const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-b-')); dirs.push(dirB);
+    fs.writeFileSync(path.join(dirA, 'a.m4a'), Buffer.alloc(10));
+    fs.writeFileSync(path.join(dirB, 'b.mp3'), Buffer.alloc(10));
+    const w = new LibraryWatcher({ paths: [dirA, dirB], stabilityMs: 80, pollMs: 40 });
+    const seen: string[] = [];
+    w.onStableFile((p) => seen.push(p));
+    await w.start();
+    await w.stop();
+    expect(seen).toContain(path.join(dirA, 'a.m4a'));
+    expect(seen).toContain(path.join(dirB, 'b.mp3'));
+  });
+
+  it('skips non-existent watch paths instead of throwing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-real-')); dirs.push(dir);
+    fs.writeFileSync(path.join(dir, 'a.mp3'), Buffer.alloc(10));
+    const w = new LibraryWatcher({
+      paths: [dir, path.join(os.tmpdir(), 'definitely-not-a-real-dir-' + Date.now())],
+      stabilityMs: 80, pollMs: 40,
+    });
+    const seen: string[] = [];
+    w.onStableFile((p) => seen.push(p));
+    await w.start();
+    await w.stop();
+    expect(seen).toContain(path.join(dir, 'a.mp3'));
+  });
 });

@@ -144,7 +144,13 @@ app.whenReady().then(async () => {
     },
   });
 
-  const watcher = new LibraryWatcher({ path: s.audioWatchPath });
+  // Dual-watch: the new built-in recorder writes .m4a into ~/Music/MeetingNotes,
+  // and legacy users still have Audio Hijack writing .mp3 into the configured
+  // path. Watching both keeps the Library a single source of truth across the
+  // transition and afterwards.
+  const watcher = new LibraryWatcher({
+    paths: [s.audioWatchPath, recordingsDir, path.join(os.homedir(), 'Music', 'Audio Hijack')],
+  });
   watcher.onStableFile(async (audioPath) => {
     try {
       // Dedupe: skip files we've already cataloged. Lets us catalog backlog
