@@ -47,6 +47,9 @@ final class AACWriter {
   }
 
   func finalize() async {
+    // markAsFinished()/finishWriting() crash if startWriting() was never
+    // called (i.e. no buffers ever appended). Skip cleanly in that case.
+    guard started else { return }
     input.markAsFinished()
     await writer.finishWriting()
   }

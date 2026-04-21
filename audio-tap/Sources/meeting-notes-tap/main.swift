@@ -4,7 +4,35 @@ let cmd = Command.parse(CommandLine.arguments)
 
 switch cmd {
 case .record(let opts):
-  StatusEvent.emit(["event": "started", "stub": true, "out": opts.outputPath])
+  let recorder = Recorder(opts: opts)
+  do {
+    try recorder.start()
+  } catch {
+    StatusEvent.error("start failed: \(error.localizedDescription)")
+  }
+  // Wait for SIGTERM. Block forever; signal handler exits.
+  let sigterm = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+  sigterm.setEventHandler {
+    Task {
+      await recorder.stop()
+      exit(0)
+    }
+  }
+  sigterm.resume()
+  signal(SIGTERM, SIG_IGN)  // let DispatchSource handle it
+
+  let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+  sigint.setEventHandler {
+    Task {
+      await recorder.stop()
+      exit(0)
+    }
+  }
+  sigint.resume()
+  signal(SIGINT, SIG_IGN)
+
+  dispatchMain()
+
 case .probePermissions:
   StatusEvent.emit([
     "event": "permissions",
