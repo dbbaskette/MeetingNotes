@@ -9,6 +9,7 @@
     "dev:renderer": "vite",
     "dev:main": "tsc -p tsconfig.node.json --watch & wait-on tcp:5174 && electron .",
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/electron/preload/package.json', JSON.stringify({type:'commonjs'}))\" && vite build",
+    "build:audio-tap": "./audio-tap/scripts/build.sh",
     "start": "electron .",
     "dist": "npm run build && npm run sidecar:bundle && electron-builder --mac",
     "sidecar:bundle": "bash sidecar/scripts/build-bundle.sh",
