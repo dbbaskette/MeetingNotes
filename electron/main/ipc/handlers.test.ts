@@ -11,7 +11,6 @@ describe('registerIpcHandlers', () => {
       actionItems: { listByMeeting: () => [] },
       settings: { getAll: () => ({}), get: () => '', set: () => {} },
       lmStudio: { listModels: async () => [] },
-      audioHijack: { startSession: async () => {}, stopSession: async () => {}, sessionState: async () => 'stopped' },
       recordingManager: { start: async () => ({ sessionId: 's', outputPath: '/o' }), stop: async () => {}, state: () => 'idle', on: () => {} },
       appEnumerator: { list: async () => [] },
       helperPath: '/bin/meeting-notes-tap',

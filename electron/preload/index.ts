@@ -14,9 +14,6 @@ const IPC_CHANNELS = {
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
-  recordStart: 'record:start',
-  recordStop: 'record:stop',
-  recordState: 'record:state',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
@@ -61,11 +58,6 @@ const api = {
     // an extra meetings.get fetch.
     saveSummary: (id: string, markdown: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsSaveSummary, id, markdown) as Promise<string>,
-  },
-  record: {
-    start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),
-    stop: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStop, sessionName),
-    state: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordState, sessionName),
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),

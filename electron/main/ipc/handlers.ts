@@ -10,7 +10,6 @@ import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import type { LMStudioClient } from '../lm-studio/client.js';
-import type { AudioHijackBridge } from '../audio-hijack/bridge.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import { probeAudioPermissions } from '../permissions/audio.js';
@@ -37,7 +36,6 @@ export interface IpcServices {
   actionItems: ActionItemsRepo;
   settings: SettingsRepo;
   lmStudio: LMStudioClient;
-  audioHijack: AudioHijackBridge;
   recordingManager: RecordingManager;
   appEnumerator: AppEnumerator;
   helperPath: string;
@@ -245,11 +243,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return started;
   });
 
-  ipc.handle(IPC_CHANNELS.recordStart, async (_e, sessionName: string) => s.audioHijack.startSession(sessionName));
-  ipc.handle(IPC_CHANNELS.recordStop, async (_e, sessionName: string) => s.audioHijack.stopSession(sessionName));
-  ipc.handle(IPC_CHANNELS.recordState, async (_e, sessionName: string) => s.audioHijack.sessionState(sessionName));
-
-  // New built-in recording namespace. The renderer asks for a list of audible
+  // Built-in recording namespace. The renderer asks for a list of audible
   // apps, picks one, and the manager spawns the bundled meeting-notes-tap
   // helper. Level + state-change events are broadcast via webContents.send
   // (wired up where the manager is constructed in electron/main/index.ts).

@@ -11,7 +11,6 @@ import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
 import { DiarizationSupervisor } from './diarization/supervisor.js';
-import { AudioHijackBridge } from './audio-hijack/bridge.js';
 import { RecordingManager } from './recording/manager.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
@@ -82,9 +81,7 @@ app.whenReady().then(async () => {
   });
   void supervisor.start();
 
-  const audioHijack = new AudioHijackBridge();
-
-  // Built-in audio capture helper (replacement for AudioHijackBridge). The
+  // Built-in audio capture helper. The
   // helper binary is bundled inside MeetingNotes.app; resolve its path so
   // both dev (`npm run dev`) and packaged builds can spawn it.
   const helperPath = resolveHelperPath({
@@ -203,7 +200,6 @@ app.whenReady().then(async () => {
     actionItems,
     settings,
     lmStudio,
-    audioHijack,
     recordingManager,
     appEnumerator,
     helperPath,
