@@ -17,6 +17,10 @@ export interface Settings {
   exporterMarkdown: boolean;
   /** AAC bitrate the built-in helper records at, in kbps. UI offers 96/128/192. */
   recordingBitrateKbps: number;
+  /** When true, poll the frontmost browser tab for meeting URLs and prompt
+   *  to start recording. Opt-in because it requires AppleScript Automation
+   *  permission for each browser. */
+  autoDetectMeetings: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -36,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   exporterApple: true,
   exporterMarkdown: true,
   recordingBitrateKbps: 128,
+  autoDetectMeetings: false,
 };
 
 type Key = keyof Settings;

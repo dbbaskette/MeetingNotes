@@ -15,6 +15,7 @@ interface Settings {
   exporterApple: boolean;
   exporterMarkdown: boolean;
   recordingBitrateKbps: number;
+  autoDetectMeetings: boolean;
 }
 
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
@@ -137,6 +138,34 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           </select>
           <div className="text-xs text-ink-muted mt-1">
             Applies to new recordings. Higher bitrate = bigger files but cleaner playback.
+          </div>
+        </label>
+      </section>
+
+      <section className="border-t border-surface-border pt-5">
+        <div className="text-xs font-bold text-ink-muted uppercase mb-2">Meeting auto-detect</div>
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={s.autoDetectMeetings}
+            onChange={(e) => update('autoDetectMeetings', e.target.checked)}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-sm text-ink">Watch browser tabs for meeting URLs</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              When a tab in Chrome, Safari, Arc, Edge, or Brave opens a known
+              meeting URL (Meet, Zoom web, Teams, Whereby, Jitsi, …), a banner
+              offers to start recording. Requires granting MeetingNotes
+              Automation permission for each browser you use (macOS will
+              prompt the first time).
+            </div>
+            <div className="text-xs text-ink-muted mt-1">
+              Note: the recorder captures the whole browser process, so audio
+              from other tabs (YouTube, etc.) will bleed in. Native Zoom/Teams
+              desktop meetings don&apos;t need this — they&apos;re picked in the
+              Record source picker directly.
+            </div>
           </div>
         </label>
       </section>

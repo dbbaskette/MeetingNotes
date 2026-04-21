@@ -28,6 +28,7 @@ import { runIdentifying } from './pipeline/stages/identifying.js';
 import { runSummarizing } from './pipeline/stages/summarizing.js';
 import { runExtracting } from './pipeline/stages/extracting.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
+import { MeetingDetector } from './meeting-detector/detector.js';
 import { buildExporterRegistry } from './exporters/registry.js';
 import { Logger } from './logging/logger.js';
 import { createMeetingFolder } from './storage/meeting-folder.js';
@@ -193,6 +194,19 @@ app.whenReady().then(async () => {
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
+  // Meeting auto-detect (#12). Opt-in per setting. Polls the frontmost
+  // browser tabs for known meeting URLs (Meet/Zoom/Teams/Whereby/etc.) and
+  // pushes a meetingDetectedEvent to renderers so they can prompt the user
+  // to start recording.
+  const meetingDetector = new MeetingDetector({
+    isSuppressed: () => recordingSessionsRepo.findOpen().length > 0,
+  });
+  meetingDetector.onDetected((m) => {
+    BrowserWindow.getAllWindows().forEach((w) =>
+      w.webContents.send(IPC_CHANNELS.meetingDetectedEvent, m));
+  });
+  if (s.autoDetectMeetings) meetingDetector.start();
+
   const exporters = buildExporterRegistry();
   registerIpcHandlers(ipcMain, {
     meetings,
@@ -207,6 +221,7 @@ app.whenReady().then(async () => {
     pipeline,
     exporters,
     libraryRoot,
+    meetingDetector,
   });
 
   await createWindow();
@@ -230,6 +245,7 @@ app.whenReady().then(async () => {
         logger.error('shutdown:recording-stop-error', { err: String(err) });
       }
       try {
+        meetingDetector.stop();
         await Promise.all([supervisor.stop(), watcher.stop()]);
       } catch (err) {
         logger.error('shutdown:error', { err: String(err) });

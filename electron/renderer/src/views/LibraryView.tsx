@@ -22,6 +22,7 @@ import { InboxRow } from '../components/InboxRow';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
+import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
 import { api } from '../ipc/client';
 
 interface Props {
@@ -150,6 +151,14 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           ⚙
         </button>
       </header>
+
+      {!liveRecording && (
+        <MeetingDetectedBanner
+          onStartRecording={({ sessionId, label }) => setLiveRecording({
+            sessionId, label, startedAt: new Date().toISOString(),
+          })}
+        />
+      )}
 
       {liveRecording && (
         <div className="mb-6">

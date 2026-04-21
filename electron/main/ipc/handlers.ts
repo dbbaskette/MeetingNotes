@@ -12,6 +12,7 @@ import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import type { LMStudioClient } from '../lm-studio/client.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
+import type { MeetingDetector } from '../meeting-detector/detector.js';
 import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
@@ -43,6 +44,7 @@ export interface IpcServices {
   pipeline: Pipeline;
   exporters: Record<string, Exporter>;
   libraryRoot: string;
+  meetingDetector?: MeetingDetector;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -264,6 +266,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.recordingManager.state(sessionId);
   });
 
+  ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, url: unknown) => {
+    if (typeof url !== 'string' || !s.meetingDetector) return;
+    s.meetingDetector.dismiss(url);
+  });
+
   ipc.handle(IPC_CHANNELS.permissionsAudioGet, () => probeAudioPermissions({ helperPath: s.helperPath }));
   ipc.handle(IPC_CHANNELS.permissionsRequestMic, () => requestMicAccess());
   ipc.handle(IPC_CHANNELS.permissionsMicStatus, () => getMicAccessStatus());
@@ -411,7 +418,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
-    return s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
+    s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
+    // Toggle the meeting detector live when the user flips the setting —
+    // no need to restart the app.
+    if (key === 'autoDetectMeetings' && s.meetingDetector) {
+      if (value) s.meetingDetector.start();
+      else s.meetingDetector.stop();
+    }
   });
 
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
