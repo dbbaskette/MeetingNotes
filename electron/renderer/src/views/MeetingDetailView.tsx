@@ -82,7 +82,19 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
     };
   }, [id, kick]);
 
-  if (!m) return <div className="p-8 text-ink-muted">Loading…</div>;
+  if (!m)
+    return (
+      <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+          <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm">
+            ← Library
+          </button>
+          <div className="flex-1 text-center font-semibold text-ink-muted">Loading…</div>
+          <div className="w-[68px]" />
+        </div>
+        <div className="p-8 text-ink-muted">Loading…</div>
+      </div>
+    );
 
   return (
     <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">

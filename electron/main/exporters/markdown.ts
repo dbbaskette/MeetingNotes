@@ -6,7 +6,12 @@ export class MarkdownExporter implements Exporter {
   name = 'markdown';
 
   async export(input: ExportInput): Promise<string> {
-    const lines: string[] = [`# ${input.meetingTitle} — Action Items`, ''];
+    const lines: string[] = [`# ${input.meetingTitle}`, ''];
+    const summary = input.summaryMd?.trim();
+    if (summary) {
+      lines.push(summary, '');
+    }
+    lines.push('## Action Items', '');
     for (const it of input.items) {
       const box = it.status === 'done' ? '[x]' : '[ ]';
       const parts = [it.text];

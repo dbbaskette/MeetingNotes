@@ -354,8 +354,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (items.length === 0) throw new Error('No action items selected');
     const exporter = s.exporters[input.exporter];
     if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
+    const summaryPath = path.join(folder, 'summary.md');
+    const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
     const result = await exporter.export({
       items, meetingTitle: meeting.title, meetingFolder: folder,
+      summaryMd,
       outputPath: typeof input.outputPath === 'string' ? input.outputPath : undefined,
       onItemExported: (id) => s.actionItems.markExported(id, input.exporter),
     });

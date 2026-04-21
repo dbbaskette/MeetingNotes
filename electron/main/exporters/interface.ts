@@ -5,6 +5,9 @@ export interface ExportInput {
   items: ExportableItem[];
   meetingTitle: string;
   meetingFolder: string;
+  /** Meeting summary markdown, if available. File-based exporters may include
+   *  it; action-only exporters (Apple Reminders) ignore it. */
+  summaryMd?: string | null;
   /** Called after each item successfully exports. */
   onItemExported?: (id: string) => void;
   /** Destination path override for file-based exporters. Ignored by exporters
