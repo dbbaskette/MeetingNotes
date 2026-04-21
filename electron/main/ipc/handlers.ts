@@ -11,6 +11,8 @@ import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import type { LMStudioClient } from '../lm-studio/client.js';
 import type { AudioHijackBridge } from '../audio-hijack/bridge.js';
+import type { RecordingManager } from '../recording/manager.js';
+import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
@@ -35,6 +37,8 @@ export interface IpcServices {
   settings: SettingsRepo;
   lmStudio: LMStudioClient;
   audioHijack: AudioHijackBridge;
+  recordingManager: RecordingManager;
+  appEnumerator: AppEnumerator;
   roster: RosterService;
   pipeline: Pipeline;
   exporters: Record<string, Exporter>;
@@ -242,6 +246,27 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.recordStart, async (_e, sessionName: string) => s.audioHijack.startSession(sessionName));
   ipc.handle(IPC_CHANNELS.recordStop, async (_e, sessionName: string) => s.audioHijack.stopSession(sessionName));
   ipc.handle(IPC_CHANNELS.recordState, async (_e, sessionName: string) => s.audioHijack.sessionState(sessionName));
+
+  // New built-in recording namespace. The renderer asks for a list of audible
+  // apps, picks one, and the manager spawns the bundled meeting-notes-tap
+  // helper. Level + state-change events are broadcast via webContents.send
+  // (wired up where the manager is constructed in electron/main/index.ts).
+  ipc.handle(IPC_CHANNELS.recordingListSources, async () => s.appEnumerator.list());
+  ipc.handle(IPC_CHANNELS.recordingStart, async (_e, input: unknown) => {
+    if (typeof input !== 'object' || input === null) throw new Error('invalid args');
+    const { targetPid, targetLabel, mic } = input as {
+      targetPid: number | 'system'; targetLabel: string; mic: boolean;
+    };
+    return s.recordingManager.start({ targetPid, targetLabel, mic });
+  });
+  ipc.handle(IPC_CHANNELS.recordingStop, async (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') throw new Error('sessionId required');
+    return s.recordingManager.stop(sessionId);
+  });
+  ipc.handle(IPC_CHANNELS.recordingState, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') throw new Error('sessionId required');
+    return s.recordingManager.state(sessionId);
+  });
 
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {

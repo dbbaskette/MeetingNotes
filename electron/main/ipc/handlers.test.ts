@@ -12,6 +12,8 @@ describe('registerIpcHandlers', () => {
       settings: { getAll: () => ({}), get: () => '', set: () => {} },
       lmStudio: { listModels: async () => [] },
       audioHijack: { startSession: async () => {}, stopSession: async () => {}, sessionState: async () => 'stopped' },
+      recordingManager: { start: async () => ({ sessionId: 's', outputPath: '/o' }), stop: async () => {}, state: () => 'idle', on: () => {} },
+      appEnumerator: { list: async () => [] },
       roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
       pipeline: { enqueue: () => {} },
       exporters: {},

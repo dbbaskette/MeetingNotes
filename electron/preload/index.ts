@@ -17,6 +17,12 @@ const IPC_CHANNELS = {
   recordStart: 'record:start',
   recordStop: 'record:stop',
   recordState: 'record:state',
+  recordingListSources: 'recording:list-sources',
+  recordingStart: 'recording:start',
+  recordingStop: 'recording:stop',
+  recordingState: 'recording:state',
+  recordingLevelEvent: 'recording:level',
+  recordingStateEvent: 'recording:state-change',
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
@@ -59,6 +65,23 @@ const api = {
     start: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStart, sessionName),
     stop: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordStop, sessionName),
     state: (sessionName: string) => ipcRenderer.invoke(IPC_CHANNELS.recordState, sessionName),
+  },
+  recording: {
+    listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
+    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
+    stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
+    state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
+    onLevel: (cb: (e: { sessionId: string; peakDb: number }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; peakDb: number }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingLevelEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingLevelEvent, wrapped);
+    },
+    onStateChange: (cb: (e: { sessionId: string; state: string }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; state: string }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
+    },
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
