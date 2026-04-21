@@ -5,7 +5,19 @@ import CoreAudio
 // Owns the lifecycle of one recording: tap + mic + mix + write.
 final class Recorder {
   private let opts: RecordOptions
-  private var writer: AACWriter?
+  // Three writers:
+  //   writerMixed — 50/50 mic + tap mono, same file we've always produced.
+  //                 The library watcher / pipeline consumes this; it's the
+  //                 "primary" recording.
+  //   writerVoice — mic-only stem (omitted when captureMic == false).
+  //   writerSystem — tap-only stem (the other side of the conversation).
+  // Stems are sidecar files — <mixed>.voice.m4a and <mixed>.system.m4a —
+  // written alongside the mixed output. A future pipeline pass can
+  // transcribe each stem independently for deterministic speaker-ID and
+  // better overlap handling; today they're just artifacts on disk.
+  private var writerMixed: AACWriter?
+  private var writerVoice: AACWriter?
+  private var writerSystem: AACWriter?
   private var engine: AVAudioEngine?
   private var micEngine: AVAudioEngine?
   private var tapObjectID: AudioObjectID = 0
@@ -36,14 +48,29 @@ final class Recorder {
   init(opts: RecordOptions) { self.opts = opts }
 
   func start() throws {
-    let url = URL(fileURLWithPath: opts.outputPath)
+    let mixedURL = URL(fileURLWithPath: opts.outputPath)
     // Use 48 kHz to match what aggregate devices typically expose.
-    writer = try AACWriter(outputURL: url, sampleRate: 48_000, bitrate: 128_000)
+    writerMixed = try AACWriter(outputURL: mixedURL, sampleRate: 48_000, bitrate: 128_000)
+    // Stems: <mixed>.voice.m4a (mic) and <mixed>.system.m4a (tap). Sidecar
+    // the mixed file so the library watcher picks up exactly one meeting
+    // per recording; stems are filtered out watcher-side by filename.
+    let baseURL = mixedURL.deletingPathExtension()
+    let voiceURL = baseURL.appendingPathExtension("voice").appendingPathExtension("m4a")
+    let systemURL = baseURL.appendingPathExtension("system").appendingPathExtension("m4a")
+    if opts.captureMic {
+      writerVoice = try AACWriter(outputURL: voiceURL, sampleRate: 48_000, bitrate: 128_000)
+    }
+    writerSystem = try AACWriter(outputURL: systemURL, sampleRate: 48_000, bitrate: 128_000)
     try attachProcessTap()
     watchTargetPIDIfNeeded()
     if opts.captureMic { try attachMic() }
     try startEngine()
-    StatusEvent.emit(["event": "started"])
+    StatusEvent.emit([
+      "event": "started",
+      "output_mixed": opts.outputPath,
+      "output_voice": opts.captureMic ? voiceURL.path : "",
+      "output_system": systemURL.path,
+    ])
   }
 
   // MARK: - Target PID watcher (Task 11)
@@ -77,13 +104,18 @@ final class Recorder {
     stopAggregateIO()
     engine?.stop()
     detachProcessTap()
-    if let w = writer {
-      await w.finalize()
-      StatusEvent.emit([
-        "event": "stopped",
-        "bytes": NSNumber(value: w.bytesWritten),
-      ])
-    }
+    // Finalize all three writers. Await each so the encoders flush cleanly;
+    // the queue.sync inside AACWriter makes the cost additive but still
+    // bounded (sub-second each).
+    if let w = writerMixed { await w.finalize() }
+    if let w = writerVoice { await w.finalize() }
+    if let w = writerSystem { await w.finalize() }
+    StatusEvent.emit([
+      "event": "stopped",
+      "bytes": NSNumber(value: writerMixed?.bytesWritten ?? 0),
+      "bytes_voice": NSNumber(value: writerVoice?.bytesWritten ?? 0),
+      "bytes_system": NSNumber(value: writerSystem?.bytesWritten ?? 0),
+    ])
   }
 
   func lastSignalSeen() -> Date { lastSignalAt }
@@ -401,6 +433,13 @@ final class Recorder {
         return buffer
       }
       if err != nil { return }
+      // Voice stem (#13 Phase 1): append the converted mic buffer to the
+      // mic-only writer BEFORE we copy samples into micPendingFrames.
+      // outBuf is mic-only here; the mix into the tap side happens inside
+      // the tap IOProc using micPendingFrames as the seam.
+      if let voiceWriter = self.writerVoice, let voiceCopy = Self.copyMonoBuffer(outBuf) {
+        voiceWriter.append(voiceCopy, at: 0)
+      }
       guard let chan = outBuf.floatChannelData?[0] else { return }
       let n = Int(outBuf.frameLength)
       var arr = [Float](repeating: 0, count: n)
@@ -419,7 +458,7 @@ final class Recorder {
   fileprivate func handleIOProc(inputData: UnsafePointer<AudioBufferList>,
                                 inputTime: UnsafePointer<AudioTimeStamp>) {
     ioProcFireCount &+= 1
-    guard let writer = writer, let src = sourceFormat else { return }
+    guard let mixedWriter = writerMixed, let src = sourceFormat else { return }
     let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
     // First buffer in the ABL holds the deinterleaved channels (or the
     // interleaved data if mChannelsPerFrame > 1 with mNumberBuffers == 1).
@@ -492,11 +531,18 @@ final class Recorder {
                         "out_frames": Int(outBuf.frameLength)])
     }
 
+    // Dual-stem capture (issue #13 Phase 1): write the tap-only buffer to
+    // the system stem BEFORE mixing in the mic. Copy first since
+    // mixPendingMicIfAvailable mutates outBuf in place.
+    if let sysWriter = writerSystem, let systemCopy = Self.copyMonoBuffer(outBuf) {
+      sysWriter.append(systemCopy, at: inputTime.pointee.mHostTime)
+    }
+
     // Task 9 mixes mic samples in here.
     mixPendingMicIfAvailable(into: outBuf)
 
     lastSignalAt = .init()
-    writer.append(outBuf, at: inputTime.pointee.mHostTime)
+    mixedWriter.append(outBuf, at: inputTime.pointee.mHostTime)
 
     let now = Date().timeIntervalSince1970
     if now - lastLevelEmitAt > 0.1 {
@@ -538,6 +584,21 @@ final class Recorder {
   }
 
   // MARK: - Mic engine (added in Task 9)
+
+  // Duplicate a mono Float32 PCM buffer so the system-stem writer gets its
+  // own sample bytes before mixPendingMicIfAvailable mutates the original
+  // outBuf in place. Shallow copying the AVAudioPCMBuffer is insufficient —
+  // the underlying floatChannelData pointer is shared.
+  private static func copyMonoBuffer(_ src: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    guard let dst = AVAudioPCMBuffer(pcmFormat: src.format, frameCapacity: src.frameLength),
+          let sc = src.floatChannelData, let dc = dst.floatChannelData else { return nil }
+    dst.frameLength = src.frameLength
+    let n = Int(src.frameLength)
+    for c in 0..<Int(src.format.channelCount) {
+      for i in 0..<n { dc[c][i] = sc[c][i] }
+    }
+    return dst
+  }
 
   private static func peakDB(_ buffer: AVAudioPCMBuffer) -> Double {
     guard let channels = buffer.floatChannelData else { return -160 }
