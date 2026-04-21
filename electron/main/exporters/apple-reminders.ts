@@ -21,6 +21,23 @@ export class AppleRemindersExporter implements Exporter {
 
   async export(input: ExportInput): Promise<string> {
     const list = escapeAppleScript(this.listName);
+
+    // First run against a clean Reminders DB gave users a cryptic
+    // `Can't get list "MeetingNotes". (-1728)` error because the list we're
+    // targeting didn't exist yet. Create it idempotently up front. AppleScript
+    // doesn't have a CREATE IF NOT EXISTS, so we check with `exists` first.
+    const ensureListScript =
+      `tell application "Reminders" to if not (exists list "${list}") ` +
+      `then make new list with properties {name:"${list}"}`;
+    try {
+      await this.runner('osascript', ['-e', ensureListScript]);
+    } catch (e) {
+      throw new Error(
+        `Could not create Reminders list "${this.listName}". ` +
+        `Open Reminders.app once and grant access, then retry. (${String(e)})`,
+      );
+    }
+
     const open = input.items.filter((i) => i.status !== 'done');
     let exported = 0;
     const failures: string[] = [];

@@ -1,10 +1,55 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { Agent } from 'undici';
+
+// Local LLM calls (chat completions, audio transcription) routinely hold
+// a response open for 5–10+ minutes on large inputs while the model
+// generates. undici's default `headersTimeout` is 5 minutes, which fires
+// BEFORE our AbortSignal.timeout(10min) and surfaces as
+// "fetch failed: Headers Timeout Error" — looking like a network failure
+// when the model is actually still working. We bump both header and body
+// timeouts well past the AbortSignal ceiling so the abort signal is the
+// thing that wins, not undici's defaults.
+//
+// Lazily constructed so test environments can run without instantiating
+// a real Agent (vitest's happy-dom otherwise objects).
+let slowLLMAgent: Agent | undefined;
+function getSlowLLMAgent(): Agent {
+  if (!slowLLMAgent) {
+    slowLLMAgent = new Agent({
+      headersTimeout: 15 * 60 * 1000,
+      bodyTimeout: 15 * 60 * 1000,
+      connectTimeout: 30 * 1000,
+    });
+  }
+  return slowLLMAgent;
+}
+
+// `fetch`'s global TS signature doesn't expose undici's `dispatcher` option,
+// even though Node's runtime fetch accepts it. Cast through this helper so
+// the cast lives in one place and the call sites stay clean.
+type FetchInit = Parameters<typeof fetch>[1] & { dispatcher?: Agent };
+function fetchWithDispatcher(url: string, init: FetchInit): Promise<Response> {
+  return fetch(url, init as Parameters<typeof fetch>[1]);
+}
 
 export class LMStudioError extends Error {
   constructor(message: string, public cause?: unknown) {
     super(message);
   }
+}
+
+function describeFetchError(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  // undici/fetch nests the real reason in .cause (e.g. ECONNRESET, ECONNREFUSED).
+  // Pull it out so the surfaced message is specific instead of the generic
+  // "fetch failed" that Node emits at the outer level.
+  const cause = (e as Error & { cause?: unknown }).cause;
+  if (cause instanceof Error && cause.message) return `${e.message}: ${cause.message}`;
+  if (cause && typeof cause === 'object' && 'code' in cause) {
+    return `${e.message}: ${String((cause as { code: unknown }).code)}`;
+  }
+  return e.message || 'unknown error';
 }
 
 export interface TranscribeInput {
@@ -61,6 +106,19 @@ export class LMStudioClient {
       if (modelField) f.append('model', input.model);
       f.append('response_format', 'verbose_json');
       if (input.language) f.append('language', input.language);
+      // Anti-hallucination settings for whisper.cpp. Meeting audio with long
+      // pauses or side chatter is prone to "stuck in a loop" output like
+      // "Do I have to create a new one?" repeated 50x. These params break the
+      // loop: no_context stops conditioning each chunk on the previous chunk's
+      // (possibly bad) output, and the temperature fallback lets the decoder
+      // re-sample when the greedy path looks degenerate.
+      f.append('temperature', '0.0');
+      f.append('temperature_inc', '0.2');
+      f.append('no_context', 'true');
+      // entropy_thold / logprob_thold trigger the temperature fallback when
+      // the decoder's confidence tanks (signature of a loop).
+      f.append('entropy_thold', '2.4');
+      f.append('logprob_thold', '-1.0');
       f.append(
         'file',
         new Blob([bytes as BlobPart], { type: 'audio/mpeg' }),
@@ -71,10 +129,11 @@ export class LMStudioClient {
 
     const post = async (path: string, modelField: boolean): Promise<Response> => {
       try {
-        return await fetch(`${this.baseUrl}${path}`, {
+        return await fetchWithDispatcher(`${this.baseUrl}${path}`, {
           method: 'POST',
           body: buildForm(modelField),
           signal: AbortSignal.timeout(10 * 60 * 1000),
+          dispatcher: getSlowLLMAgent(),
         });
       } catch (e) {
         throw new LMStudioError(`STT POST ${this.baseUrl}${path} failed: network`, e);
@@ -100,9 +159,15 @@ export class LMStudioClient {
   }
 
   async chat(input: ChatInput): Promise<string> {
-    let resp: Response;
-    try {
-      resp = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+    // 10-minute ceiling per attempt. Summarizing / extracting on a local model
+    // routinely runs several minutes for long transcripts. One retry on
+    // transient network failure — LM Studio occasionally drops mid-stream
+    // connections between pipeline stages (the socket recovers within a
+    // second or two). We don't retry aborts / 4xx / 5xx, only true network
+    // failures, so we're not masking legit server errors.
+    const attempt = async (): Promise<Response> => fetchWithDispatcher(
+      `${this.baseUrl}/v1/chat/completions`,
+      {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -111,13 +176,57 @@ export class LMStudioClient {
           temperature: input.temperature ?? 0.2,
           max_tokens: input.maxTokens,
         }),
-        signal: AbortSignal.timeout(2 * 60 * 1000),
-      });
+        signal: AbortSignal.timeout(10 * 60 * 1000),
+        dispatcher: getSlowLLMAgent(),
+      },
+    );
+
+    let resp: Response;
+    try {
+      resp = await attempt();
     } catch (e) {
-      throw new LMStudioError('LM Studio chat failed: network', e);
+      const isAbort = e instanceof Error && e.name === 'AbortError';
+      if (isAbort) {
+        throw new LMStudioError(
+          'LM Studio chat timed out after 10 minutes — model may be too large for this transcript',
+          e,
+        );
+      }
+      // Network hiccup — pause and retry once. If the second attempt still
+      // blows up, surface the underlying error cause in the message so the
+      // user isn't staring at a generic "network".
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        resp = await attempt();
+      } catch (e2) {
+        const cause = describeFetchError(e2);
+        throw new LMStudioError(
+          `LM Studio chat failed after retry (${cause}). ` +
+            `Check LM Studio is running, a model is loaded, and the server tab is enabled.`,
+          e2,
+        );
+      }
     }
     if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
-    const body = (await resp.json()) as { choices: { message: { content: string } }[] };
-    return body.choices?.[0]?.message?.content ?? '';
+    const body = (await resp.json()) as {
+      choices: { message: { content: string; reasoning_content?: string } }[];
+    };
+    const content = body.choices?.[0]?.message?.content ?? '';
+    // Empty content with a populated reasoning_content usually means the model
+    // crashed mid-generation — on Apple Silicon this is almost always the
+    // Metal OOM path, where LM Studio returns a 200 with a truncated response
+    // because the GPU command buffer died. Gemma-31b on a 13k-token transcript
+    // is the canonical trigger. Surface a specific error so the user knows to
+    // switch to a smaller model (qwen3.5-9b, nemotron-3-nano-4b) rather than
+    // chasing a "network" red herring.
+    if (content.trim() === '') {
+      const partial = body.choices?.[0]?.message?.reasoning_content ?? '';
+      throw new LMStudioError(
+        `LM Studio returned empty content — the model likely ran out of GPU memory ` +
+          `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b). ` +
+          (partial ? `Partial output: "${partial.slice(0, 80)}…"` : ''),
+      );
+    }
+    return content;
   }
 }

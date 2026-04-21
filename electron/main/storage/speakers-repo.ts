@@ -95,7 +95,16 @@ export class SpeakersRepo {
     }));
   }
 
-  linkToMeeting(meetingId: string, localLabel: string, rosterId: string, confidence: number): void {
+  /** Drop all per-meeting speaker links. Used when a rerun invalidates the
+   *  diarization output; roster entries themselves are kept. */
+  unlinkMeeting(meetingId: string): void {
+    this.db.prepare('DELETE FROM meeting_speakers WHERE meeting_id = ?').run(meetingId);
+  }
+
+  linkToMeeting(meetingId: string, localLabel: string, rosterId: string | null, confidence: number): void {
+    // rosterId=null lets the caller "unlink" a previously-identified speaker
+    // without dropping the meeting_speakers row — the local label stays in
+    // the UI list, just un-identified again.
     this.db.prepare(`
       INSERT INTO meeting_speakers (meeting_id, local_label, roster_speaker_id, confidence)
       VALUES (?, ?, ?, ?)

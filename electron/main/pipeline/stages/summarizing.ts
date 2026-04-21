@@ -18,6 +18,17 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
       { role: 'user', content: transcript },
     ],
   });
-  fs.writeFileSync(path.join(folder, 'summary.md'), content);
-  ctx.logger.info('summarize:done', { meetingId, chars: content.length });
+  // Post-process LLM output to survive formatting drift:
+  //  - strip leading / trailing whitespace (models love to open with a
+  //    couple of blank lines)
+  //  - demote accidental "# Overview" H1s to "## Overview" — the prompt
+  //    asks for H2 but smaller models occasionally ignore that, and H1
+  //    inside the app looks like a page title
+  //  - collapse "*" bullets to "-" so the preview renders consistently
+  const cleaned = content
+    .trim()
+    .replace(/^# (Overview|Key Discussion Points|Decisions|Action Items|Follow-ups|Open Questions)\b/gm, '## $1')
+    .replace(/^(\s*)\* /gm, '$1- ');
+  fs.writeFileSync(path.join(folder, 'summary.md'), cleaned);
+  ctx.logger.info('summarize:done', { meetingId, chars: cleaned.length });
 };

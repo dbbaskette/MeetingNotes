@@ -4,6 +4,8 @@ export interface MeetingRow {
   id: string; slug: string; title: string;
   startedAt: string | null; durationS: number | null;
   audioPath: string; status: string; pipelineStage: string;
+  stageStartedAt: string | null;
+  skipSpeakerId: boolean;
   createdAt: string; updatedAt: string;
 }
 
@@ -23,6 +25,8 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     audioPath: r.audio_path as string,
     status: r.status as string,
     pipelineStage: r.pipeline_stage as string,
+    stageStartedAt: (r.stage_started_at as string) ?? null,
+    skipSpeakerId: Boolean((r.skip_speaker_id as number | undefined) ?? 0),
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   };
@@ -68,8 +72,10 @@ export class MeetingsRepo {
   }
 
   updateStage(id: string, stage: string): void {
-    this.db.prepare('UPDATE meetings SET pipeline_stage = ?, updated_at = ? WHERE id = ?')
-      .run(stage, new Date().toISOString(), id);
+    const now = new Date().toISOString();
+    this.db.prepare(
+      'UPDATE meetings SET pipeline_stage = ?, stage_started_at = ?, updated_at = ? WHERE id = ?',
+    ).run(stage, now, now, id);
   }
 
   updateTitle(id: string, title: string): void {
@@ -85,5 +91,10 @@ export class MeetingsRepo {
   updateDuration(id: string, durationS: number): void {
     this.db.prepare('UPDATE meetings SET duration_s = ?, updated_at = ? WHERE id = ?')
       .run(durationS, new Date().toISOString(), id);
+  }
+
+  updateSkipSpeakerId(id: string, skip: boolean): void {
+    this.db.prepare('UPDATE meetings SET skip_speaker_id = ?, updated_at = ? WHERE id = ?')
+      .run(skip ? 1 : 0, new Date().toISOString(), id);
   }
 }

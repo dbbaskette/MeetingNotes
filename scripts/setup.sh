@@ -130,8 +130,11 @@ if [ "$SKIP_HF" -eq 0 ]; then
   cat <<MSG
   pyannote's diarization model is gated. One-time setup:
     1. Create a free account at https://huggingface.co
-    2. Accept the license at https://huggingface.co/pyannote/speaker-diarization-3.1
-       (and https://huggingface.co/pyannote/segmentation-3.0)
+    2. Accept the license on ALL THREE of these pages:
+         https://huggingface.co/pyannote/speaker-diarization-3.1
+         https://huggingface.co/pyannote/segmentation-3.0
+         https://huggingface.co/pyannote/speaker-diarization-community-1
+       (pyannote 3.4+ pulls the PLDA component from community-1 at runtime)
     3. Create a fine-grained token at https://huggingface.co/settings/tokens
        Scope: "Read access to contents of all public gated repos you can access"
     4. Paste it below.

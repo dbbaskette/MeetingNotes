@@ -23,6 +23,7 @@
     "format": "prettier --write ."
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
@@ -51,6 +52,9 @@
     "chokidar": "^3.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "undici": "^6.25.0",
     "zod": "^3.23.0",
     "zustand": "^4.5.0"
   }

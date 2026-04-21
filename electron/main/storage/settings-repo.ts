@@ -21,7 +21,12 @@ export const DEFAULT_SETTINGS: Settings = {
   lmStudioUrl: 'http://localhost:1234',
   sttUrl: 'http://127.0.0.1:8080',
   sttModel: 'whisper-1',
-  llmModel: '',
+  // Default to a small-to-mid LLM that actually fits in Apple Silicon VRAM
+  // on an 8-hour meeting transcript. Gemma-31b and Qwen-35b-a3b both blow up
+  // with Metal OOM on 13k+ token prompts on 24–32GB machines; qwen3.5-9b
+  // does the same summarization job in a fraction of the memory and time.
+  // Users can override in Settings if they've got the VRAM for a bigger one.
+  llmModel: 'qwen/qwen3.5-9b',
   audioHijackSessionName: 'Meeting',
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),
   audioWatchPath: path.join(os.homedir(), 'Music', 'Audio Hijack'),

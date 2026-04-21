@@ -7,9 +7,13 @@ const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('done'),
 ) as readonly Exclude<Stage, 'discovered' | 'transcribing' | 'diarizing' | 'done'>[];
 
+// Stages that have a worker — i.e. the pipeline invokes a handler for them.
+// `awaiting_speaker_id` is intentionally absent: it's a user-gate, not work.
+type WorkStage = Exclude<Stage, 'discovered' | 'done' | 'awaiting_speaker_id'>;
+
 export interface PipelineDeps {
   ctx: PipelineContext;
-  stages: Record<Exclude<Stage, 'discovered' | 'done'>, StageHandler>;
+  stages: Record<WorkStage, StageHandler>;
 }
 
 export class Pipeline {
@@ -85,8 +89,29 @@ export class Pipeline {
     if (startIdx >= 0) {
       for (let i = startIdx; i < LINEAR_STAGES.length; i++) {
         const s = LINEAR_STAGES[i]!;
+        // Speaker-ID gate: after `identifying` completes, the next entry in
+        // LINEAR_STAGES is `awaiting_speaker_id`. It has no handler — this is
+        // where we stop so the user can label unknown voices in the UI. When
+        // they're done (or flip the per-meeting skip flag), calling
+        // `continueFromSpeakerId` in the IPC handlers re-enqueues the meeting
+        // with stage='summarizing', which re-enters this loop past the gate.
+        if (s === 'awaiting_speaker_id') {
+          const fresh = this.deps.ctx.meetings.findById(meetingId);
+          if (!fresh?.skipSpeakerId) {
+            this.deps.ctx.meetings.updateStage(meetingId, s);
+            this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
+            return; // stop; user action re-enqueues
+          }
+          // Skip flag is set — don't stop. But before summarize reads
+          // transcript.md, re-run merging so any roster matches the
+          // `identifying` stage auto-made replace SPEAKER_00 with real
+          // names in the written transcript. Cheap (no network) and
+          // idempotent, safe to run on every exit from the gate.
+          await this.deps.stages.merging(input, this.deps.ctx);
+          continue;
+        }
         this.deps.ctx.meetings.updateStage(meetingId, s);
-        await this.deps.stages[s](input, this.deps.ctx);
+        await this.deps.stages[s as WorkStage](input, this.deps.ctx);
       }
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');

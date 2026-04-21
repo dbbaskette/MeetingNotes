@@ -30,10 +30,23 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
   }));
 
   const matches = ctx.roster.identifyUnknowns(detected);
+  // Preserve user assignments across re-runs. If the user already linked
+  // SPEAKER_02 to "Alice" via the Speakers panel, running identify again
+  // (e.g. on a rerun from `merging`) must not overwrite that assignment
+  // with the auto-matcher's opinion — the user's manual label is always
+  // the source of truth. We skip any label that already has a non-null
+  // roster link. Unlinked labels still get the auto-match treatment.
+  const existing = new Map<string, string | null>(
+    ctx.speakers.listForMeeting(meetingId).map((s) => [s.localLabel, s.rosterSpeakerId]),
+  );
   for (const m of matches) {
-    if (m.rosterId !== null && m.confidence !== null) {
-      ctx.speakers.linkToMeeting(meetingId, m.label, m.rosterId, m.confidence);
-    }
+    if (existing.get(m.label)) continue; // user already identified this voice
+    ctx.speakers.linkToMeeting(
+      meetingId,
+      m.label,
+      m.rosterId ?? null,
+      m.confidence ?? 0,
+    );
   }
   ctx.logger.info('identify:done', {
     meetingId,

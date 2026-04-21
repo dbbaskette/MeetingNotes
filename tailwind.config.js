@@ -1,3 +1,5 @@
+import typography from '@tailwindcss/typography';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./electron/renderer/index.html', './electron/renderer/src/**/*.{ts,tsx}'],
@@ -31,5 +33,8 @@ export default {
       borderRadius: { xl: '14px' },
     },
   },
-  plugins: [],
+  // Drives the `prose` classes used by the summary preview's markdown
+  // renderer. Without this plugin `prose`/`prose-sm` silently resolve to
+  // nothing and headings/lists/tables render unstyled.
+  plugins: [typography],
 };

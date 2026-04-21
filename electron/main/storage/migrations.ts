@@ -54,6 +54,72 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    // stage_started_at lets the UI show elapsed time ("DIARIZING · 2m 18s")
+    // without having to time-track separately in the renderer.
+    up: `
+      ALTER TABLE meetings ADD COLUMN stage_started_at TEXT;
+      UPDATE meetings SET stage_started_at = updated_at WHERE stage_started_at IS NULL;
+    `,
+  },
+  {
+    version: 3,
+    // Reset meetings that never actually finished a processing step back to
+    // "pending". Historical 'failed' rows came from the old auto-enqueue
+    // behavior where every dropped MP3 got jammed through a broken pipeline;
+    // those aren't real failures, they're un-started recordings. Any row whose
+    // pipeline_stage is 'discovered' (meaning nothing has actually run yet) is
+    // safe to treat as pending regardless of status. Leaves real failures
+    // alone (status='failed' with a real pipeline_stage like 'diarizing').
+    up: `
+      -- Discovered-but-not-pending: trivially wrong state, reset.
+      UPDATE meetings
+         SET status = 'pending'
+       WHERE pipeline_stage = 'discovered'
+         AND status != 'pending';
+
+      -- Historical 'failed' cruft: old auto-enqueue builds jammed every MP3
+      -- through a broken pipeline, so the library fills with FAILED pills
+      -- before the user has ever clicked anything. One-time reset to pending
+      -- + discovered so these look like fresh cataloged recordings again.
+      -- Real deliberate failures going forward keep their 'failed' status.
+      UPDATE meetings
+         SET status = 'pending',
+             pipeline_stage = 'discovered',
+             stage_started_at = NULL
+       WHERE status = 'failed';
+    `,
+  },
+  {
+    version: 4,
+    // Swap the default LLM away from gemma-4-31b. On 24–32GB Apple Silicon
+    // gemma-31b runs the Metal allocator out of memory on any meeting longer
+    // than ~10 minutes (13k+ prompt tokens), so summarize and extract both
+    // die mid-generation with "Channel Error" / empty content. qwen3.5-9b
+    // produces comparable summary quality at a fraction of the VRAM. Users
+    // who deliberately want the big model can still pick it in Settings.
+    // Only rewrites the row if it's still on the problematic default; we
+    // don't second-guess users who've already chosen something else.
+    up: `
+      UPDATE settings
+         SET value = '"qwen/qwen3.5-9b"'
+       WHERE key = 'llmModel'
+         AND value IN ('"google/gemma-4-31b"', '""');
+    `,
+  },
+  {
+    version: 5,
+    // Per-meeting flag for "skip the speaker-identification gate." The
+    // pipeline pauses at `awaiting_speaker_id` by default so the user can
+    // label unknown voices before summarize bakes SPEAKER_00 into the output.
+    // Users who don't care (solo brain-dumps, low-stakes recordings) can flip
+    // this on and have the pipeline run end-to-end without waiting. Stored
+    // as 0/1 because better-sqlite3 doesn't have a native boolean type.
+    up: `
+      ALTER TABLE meetings ADD COLUMN skip_speaker_id INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

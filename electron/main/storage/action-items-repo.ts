@@ -52,6 +52,10 @@ export class ActionItemsRepo {
     return out;
   }
 
+  deleteForMeeting(meetingId: string): void {
+    this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?').run(meetingId);
+  }
+
   setStatus(id: string, status: string): void {
     this.db.prepare('UPDATE action_items SET status = ? WHERE id = ?').run(status, id);
   }

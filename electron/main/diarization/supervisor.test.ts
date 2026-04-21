@@ -16,7 +16,8 @@ function fakeProc() {
   return ee;
 }
 
-const noProbe = async () => false; // never reuse — always spawn
+const noProbe = async (): Promise<{ ok: boolean; buildId: string }> =>
+  ({ ok: false, buildId: '' }); // never reuse — always spawn
 
 describe('DiarizationSupervisor', () => {
   it('spawns the sidecar on start()', async () => {
@@ -47,7 +48,7 @@ describe('DiarizationSupervisor', () => {
   it('reuses an existing healthy instance instead of spawning', async () => {
     const spawn = vi.fn(() => fakeProc() as any);
     const sup = new DiarizationSupervisor({
-      spawn, sidecarDir: '/tmp', healthProbe: async () => true,
+      spawn, sidecarDir: '/tmp', healthProbe: async () => ({ ok: true, buildId: '' }),
     });
     await sup.start();
     expect(spawn).not.toHaveBeenCalled();
@@ -69,7 +70,7 @@ describe('DiarizationSupervisor', () => {
     });
     const sup = new DiarizationSupervisor({
       spawn, sidecarDir: '/tmp', maxRestarts: 5, restartDelayMs: 0,
-      healthProbe: async () => false, // foreign owner, not a sidecar
+      healthProbe: async () => ({ ok: false, buildId: '' }), // foreign owner, not a sidecar
     });
     await sup.start();
     await new Promise((r) => setTimeout(r, 50));

@@ -1,10 +1,17 @@
 export const STAGES = [
   'discovered', 'transcribing', 'diarizing', 'merging',
-  'identifying', 'summarizing', 'extracting', 'done',
+  'identifying',
+  // Gate where the pipeline pauses for the user to label unknown speakers
+  // before summarize runs with `SPEAKER_00` placeholders baked into the
+  // prompt. The pipeline only enters this stage if `skipSpeakerId` is false
+  // on the meeting; otherwise it advances straight from identifying to
+  // summarizing. No stage handler — it's a wait state, not work.
+  'awaiting_speaker_id',
+  'summarizing', 'extracting', 'done',
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
-export const STATUSES = ['pending', 'processing', 'done', 'failed'] as const;
+export const STATUSES = ['pending', 'processing', 'awaiting_user', 'done', 'failed'] as const;
 export type Status = (typeof STATUSES)[number];
 
 export function isStage(v: unknown): v is Stage {
