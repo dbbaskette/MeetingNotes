@@ -33,6 +33,18 @@ function fetchWithDispatcher(url: string, init: FetchInit): Promise<Response> {
   return fetch(url, init as Parameters<typeof fetch>[1]);
 }
 
+function mimeFromExt(filePath: string): string {
+  const ext = filePath.toLowerCase().split('.').pop();
+  switch (ext) {
+    case 'wav': return 'audio/wav';
+    case 'mp3': return 'audio/mpeg';
+    case 'm4a': case 'mp4': return 'audio/mp4';
+    case 'flac': return 'audio/flac';
+    case 'ogg': return 'audio/ogg';
+    default: return 'application/octet-stream';
+  }
+}
+
 export class LMStudioError extends Error {
   constructor(message: string, public cause?: unknown) {
     super(message);
@@ -121,7 +133,7 @@ export class LMStudioClient {
       f.append('logprob_thold', '-1.0');
       f.append(
         'file',
-        new Blob([bytes as BlobPart], { type: 'audio/mpeg' }),
+        new Blob([bytes as BlobPart], { type: mimeFromExt(input.audioPath) }),
         path.basename(input.audioPath),
       );
       return f;

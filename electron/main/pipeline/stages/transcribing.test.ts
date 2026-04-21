@@ -2,6 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// Prevent ensureWav from shelling out to ffmpeg in tests — the audio files
+// are stubs. The no-op mock returns the original path unchanged.
+vi.mock('../../lib/ensure-wav.js', () => ({
+  ensureWav: async (p: string) => ({ path: p, cleanup: () => {} }),
+}));
+
 import { runTranscribing } from './transcribing.js';
 
 describe('runTranscribing', () => {
