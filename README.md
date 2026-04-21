@@ -1,6 +1,25 @@
 # MeetingNotes
 
+[![Platform](https://img.shields.io/badge/platform-macOS%2014.2%2B-blue)](https://support.apple.com/en-us/HT201260)
+[![Architecture](https://img.shields.io/badge/arch-Apple%20Silicon-black)](https://support.apple.com/en-us/HT211814)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![Electron](https://img.shields.io/badge/electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![TypeScript](https://img.shields.io/badge/typescript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 Local-first meeting notes for macOS. Hit Record, pick which app's audio you want to capture (Zoom, Teams, FaceTime, etc.) plus your mic, and MeetingNotes records, transcribes, diarizes, identifies speakers, summarises, and extracts action items — all on your machine. No cloud, no uploads, no API keys at inference time, no third-party recorder to install.
+
+## Screenshots
+
+<!-- Add screenshots to docs/screenshots/ and they'll render here. -->
+
+| Library & Inbox | Recording in progress |
+| --- | --- |
+| ![Library view](docs/screenshots/library.png) | ![Recording](docs/screenshots/recording.png) |
+
+| Speaker-ID gate | Summary editor |
+| --- | --- |
+| ![Speaker ID](docs/screenshots/speaker-id.png) | ![Summary](docs/screenshots/summary.png) |
 
 ## Why
 
