@@ -1,103 +1,72 @@
 import AVFoundation
 import CoreMedia
 
-// Wraps AVAssetWriter for streaming-write of mono AAC into M4A.
-// Caller passes mono Float32 PCM buffers via append(_:); on stop(),
-// finalizes the container so the file is playable.
+// Streaming-write of mono PCM into an M4A/AAC file via AVAudioFile.
+// AVAudioFile handles the AAC encode + M4A container internally and avoids
+// the CMSampleBuffer construction landmines of AVAssetWriter for our case
+// (where the source ABL layout from the tap doesn't always satisfy
+// CMSampleBufferSetDataBufferFromAudioBufferList's strict requirements).
 final class AACWriter {
-  private let writer: AVAssetWriter
-  private let input: AVAssetWriterInput
-  private let sourceFormat: AVAudioFormat
+  private let outputURL: URL
+  private let processingFormat: AVAudioFormat
+  private var file: AVAudioFile?
   private var started = false
-  private var firstSampleTime: CMTime = .zero
+  private let queue = DispatchQueue(label: "AACWriter.serialize")
 
   init(outputURL: URL, sampleRate: Double, bitrate: Int) throws {
-    // Delete any existing file — caller picks unique paths so this is paranoia.
+    self.outputURL = outputURL
     try? FileManager.default.removeItem(at: outputURL)
-    writer = try AVAssetWriter(outputURL: outputURL, fileType: .m4a)
-    sourceFormat = AVAudioFormat(
+    // Mono Float32 — matches what Recorder feeds us.
+    self.processingFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: sampleRate,
       channels: 1,
       interleaved: false
     )!
-    let outputSettings: [String: Any] = [
+    let settings: [String: Any] = [
       AVFormatIDKey: kAudioFormatMPEG4AAC,
       AVNumberOfChannelsKey: 1,
       AVSampleRateKey: sampleRate,
       AVEncoderBitRateKey: bitrate,
     ]
-    input = AVAssetWriterInput(mediaType: .audio, outputSettings: outputSettings)
-    input.expectsMediaDataInRealTime = true
-    writer.add(input)
+    do {
+      // commonFormat passed here tells AVAudioFile what format the buffers
+      // we'll write are in (Float32 PCM); the on-disk format is AAC per
+      // settings.
+      self.file = try AVAudioFile(
+        forWriting: outputURL,
+        settings: settings,
+        commonFormat: .pcmFormatFloat32,
+        interleaved: false
+      )
+      self.started = true
+    } catch {
+      StatusEvent.emit(["event": "diag", "stage": "avaudiofile_create_err",
+                        "err": String(describing: error)])
+      throw error
+    }
   }
 
   func append(_ buffer: AVAudioPCMBuffer, at hostTime: UInt64) {
-    let pts = CMTime(value: CMTimeValue(hostTime), timescale: 1_000_000_000)
-    if !started {
-      firstSampleTime = pts
-      writer.startWriting()
-      writer.startSession(atSourceTime: .zero)
-      started = true
+    queue.sync {
+      guard let file = file else { return }
+      do {
+        try file.write(from: buffer)
+      } catch {
+        StatusEvent.emit(["event": "diag", "stage": "avaudiofile_write_err",
+                          "err": String(describing: error)])
+      }
     }
-    let relativeTime = CMTimeSubtract(pts, firstSampleTime)
-    guard let sampleBuffer = buffer.toCMSampleBuffer(presentationTime: relativeTime) else { return }
-    while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.001) }
-    input.append(sampleBuffer)
   }
 
   func finalize() async {
-    // markAsFinished()/finishWriting() crash if startWriting() was never
-    // called (i.e. no buffers ever appended). Skip cleanly in that case.
-    guard started else { return }
-    input.markAsFinished()
-    await writer.finishWriting()
+    queue.sync {
+      // Releasing the file flushes the AAC encoder and finalizes the M4A.
+      file = nil
+    }
   }
 
   var bytesWritten: Int64 {
-    // Best-effort byte count for the stopped event — ask the file system.
-    (try? FileManager.default.attributesOfItem(atPath: writer.outputURL.path)[.size] as? NSNumber)?.int64Value ?? 0
-  }
-}
-
-private extension AVAudioPCMBuffer {
-  // Pack a PCM buffer into a CMSampleBuffer at a given timestamp. AVAssetWriter
-  // wants CMSampleBuffer, AVAudioEngine gives us AVAudioPCMBuffer — bridge.
-  func toCMSampleBuffer(presentationTime: CMTime) -> CMSampleBuffer? {
-    let asbd = format.streamDescription.pointee
-    var formatDescription: CMAudioFormatDescription?
-    var err = CMAudioFormatDescriptionCreate(
-      allocator: kCFAllocatorDefault,
-      asbd: format.streamDescription,
-      layoutSize: 0, layout: nil,
-      magicCookieSize: 0, magicCookie: nil,
-      extensions: nil,
-      formatDescriptionOut: &formatDescription
-    )
-    guard err == noErr, let fd = formatDescription else { return nil }
-
-    var timing = CMSampleTimingInfo(
-      duration: CMTime(value: CMTimeValue(frameLength), timescale: CMTimeScale(asbd.mSampleRate)),
-      presentationTimeStamp: presentationTime,
-      decodeTimeStamp: .invalid
-    )
-    var sampleBuffer: CMSampleBuffer?
-    err = CMSampleBufferCreate(
-      allocator: kCFAllocatorDefault,
-      dataBuffer: nil, dataReady: false, makeDataReadyCallback: nil, refcon: nil,
-      formatDescription: fd,
-      sampleCount: CMItemCount(frameLength),
-      sampleTimingEntryCount: 1, sampleTimingArray: &timing,
-      sampleSizeEntryCount: 0, sampleSizeArray: nil,
-      sampleBufferOut: &sampleBuffer
-    )
-    guard err == noErr, let sb = sampleBuffer else { return nil }
-    err = CMSampleBufferSetDataBufferFromAudioBufferList(
-      sb, blockBufferAllocator: kCFAllocatorDefault,
-      blockBufferMemoryAllocator: kCFAllocatorDefault, flags: 0,
-      bufferList: audioBufferList
-    )
-    guard err == noErr else { return nil }
-    return sb
+    (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? NSNumber)?.int64Value ?? 0
   }
 }

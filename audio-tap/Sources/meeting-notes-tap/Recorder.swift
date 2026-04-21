@@ -119,6 +119,7 @@ final class Recorder {
     description.name = "MeetingNotes Tap \(getpid())"
     description.isPrivate = true
     description.isExclusive = false
+    description.muteBehavior = .unmuted
 
     var tapID: AUAudioObjectID = 0
     let s1 = AudioHardwareCreateProcessTap(description, &tapID)
@@ -128,20 +129,37 @@ final class Recorder {
     }
     self.tapObjectID = tapID
 
-    // Wrap the tap in an aggregate device so the IOProc can read it.
-    let aggregateUID = "meeting-notes-tap-\(getpid())-\(UUID().uuidString)"
+    // Aggregate device must include the system default output as the main
+    // sub-device — otherwise `kAudioDevicePropertyDeviceIsRunning` stays 0
+    // and the IOProc never fires. The tap is an *additional* stream on top.
+    // (Pattern matches AudioCap's ProcessTap.swift.)
+    let outputUID: String
+    do {
+      let outputID = try Self.readDefaultSystemOutputDeviceID()
+      outputUID = try Self.readDeviceUID(outputID)
+    } catch {
+      throw NSError(domain: "meeting-notes-tap", code: -11,
+                    userInfo: [NSLocalizedDescriptionKey: "could not read default output device: \(error)"])
+    }
+
+    let aggregateUID = UUID().uuidString
     let tapUIDString = description.uuid.uuidString
     let aggDescription: [String: Any] = [
+      kAudioAggregateDeviceNameKey as String: "MeetingNotes Tap \(getpid())",
       kAudioAggregateDeviceUIDKey as String: aggregateUID,
-      kAudioAggregateDeviceNameKey as String: "MeetingNotes Tap Aggregate",
+      kAudioAggregateDeviceMainSubDeviceKey as String: outputUID,
       kAudioAggregateDeviceIsPrivateKey as String: true,
+      kAudioAggregateDeviceIsStackedKey as String: false,
+      kAudioAggregateDeviceTapAutoStartKey as String: true,
+      kAudioAggregateDeviceSubDeviceListKey as String: [
+        [ kAudioSubDeviceUIDKey as String: outputUID ],
+      ],
       kAudioAggregateDeviceTapListKey as String: [
         [
+          kAudioSubTapDriftCompensationKey as String: true,
           kAudioSubTapUIDKey as String: tapUIDString,
-          kAudioSubTapDriftCompensationKey as String: false,
         ],
       ],
-      kAudioAggregateDeviceTapAutoStartKey as String: true,
     ]
     var aggID: AudioObjectID = 0
     let s2 = AudioHardwareCreateAggregateDevice(aggDescription as CFDictionary, &aggID)
@@ -152,36 +170,66 @@ final class Recorder {
     self.aggregateID = aggID
   }
 
-  /// Look up the kAudioProcess AudioObjectID corresponding to a unix PID.
-  private static func audioProcessObjectID(forPID pid: pid_t) -> AudioObjectID? {
-    var address = AudioObjectPropertyAddress(
-      mSelector: kAudioHardwarePropertyProcessObjectList,
+  // MARK: - CoreAudio helpers (adapted from AudioCap's CoreAudioUtils.swift)
+
+  /// Read `kAudioHardwarePropertyDefaultSystemOutputDevice` from the system object.
+  private static func readDefaultSystemOutputDeviceID() throws -> AudioObjectID {
+    var addr = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
       mScope: kAudioObjectPropertyScopeGlobal,
       mElement: kAudioObjectPropertyElementMain
     )
-    var size: UInt32 = 0
-    var status = AudioObjectGetPropertyDataSize(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+    var devID: AudioObjectID = 0
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    let st = AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &devID
     )
-    guard status == noErr, size > 0 else { return nil }
-    let count = Int(size) / MemoryLayout<AudioObjectID>.size
-    var ids = [AudioObjectID](repeating: 0, count: count)
-    status = AudioObjectGetPropertyData(
-      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids
-    )
-    guard status == noErr else { return nil }
-    for id in ids {
-      var pidAddress = AudioObjectPropertyAddress(
-        mSelector: kAudioProcessPropertyPID,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-      )
-      var p: pid_t = 0
-      var sz = UInt32(MemoryLayout<pid_t>.size)
-      let st = AudioObjectGetPropertyData(id, &pidAddress, 0, nil, &sz, &p)
-      if st == noErr, p == pid { return id }
+    guard st == noErr, devID != 0 else {
+      throw NSError(domain: "meeting-notes-tap", code: Int(st),
+                    userInfo: [NSLocalizedDescriptionKey: "default output device read failed: \(st)"])
     }
-    return nil
+    return devID
+  }
+
+  /// Read `kAudioDevicePropertyDeviceUID` for the given device object ID.
+  private static func readDeviceUID(_ devID: AudioObjectID) throws -> String {
+    var addr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyDeviceUID,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    var uid: CFString = "" as CFString
+    var size = UInt32(MemoryLayout<CFString?>.size)
+    let st = withUnsafeMutablePointer(to: &uid) { ptr in
+      AudioObjectGetPropertyData(devID, &addr, 0, nil, &size, ptr)
+    }
+    guard st == noErr else {
+      throw NSError(domain: "meeting-notes-tap", code: Int(st),
+                    userInfo: [NSLocalizedDescriptionKey: "device UID read failed: \(st)"])
+    }
+    return uid as String
+  }
+
+  /// Look up the kAudioProcess AudioObjectID corresponding to a unix PID via
+  /// `kAudioHardwarePropertyTranslatePIDToProcessObject` (AudioCap pattern).
+  private static func audioProcessObjectID(forPID pid: pid_t) -> AudioObjectID? {
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    var inPID: pid_t = pid
+    var objectID: AudioObjectID = 0
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    let qualSize = UInt32(MemoryLayout<pid_t>.size)
+    let st = withUnsafeMutablePointer(to: &inPID) { qPtr -> OSStatus in
+      AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject),
+        &address, qualSize, qPtr, &size, &objectID
+      )
+    }
+    guard st == noErr, objectID != 0 else { return nil }
+    return objectID
   }
 
   private func detachProcessTap() {
@@ -202,29 +250,36 @@ final class Recorder {
   // IOProc on the aggregate device directly — that's the path the WWDC
   // sample uses too.
   private func startEngine() throws {
-    // Read the tap's actual format off the aggregate device input stream.
+    // Read the tap's actual format from the tap object itself
+    // (kAudioTapPropertyFormat) — this is the authoritative format the
+    // captured audio is delivered in.
     var streamFormat = AudioStreamBasicDescription()
     var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-    var addr = AudioObjectPropertyAddress(
-      mSelector: kAudioDevicePropertyStreamFormat,
-      mScope: kAudioDevicePropertyScopeInput,
+    var tapFmtAddr = AudioObjectPropertyAddress(
+      mSelector: kAudioTapPropertyFormat,
+      mScope: kAudioObjectPropertyScopeGlobal,
       mElement: kAudioObjectPropertyElementMain
     )
-    let sf = AudioObjectGetPropertyData(aggregateID, &addr, 0, nil, &size, &streamFormat)
+    let sf = AudioObjectGetPropertyData(tapObjectID, &tapFmtAddr, 0, nil, &size, &streamFormat)
     guard sf == noErr, streamFormat.mSampleRate > 0 else {
       throw NSError(domain: "meeting-notes-tap", code: Int(sf),
-                    userInfo: [NSLocalizedDescriptionKey: "read aggregate stream format failed: \(sf)"])
+                    userInfo: [NSLocalizedDescriptionKey: "read tap stream format failed: \(sf)"])
     }
     self.tapFormat = streamFormat
+    StatusEvent.emit([
+      "event": "diag",
+      "stage": "tap_format",
+      "sr": streamFormat.mSampleRate,
+      "ch": Int(streamFormat.mChannelsPerFrame),
+      "bits": Int(streamFormat.mBitsPerChannel),
+      "bytes_per_frame": Int(streamFormat.mBytesPerFrame),
+      "fmt_flags": Int(streamFormat.mFormatFlags),
+    ])
 
-    // Build a non-interleaved Float32 source format that matches the tap
-    // (Process Tap streams are deinterleaved Float32 by design).
-    guard let src = AVAudioFormat(
-      commonFormat: .pcmFormatFloat32,
-      sampleRate: streamFormat.mSampleRate,
-      channels: AVAudioChannelCount(max(streamFormat.mChannelsPerFrame, 1)),
-      interleaved: false
-    ) else {
+    // Build the source AVAudioFormat directly from the stream description so
+    // interleaved-ness matches what CoreAudio actually delivers (the IOProc
+    // ABL with mNumberBuffers==1 + multi-channel is interleaved).
+    guard let src = AVAudioFormat(streamDescription: &streamFormat) else {
       throw NSError(domain: "meeting-notes-tap", code: -10,
                     userInfo: [NSLocalizedDescriptionKey: "could not build source AVAudioFormat"])
     }
@@ -350,12 +405,41 @@ final class Recorder {
     let firstBuf = abl[0]
     let bytesPerChannel = MemoryLayout<Float>.size
     let frames = Int(firstBuf.mDataByteSize) / max(Int(firstBuf.mNumberChannels), 1) / bytesPerChannel
+    if ioProcFireCount <= 3 || ioProcFireCount % 200 == 0 {
+      // Compute per-buffer peak so we can see which stream has signal.
+      var peaks: [Double] = []
+      for b in 0..<abl.count {
+        let buf = abl[b]
+        let n = Int(buf.mDataByteSize) / MemoryLayout<Float>.size
+        var pk: Float = 0
+        if let data = buf.mData {
+          let p = data.bindMemory(to: Float.self, capacity: n)
+          for i in 0..<n { pk = max(pk, abs(p[i])) }
+        }
+        peaks.append(Double(pk))
+      }
+      StatusEvent.emit([
+        "event": "diag",
+        "stage": "ioproc",
+        "fire": NSNumber(value: ioProcFireCount),
+        "abl_count": Int(abl.count),
+        "buf0_bytes": Int(firstBuf.mDataByteSize),
+        "buf0_chans": Int(firstBuf.mNumberChannels),
+        "frames": frames,
+        "buf_peaks": peaks,
+      ])
+    }
     guard frames > 0 else { return }
 
     // Wrap ABL in an AVAudioPCMBuffer for AVAudioConverter.
     guard let inputBuf = AVAudioPCMBuffer(pcmFormat: src,
                                           bufferListNoCopy: inputData,
-                                          deallocator: nil) else { return }
+                                          deallocator: nil) else {
+      if ioProcFireCount <= 3 {
+        StatusEvent.emit(["event": "diag", "stage": "pcmbuf_nil"])
+      }
+      return
+    }
 
     // Output mono buffer sized for any sample-rate ratio. Input/output use
     // the same sample rate (48k → 48k); allocate frames + slack.
@@ -374,7 +458,17 @@ final class Recorder {
       status.pointee = .haveData
       return inputBuf
     }
-    guard convError == nil else { return }
+    guard convError == nil else {
+      if ioProcFireCount <= 3 {
+        StatusEvent.emit(["event": "diag", "stage": "conv_err",
+                          "err": String(describing: convError)])
+      }
+      return
+    }
+    if ioProcFireCount <= 3 {
+      StatusEvent.emit(["event": "diag", "stage": "post_conv",
+                        "out_frames": Int(outBuf.frameLength)])
+    }
 
     // Task 9 mixes mic samples in here.
     mixPendingMicIfAvailable(into: outBuf)
