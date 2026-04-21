@@ -224,7 +224,49 @@ final class Recorder {
     }
     aggregateRunning = true
 
-    // Mic mixing wired in Task 9.
+    if opts.captureMic { try startMicEngine() }
+  }
+
+  /// Run a separate AVAudioEngine for the mic; convert to mono 48k Float32
+  /// and append into a shared queue that handleIOProc drains and mixes 50/50
+  /// with the tap stream. Two engines lets each manage its own clock.
+  private func startMicEngine() throws {
+    let micEngine = AVAudioEngine()
+    self.micEngine = micEngine
+    let micInput = micEngine.inputNode
+    let micFormat = micInput.outputFormat(forBus: 0)
+    guard micFormat.sampleRate > 0 else {
+      // No mic available; carry on without mic.
+      self.micEngine = nil
+      return
+    }
+    let micConverter = AVAudioConverter(from: micFormat, to: writeFormat)
+    micInput.installTap(onBus: 0, bufferSize: 4096, format: micFormat) { [weak self] buffer, _ in
+      guard let self = self, let conv = micConverter else { return }
+      let outFrames = AVAudioFrameCount(Double(buffer.frameLength) * (self.writeFormat.sampleRate / micFormat.sampleRate)) + 1024
+      guard let outBuf = AVAudioPCMBuffer(pcmFormat: self.writeFormat, frameCapacity: outFrames) else { return }
+      var err: NSError?
+      var supplied = false
+      let _ = conv.convert(to: outBuf, error: &err) { _, status in
+        if supplied { status.pointee = .noDataNow; return nil }
+        supplied = true
+        status.pointee = .haveData
+        return buffer
+      }
+      if err != nil { return }
+      guard let chan = outBuf.floatChannelData?[0] else { return }
+      let n = Int(outBuf.frameLength)
+      var arr = [Float](repeating: 0, count: n)
+      for i in 0..<n { arr[i] = chan[i] }
+      self.micLock.lock()
+      // Bound the queue so a stalled writer can't grow it unboundedly.
+      if self.micPendingFrames.count > 48_000 * 2 {
+        self.micPendingFrames.removeFirst(self.micPendingFrames.count - 48_000)
+      }
+      self.micPendingFrames.append(contentsOf: arr)
+      self.micLock.unlock()
+    }
+    try micEngine.start()
   }
 
   fileprivate func handleIOProc(inputData: UnsafePointer<AudioBufferList>,
