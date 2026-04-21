@@ -23,16 +23,23 @@ export function App(): JSX.Element {
     })();
   }, []);
 
-  if (!permsOk) return <PermissionsModal onAllGranted={() => setPermsOk(true)} />;
+  const body = !permsOk ? (
+    <PermissionsModal onAllGranted={() => setPermsOk(true)} />
+  ) : view.kind === 'library' ? (
+    <LibraryView
+      onOpen={(id) => setView({ kind: 'detail', id })}
+      onSettings={() => setView({ kind: 'settings' })}
+    />
+  ) : view.kind === 'detail' ? (
+    <MeetingDetailView id={view.id} onBack={() => setView({ kind: 'library' })} />
+  ) : (
+    <SettingsView onBack={() => setView({ kind: 'library' })} />
+  );
 
-  if (view.kind === 'library')
-    return (
-      <LibraryView
-        onOpen={(id) => setView({ kind: 'detail', id })}
-        onSettings={() => setView({ kind: 'settings' })}
-      />
-    );
-  if (view.kind === 'detail')
-    return <MeetingDetailView id={view.id} onBack={() => setView({ kind: 'library' })} />;
-  return <SettingsView onBack={() => setView({ kind: 'library' })} />;
+  return (
+    <>
+      <div className="window-drag-strip" />
+      {body}
+    </>
+  );
 }
