@@ -6,7 +6,11 @@ switch cmd {
 case .record(let opts):
   StatusEvent.emit(["event": "started", "stub": true, "out": opts.outputPath])
 case .probePermissions:
-  StatusEvent.emit(["event": "permissions", "mic": "unknown", "audio_capture": "unknown"])
+  StatusEvent.emit([
+    "event": "permissions",
+    "mic": Permissions.microphone().rawValue,
+    "audio_capture": Permissions.audioCapture().rawValue,
+  ])
 case .listAudioProcesses:
   let procs = ProcessList.enumerate().map { p -> [String: Any] in
     var out: [String: Any] = ["pid": Int(p.pid)]
