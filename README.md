@@ -1,22 +1,30 @@
 # MeetingNotes
 
-Local-first meeting notes for macOS. Drop a recording from Audio Hijack into a watched folder, pick which ones to process, and MeetingNotes transcribes, diarizes, identifies speakers, summarises, and extracts action items — all on your machine. No cloud, no uploads, no API keys at inference time.
+Local-first meeting notes for macOS. Hit Record, pick which app's audio you want to capture (Zoom, Teams, FaceTime, etc.) plus your mic, and MeetingNotes records, transcribes, diarizes, identifies speakers, summarises, and extracts action items — all on your machine. No cloud, no uploads, no API keys at inference time, no third-party recorder to install.
 
 ## Why
 
-Meeting-transcription tools either ship your audio to a SaaS, lock you into their recorder, or only do half the job. MeetingNotes runs the whole pipeline locally:
+Most meeting-transcription tools either ship your audio to a SaaS, lock you into their recorder, or only do half the job. MeetingNotes runs the whole pipeline locally:
 
+- **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic, mixed mono, into M4A
 - **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon)
 - **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar
 - **Speaker identification** by matching voice embeddings against a roster you build over time
 - **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai)
-- **Export** to Apple Reminders or Markdown
+- **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
 
-You bring the recorder ([Audio Hijack](https://rogueamoeba.com/audiohijack/), paid, recommended) and the models. MeetingNotes orchestrates everything else.
+You bring the models. MeetingNotes orchestrates everything else.
 
 ## Status
 
-Alpha. Tested on macOS 14+ / Apple Silicon. 93 tests green. The pipeline is end-to-end functional, the UI is workable; rough edges in error-state polish and multi-meeting concurrency.
+Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built-in recording → transcribe → diarize → speaker-ID gate → summarise → extract → export. Rough edges in error-state polish and "All system audio" capture path.
+
+## Requirements
+
+- **macOS 14.2 (Sonoma) or later** on Apple Silicon
+- ~16 GB RAM minimum (whisper + a 9B LLM)
+- [LM Studio](https://lmstudio.ai) installed with a chat model loaded (default: `qwen/qwen3.5-9b`)
+- HuggingFace account with three pyannote model licences accepted (one-time, see below)
 
 ## Quick start
 
@@ -29,38 +37,34 @@ brew install whisper-cpp ffmpeg
 # Single interactive setup: deps, sidecar venv, model, HF token, .app build.
 ./scripts/setup.sh
 
-# One command to run everything.
+# One command to launch the stack + the .app.
 ./scripts/start.sh
 ```
 
-`start.sh` launches the STT server, auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development.
+`start.sh` launches whisper-server, auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development.
 
-## Catalog, then process
+**First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security.
 
-New in this build: MeetingNotes no longer auto-processes every MP3 it finds. The watcher catalogs files as **pending** and leaves them for you to trigger.
+## Recording a meeting
 
-```
-● 4 pending   ● 1 processing   ● 27 done          Process all pending →
-```
+1. Click **⏺ Record** in the top right.
+2. Source picker shows every app currently producing audio. Recognised meeting apps (Zoom, Teams, FaceTime, Slack, Discord, WhatsApp) appear first with a `MEETING` badge. Pick one — or `All system audio` as a catch-all.
+3. A live recording row appears at the top of the library with elapsed time, VU meter, and a Stop button.
+4. Click **■ Stop** when the meeting ends. The recording shows up in your Inbox within a second.
+5. Click **▶ Process** to run it through the pipeline.
 
-Each card shows its state with a color-coded inset:
+Recordings land at `~/Music/MeetingNotes/recording-<timestamp>-<id>.m4a`. AAC mono at 128 kbps — about 60 MB for an hour-long meeting.
 
-| State | Treatment | Action |
-| --- | --- | --- |
-| pending | amber left bar + `▶ Process` button | click to run one, or checkbox for bulk |
-| processing | indigo shimmer + animated stage chip | — |
-| done | muted, action-item count badge | click to open |
-| failed | coral left bar + `↻ Retry` button | click to re-run from transcribe |
-
-Hover any pending card to reveal a checkbox; select several and a sticky action bar rises from the bottom: `3 selected    [Cancel]  [▶ Process 3 meetings]`.
-
-## How it works
+## How the pipeline works
 
 ```
-Audio Hijack ──MP3──▶ ~/Music/Audio Hijack
+⏺ Record button ──▶ Swift helper (Process Tap + AVAudioEngine)
+                              │
+                              ▼ writes M4A
+                    ~/Music/MeetingNotes/
                               │
                               ▼ chokidar watcher
-                         status='pending'
+                       Inbox row (pending)
                               │
                               ▼ user clicks Process
                        ┌──────────────┐
@@ -68,20 +72,37 @@ Audio Hijack ──MP3──▶ ~/Music/Audio Hijack
                        │              │
                        │  transcribe ─┼──▶ whisper-server (8080)
                        │  diarize ────┼──▶ pyannote sidecar (8765)
-                       │  merge       │
-                       │  identify ───┼──▶ speaker roster (cosine)
+                       │  merge       │       (M4A → temp WAV via ffmpeg
+                       │  identify ───┼──▶     before either stage)
+                       │  ▼           │
+                       │  awaiting_   │   ◀── pause: name unknown voices
+                       │  speaker_id  │       (or check Skip for this meeting)
+                       │  ▼           │
+                       │  re-merge    │   ◀── transcript.md gets real names
                        │  summarise ──┼──▶ LM Studio (1234)
                        │  extract ────┼──▶ LM Studio (1234)
                        └──────┬───────┘
                               ▼
                   ~/Documents/MeetingNotes/meetings/<slug>/
-                    ├── audio.mp3 (symlink)
-                    ├── transcript.md
+                    ├── audio.m4a (symlink)
+                    ├── transcript.raw.json
+                    ├── diarization.json
+                    ├── transcript.md      (with real speaker names after gate)
                     ├── summary.md
-                    └── meeting.json
+                    └── action-items.json
 ```
 
-Transcribing and diarizing run in parallel; the rest are sequential. Each meeting is one row in SQLite at `~/Documents/MeetingNotes/db.sqlite` and one folder under `meetings/`. Crash-safe: if the app dies mid-pipeline, recovery resumes `status='processing'` meetings on next launch; `status='failed'` waits for an explicit user retry.
+`transcribe` and `diarize` run in parallel; the rest are sequential. Each meeting is one row in SQLite at `~/Documents/MeetingNotes/db.sqlite` and one folder under `meetings/`. Crash-safe: if the app dies mid-pipeline, recovery resumes `status='processing'` meetings on next launch; `status='failed'` waits for explicit retry.
+
+### The speaker-ID gate
+
+After diarize + identify, the pipeline pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip. In the meeting detail view you'll see each unidentified voice with a **▶ Play sample** button (8-second clip of just that speaker) and a dropdown to either link to an existing roster entry or create a new one. Click **Continue** to proceed to summarize/extract — the transcript gets re-merged with real names baked in.
+
+Don't care for this meeting? Toggle **Skip speaker ID** at the top of the detail view (or before recording finishes, on the row itself). Pipeline runs end-to-end without pausing.
+
+### Summary editor
+
+The Summary tab has three modes — **Preview** (rendered markdown), **Split** (textarea + live preview), **Edit** (full-width textarea). LLM hallucination, formatting tweaks, redactions — fix in place and Save. Edits write to `summary.md` on disk. Re-running summarize from the rerun buttons will overwrite, so don't re-summarize work you've hand-edited.
 
 ## Setup script
 
@@ -120,21 +141,21 @@ App logs: `~/Library/Logs/MeetingNotes/app.log`.
 
 ### `doctor.sh`
 
-Checks binaries (node, python3, ffmpeg, whisper-server), filesystem (library dirs, Audio Hijack folder), sidecar (venv, HF token cache, HF model cache), services (whisper-server reachable, LM Studio reachable + loaded models, diarization sidecar), and native modules (better-sqlite3 loadability under Node).
+Checks binaries (node, python3, ffmpeg, whisper-server), filesystem (library dirs, recordings folder), sidecar (venv, HF token cache, HF model cache), services (whisper-server reachable, LM Studio reachable + loaded models, diarization sidecar), and native modules (better-sqlite3 loadability under Node).
 
 ## Configuration
 
-Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings`). Edit in the app's Settings view, or via `setup.sh`, or directly:
+Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings`). Edit in the app's Settings view, or via `setup.sh`.
 
 | Key | Default | What it does |
 | --- | --- | --- |
 | `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
 | `sttModel` | `whisper-1` | informational; actual model is whichever whisper-server started with |
-| `llmModel` | `''` | model id for summarization/extraction (must be loaded in LM Studio) |
-| `audioHijackSessionName` | `Meeting` | the AH session the app starts/stops via AppleScript |
-| `libraryPath` | `~/Documents/MeetingNotes` | where meetings, db, and embeddings live |
-| `audioWatchPath` | `~/Music/Audio Hijack` | folder watched for MP3 drops |
+| `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction (must be loaded in LM Studio) |
+| `libraryPath` | `~/Documents/MeetingNotes` | meetings, db, embeddings |
+| `audioWatchPath` | `~/Music/MeetingNotes` | folder watched for new recordings (also watches `~/Music/Audio Hijack` for one release as a legacy fallback) |
+| `recordingBitrateKbps` | `128` | AAC bitrate for new recordings (96 / 128 / 192) |
 | `sttLanguage` | `en` | passed to Whisper |
 | `exporterApple` | `true` | enable Apple Reminders exporter |
 | `exporterMarkdown` | `true` | enable Markdown exporter |
@@ -143,33 +164,35 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 pyannote's diarization models are *gated* on Hugging Face. One-time setup:
 
-1. Accept the license on all three of:
+1. Accept the licence on all three of:
    - https://huggingface.co/pyannote/speaker-diarization-3.1
    - https://huggingface.co/pyannote/segmentation-3.0
    - https://huggingface.co/pyannote/speaker-diarization-community-1 *(pyannote 3.4+ pulls the PLDA component from this one at runtime)*
 2. Create a **fine-grained** token at https://huggingface.co/settings/tokens with scope "Read access to contents of all public gated repos you can access".
 3. Paste it when `setup.sh` prompts. It's saved to `~/.cache/huggingface/token` (chmod 600).
 
-After that, the model is cached at `~/.cache/huggingface/hub/` and inference needs neither the token nor the network.
+After that, the model is cached at `~/.cache/huggingface/hub/` and inference needs neither the token nor the network. The diarization supervisor reads the token from the cache file at launch, so `open MeetingNotes.app` works without going through `start.sh`.
 
 ## Packaging
 
-`npm run dist` (or `setup.sh`'s last step) builds two artifacts:
+`npm run dist` builds three artifacts:
 
-1. **Sidecar PyInstaller bundle** — embeds Python + pyannote + torch into `sidecar/dist/meeting-notes-diarize/`. End users don't need Python installed. The supervisor prefers the source-tree `.venv` when present (fast dev iteration), otherwise spawns the bundled binary.
-2. **`.app` via electron-builder** — ships the sidecar bundle as an `extraResource`, rebuilds `better-sqlite3` against Electron's ABI, produces `release/mac-arm64/MeetingNotes.app` plus a `.dmg` and `.zip`.
+1. **Swift helper** — `audio-tap/build/meeting-notes-tap`, codesigned with `com.apple.security.device.audio-input` entitlement.
+2. **Sidecar PyInstaller bundle** — embeds Python + pyannote + torch into `sidecar/dist/meeting-notes-diarize/`. End users don't need Python installed. The supervisor prefers the source-tree `.venv` when present (fast dev iteration), otherwise spawns the bundled binary.
+3. **`.app` via electron-builder** — ships the helper at `Contents/Resources/bin/meeting-notes-tap` and the sidecar bundle as `extraResources`, rebuilds `better-sqlite3` against Electron's ABI, produces `release/mac-arm64/MeetingNotes.app` plus `.dmg` and `.zip`.
 
 ```bash
-npm run sidecar:bundle              # just the Python bundle (~10 min, 1.5 GB)
-npm run dist                        # bundle + .app + DMG + ZIP
-npx electron-builder --mac --dir    # faster rebuild for dev (.app only, no DMG)
+npm run build:audio-tap              # just the Swift helper (~2 sec)
+npm run sidecar:bundle               # just the Python bundle (~10 min, 1.5 GB)
+npm run dist                         # everything + .app + DMG + ZIP
+npx electron-builder --mac --dir     # faster rebuild for dev (.app only, no DMG)
 ```
 
 ## Development
 
 ```bash
 npm run dev                # vite + electron with HMR
-npm test                   # vitest, 93 tests
+npm test                   # vitest
 npm run lint
 npm run build              # tsc main + tsc preload (CJS) + vite
 ```
@@ -179,25 +202,31 @@ npm run build              # tsc main + tsc preload (CJS) + vite
 ### Source layout
 
 ```
+audio-tap/            Swift CLI helper for CoreAudio Process Tap recording
+  Sources/meeting-notes-tap/
+  scripts/build.sh    swiftc + codesign with entitlements
+  Info.plist          NSMicrophoneUsageDescription + NSAudioCaptureUsageDescription
 electron/main/        main process: pipeline, storage, IPC, watcher, services
+  recording/          RecordingManager, AppEnumerator, orphan-recovery
+  permissions/        mic state probe via systemPreferences API
 electron/preload/     preload bridge (CJS, IPC surface with parity test)
 electron/renderer/    React UI
+  components/         RecordButton, SourcePicker, LiveRecordingRow, VuMeter,
+                      PermissionsModal, InboxRow, LibraryRow
 sidecar/              Python (pyannote) diarization sidecar, FastAPI on 8765
-  serve.py            PyInstaller entrypoint
-  meeting_notes_diarize/
-  scripts/
 scripts/              setup.sh · start.sh · whisper-server.sh · doctor.sh
-docs/                 manual smoke-test checklist and planning docs
+docs/                 manual smoke-test checklist + design specs + plans
 ```
 
 ## Security
 
 - Electron sandbox locked down: `contextIsolation: true`, `nodeIntegration: false`. Preload compiled to CJS; exposes a typed API surface only.
 - All IPC request payloads are zod-validated (stages, statuses, embedding length/finiteness, settings key whitelist).
-- AppleScript strings escaped for both `\` and `"`; AH session name goes through a multi-line `tell` block, not one-liner interpolation.
+- The Swift helper is a child of MeetingNotes.app, codesigned with audio-input entitlement; TCC attribution makes the user's grant scoped to MeetingNotes specifically.
 - All SQLite calls use parameter binding via `better-sqlite3`. FKs + WAL enabled.
 - HF token saved to `~/.cache/huggingface/token` with `chmod 600`.
 - Diarization sidecar supervisor probes `/health` before spawning; detects `EADDRINUSE`; refuses to kill an externally-owned instance at shutdown.
+- The recording helper auto-stops on parent-process death (kqueue watch on PPID), so an Electron crash can't leave an orphan recorder running indefinitely.
 
 ## Licence
 
@@ -208,4 +237,4 @@ MIT — see [LICENSE](LICENSE).
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — fast local Whisper inference
 - [pyannote-audio](https://github.com/pyannote/pyannote-audio) — speaker diarization
 - [LM Studio](https://lmstudio.ai) — local LLM runtime with an OpenAI-compatible API
-- [Audio Hijack](https://rogueamoeba.com/audiohijack/) — the recorder we orchestrate around
+- [AudioCap by @insidegui](https://github.com/insidegui/AudioCap) — Process Tap reference implementation that unblocked our audio capture work
