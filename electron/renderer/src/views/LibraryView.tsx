@@ -21,6 +21,7 @@ import { useMeetingsStore } from '../store/meetings';
 import { InboxRow } from '../components/InboxRow';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
+import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { api } from '../ipc/client';
 
 interface Props {
@@ -35,6 +36,9 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
+  const [liveRecording, setLiveRecording] = useState<
+    { sessionId: string; label: string; startedAt: string } | null
+  >(null);
 
   useEffect(() => {
     void refresh();
@@ -135,7 +139,9 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
         <div className="flex-1" />
-        <RecordButton sessionName="Meeting" />
+        <RecordButton onStarted={({ sessionId, label }) => setLiveRecording({
+          sessionId, label, startedAt: new Date().toISOString(),
+        })} />
         <button
           onClick={onSettings}
           aria-label="Settings"
@@ -144,6 +150,17 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           ⚙
         </button>
       </header>
+
+      {liveRecording && (
+        <div className="mb-6">
+          <LiveRecordingRow
+            sessionId={liveRecording.sessionId}
+            label={liveRecording.label}
+            startedAt={liveRecording.startedAt}
+            onStopped={() => { setLiveRecording(null); void refresh(); }}
+          />
+        </div>
+      )}
 
       {/* ── INBOX ───────────────────────────────────────────────────────── */}
       {inbox.length > 0 && (
