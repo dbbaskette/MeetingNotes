@@ -67,4 +67,6 @@ export const IPC_CHANNELS = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   modelsList: 'models:list',
+  meetingDetectedEvent: 'meeting-detector:detected',
+  meetingDetectorDismiss: 'meeting-detector:dismiss',
 } as const;

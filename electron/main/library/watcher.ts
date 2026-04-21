@@ -14,6 +14,16 @@ export interface WatcherOptions {
 
 const SUPPORTED_EXT = /\.(mp3|m4a)$/i;
 
+// The dual-stem capture path (issue #13) writes sidecar files
+// `<base>.voice.m4a` and `<base>.system.m4a` alongside the mixed `.m4a`.
+// Skip them — only the mixed file should become a meeting. The stems are
+// artifacts consumed by later pipeline stages (or left on disk for the
+// future stem-aware transcriber).
+const STEM_SUFFIX = /\.(voice|system)\.(mp3|m4a)$/i;
+function isStemArtifact(name: string): boolean {
+  return STEM_SUFFIX.test(name);
+}
+
 function expandHome(p: string): string {
   if (p === '~') return os.homedir();
   if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
@@ -57,7 +67,7 @@ export class LibraryWatcher {
     // chokidar only for *new* arrivals.
     try {
       for (const name of fs.readdirSync(watchPath)) {
-        if (!SUPPORTED_EXT.test(name)) continue;
+        if (!SUPPORTED_EXT.test(name) || isStemArtifact(name)) continue;
         const full = path.join(watchPath, name);
         try {
           const st = fs.statSync(full);
@@ -79,7 +89,7 @@ export class LibraryWatcher {
       watcher.once('ready', () => resolve());
     });
     watcher.on('add', (p) => {
-      if (!SUPPORTED_EXT.test(p)) return;
+      if (!SUPPORTED_EXT.test(p) || isStemArtifact(p)) return;
       // Re-root resolved paths so consumers store stable identifiers — without
       // this, a watch path that's a symlink would get its real-path version
       // into the DB and later restarts couldn't dedupe by audio_path.

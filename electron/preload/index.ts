@@ -35,6 +35,8 @@ const IPC_CHANNELS = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   modelsList: 'models:list',
+  meetingDetectedEvent: 'meeting-detector:detected',
+  meetingDetectorDismiss: 'meeting-detector:dismiss',
 } as const;
 
 const api = {
@@ -126,6 +128,22 @@ const api = {
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),
+  },
+  meetingDetector: {
+    // Push channel: main sends { platform, url, title, browserPid, browserLabel }
+    // when a meeting URL is observed. Unsubscribe via the returned callback.
+    onDetected: (cb: (m: {
+      platform: string; url: string; title: string | null;
+      browserPid: number; browserLabel: string;
+    }) => void) => {
+      const wrapped = (_e: unknown, payload: {
+        platform: string; url: string; title: string | null;
+        browserPid: number; browserLabel: string;
+      }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.meetingDetectedEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.meetingDetectedEvent, wrapped);
+    },
+    dismiss: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, url),
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{

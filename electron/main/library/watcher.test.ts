@@ -34,6 +34,19 @@ describe('LibraryWatcher', () => {
     expect(seen.sort()).toEqual([path.join(dir, 'a.mp3'), path.join(dir, 'b.mp3')]);
   });
 
+  it('skips dual-stem artifacts (*.voice.m4a, *.system.m4a)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-stems-')); dirs.push(dir);
+    fs.writeFileSync(path.join(dir, 'rec-001.m4a'), Buffer.alloc(10));        // mixed — should emit
+    fs.writeFileSync(path.join(dir, 'rec-001.voice.m4a'), Buffer.alloc(10));  // stem — skip
+    fs.writeFileSync(path.join(dir, 'rec-001.system.m4a'), Buffer.alloc(10)); // stem — skip
+    const w = new LibraryWatcher({ path: dir, stabilityMs: 50, pollMs: 30 });
+    const seen: string[] = [];
+    w.onStableFile((p) => seen.push(p));
+    await w.start();
+    await w.stop();
+    expect(seen).toEqual([path.join(dir, 'rec-001.m4a')]);
+  });
+
   it('does not double-emit a file across initial scan + add event', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-dedupe-')); dirs.push(dir);
     fs.writeFileSync(path.join(dir, 'pre.mp3'), Buffer.alloc(10));
