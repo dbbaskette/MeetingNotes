@@ -1,5 +1,7 @@
 # MeetingNotes
 
+![MeetingNotes banner](docs/banner.png)
+
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.2%2B-blue)](https://support.apple.com/en-us/HT201260)
 [![Architecture](https://img.shields.io/badge/arch-Apple%20Silicon-black)](https://support.apple.com/en-us/HT211814)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
