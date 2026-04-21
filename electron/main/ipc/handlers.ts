@@ -29,6 +29,7 @@ import {
   averageEmbeddingForLabel,
   type DiarizationSegment,
 } from '../speakers/sample-extractor.js';
+import { deriveStemPaths, hasStems } from '../lib/stem-paths.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 
 export interface IpcServices {
@@ -321,8 +322,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const diarPath = path.join(folder, 'diarization.json');
     if (!fs.existsSync(diarPath)) return null;
+    // When stems exist, diarization ran against the system stem — so the
+    // segment timestamps correspond to the system stem's timeline, not the
+    // mixed file. Extract the clip from the same stem the timestamps came
+    // from, otherwise the wrong audio gets cut.
+    const clipSource = hasStems(m.audioPath) ? deriveStemPaths(m.audioPath).system : m.audioPath;
     const clip = await extractSpeakerSample({
-      audioPath: m.audioPath,
+      audioPath: clipSource,
       diarizationPath: diarPath,
       sampleDir: path.join(folder, 'samples'),
       localLabel,
