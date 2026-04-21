@@ -31,6 +31,31 @@ case .record(let opts):
   sigint.resume()
   signal(SIGINT, SIG_IGN)
 
+  // Parent died → stop and exit cleanly (orphan recovery).
+  ParentWatch.onParentExit {
+    Task {
+      StatusEvent.emit(["event": "parent_exited"])
+      await recorder.stop()
+      exit(0)
+    }
+  }
+
+  // Idle-stop safety net: if no audio for N seconds, stop. Prevents a
+  // hard-killed parent (kernel panic) from leaving us recording silence
+  // forever. Recorder updates lastSignalAt every time it writes a buffer.
+  let idleTimer = DispatchSource.makeTimerSource(queue: .global())
+  idleTimer.schedule(deadline: .now() + 60, repeating: 60)
+  idleTimer.setEventHandler {
+    if Date().timeIntervalSince(recorder.lastSignalSeen()) > Double(opts.idleStopSeconds) {
+      Task {
+        StatusEvent.emit(["event": "idle_stop"])
+        await recorder.stop()
+        exit(0)
+      }
+    }
+  }
+  idleTimer.resume()
+
   dispatchMain()
 
 case .probePermissions:
