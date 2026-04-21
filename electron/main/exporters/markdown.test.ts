@@ -20,8 +20,23 @@ describe('MarkdownExporter', () => {
       meetingFolder: dir,
     });
     const md = fs.readFileSync(outPath, 'utf8');
-    expect(md).toContain('# Q2 — Action Items');
+    expect(md).toContain('# Q2');
+    expect(md).toContain('## Action Items');
     expect(md).toContain('- [ ] do A — Dan — due 2026-04-22');
     expect(md).toContain('- [x] do B');
+  });
+
+  it('includes the summary before the action items when provided', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-md-')); dirs.push(dir);
+    const exp = new MarkdownExporter();
+    const outPath = await exp.export({
+      items: [{ id: '1', text: 'do A', ownerName: null, dueDate: null, status: 'open' }],
+      meetingTitle: 'Q2',
+      meetingFolder: dir,
+      summaryMd: '## Overview\n\nDiscussed roadmap.',
+    });
+    const md = fs.readFileSync(outPath, 'utf8');
+    expect(md.indexOf('## Overview')).toBeLessThan(md.indexOf('## Action Items'));
+    expect(md).toContain('Discussed roadmap.');
   });
 });
