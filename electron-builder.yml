@@ -19,6 +19,12 @@ extraResources:
       - "BUILD_ID"
       - "!**/__pycache__/**"
       - "!**/*.pyc"
+  # Built-in audio capture helper. Bundled inside MeetingNotes.app so that
+  # macOS attributes the audio-capture TCC request to the parent app's stable
+  # signed identity (a bare CLI binary cannot be granted Privacy & Security
+  # access reliably).
+  - from: audio-tap/build/meeting-notes-tap
+    to: bin/meeting-notes-tap
 mac:
   target:
     - dmg
