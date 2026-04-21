@@ -16,6 +16,7 @@ interface Settings {
   exporterMarkdown: boolean;
   recordingBitrateKbps: number;
   autoDetectMeetings: boolean;
+  userName: string;
 }
 
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
@@ -121,6 +122,18 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           onChange={(e) => update('sttLanguage', e.target.value)}
           className="input"
         />
+      </Field>
+      <Field label="Your name">
+        <input
+          value={s.userName}
+          onChange={(e) => update('userName', e.target.value)}
+          placeholder="You"
+          className="input"
+        />
+        <div className="text-xs text-ink-muted mt-1">
+          Used to label your voice in transcripts when dual-stem capture
+          is active. Leave blank to just see &ldquo;You&rdquo;.
+        </div>
       </Field>
 
       <section className="border-t border-surface-border pt-5">

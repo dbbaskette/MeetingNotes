@@ -28,6 +28,16 @@ describe('mergeTranscriptWithDiarization', () => {
     );
     expect(out[0]!.speaker).toBe('UNKNOWN');
   });
+
+  it('labels voice-stem segments as VOICE_YOU without consulting diarization', () => {
+    // Diarization would assign this segment to SPEAKER_01 on overlap, but
+    // the voice source tag wins — it's definitionally the local user.
+    const out = mergeTranscriptWithDiarization(
+      [{ start: 3, end: 4, text: 'my line', source: 'voice' }],
+      diar,
+    );
+    expect(out[0]!.speaker).toBe('VOICE_YOU');
+  });
 });
 
 describe('mergedToMarkdown', () => {

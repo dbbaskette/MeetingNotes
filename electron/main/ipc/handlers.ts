@@ -219,7 +219,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         // before flipping the skip switch — they may have labeled some but
         // not all voices, and they still deserve names in the transcript.
         try {
-          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers });
+          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
         s.meetings.updateStatus(id, 'processing');
         s.pipeline.enqueue(id);
@@ -239,7 +239,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // bumping the stage — the whole point of the gate is giving the user a
     // chance to replace SPEAKER_00 with real names in the final output.
     try {
-      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers });
+      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
     } catch { /* see note above */ }
     // Advance manually to 'summarizing' so the pipeline's linear loop picks up
     // on the right side of the gate. (We don't flip skipSpeakerId — the user

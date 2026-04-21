@@ -1,4 +1,14 @@
-export interface WhisperSegment { start: number; end: number; text: string; }
+import { VOICE_SPEAKER_LABEL } from './stem-paths.js';
+
+export interface WhisperSegment {
+  start: number;
+  end: number;
+  text: string;
+  /** When stem-aware transcription ran, each segment knows which stream it
+   *  came from. Voice-stem segments bypass diarization matching because
+   *  they're definitionally the local user. */
+  source?: 'voice' | 'system';
+}
 export interface DiarSegment { start: number; end: number; speaker: string; }
 export interface MergedSegment extends WhisperSegment { speaker: string; }
 
@@ -11,6 +21,10 @@ export function mergeTranscriptWithDiarization(
   diar: readonly DiarSegment[],
 ): MergedSegment[] {
   return whisper.map((w) => {
+    // Voice-stem segments are always the local user — skip the diarization
+    // lookup entirely. The labelMap at render time converts VOICE_YOU into
+    // the user's name (or the literal "You" when unset).
+    if (w.source === 'voice') return { ...w, speaker: VOICE_SPEAKER_LABEL };
     let best: DiarSegment | null = null;
     let bestOverlap = 0;
     for (const d of diar) {
