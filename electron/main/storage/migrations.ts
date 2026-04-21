@@ -120,6 +120,26 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE meetings ADD COLUMN skip_speaker_id INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 6,
+    // Track in-flight recordings so we can recover orphans on next launch
+    // (an unfinalized .m4a from a previous PID that never wrote 'finalized').
+    // status='recording' on insert; updated to 'finalized' on clean stop or
+    // 'orphaned' when the recovery scan finds the file abandoned.
+    up: `
+      CREATE TABLE IF NOT EXISTS recording_sessions (
+        id TEXT PRIMARY KEY,
+        helper_pid INTEGER NOT NULL,
+        target_pid INTEGER,
+        target_label TEXT NOT NULL,
+        output_path TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finalized_at TEXT,
+        status TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_rec_status ON recording_sessions(status);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
