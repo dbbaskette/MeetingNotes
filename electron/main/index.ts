@@ -200,6 +200,7 @@ app.whenReady().then(async () => {
     audioHijack,
     recordingManager,
     appEnumerator,
+    helperPath,
     roster,
     pipeline,
     exporters,

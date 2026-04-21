@@ -13,6 +13,7 @@ import type { LMStudioClient } from '../lm-studio/client.js';
 import type { AudioHijackBridge } from '../audio-hijack/bridge.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
+import { probeAudioPermissions } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
@@ -39,6 +40,7 @@ export interface IpcServices {
   audioHijack: AudioHijackBridge;
   recordingManager: RecordingManager;
   appEnumerator: AppEnumerator;
+  helperPath: string;
   roster: RosterService;
   pipeline: Pipeline;
   exporters: Record<string, Exporter>;
@@ -267,6 +269,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
     return s.recordingManager.state(sessionId);
   });
+
+  ipc.handle(IPC_CHANNELS.permissionsAudioGet, () => probeAudioPermissions({ helperPath: s.helperPath }));
 
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {

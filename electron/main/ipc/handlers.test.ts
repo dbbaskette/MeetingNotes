@@ -14,6 +14,7 @@ describe('registerIpcHandlers', () => {
       audioHijack: { startSession: async () => {}, stopSession: async () => {}, sessionState: async () => 'stopped' },
       recordingManager: { start: async () => ({ sessionId: 's', outputPath: '/o' }), stop: async () => {}, state: () => 'idle', on: () => {} },
       appEnumerator: { list: async () => [] },
+      helperPath: '/bin/meeting-notes-tap',
       roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
       pipeline: { enqueue: () => {} },
       exporters: {},
