@@ -97,4 +97,11 @@ export class MeetingsRepo {
     this.db.prepare('UPDATE meetings SET skip_speaker_id = ?, updated_at = ? WHERE id = ?')
       .run(skip ? 1 : 0, new Date().toISOString(), id);
   }
+
+  /** Remove the row. Foreign keys in `meeting_speakers` and `action_items`
+   *  cascade (see migrations.ts), so associated rows vacate automatically.
+   *  File cleanup (audio + stems + meeting folder) is the caller's job. */
+  delete(id: string): void {
+    this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
+  }
 }

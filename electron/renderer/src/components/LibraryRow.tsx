@@ -6,6 +6,7 @@
 // view where the user picks which stage to rewind to.
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
+import { MeetingRowMenu } from './MeetingRowMenu';
 
 interface Meeting {
   id: string;
@@ -23,6 +24,7 @@ interface Meeting {
 interface Props {
   meeting: Meeting;
   onOpen: (id: string) => void;
+  onChanged: () => void;
 }
 
 function fmtDur(s: number | null): string {
@@ -40,7 +42,7 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function LibraryRow({ meeting, onOpen }: Props): JSX.Element {
+export function LibraryRow({ meeting, onOpen, onChanged }: Props): JSX.Element {
   const status = meeting.status;
   const edge =
     status === 'failed' ? 'before:bg-rose-500' :
@@ -92,6 +94,8 @@ export function LibraryRow({ meeting, onOpen }: Props): JSX.Element {
       )}
 
       <StatusChip meeting={meeting} />
+
+      <MeetingRowMenu meeting={meeting} onChanged={onChanged} />
 
       <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 text-ink-muted/40 shrink-0 group-hover:text-brand-indigo transition-colors" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
         <path d="M6 3l5 5-5 5" />

@@ -42,4 +42,11 @@ describe('MeetingsRepo', () => {
     repo.insert({ id: 'b', slug: 'b', title: 'B', startedAt: null, durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
     expect(repo.findNonTerminal().map((m) => m.id)).toEqual(['a']);
   });
+
+  it('delete removes the row (and findById returns null)', () => {
+    repo.insert({ id: 'gone', slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+    expect(repo.findById('gone')).not.toBeNull();
+    repo.delete('gone');
+    expect(repo.findById('gone')).toBeNull();
+  });
 });

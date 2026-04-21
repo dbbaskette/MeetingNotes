@@ -197,6 +197,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
                 checked={selected.has(m.id)}
                 onToggle={() => toggleSelect(m.id)}
                 onOpen={() => onOpen(m.id)}
+                onChanged={() => void refresh()}
               />
             ))}
           </div>
@@ -267,7 +268,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
         ) : (
           <div className="space-y-2">
             {library.map((m) => (
-              <LibraryRow key={m.id} meeting={m} onOpen={onOpen} />
+              <LibraryRow key={m.id} meeting={m} onOpen={onOpen} onChanged={() => void refresh()} />
             ))}
           </div>
         )}
