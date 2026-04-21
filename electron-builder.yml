@@ -31,3 +31,17 @@ mac:
     - zip
   category: public.app-category.productivity
   hardenedRuntime: true
+  # Custom entitlements add com.apple.security.device.audio-input to both the
+  # parent .app and every signed child binary (electron-builder uses the same
+  # plist for both unless entitlementsInherit is overridden). The bundled
+  # meeting-notes-tap helper inherits via entitlementsInherit so the audio
+  # entitlement survives electron-builder's re-sign of the extraResources.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # NSMicrophoneUsageDescription / NSAudioCaptureUsageDescription strings come
+  # from the helper's embedded Info.plist; the parent .app uses Electron's
+  # bundled Info.plist (Electron prompts on first getMediaAccessStatus call
+  # only if asked — we let the helper own the prompts).
+  extendInfo:
+    NSMicrophoneUsageDescription: MeetingNotes records meetings by capturing your microphone.
+    NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
