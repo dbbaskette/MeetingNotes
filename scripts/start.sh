@@ -49,6 +49,23 @@ case "$MODE" in
     exit 0 ;;
 
   prod|dev)
+    # 0. Kill any previously-running MeetingNotes instance so we relaunch into
+    #    the fresh build, not an old Electron/sidecar pair still in memory.
+    #    macOS's `open` would otherwise just focus the existing process.
+    if pgrep -f "MeetingNotes.app/Contents/MacOS/MeetingNotes" >/dev/null 2>&1; then
+      echo "MeetingNotes:   killing running instance to pick up the fresh build..."
+      pkill -f "MeetingNotes.app/Contents/MacOS/MeetingNotes" >/dev/null 2>&1 || true
+      # Give Electron a beat to unwind its child processes.
+      sleep 1
+    fi
+    # Free the sidecar port in case a detached sidecar survived the kill.
+    # The supervisor's build_id check would eventually catch this, but killing
+    # here means one fewer race during cold start.
+    if lsof -ti :8765 >/dev/null 2>&1; then
+      echo "sidecar:        killing process holding port 8765..."
+      lsof -ti :8765 | xargs kill -9 2>/dev/null || true
+    fi
+
     # 1. Whisper server (background daemon, idempotent).
     if "$WS" status 2>&1 | grep -q "Running"; then
       echo "whisper-server: already running"

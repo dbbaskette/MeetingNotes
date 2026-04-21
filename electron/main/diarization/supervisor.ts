@@ -15,23 +15,58 @@ export interface SupervisorDeps {
   /** Hard kill timeout when stopping. */
   stopGraceMs?: number;
   onLog?: (line: string) => void;
-  /** Override for tests. Probes /health on host:port and resolves true if a working sidecar is already there. */
-  healthProbe?: (host: string, port: number) => Promise<boolean>;
+  /** Override for tests. Probes /health on host:port and returns the reported
+   *  build_id (or empty string if unreachable). */
+  healthProbe?: (host: string, port: number) => Promise<{ ok: boolean; buildId: string }>;
 }
 
 const PORT_IN_USE_RE = /address already in use|errno 48/i;
 
-async function defaultHealthProbe(host: string, port: number): Promise<boolean> {
+async function defaultHealthProbe(
+  host: string,
+  port: number,
+): Promise<{ ok: boolean; buildId: string }> {
   try {
     const resp = await fetch(`http://${host}:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    if (!resp.ok) return false;
-    const body = (await resp.json().catch(() => null)) as { status?: string } | null;
-    return body?.status === 'ok';
+    if (!resp.ok) return { ok: false, buildId: '' };
+    const body = (await resp.json().catch(() => null)) as
+      | { status?: string; build_id?: string }
+      | null;
+    return { ok: body?.status === 'ok', buildId: body?.build_id ?? '' };
   } catch {
-    return false;
+    return { ok: false, buildId: '' };
   }
+}
+
+function readExpectedBuildId(sidecarDir: string): string {
+  // BUILD_ID is written next to the bundle during `npm run build:sidecar`.
+  // Matches the _read_build_id search order in app.py.
+  for (const p of [
+    path.join(sidecarDir, 'BUILD_ID'),
+    path.join(sidecarDir, 'dist', 'BUILD_ID'),
+  ]) {
+    try {
+      if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8').trim();
+    } catch {
+      /* noop */
+    }
+  }
+  return '';
+}
+
+async function killOnPort(port: number): Promise<void> {
+  // Best-effort: free the port so we can respawn. Only called when we've
+  // decided the current owner is a stale sidecar of ours.
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolve) => {
+    const p = spawn('sh', ['-c', `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`]);
+    p.on('exit', () => resolve());
+    p.on('error', () => resolve());
+  });
+  // Give the OS a beat to release the port.
+  await new Promise((r) => setTimeout(r, 250));
 }
 
 export class DiarizationSupervisor {
@@ -49,7 +84,7 @@ export class DiarizationSupervisor {
   private readonly restartDelay: number;
   private readonly healthyUptime: number;
   private readonly stopGrace: number;
-  private readonly probe: (host: string, port: number) => Promise<boolean>;
+  private readonly probe: (host: string, port: number) => Promise<{ ok: boolean; buildId: string }>;
 
   constructor(private readonly deps: SupervisorDeps) {
     this.spawnFn = deps.spawn ?? realSpawn;
@@ -65,12 +100,26 @@ export class DiarizationSupervisor {
     const host = this.deps.host ?? '127.0.0.1';
     const port = this.deps.port ?? 8765;
 
-    // Pre-flight: if a healthy sidecar already owns the port (e.g. a debugger
-    // or a leftover from a previous run that survived shutdown), reuse it.
-    if (await this.probe(host, port)) {
-      this.external = true;
-      this.deps.onLog?.(`sidecar: reusing existing instance at ${host}:${port}`);
-      return;
+    // Pre-flight: if a healthy sidecar already owns the port, compare its
+    // build_id against the on-disk one. Match => reuse. Mismatch => it's a
+    // leftover from a previous .app build still running old Python code; kill
+    // it so we can launch the fresh bundle. This is what prevents "I rebuilt
+    // but the bug is still there" confusion.
+    const expectedBuildId = readExpectedBuildId(this.deps.sidecarDir);
+    const probe = await this.probe(host, port);
+    if (probe.ok) {
+      if (!expectedBuildId || probe.buildId === expectedBuildId) {
+        this.external = true;
+        this.deps.onLog?.(
+          `sidecar: reusing existing instance at ${host}:${port} (build_id=${probe.buildId || 'unknown'})`,
+        );
+        return;
+      }
+      this.deps.onLog?.(
+        `sidecar: stale instance at ${host}:${port} ` +
+        `(running=${probe.buildId}, expected=${expectedBuildId}) — killing and respawning`,
+      );
+      await killOnPort(port);
     }
 
     const launch = this.resolveLaunch(host, port);
@@ -108,7 +157,7 @@ export class DiarizationSupervisor {
     if (PORT_IN_USE_RE.test(line) && !this.portConflict) {
       this.portConflict = true;
       // Re-probe: maybe the squatter IS a working sidecar we can reuse.
-      void this.probe(host, port).then((ok) => {
+      void this.probe(host, port).then(({ ok }) => {
         if (ok) {
           this.external = true;
           this.deps.onLog?.(`sidecar: port ${port} held by working instance — reusing`);

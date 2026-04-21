@@ -7,6 +7,10 @@ export interface ExportInput {
   meetingFolder: string;
   /** Called after each item successfully exports. */
   onItemExported?: (id: string) => void;
+  /** Destination path override for file-based exporters. Ignored by exporters
+   *  that don't write a single file (Apple Reminders, etc.). When omitted,
+   *  the exporter picks its own default location. */
+  outputPath?: string;
 }
 export interface Exporter {
   name: string;

@@ -16,6 +16,7 @@ extraResources:
     to: sidecar
     filter:
       - "meeting_notes_diarize/**/*.py"
+      - "BUILD_ID"
       - "!**/__pycache__/**"
       - "!**/*.pyc"
 mac:

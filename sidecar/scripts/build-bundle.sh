@@ -16,6 +16,12 @@ fi
 
 rm -rf build dist
 
+# Stamp a build id so the Electron supervisor can detect stale sidecars from a
+# previous app version still holding port 8765, kill them, and spawn the fresh
+# bundle. Without this the user has to manually `lsof -ti :8765 | xargs kill`
+# after every rebuild.
+BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null || echo local)"
+
 # pyannote loads model files dynamically and registers many submodules. The
 # common-issue collect-* flags below pull those in. torch is huge but standard.
 "$VENV_PY" -m PyInstaller \
@@ -34,6 +40,12 @@ rm -rf build dist
   --hidden-import sklearn.neighbors._partition_nodes \
   serve.py
 
+# Write BUILD_ID next to the bundle. The sidecar reads it at startup and
+# reports it on /health; the supervisor reads this file to know what's fresh.
+printf '%s\n' "$BUILD_ID" > dist/BUILD_ID
+printf '%s\n' "$BUILD_ID" > BUILD_ID
+
+echo "BUILD_ID: $BUILD_ID"
 echo
 echo "Bundle ready: $(pwd)/dist/meeting-notes-diarize/meeting-notes-diarize"
 echo "Smoke test it with:"

@@ -13,8 +13,12 @@ describe('AppleRemindersExporter', () => {
       meetingTitle: 'Q2',
       meetingFolder: '/tmp',
     });
-    expect(runner).toHaveBeenCalledTimes(1);
-    const [cmd, args] = runner.mock.calls[0]!;
+    // 1 ensure-list call + 1 per open item (done items are filtered).
+    expect(runner).toHaveBeenCalledTimes(2);
+    const [ensureCmd, ensureArgs] = runner.mock.calls[0]!;
+    expect(ensureCmd).toBe('osascript');
+    expect((ensureArgs as string[]).join(' ')).toContain('exists list');
+    const [cmd, args] = runner.mock.calls[1]!;
     expect(cmd).toBe('osascript');
     expect((args as string[]).join(' ')).toContain('do A');
   });

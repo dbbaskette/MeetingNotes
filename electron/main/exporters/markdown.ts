@@ -14,7 +14,7 @@ export class MarkdownExporter implements Exporter {
       if (it.dueDate) parts.push(`due ${it.dueDate}`);
       lines.push(`- ${box} ${parts.join(' — ')}`);
     }
-    const out = path.join(input.meetingFolder, 'exports', 'action-items.md');
+    const out = input.outputPath ?? path.join(input.meetingFolder, 'exports', 'action-items.md');
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, lines.join('\n'));
     return out;

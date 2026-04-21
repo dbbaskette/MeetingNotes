@@ -111,16 +111,40 @@ def _embed_segment(waveform: Any, sr: int, start: float, end: float) -> np.ndarr
 def diarize_audio(audio_path: str) -> DiarizeResponse:
     waveform, sr = _load_audio(audio_path)
     pipe = _get_pipeline()
-    annotation = pipe({"waveform": waveform, "sample_rate": sr})
+    result = pipe({"waveform": waveform, "sample_rate": sr})
+
+    # pyannote 3.4+ returns a DiarizeOutput wrapper around the Annotation.
+    # Older builds returned the Annotation directly. Accept both.
+    if hasattr(result, "itertracks"):
+        annotation = result
+        speaker_embeddings = None
+        speaker_order: List[str] = []
+    else:
+        annotation = result.speaker_diarization
+        speaker_embeddings = getattr(result, "speaker_embeddings", None)
+        # DiarizeOutput.speaker_embeddings rows are sorted in labels() order.
+        speaker_order = list(annotation.labels()) if speaker_embeddings is not None else []
+
+    # Prefer the per-speaker embeddings the pipeline already computed — saves
+    # one additional forward pass per turn.
+    label_to_emb: dict[str, np.ndarray] = {}
+    if speaker_embeddings is not None:
+        for i, label in enumerate(speaker_order):
+            label_to_emb[str(label)] = np.asarray(speaker_embeddings[i], dtype=np.float32).flatten()
+
     segments: List[Segment] = []
     speakers: set[str] = set()
     for turn, _, label in annotation.itertracks(yield_label=True):
-        emb = _embed_segment(waveform, sr, turn.start, turn.end)
+        label_s = str(label)
+        if label_s in label_to_emb:
+            emb = label_to_emb[label_s]
+        else:
+            emb = _embed_segment(waveform, sr, turn.start, turn.end)
         segments.append(Segment(
             start=float(turn.start),
             end=float(turn.end),
-            speaker=str(label),
+            speaker=label_s,
             embedding=emb.tolist(),
         ))
-        speakers.add(str(label))
+        speakers.add(label_s)
     return DiarizeResponse(segments=segments, num_speakers=len(speakers))

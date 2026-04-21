@@ -141,9 +141,12 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 ### Hugging Face token
 
-pyannote's diarization model is *gated* on Hugging Face. One-time setup:
+pyannote's diarization models are *gated* on Hugging Face. One-time setup:
 
-1. Accept the license at https://huggingface.co/pyannote/speaker-diarization-3.1 (and `.../segmentation-3.0`).
+1. Accept the license on all three of:
+   - https://huggingface.co/pyannote/speaker-diarization-3.1
+   - https://huggingface.co/pyannote/segmentation-3.0
+   - https://huggingface.co/pyannote/speaker-diarization-community-1 *(pyannote 3.4+ pulls the PLDA component from this one at runtime)*
 2. Create a **fine-grained** token at https://huggingface.co/settings/tokens with scope "Read access to contents of all public gated repos you can access".
 3. Paste it when `setup.sh` prompts. It's saved to `~/.cache/huggingface/token` (chmod 600).
 
