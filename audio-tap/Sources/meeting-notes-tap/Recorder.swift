@@ -36,9 +36,35 @@ final class Recorder {
     // Use 48 kHz to match what aggregate devices typically expose.
     writer = try AACWriter(outputURL: url, sampleRate: 48_000, bitrate: 128_000)
     try attachProcessTap()
+    watchTargetPIDIfNeeded()
     if opts.captureMic { try attachMic() }
     try startEngine()
     StatusEvent.emit(["event": "started"])
+  }
+
+  // MARK: - Target PID watcher (Task 11)
+  // When the user's recording targets a specific PID, watch it via kqueue
+  // and auto-finalize the recording when that process exits.
+  private func watchTargetPIDIfNeeded() {
+    guard let targetPID = opts.pid else { return }
+    DispatchQueue.global().async { [weak self] in
+      let kq = kqueue()
+      guard kq >= 0 else { return }
+      var event = kevent(
+        ident: UInt(targetPID), filter: Int16(EVFILT_PROC),
+        flags: UInt16(EV_ADD | EV_ENABLE | EV_ONESHOT),
+        fflags: UInt32(NOTE_EXIT), data: 0, udata: nil
+      )
+      _ = kevent(kq, &event, 1, nil, 0, nil)
+      var triggered = kevent()
+      _ = kevent(kq, nil, 0, &triggered, 1, nil)
+      close(kq)
+      Task {
+        StatusEvent.emit(["event": "target_exited", "pid": Int(targetPID)])
+        await self?.stop()
+        exit(0)
+      }
+    }
   }
 
   func stop() async {
