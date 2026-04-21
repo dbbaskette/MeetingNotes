@@ -14,8 +14,12 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void (async () => {
-      const r = (await api.permissions.audio()) as { mic: string; audioCapture: string };
-      setPermsOk(r.mic === 'granted' && r.audioCapture === 'granted');
+      // Use the authoritative Electron mic-status API, not the helper's
+      // probe — the helper falsely reports 'granted' because its audio_capture
+      // check creates an empty tap which always succeeds. Audio-capture grant
+      // is checked at first Record click via the actual Process Tap call.
+      const mic = (await api.permissions.micStatus()) as string;
+      setPermsOk(mic === 'granted');
     })();
   }, []);
 

@@ -26,6 +26,27 @@ export async function requestMicAccess(
 }
 
 /**
+ * Returns the actual mic-access state for MeetingNotes itself
+ * (not the helper subprocess). This is the source of truth for
+ * "should we show the permissions modal" — Electron's
+ * systemPreferences API queries TCC against the parent app's identity,
+ * which is exactly what we want.
+ */
+export function getMicAccessStatus(
+  deps?: { getMediaAccessStatus?: (type: 'microphone') => 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' },
+): PermissionState {
+  const get = deps?.getMediaAccessStatus
+    ?? ((t: 'microphone') => systemPreferences.getMediaAccessStatus(t));
+  const status = get('microphone');
+  switch (status) {
+    case 'granted': return 'granted';
+    case 'denied': case 'restricted': return 'denied';
+    case 'not-determined': return 'not-determined';
+    default: return 'unknown';
+  }
+}
+
+/**
  * Asks the bundled helper to report mic + audio-capture TCC state. The
  * helper's audio-capture probe is best-effort (Apple does not expose a
  * stable API for "would CoreAudio Process Tap succeed"); a 'not-determined'

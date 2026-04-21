@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import type { LMStudioClient } from '../lm-studio/client.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
-import { probeAudioPermissions, requestMicAccess } from '../permissions/audio.js';
+import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
@@ -266,6 +266,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.permissionsAudioGet, () => probeAudioPermissions({ helperPath: s.helperPath }));
   ipc.handle(IPC_CHANNELS.permissionsRequestMic, () => requestMicAccess());
+  ipc.handle(IPC_CHANNELS.permissionsMicStatus, () => getMicAccessStatus());
 
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {

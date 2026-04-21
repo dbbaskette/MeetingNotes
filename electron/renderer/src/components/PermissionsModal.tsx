@@ -8,13 +8,19 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
   const [audioCapture, setAudioCapture] = useState<State>('unknown');
 
   async function recheck(): Promise<void> {
-    const r = (await api.permissions.audio()) as { mic: State; audioCapture: State };
-    setMic(r.mic); setAudioCapture(r.audioCapture);
+    // Fetch mic state from the authoritative Electron API (queries TCC against
+    // the parent app's identity) and audio-capture state from the helper probe
+    // in parallel.
+    const [micState, audioPerms] = await Promise.all([
+      api.permissions.micStatus() as Promise<State>,
+      api.permissions.audio() as Promise<{ mic: State; audioCapture: State }>,
+    ]);
+    setMic(micState); setAudioCapture(audioPerms.audioCapture);
     // Mic granted + audio not explicitly denied → allow recording to start.
     // The OS will prompt for Screen & System Audio Recording automatically
     // the first time the helper attempts a CoreAudio Process Tap capture
     // (i.e. when the user clicks Record).
-    if (r.mic === 'granted' && r.audioCapture !== 'denied') onAllGranted();
+    if (micState === 'granted' && audioPerms.audioCapture !== 'denied') onAllGranted();
   }
 
   useEffect(() => { void recheck(); const t = setInterval(recheck, 2000); return () => clearInterval(t); }, []);
@@ -24,11 +30,15 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
     // in System Settings and shows the OS dialog if not yet determined.
     await api.permissions.requestMic();
     // If they denied, open System Settings as a fallback so they can flip it.
-    const r = (await api.permissions.audio()) as { mic: State; audioCapture: State };
-    setMic(r.mic); setAudioCapture(r.audioCapture);
-    if (r.mic !== 'granted') {
+    // Use the authoritative micStatus for mic state, helper probe for audioCapture.
+    const [micState, audioPerms] = await Promise.all([
+      api.permissions.micStatus() as Promise<State>,
+      api.permissions.audio() as Promise<{ mic: State; audioCapture: State }>,
+    ]);
+    setMic(micState); setAudioCapture(audioPerms.audioCapture);
+    if (micState !== 'granted') {
       window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
-    } else if (r.audioCapture !== 'denied') {
+    } else if (audioPerms.audioCapture !== 'denied') {
       onAllGranted();
     }
   }
