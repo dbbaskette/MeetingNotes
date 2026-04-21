@@ -6,7 +6,8 @@
 // each row. Clicks bubble-stop so they don't also toggle the surrounding
 // row (select / open detail). The refresh callback is fired after each
 // mutation so the containing list re-queries.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 
 export interface MeetingRowMenuProps {
@@ -22,8 +23,21 @@ type ModalKind = null | 'rename' | 'delete';
 export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Position the popover relative to the trigger button via viewport
+  // coordinates. The menu renders in a portal on document.body because the
+  // row's `transform` (hover:-translate-y-px on LibraryRow) creates a new
+  // stacking context, and `z-index` inside a transformed ancestor can't
+  // escape it — sibling rows paint over us. Fixed positioning + portal
+  // sidesteps the whole issue.
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setAnchor({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+  }, [open]);
 
   // Close the popover on outside click + Escape. Doesn't close the modal —
   // a rename/delete confirmation should ignore stray clicks behind it.
@@ -37,11 +51,16 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
     function onKey(e: KeyboardEvent): void {
       if (e.key === 'Escape') setOpen(false);
     }
+    function onScroll(): void { setOpen(false); }
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
+    // Close on scroll — re-computing the anchor on every scroll event is
+    // overkill for an actions menu; just dismiss and let the user click again.
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -62,12 +81,13 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
         </svg>
       </button>
 
-      {open && (
+      {open && anchor && createPortal(
         <div
           ref={menuRef}
           onClick={(e) => e.stopPropagation()}
+          style={{ position: 'fixed', top: anchor.top, right: anchor.right, zIndex: 1000 }}
           className="
-            absolute right-2 top-12 z-20 min-w-[140px]
+            min-w-[140px]
             bg-surface border border-surface-border rounded-lg shadow-pop
             py-1 text-sm
           "
@@ -84,7 +104,8 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           >
             Delete…
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {modal === 'rename' && (
