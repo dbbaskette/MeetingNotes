@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { LMStudioClient } from './client.js';
+import { LMStudioClient, stripThinking } from './client.js';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -72,5 +72,43 @@ describe('LMStudioClient.chat', () => {
       temperature: 0.2,
     });
     expect(result).toBe('Summary text');
+  });
+
+  it('strips <think>…</think> blocks from reasoning-model output', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{
+            message: {
+              role: 'assistant',
+              content: '<think>the user wants a summary. I should focus on…</think>\n\n## Overview\nReal content here.',
+            },
+          }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    const result = await c.chat({
+      model: 'qwen3-14b',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+    expect(result).not.toMatch(/<think>/);
+    expect(result).toContain('## Overview');
+  });
+});
+
+describe('stripThinking', () => {
+  it('removes closed <think> blocks', () => {
+    expect(stripThinking('<think>reasoning</think>hello')).toBe('hello');
+  });
+  it('removes multiple blocks', () => {
+    expect(stripThinking('<think>a</think>one<think>b</think>two')).toBe('onetwo');
+  });
+  it('drops an unclosed trailing <think> block', () => {
+    expect(stripThinking('real content<think>truncated reasoning')).toBe('real content');
+  });
+  it('is a no-op for text without tags', () => {
+    expect(stripThinking('## Overview\nstuff')).toBe('## Overview\nstuff');
   });
 });

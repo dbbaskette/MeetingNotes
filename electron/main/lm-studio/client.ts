@@ -239,6 +239,18 @@ export class LMStudioClient {
           (partial ? `Partial output: "${partial.slice(0, 80)}…"` : ''),
       );
     }
-    return content;
+    return stripThinking(content);
   }
+}
+
+// Reasoning models (Qwen3, DeepSeek-R1, gpt-oss, etc.) emit their chain of
+// thought in <think>…</think> blocks. LM Studio returns the full text
+// including those blocks. Strip them so summaries and action items aren't
+// polluted with reasoning. Also drop an unclosed trailing <think> (happens
+// on truncation / mid-stream).
+export function stripThinking(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/i, '')
+    .trim();
 }
