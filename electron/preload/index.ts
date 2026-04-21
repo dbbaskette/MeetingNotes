@@ -21,6 +21,7 @@ const IPC_CHANNELS = {
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
   permissionsAudioGet: 'permissions:audio-get',
+  permissionsRequestMic: 'permissions:request-mic',
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
@@ -130,6 +131,7 @@ const api = {
       mic: 'granted' | 'denied' | 'not-determined' | 'unknown';
       audioCapture: 'granted' | 'denied' | 'not-determined' | 'unknown';
     }>,
+    requestMic: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsRequestMic) as Promise<boolean>,
   },
   on: (channel: string, handler: (...args: unknown[]) => void) => {
     const wrapped = (_e: unknown, ...args: unknown[]) => handler(...args);

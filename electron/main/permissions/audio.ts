@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { systemPreferences } from 'electron';
 
 const pExecFile = promisify(execFile);
 
@@ -10,6 +11,19 @@ export interface AudioPermissions {
 }
 
 type Runner = (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+/**
+ * Triggers an OS-native microphone permission dialog (if not yet determined)
+ * and returns whether microphone access is granted after the user responds.
+ * Calling this is what causes MeetingNotes to appear in
+ * System Settings → Privacy & Security → Microphone.
+ */
+export async function requestMicAccess(
+  deps?: { askForMediaAccess?: (type: 'microphone') => Promise<boolean> },
+): Promise<boolean> {
+  const ask = deps?.askForMediaAccess ?? systemPreferences.askForMediaAccess.bind(systemPreferences);
+  return ask('microphone');
+}
 
 /**
  * Asks the bundled helper to report mic + audio-capture TCC state. The

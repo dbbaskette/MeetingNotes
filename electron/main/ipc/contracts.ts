@@ -53,6 +53,7 @@ export const IPC_CHANNELS = {
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
   permissionsAudioGet: 'permissions:audio-get',
+  permissionsRequestMic: 'permissions:request-mic',
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
