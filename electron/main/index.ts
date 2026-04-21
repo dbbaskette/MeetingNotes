@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
@@ -11,6 +12,12 @@ import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
 import { DiarizationSupervisor } from './diarization/supervisor.js';
 import { AudioHijackBridge } from './audio-hijack/bridge.js';
+import { RecordingManager } from './recording/manager.js';
+import { AppEnumerator } from './recording/app-enumerator.js';
+import { resolveHelperPath } from './recording/helper-path.js';
+import { recoverOrphans } from './recording/orphan-recovery.js';
+import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
+import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
@@ -76,6 +83,41 @@ app.whenReady().then(async () => {
   void supervisor.start();
 
   const audioHijack = new AudioHijackBridge();
+
+  // Built-in audio capture helper (replacement for AudioHijackBridge). The
+  // helper binary is bundled inside MeetingNotes.app; resolve its path so
+  // both dev (`npm run dev`) and packaged builds can spawn it.
+  const helperPath = resolveHelperPath({
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+  });
+  const recordingsDir = path.join(os.homedir(), 'Music', 'MeetingNotes');
+  fs.mkdirSync(recordingsDir, { recursive: true });
+  const recordingSessionsRepo = new RecordingSessionsRepo(db);
+  const recordingManager = new RecordingManager({
+    helperPath,
+    recordingsDir,
+    repo: recordingSessionsRepo,
+  });
+  const appEnumerator = new AppEnumerator({ helperPath });
+
+  // Broadcast level + state-change events to all renderer windows. Doing this
+  // here (not inside RecordingManager) keeps the manager free of any Electron
+  // dependency, which makes it unit-testable with a fake spawn.
+  recordingManager.on('level', (sessionId, peakDb) => {
+    BrowserWindow.getAllWindows().forEach((w) =>
+      w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, peakDb }));
+  });
+  recordingManager.on('state-change', (sessionId, state) => {
+    BrowserWindow.getAllWindows().forEach((w) =>
+      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state }));
+  });
+
+  // One-shot orphan scan at launch: any 'recording' rows whose helper PID is
+  // gone get marked 'orphaned' so the UI doesn't think they're still going.
+  await recoverOrphans({ repo: recordingSessionsRepo });
+
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
@@ -156,6 +198,8 @@ app.whenReady().then(async () => {
     settings,
     lmStudio,
     audioHijack,
+    recordingManager,
+    appEnumerator,
     roster,
     pipeline,
     exporters,
@@ -171,6 +215,17 @@ app.whenReady().then(async () => {
     e.preventDefault();
     pipeline.drain();
     void (async () => {
+      // Stop any active recordings cleanly so finalize is written, instead of
+      // leaving the helper to die on parent-watch (which works but leaves an
+      // 'orphaned' DB row for an otherwise-clean shutdown).
+      try {
+        const open = recordingSessionsRepo.findOpen();
+        for (const row of open) {
+          try { await recordingManager.stop(row.id); } catch { /* best-effort */ }
+        }
+      } catch (err) {
+        logger.error('shutdown:recording-stop-error', { err: String(err) });
+      }
       try {
         await Promise.all([supervisor.stop(), watcher.stop()]);
       } catch (err) {
