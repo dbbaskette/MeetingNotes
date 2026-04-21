@@ -34,6 +34,7 @@ describe('runMerging', () => {
       meetings: { findById: () => ({ slug: 'slug' }) },
       speakers: { listForMeeting: () => [] },
       logger: { info: () => {} },
+      settings: { get: () => '' },
     };
     await runMerging({ meetingId: 'm' }, ctx);
     const md = fs.readFileSync(path.join(f, 'transcript.md'), 'utf8');
@@ -75,10 +76,71 @@ describe('runMerging', () => {
         ],
       },
       logger: { info: () => {} },
+      settings: { get: () => '' },
     };
     await runMerging({ meetingId: 'm' }, ctx);
     const md = fs.readFileSync(path.join(f, 'transcript.md'), 'utf8');
     expect(md).toContain('[Alice 00:00] Hi.');
     expect(md).toContain('[SPEAKER_01 00:01] There.'); // unidentified stays raw
+  });
+
+  it('labels voice-stem segments with userName (or "You" when unset) and bypasses diarization', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-m-stem-'));
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(
+      path.join(f, 'transcript.raw.json'),
+      JSON.stringify({
+        segments: [
+          { start: 0, end: 2, text: 'Hey everyone.', source: 'voice' },      // local user (mic stem)
+          { start: 3, end: 5, text: 'Hi Dan.', source: 'system' },           // remote
+          { start: 6, end: 8, text: 'Thanks for joining.', source: 'voice' },
+        ],
+      }),
+    );
+    // Diarization only covers the system side — voice segments bypass it entirely.
+    fs.writeFileSync(
+      path.join(f, 'diarization.json'),
+      JSON.stringify({
+        segments: [{ start: 3, end: 5, speaker: 'SPEAKER_00', embedding: [] }],
+      }),
+    );
+    const ctx: any = {
+      libraryRoot: dir,
+      meetings: { findById: () => ({ slug: 'slug' }) },
+      speakers: { listForMeeting: () => [] },
+      logger: { info: () => {} },
+      settings: { get: (k: string) => (k === 'userName' ? 'Dan' : '') },
+    };
+    await runMerging({ meetingId: 'm' }, ctx);
+    const md = fs.readFileSync(path.join(f, 'transcript.md'), 'utf8');
+    expect(md).toContain('[Dan 00:00] Hey everyone.');
+    expect(md).toContain('[SPEAKER_00 00:03] Hi Dan.');
+    expect(md).toContain('[Dan 00:06] Thanks for joining.');
+  });
+
+  it('survives a missing diarization.json (voice segments still render)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-m-nodiar-'));
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(
+      path.join(f, 'transcript.raw.json'),
+      JSON.stringify({
+        segments: [
+          { start: 0, end: 2, text: 'Just me here.', source: 'voice' },
+        ],
+      }),
+    );
+    // No diarization.json on disk.
+    const ctx: any = {
+      libraryRoot: dir,
+      meetings: { findById: () => ({ slug: 'slug' }) },
+      speakers: { listForMeeting: () => [] },
+      logger: { info: () => {} },
+      settings: { get: () => '' },
+    };
+    await runMerging({ meetingId: 'm' }, ctx);
+    const md = fs.readFileSync(path.join(f, 'transcript.md'), 'utf8');
+    expect(md).toContain('[You 00:00] Just me here.');
   });
 });

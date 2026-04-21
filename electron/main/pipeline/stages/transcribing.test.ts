@@ -38,6 +38,52 @@ describe('runTranscribing', () => {
     expect(written.text).toBe('hi');
   });
 
+  it('transcribes voice + system stems independently when both exist', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-t-stem-'));
+    const mFolder = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(mFolder, { recursive: true });
+    // Mixed + both stems on disk — triggers the stem-aware path.
+    const mixed = path.join(mFolder, 'rec.m4a');
+    fs.writeFileSync(mixed, 'x');
+    fs.writeFileSync(path.join(mFolder, 'rec.voice.m4a'), 'x');
+    fs.writeFileSync(path.join(mFolder, 'rec.system.m4a'), 'x');
+
+    const transcribe = vi.fn(async ({ audioPath }: { audioPath: string }) => {
+      // Return distinct segments per stream so we can verify merging.
+      if (audioPath.includes('.voice.')) {
+        return { text: 'hey', segments: [{ start: 0, end: 2, text: 'hey' }] };
+      }
+      return { text: 'hi', segments: [{ start: 1, end: 3, text: 'hi' }] };
+    });
+    const ctx: any = {
+      libraryRoot: dir,
+      stt: { transcribe },
+      settings: { get: (k: string) => (k === 'sttModel' ? 'whisper-large-v3' : 'en') },
+      meetings: {
+        findById: () => ({ slug: 'slug', audioPath: mixed, durationS: 10 }),
+        updateStage: vi.fn(),
+      },
+      logger: { info: vi.fn(), error: vi.fn() },
+    };
+    await runTranscribing({ meetingId: 'm1' }, ctx);
+
+    // Separate per-stem files written…
+    const voice = JSON.parse(fs.readFileSync(path.join(mFolder, 'transcript.voice.raw.json'), 'utf8'));
+    const system = JSON.parse(fs.readFileSync(path.join(mFolder, 'transcript.system.raw.json'), 'utf8'));
+    expect(voice.segments[0].text).toBe('hey');
+    expect(system.segments[0].text).toBe('hi');
+
+    // …plus a combined transcript.raw.json with source markers, ordered by start.
+    const combined = JSON.parse(fs.readFileSync(path.join(mFolder, 'transcript.raw.json'), 'utf8'));
+    expect(combined.segments).toEqual([
+      { start: 0, end: 2, text: 'hey', source: 'voice' },
+      { start: 1, end: 3, text: 'hi', source: 'system' },
+    ]);
+
+    // Called twice — once per stem — with the actual stem paths, not the mixed.
+    expect(transcribe).toHaveBeenCalledTimes(2);
+  });
+
   it('drops Whisper hallucinations past the known audio duration', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-t-'));
     const mFolder = path.join(dir, 'meetings', 'slug');

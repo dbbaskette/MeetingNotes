@@ -21,6 +21,9 @@ export interface Settings {
    *  to start recording. Opt-in because it requires AppleScript Automation
    *  permission for each browser. */
   autoDetectMeetings: boolean;
+  /** Display name used for the local user's voice in stem-aware transcripts.
+   *  Empty → the literal "You" is used. (#13 Phase 3.) */
+  userName: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -41,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   exporterMarkdown: true,
   recordingBitrateKbps: 128,
   autoDetectMeetings: false,
+  userName: '',
 };
 
 type Key = keyof Settings;
