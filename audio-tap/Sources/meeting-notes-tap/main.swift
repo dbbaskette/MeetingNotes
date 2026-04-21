@@ -8,5 +8,12 @@ case .record(let opts):
 case .probePermissions:
   StatusEvent.emit(["event": "permissions", "mic": "unknown", "audio_capture": "unknown"])
 case .listAudioProcesses:
-  StatusEvent.emit(["event": "processes", "items": []])
+  let procs = ProcessList.enumerate().map { p -> [String: Any] in
+    var out: [String: Any] = ["pid": Int(p.pid)]
+    if let b = p.bundleID { out["bundle_id"] = b }
+    if let n = p.name { out["name"] = n }
+    out["is_meeting_app"] = (p.bundleID.map { MEETING_APP_BUNDLE_IDS.contains($0) }) ?? false
+    return out
+  }
+  StatusEvent.emit(["event": "processes", "items": procs])
 }
