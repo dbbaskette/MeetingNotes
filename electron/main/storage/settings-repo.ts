@@ -15,6 +15,8 @@ export interface Settings {
   sttLanguage: string;
   exporterApple: boolean;
   exporterMarkdown: boolean;
+  /** AAC bitrate the built-in helper records at, in kbps. UI offers 96/128/192. */
+  recordingBitrateKbps: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -29,10 +31,11 @@ export const DEFAULT_SETTINGS: Settings = {
   llmModel: 'qwen/qwen3.5-9b',
   audioHijackSessionName: 'Meeting',
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),
-  audioWatchPath: path.join(os.homedir(), 'Music', 'Audio Hijack'),
+  audioWatchPath: path.join(os.homedir(), 'Music', 'MeetingNotes'),
   sttLanguage: 'en',
   exporterApple: true,
   exporterMarkdown: true,
+  recordingBitrateKbps: 128,
 };
 
 type Key = keyof Settings;
