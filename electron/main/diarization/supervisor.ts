@@ -1,7 +1,26 @@
 import type { ChildProcess } from 'node:child_process';
 import { spawn as realSpawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+
+/**
+ * Resolves an HF_TOKEN to inject into the sidecar's environment.
+ * Priority: existing env var → standard HuggingFace cache file. The .app
+ * launched via `open` doesn't inherit shell env vars, so we read the
+ * cache file directly. Returns null when no token is available; the
+ * sidecar will surface its own clear error in that case.
+ */
+function readHFToken(): string | null {
+  if (process.env.HF_TOKEN) return process.env.HF_TOKEN;
+  const tokenFile = path.join(os.homedir(), '.cache', 'huggingface', 'token');
+  try {
+    const t = fs.readFileSync(tokenFile, 'utf8').trim();
+    return t.length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface SupervisorDeps {
   spawn?: typeof realSpawn;
@@ -123,9 +142,20 @@ export class DiarizationSupervisor {
     }
 
     const launch = this.resolveLaunch(host, port);
+    // The sidecar reads HF_TOKEN from env to download pyannote models.
+    // When the .app is launched via `open` (not via scripts/start.sh),
+    // shell env vars don't propagate, so we read the cache file directly.
+    const hfToken = readHFToken();
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...(hfToken ? { HF_TOKEN: hfToken } : {}),
+    };
     let proc: ChildProcess;
     try {
-      proc = this.spawnFn(launch.cmd, launch.args, { cwd: this.deps.sidecarDir });
+      proc = this.spawnFn(launch.cmd, launch.args, {
+        cwd: this.deps.sidecarDir,
+        env: childEnv,
+      });
     } catch (e) {
       this.deps.onLog?.(`spawn failed: ${String(e)}`);
       this.scheduleRestart();
