@@ -28,6 +28,10 @@ final class Recorder {
   private var lastSignalAt: Date = .init()
   private var lastLevelEmitAt: TimeInterval = 0
   private var stopped = false
+  // Task 12 diagnostics: count IOProc invocations to detect "no data flow"
+  // even when AudioDeviceStart succeeds.
+  private var ioProcFireCount: UInt64 = 0
+  private var diagTimer: DispatchSourceTimer?
 
   init(opts: RecordOptions) { self.opts = opts }
 
@@ -250,6 +254,46 @@ final class Recorder {
     }
     aggregateRunning = true
 
+    // Task 12 diagnostics: probe DeviceIsRunning + IOProc fire count once a
+    // second so we can tell from logs whether the tap is delivering data.
+    var runAddr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyDeviceIsRunning,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    var running: UInt32 = 0
+    var rsz = UInt32(MemoryLayout<UInt32>.size)
+    let _ = AudioObjectGetPropertyData(aggregateID, &runAddr, 0, nil, &rsz, &running)
+    StatusEvent.emit([
+      "event": "diag",
+      "stage": "after_start",
+      "device_is_running": Int(running),
+      "agg_id": Int(aggregateID),
+      "tap_id": Int(tapObjectID),
+      "stream_sr": tapFormat.mSampleRate,
+      "stream_ch": Int(tapFormat.mChannelsPerFrame),
+    ])
+    let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+    timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
+    timer.setEventHandler { [weak self] in
+      guard let self = self else { return }
+      var r: UInt32 = 0
+      var sz = UInt32(MemoryLayout<UInt32>.size)
+      var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsRunning,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+      )
+      _ = AudioObjectGetPropertyData(self.aggregateID, &addr, 0, nil, &sz, &r)
+      StatusEvent.emit([
+        "event": "diag",
+        "ioproc_fires": NSNumber(value: self.ioProcFireCount),
+        "device_is_running": Int(r),
+      ])
+    }
+    timer.resume()
+    self.diagTimer = timer
+
     if opts.captureMic { try startMicEngine() }
   }
 
@@ -297,6 +341,7 @@ final class Recorder {
 
   fileprivate func handleIOProc(inputData: UnsafePointer<AudioBufferList>,
                                 inputTime: UnsafePointer<AudioTimeStamp>) {
+    ioProcFireCount &+= 1
     guard let writer = writer, let src = sourceFormat else { return }
     let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
     // First buffer in the ABL holds the deinterleaved channels (or the
@@ -361,6 +406,12 @@ final class Recorder {
   }
 
   private func stopAggregateIO() {
+    diagTimer?.cancel(); diagTimer = nil
+    StatusEvent.emit([
+      "event": "diag",
+      "stage": "stop",
+      "ioproc_fires_total": NSNumber(value: ioProcFireCount),
+    ])
     if aggregateRunning, let pid = ioProcID {
       _ = AudioDeviceStop(aggregateID, pid)
       _ = AudioDeviceDestroyIOProcID(aggregateID, pid)
