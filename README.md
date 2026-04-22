@@ -27,11 +27,12 @@ Local-first meeting notes for macOS. Hit Record, pick which app's audio you want
 
 Most meeting-transcription tools either ship your audio to a SaaS, lock you into their recorder, or only do half the job. MeetingNotes runs the whole pipeline locally:
 
-- **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic, mixed mono, into M4A
-- **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon)
-- **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar
+- **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic into a mixed M4A plus two sidecar stems (`.voice.m4a`, `.system.m4a`) for stem-aware transcription
+- **Meeting auto-detect** (opt-in) watches your frontmost browser tab for known meeting URLs — Meet, Zoom web, Teams, Whereby, Jitsi, and others — and offers to record with one click
+- **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon). With stems present, each stream is transcribed independently: you're always labelled "You", remote speakers get clean per-stream audio
+- **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar (runs on the system stem only when stems are present)
 - **Speaker identification** by matching voice embeddings against a roster you build over time
-- **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai)
+- **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai). Reasoning models welcome — `<think>` blocks are stripped before rendering
 - **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
 
 You bring the models. MeetingNotes orchestrates everything else.
@@ -64,17 +65,27 @@ brew install whisper-cpp ffmpeg
 
 `start.sh` launches whisper-server, auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development.
 
-**First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security.
+**First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security. If you enable **Watch browser tabs for meeting URLs** in Settings, macOS will also prompt once per browser for Automation access.
 
 ## Recording a meeting
 
-1. Click **⏺ Record** in the top right.
-2. Source picker shows every app currently producing audio. Recognised meeting apps (Zoom, Teams, FaceTime, Slack, Discord, WhatsApp) appear first with a `MEETING` badge. Pick one — or `All system audio` as a catch-all.
+1. Click **⏺ Record** in the top right — or, with **Watch browser tabs for meeting URLs** enabled in Settings, wait for the in-library banner when a known meeting opens in Chrome / Safari / Arc / Edge / Brave and click **Record** from there.
+2. The source picker shows every app currently producing audio. Recognised meeting apps (Zoom, Teams, FaceTime, Slack, Discord, WhatsApp) appear first with a `MEETING` badge. Pick one — or `All system audio` as a catch-all.
 3. A live recording row appears at the top of the library with elapsed time, VU meter, and a Stop button.
 4. Click **■ Stop** when the meeting ends. The recording shows up in your Inbox within a second.
 5. Click **▶ Process** to run it through the pipeline.
 
-Recordings land at `~/Music/MeetingNotes/recording-<timestamp>-<id>.m4a`. AAC mono at 128 kbps — about 60 MB for an hour-long meeting.
+Each recording writes three files to `~/Music/MeetingNotes/`:
+
+- `recording-<timestamp>-<id>.m4a` — mixed mic + tap, the primary file you play back
+- `recording-<timestamp>-<id>.voice.m4a` — mic stem only
+- `recording-<timestamp>-<id>.system.m4a` — tap stem only
+
+AAC mono at 128 kbps. A one-hour meeting is ~60 MB for the mixed file plus similar per stem.
+
+### Managing recordings
+
+Every row in the Inbox, Library, and the detail-view header exposes a **⋯** actions menu with **Rename…** and **Delete…**. Delete is a hard delete — it removes the mixed m4a, both stems, the meeting folder (transcript / summary / exports), and the database row.
 
 ## How the pipeline works
 
@@ -92,9 +103,15 @@ Recordings land at `~/Music/MeetingNotes/recording-<timestamp>-<id>.m4a`. AAC mo
                        │  Pipeline    │
                        │              │
                        │  transcribe ─┼──▶ whisper-server (8080)
+                       │              │       (stems present → voice +
+                       │              │        system transcribed
+                       │              │        separately, voice = "You")
                        │  diarize ────┼──▶ pyannote sidecar (8765)
-                       │  merge       │       (M4A → temp WAV via ffmpeg
-                       │  identify ───┼──▶     before either stage)
+                       │              │       (system stem only when stems
+                       │              │        exist; mixed file otherwise)
+                       │  merge       │       (M4A → 16kHz WAV via ffmpeg
+                       │  identify ───┼──▶     before STT; soxr when
+                       │              │        available for best quality)
                        │  ▼           │
                        │  awaiting_   │   ◀── pause: name unknown voices
                        │  speaker_id  │       (or check Skip for this meeting)
@@ -178,6 +195,8 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 | `audioWatchPath` | `~/Music/MeetingNotes` | folder watched for new recordings (also watches `~/Music/Audio Hijack` for one release as a legacy fallback) |
 | `recordingBitrateKbps` | `128` | AAC bitrate for new recordings (96 / 128 / 192) |
 | `sttLanguage` | `en` | passed to Whisper |
+| `userName` | `""` | your name — used to label the voice stem in transcripts (empty falls back to the literal "You") |
+| `autoDetectMeetings` | `false` | poll the frontmost browser tab for meeting URLs and offer to record. Requires granting Automation permission to each browser the first time |
 | `exporterApple` | `true` | enable Apple Reminders exporter |
 | `exporterMarkdown` | `true` | enable Markdown exporter |
 
@@ -230,10 +249,15 @@ audio-tap/            Swift CLI helper for CoreAudio Process Tap recording
 electron/main/        main process: pipeline, storage, IPC, watcher, services
   recording/          RecordingManager, AppEnumerator, orphan-recovery
   permissions/        mic state probe via systemPreferences API
+  meeting-detector/   browser-tab URL polling (Meet/Zoom/Teams/Whereby/etc.)
+  pipeline/stages/    transcribing (stem-aware), diarizing, merging,
+                      identifying, summarising, extracting
+  lib/stem-paths.ts   voice/system stem path derivation + hasStems()
 electron/preload/     preload bridge (CJS, IPC surface with parity test)
 electron/renderer/    React UI
   components/         RecordButton, SourcePicker, LiveRecordingRow, VuMeter,
-                      PermissionsModal, InboxRow, LibraryRow
+                      PermissionsModal, InboxRow, LibraryRow,
+                      MeetingRowMenu, MeetingDetectedBanner
 sidecar/              Python (pyannote) diarization sidecar, FastAPI on 8765
 scripts/              setup.sh · start.sh · whisper-server.sh · doctor.sh
 docs/                 manual smoke-test checklist + design specs + plans
