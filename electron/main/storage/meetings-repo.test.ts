@@ -43,10 +43,39 @@ describe('MeetingsRepo', () => {
     expect(repo.findNonTerminal().map((m) => m.id)).toEqual(['a']);
   });
 
-  it('delete removes the row (and findById returns null)', () => {
-    repo.insert({ id: 'gone', slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
-    expect(repo.findById('gone')).not.toBeNull();
-    repo.delete('gone');
+  it('softDelete hides the row from listAll but leaves it in findById', () => {
+    repo.insert({ id: 'soft', slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+    expect(repo.listAll().map((m) => m.id)).toContain('soft');
+    repo.softDelete('soft');
+    expect(repo.listAll().map((m) => m.id)).not.toContain('soft');
+    const row = repo.findById('soft');
+    expect(row).not.toBeNull();
+    expect(row!.deletedAt).not.toBeNull();
+  });
+
+  it('restore clears deletedAt, bringing the row back to listAll', () => {
+    repo.insert({ id: 'back', slug: 's2', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+    repo.softDelete('back');
+    repo.restore('back');
+    expect(repo.listAll().map((m) => m.id)).toContain('back');
+    expect(repo.findById('back')!.deletedAt).toBeNull();
+  });
+
+  it('findSoftDeleted returns only soft-deleted rows, honoring the cutoff', () => {
+    repo.insert({ id: 'live', slug: 's3', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+    repo.insert({ id: 'dead', slug: 's4', title: 't', startedAt: null, durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+    repo.softDelete('dead');
+    // No cutoff → returns the one soft-deleted row.
+    expect(repo.findSoftDeleted().map((m) => m.id)).toEqual(['dead']);
+    // Cutoff in the future → matches everything soft-deleted before now.
+    expect(repo.findSoftDeleted(new Date(Date.now() + 60_000).toISOString()).map((m) => m.id)).toEqual(['dead']);
+    // Cutoff in the past → nothing qualifies yet (row was deleted more recently).
+    expect(repo.findSoftDeleted('1970-01-01T00:00:00Z')).toEqual([]);
+  });
+
+  it('hardDelete removes the row entirely', () => {
+    repo.insert({ id: 'gone', slug: 's5', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+    repo.hardDelete('gone');
     expect(repo.findById('gone')).toBeNull();
   });
 });
