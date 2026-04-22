@@ -30,6 +30,7 @@ import {
   type DiarizationSegment,
 } from '../speakers/sample-extractor.js';
 import { deriveStemPaths, hasStems } from '../lib/stem-paths.js';
+import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 
 export interface IpcServices {
@@ -154,28 +155,27 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.meetingsDelete, (_e, id: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
-    if (!m) return; // already gone — treat as success
-    // File cleanup order: audio first (+ stem siblings), then meeting folder,
-    // then DB row. If any of the filesystem steps fails we still drop the
-    // row — a partial delete is preferable to an inconsistent UI where the
-    // row lingers but the audio is gone.
-    const tryUnlink = (p: string): void => {
-      try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* best-effort */ }
-    };
-    // Mixed file.
-    tryUnlink(m.audioPath);
-    // Stem siblings (#13 Phase 1). Same derivation as lib/stem-paths.ts —
-    // inlined to keep this handler self-contained. Safe no-op if absent.
-    const ext = path.extname(m.audioPath);
-    const base = ext ? m.audioPath.slice(0, -ext.length) : m.audioPath;
-    tryUnlink(`${base}.voice${ext}`);
-    tryUnlink(`${base}.system${ext}`);
-    // Meeting folder (transcripts, summaries, exports, meeting.json).
+    if (!m || m.deletedAt) return; // already gone or already soft-deleted — idempotent
+    // Soft-delete: move files to the per-meeting trash dir, stamp
+    // deleted_at on the row. The undo path (meetingsUndoDelete) moves
+    // everything back. Purge expired entries on startup + on a timer.
     try {
-      const folder = meetingFolderPath(s.libraryRoot, m.slug);
-      if (fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true });
-    } catch { /* best-effort */ }
-    s.meetings.delete(id);
+      moveToTrash({
+        libraryRoot: s.libraryRoot, meetingId: id,
+        audioPath: m.audioPath, slug: m.slug,
+      });
+    } catch { /* partial move is fine; restore will recover what it can */ }
+    s.meetings.softDelete(id);
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsUndoDelete, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
+    const m = s.meetings.findById(id);
+    if (!m) return false; // purge already ran
+    if (!m.deletedAt) return true; // not deleted — nothing to undo, report success
+    const restored = restoreFromTrash(s.libraryRoot, id);
+    if (restored) s.meetings.restore(id);
+    return restored;
   });
 
   ipc.handle(IPC_CHANNELS.meetingsRerun, (_e, id: string, fromStage: string) => {

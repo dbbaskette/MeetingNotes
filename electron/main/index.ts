@@ -29,6 +29,7 @@ import { runSummarizing } from './pipeline/stages/summarizing.js';
 import { runExtracting } from './pipeline/stages/extracting.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
 import { MeetingDetector } from './meeting-detector/detector.js';
+import { purgeTrashDir, UNDO_WINDOW_MS } from './storage/trash.js';
 import { buildExporterRegistry } from './exporters/registry.js';
 import { Logger } from './logging/logger.js';
 import { createMeetingFolder } from './storage/meeting-folder.js';
@@ -201,6 +202,22 @@ app.whenReady().then(async () => {
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
+  // Trash purge (UX rec #2 undo-delete). Soft-deleted meetings stay
+  // recoverable for UNDO_WINDOW_MS. On launch, purge anything that's
+  // already past the window so the user doesn't see day-old trash come
+  // back on a restart. Then every 60s check again.
+  const purgeExpiredTrash = (): void => {
+    const cutoff = new Date(Date.now() - UNDO_WINDOW_MS).toISOString();
+    const expired = meetings.findSoftDeleted(cutoff);
+    for (const m of expired) {
+      purgeTrashDir(libraryRoot, m.id);
+      meetings.hardDelete(m.id);
+      logger.info('trash:purged', { meetingId: m.id });
+    }
+  };
+  purgeExpiredTrash();
+  const trashPurgeTimer = setInterval(purgeExpiredTrash, 60_000);
+
   // Meeting auto-detect (#12). Opt-in per setting. Polls the frontmost
   // browser tabs for known meeting URLs (Meet/Zoom/Teams/Whereby/etc.) and
   // pushes a meetingDetectedEvent to renderers so they can prompt the user
@@ -253,6 +270,7 @@ app.whenReady().then(async () => {
       }
       try {
         meetingDetector.stop();
+        clearInterval(trashPurgeTimer);
         await Promise.all([supervisor.stop(), watcher.stop()]);
       } catch (err) {
         logger.error('shutdown:error', { err: String(err) });

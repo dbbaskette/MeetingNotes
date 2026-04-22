@@ -140,6 +140,19 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_rec_status ON recording_sessions(status);
     `,
   },
+  {
+    version: 7,
+    // Soft-delete support (UX rec #2). When the user deletes a meeting, we
+    // stamp `deleted_at` and move the audio files + meeting folder into a
+    // per-meeting trash directory. The row stays around so the user can
+    // click "Undo" in the toast. A periodic purge hard-deletes entries that
+    // have aged past the undo window. Partial index skips deleted rows from
+    // the normal list queries for free.
+    up: `
+      ALTER TABLE meetings ADD COLUMN deleted_at TEXT;
+      CREATE INDEX IF NOT EXISTS idx_meetings_deleted ON meetings(deleted_at);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

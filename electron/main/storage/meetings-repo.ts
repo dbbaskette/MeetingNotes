@@ -6,6 +6,10 @@ export interface MeetingRow {
   audioPath: string; status: string; pipelineStage: string;
   stageStartedAt: string | null;
   skipSpeakerId: boolean;
+  /** ISO timestamp of soft-delete. NULL = live. Rows with a non-null
+   *  `deletedAt` are hidden from `listAll()` but still accessible via
+   *  `findById()` so the undo-delete toast can restore them. */
+  deletedAt: string | null;
   createdAt: string; updatedAt: string;
 }
 
@@ -27,6 +31,7 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     pipelineStage: r.pipeline_stage as string,
     stageStartedAt: (r.stage_started_at as string) ?? null,
     skipSpeakerId: Boolean((r.skip_speaker_id as number | undefined) ?? 0),
+    deletedAt: (r.deleted_at as string) ?? null,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
   };
@@ -54,20 +59,39 @@ export class MeetingsRepo {
   }
 
   listAll(): MeetingRow[] {
-    const rows = this.db.prepare('SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC').all() as Record<string, unknown>[];
+    // Soft-deleted rows are in the DB until the purge job runs — hide them
+    // from all user-facing listings. findById() still returns them for the
+    // undo-delete path.
+    const rows = this.db.prepare(
+      'SELECT * FROM meetings WHERE deleted_at IS NULL ORDER BY COALESCE(started_at, created_at) DESC',
+    ).all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
   findNonTerminal(): MeetingRow[] {
-    const rows = this.db.prepare("SELECT * FROM meetings WHERE pipeline_stage != 'done'").all() as Record<string, unknown>[];
+    const rows = this.db.prepare(
+      "SELECT * FROM meetings WHERE pipeline_stage != 'done' AND deleted_at IS NULL",
+    ).all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
   /** Meetings to auto-resume on launch: in-progress, never failed. */
   findResumable(): MeetingRow[] {
     const rows = this.db.prepare(
-      "SELECT * FROM meetings WHERE pipeline_stage != 'done' AND status = 'processing'",
+      "SELECT * FROM meetings WHERE pipeline_stage != 'done' AND status = 'processing' AND deleted_at IS NULL",
     ).all() as Record<string, unknown>[];
+    return rows.map(rowToMeeting);
+  }
+
+  /** Rows in the soft-delete limbo, optionally older than a given ISO
+   *  timestamp. The main process's periodic purge passes a cutoff so it
+   *  only hard-deletes entries past the undo window. */
+  findSoftDeleted(olderThanIso?: string): MeetingRow[] {
+    const sql = olderThanIso
+      ? 'SELECT * FROM meetings WHERE deleted_at IS NOT NULL AND deleted_at < ?'
+      : 'SELECT * FROM meetings WHERE deleted_at IS NOT NULL';
+    const stmt = this.db.prepare(sql);
+    const rows = (olderThanIso ? stmt.all(olderThanIso) : stmt.all()) as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
@@ -98,10 +122,25 @@ export class MeetingsRepo {
       .run(skip ? 1 : 0, new Date().toISOString(), id);
   }
 
-  /** Remove the row. Foreign keys in `meeting_speakers` and `action_items`
-   *  cascade (see migrations.ts), so associated rows vacate automatically.
-   *  File cleanup (audio + stems + meeting folder) is the caller's job. */
-  delete(id: string): void {
+  /** Soft-delete: mark the row hidden but keep it around so the undo-delete
+   *  toast can restore it. File moves to the trash dir happen in the IPC
+   *  handler because they need the library root / audio paths. */
+  softDelete(id: string): void {
+    this.db.prepare('UPDATE meetings SET deleted_at = ?, updated_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), new Date().toISOString(), id);
+  }
+
+  /** Clear the deleted_at stamp — user clicked Undo. */
+  restore(id: string): void {
+    this.db.prepare('UPDATE meetings SET deleted_at = NULL, updated_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), id);
+  }
+
+  /** Hard-delete: remove the row. Foreign keys in `meeting_speakers` and
+   *  `action_items` cascade (see migrations.ts), so associated rows vacate
+   *  automatically. File cleanup is the caller's job. Used by the purge
+   *  job that runs on startup + on a timer to empty the trash. */
+  hardDelete(id: string): void {
     this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
   }
 }

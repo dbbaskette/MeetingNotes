@@ -4,6 +4,7 @@ import { LibraryView } from './views/LibraryView';
 import { MeetingDetailView } from './views/MeetingDetailView';
 import { SettingsView } from './views/SettingsView';
 import { PermissionsModal } from './components/PermissionsModal';
+import { ToastHost } from './components/Toasts';
 import { api } from './ipc/client';
 
 type View = { kind: 'library' } | { kind: 'detail'; id: string } | { kind: 'settings' };
@@ -37,9 +38,9 @@ export function App(): JSX.Element {
   );
 
   return (
-    <>
+    <ToastHost>
       <div className="window-drag-strip" />
       {body}
-    </>
+    </ToastHost>
   );
 }

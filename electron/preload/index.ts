@@ -9,6 +9,7 @@ const IPC_CHANNELS = {
   meetingsGet: 'meetings:get',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
+  meetingsUndoDelete: 'meetings:undo-delete',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
@@ -45,10 +46,17 @@ const api = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
     rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
-    /** Hard delete: removes the audio file (+ any voice/system stems),
-     *  the meeting folder (transcripts, summaries, exports), and the DB
-     *  row. Cascades to meeting_speakers and action_items via FK. */
+    /** Soft delete: moves audio files + meeting folder to the trash and
+     *  stamps `deleted_at` on the DB row. The row is hidden from listings
+     *  but recoverable via `undoDelete` for ~90s. After the undo window,
+     *  a periodic purge job in the main process hard-deletes the files
+     *  and the row. */
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<void>,
+    /** Restore a soft-deleted meeting. Returns true if the files were
+     *  moved back and the row's deleted_at cleared; false if the undo
+     *  window already expired. */
+    undoDelete: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsUndoDelete, id) as Promise<boolean>,
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
     startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,

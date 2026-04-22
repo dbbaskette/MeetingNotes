@@ -9,6 +9,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
+import { useToast } from './Toasts';
 
 export interface MeetingRowMenuProps {
   meeting: { id: string; title: string };
@@ -207,11 +208,36 @@ function DeleteDialog({
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
 
   async function confirm(): Promise<void> {
     setBusy(true); setErr(null);
     try {
       await api.meetings.delete(meeting.id);
+      // Offer an undo while the backend's 90s window lasts. The toast
+      // timer is intentionally shorter (10s) — users who read the message
+      // and move on don't expect "Undo" to sit forever. Users who need
+      // the full window can always click Undo up to 90s via a direct
+      // API call, but that's a power-user escape hatch, not the UI.
+      toast.show({
+        message: `Deleted "${meeting.title}"`,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              const restored = await api.meetings.undoDelete(meeting.id);
+              if (!restored) {
+                toast.show({ message: 'Too late — this meeting has already been purged.', variant: 'error' });
+              }
+            } catch (e) {
+              toast.show({ message: `Undo failed: ${(e as Error).message}`, variant: 'error' });
+            } finally {
+              onDeleted(); // refresh the list either way
+            }
+          },
+        },
+        durationMs: 10_000,
+      });
       onDeleted();
     } catch (e) {
       setErr((e as Error).message);
@@ -225,8 +251,9 @@ function DeleteDialog({
       <div className="text-sm text-ink-muted mb-4">
         <span className="font-mono text-ink">{meeting.title}</span>
         <br />
-        This removes the audio file on disk, the transcript, summary, and
-        any exports. The action can&apos;t be undone.
+        Moves the audio file, transcript, summary, and any exports into
+        the trash. You&apos;ll have a short window to <strong>Undo</strong>;
+        after that the files are permanently removed.
       </div>
       {err && <div className="text-xs text-rose-600 mb-2">{err}</div>}
       <div className="flex justify-end gap-2">

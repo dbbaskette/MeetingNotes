@@ -1,24 +1,14 @@
 // electron/renderer/src/views/LibraryView.tsx
 //
-// Two-zone layout:
-//
-//   ┌─ INBOX ────────────────────────────────┐
-//   │ unprocessed recordings; checkbox list; │
-//   │ primary action = "Process N selected"   │
-//   └─────────────────────────────────────────┘
-//   ┌─ LIBRARY ──────────────────────────────┐
-//   │ processed meetings; searchable;         │
-//   │ filter chips by status                  │
-//   └─────────────────────────────────────────┘
-//
-// Zones are *visually* separate — different typography, different density,
-// different action vocabulary. The old single-list UI piled four statuses
-// into one table and relied on hover-reveal checkboxes. This version makes
-// the "new arrivals → pick what to process" mental model the explicit top
-// half of the page.
+// Single unified list. Previously the view was split into an Inbox zone
+// (pending recordings) and a Library zone (everything processed or in-
+// flight). The two-zone split duplicated row rendering, filtering, and
+// search logic; merging into one list with an "Unprocessed" filter chip
+// makes the whole catalog searchable and removes the conceptual split
+// between "arrivals" and "meetings" — they're all meetings, some
+// haven't started processing yet.
 import { useEffect, useMemo, useState } from 'react';
 import { useMeetingsStore } from '../store/meetings';
-import { InboxRow } from '../components/InboxRow';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
@@ -30,7 +20,7 @@ interface Props {
   onSettings: () => void;
 }
 
-type LibFilter = 'all' | 'processing' | 'done' | 'failed';
+type LibFilter = 'all' | 'unprocessed' | 'processing' | 'done' | 'failed';
 
 export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
@@ -47,33 +37,29 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
     return () => clearInterval(t);
   }, [refresh]);
 
-  const inbox = useMemo(
-    () =>
-      meetings
-        .filter((m) => m.status === 'pending')
-        .sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? '')),
-    [meetings],
-  );
-
   // From the user's perspective `awaiting_user` is just "still in flight"
-  // — the pipeline hasn't reached `done`, it's just paused for input. So the
-  // Processing filter and counter both bucket awaiting_user with processing.
-  // Awaiting comes first in the sort because those rows actively need
-  // attention from the user, not just patience.
+  // — the pipeline hasn't reached `done`, it's just paused for input. So
+  // the Processing filter and counter both bucket awaiting_user with
+  // processing. Awaiting comes first in the sort because those rows
+  // actively need attention from the user, not just patience.
   const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
 
   const library = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const notPending = meetings.filter((m) => m.status !== 'pending');
-    const searched = q ? notPending.filter((m) => m.title.toLowerCase().includes(q)) : notPending;
+    const searched = q ? meetings.filter((m) => m.title.toLowerCase().includes(q)) : meetings;
     const filtered = libFilter === 'all'
       ? searched
-      : libFilter === 'processing'
-        ? searched.filter((m) => isInFlight(m.status))
-        : searched.filter((m) => m.status === libFilter);
-    // Awaiting first (needs YOU), then processing (needs patience), then
-    // failed (needs attention), then done (chronological).
-    const rank: Record<string, number> = { awaiting_user: 0, processing: 1, failed: 2, done: 3 };
+      : libFilter === 'unprocessed'
+        ? searched.filter((m) => m.status === 'pending')
+        : libFilter === 'processing'
+          ? searched.filter((m) => isInFlight(m.status))
+          : searched.filter((m) => m.status === libFilter);
+    // Pending first (user can act), then awaiting_user (needs YOU mid-
+    // pipeline), processing (needs patience), failed (needs attention),
+    // done (chronological).
+    const rank: Record<string, number> = {
+      pending: 0, awaiting_user: 1, processing: 2, failed: 3, done: 4,
+    };
     return [...filtered].sort((a, b) => {
       const ra = rank[a.status] ?? 9;
       const rb = rank[b.status] ?? 9;
@@ -83,27 +69,33 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
   }, [meetings, query, libFilter]);
 
   const libCounts = useMemo(() => ({
-    all: meetings.filter((m) => m.status !== 'pending').length,
+    all: meetings.length,
+    unprocessed: meetings.filter((m) => m.status === 'pending').length,
     processing: meetings.filter((m) => isInFlight(m.status)).length,
     done: meetings.filter((m) => m.status === 'done').length,
     failed: meetings.filter((m) => m.status === 'failed').length,
   }), [meetings]);
 
+  const pendingIds = useMemo(
+    () => meetings.filter((m) => m.status === 'pending').map((m) => m.id),
+    [meetings],
+  );
+
   // Drop stale selections — a meeting that just transitioned out of pending
   // (e.g. user clicked Process and it's now 'processing') shouldn't stay
   // checked. Keeps the "N selected" pill honest.
   useEffect(() => {
-    const pendingIds = new Set(inbox.map((m) => m.id));
+    const ids = new Set(pendingIds);
     setSelected((prev) => {
       let changed = false;
       const next = new Set<string>();
       for (const id of prev) {
-        if (pendingIds.has(id)) next.add(id);
+        if (ids.has(id)) next.add(id);
         else changed = true;
       }
       return changed ? next : prev;
     });
-  }, [inbox]);
+  }, [pendingIds]);
 
   function toggleSelect(id: string): void {
     setSelected((prev) => {
@@ -114,10 +106,6 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
     });
   }
 
-  function toggleSelectAll(): void {
-    setSelected((prev) => (prev.size === inbox.length ? new Set() : new Set(inbox.map((m) => m.id))));
-  }
-
   async function processSelected(): Promise<void> {
     const ids = [...selected];
     if (ids.length === 0) return;
@@ -125,8 +113,6 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
     await api.meetings.startMany(ids);
     void refresh();
   }
-
-  const allSelected = inbox.length > 0 && selected.size === inbox.length;
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-24">
@@ -178,40 +164,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
         </div>
       )}
 
-      {/* ── INBOX ───────────────────────────────────────────────────────── */}
-      {inbox.length > 0 && (
-        <section className="mb-10">
-          <div className="flex items-baseline gap-3 mb-3">
-            <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
-              Inbox
-            </h2>
-            <span className="text-[11px] text-ink-muted">
-              {inbox.length} {inbox.length === 1 ? 'recording' : 'recordings'} waiting
-            </span>
-            <div className="flex-1" />
-            <button
-              onClick={toggleSelectAll}
-              className="text-[11px] font-semibold text-brand-indigo hover:underline"
-            >
-              {allSelected ? 'Clear' : 'Select all'}
-            </button>
-          </div>
-          <div className="bg-surface border border-surface-border rounded-xl overflow-hidden divide-y divide-surface-border">
-            {inbox.map((m) => (
-              <InboxRow
-                key={m.id}
-                meeting={m}
-                checked={selected.has(m.id)}
-                onToggle={() => toggleSelect(m.id)}
-                onOpen={() => onOpen(m.id)}
-                onChanged={() => void refresh()}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── LIBRARY ─────────────────────────────────────────────────────── */}
+      {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}
       <section>
         <div className="flex items-baseline gap-3 mb-3">
           <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
@@ -222,11 +175,9 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           </span>
         </div>
 
-        {/* Filter chips — declarative, replaces the mixed-status list.
-            Wraps on narrow windows; search yields width first via flex-1 on
-            narrow, fixed width on sm+. All status chips share the same
-            conditional rendering rule (count > 0) for consistency — only
-            the default "All" chip is always visible. */}
+        {/* Filter chips — each status chip hides when its count is zero so
+            users aren't staring at "Failed 0" on a fresh install. Search
+            yields width first on narrow via flex-1. */}
         <div className="flex items-center flex-wrap gap-2 mb-3">
           <FilterChip
             active={libFilter === 'all'}
@@ -234,6 +185,15 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
             label="All"
             n={libCounts.all}
           />
+          {libCounts.unprocessed > 0 && (
+            <FilterChip
+              active={libFilter === 'unprocessed'}
+              onClick={() => setLibFilter('unprocessed')}
+              label="Unprocessed"
+              n={libCounts.unprocessed}
+              dotClass="bg-ink-muted"
+            />
+          )}
           {libCounts.processing > 0 && (
             <FilterChip
               active={libFilter === 'processing'}
@@ -273,14 +233,20 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
         {library.length === 0 ? (
           <LibraryEmpty
             hasAny={libCounts.all > 0}
-            hasInbox={inbox.length > 0}
             filter={libFilter}
             query={query}
           />
         ) : (
           <div className="space-y-2">
             {library.map((m) => (
-              <LibraryRow key={m.id} meeting={m} onOpen={onOpen} onChanged={() => void refresh()} />
+              <LibraryRow
+                key={m.id}
+                meeting={m}
+                onOpen={onOpen}
+                onChanged={() => void refresh()}
+                checked={m.status === 'pending' ? selected.has(m.id) : undefined}
+                onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
+              />
             ))}
           </div>
         )}
@@ -326,10 +292,9 @@ function FilterChip({
 }
 
 function LibraryEmpty({
-  hasAny, hasInbox, filter, query,
+  hasAny, filter, query,
 }: {
   hasAny: boolean;
-  hasInbox: boolean;
   filter: LibFilter;
   query: string;
 }): JSX.Element {
@@ -341,16 +306,10 @@ function LibraryEmpty({
     );
   }
   if (hasAny && filter !== 'all') {
+    const filterLabel = filter === 'unprocessed' ? 'unprocessed' : filter;
     return (
       <div className="text-center py-10 text-sm text-ink-muted">
-        No {filter} meetings.
-      </div>
-    );
-  }
-  if (hasInbox) {
-    return (
-      <div className="text-center py-10 text-sm text-ink-muted italic">
-        Nothing here yet — pick recordings from the Inbox above and process them.
+        No {filterLabel} meetings.
       </div>
     );
   }
@@ -359,8 +318,8 @@ function LibraryEmpty({
       <div className="text-4xl mb-4 opacity-40">◈</div>
       <div className="text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
         Hit <span className="font-semibold text-ink">Record</span> to start a new session,
-        or drop an MP3 in{' '}
-        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">~/Music/Audio Hijack</code>.
+        or drop an audio file in{' '}
+        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">~/Music/MeetingNotes</code>.
       </div>
     </div>
   );
