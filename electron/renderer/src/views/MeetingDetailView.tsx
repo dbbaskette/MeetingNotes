@@ -100,14 +100,17 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
   return (
     <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm">
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
           ← Library
         </button>
-        <div className="flex-1 text-center font-semibold">{m.title}</div>
+        {/* min-w-0 lets the truncate actually clip long titles instead of
+            forcing the flex row to overflow — otherwise a long title would
+            push the actions menu off the right edge. */}
+        <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">{m.title}</div>
         {/* Actions menu: rename/delete from the detail view. When the user
             deletes from here, route back to Library since the detail we're
             viewing no longer exists. */}
-        <div className="relative w-[68px] flex justify-end">
+        <div className="relative w-[68px] flex justify-end shrink-0">
           <MeetingRowMenu
             meeting={{ id: m.id, title: m.title }}
             onChanged={() => void reload()}
@@ -126,10 +129,15 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
 
       <SpeakerIdControls meeting={m} onReload={reload} />
 
-      <div className="grid grid-cols-[220px_1fr_240px] min-h-[560px]">
-        <LeftRail meeting={m} onReload={reload} />
-        <CenterPane meeting={m} tab={tab} onTab={setTab} />
-        <RightRail meeting={m} onReload={reload} />
+      {/* Responsive layout: stack single-column below lg (1024px) so the
+          narrow rails don't clip center-pane content (transcript / audio
+          player / summary). min-w-0 on each cell lets flex/grid children
+          actually shrink — without it long lines of text force horizontal
+          overflow and the whole detail view gets cut off on the right. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
+        <div className="min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
+        <div className="min-w-0"><CenterPane meeting={m} tab={tab} onTab={setTab} /></div>
+        <div className="min-w-0"><RightRail meeting={m} onReload={reload} /></div>
       </div>
     </div>
   );

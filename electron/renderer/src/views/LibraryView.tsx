@@ -129,7 +129,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
   const allSelected = inbox.length > 0 && selected.size === inbox.length;
 
   return (
-    <div className="max-w-5xl mx-auto p-8 pb-24">
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-24">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">

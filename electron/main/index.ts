@@ -43,6 +43,13 @@ async function createWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    // Keep the window from shrinking to a size where the detail view's
+    // fixed-width rails + stage timeline chips would clip content off the
+    // right edge. 900×600 still leaves the three-column detail layout
+    // readable; below that the renderer's responsive breakpoint collapses
+    // the rails below the center pane.
+    minWidth: 900,
+    minHeight: 600,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#fafaf9',
     webPreferences: {
