@@ -35,11 +35,14 @@ describe('runDiarizing', () => {
     expect(got.num_speakers).toBe(1);
   });
 
-  it('diarizes the system stem (not the mixed file) when stems exist', async () => {
+  it('diarizes the mixed file (not any stem) even when stems exist', async () => {
+    // Stem-aware diarization is currently disabled because transcription
+    // had to revert to the mixed file pending #27 (voice stem silence).
+    // Running diarize on a different audio source than transcribe causes
+    // UNKNOWN-speaker segments, so they must stay paired.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-stem-'));
     const mFolder = path.join(dir, 'meetings', 'slug');
     fs.mkdirSync(mFolder, { recursive: true });
-    // Place a mixed file + system + voice stems on disk to trigger stem-aware path.
     const mixed = path.join(mFolder, 'rec.m4a');
     const system = path.join(mFolder, 'rec.system.m4a');
     const voice = path.join(mFolder, 'rec.voice.m4a');
@@ -58,8 +61,7 @@ describe('runDiarizing', () => {
       logger: { info: vi.fn() },
     };
     await runDiarizing({ meetingId: 'm' }, ctx);
-    // Must have diarized the SYSTEM stem, not the mixed file.
     expect(diarize).toHaveBeenCalledTimes(1);
-    expect(diarize.mock.calls[0][0]).toBe(system);
+    expect(diarize.mock.calls[0][0]).toBe(mixed);
   });
 });
