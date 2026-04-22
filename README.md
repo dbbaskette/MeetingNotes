@@ -13,15 +13,13 @@ Local-first meeting notes for macOS. Hit Record, pick which app's audio you want
 
 ## Screenshots
 
-<!-- Add screenshots to docs/screenshots/ and they'll render here. -->
-
-| Library & Inbox | Recording in progress |
+| Library | Recording in progress |
 | --- | --- |
-| ![Library view](docs/screenshots/library.png) | ![Recording](docs/screenshots/recording.png) |
+| ![Unified library list — filter chips across every state, progress indicator on in-flight rows, action-items count + speakers on done rows](docs/screenshots/library.png) | ![Live recording row docked above the library — mic + system audio mix, elapsed timer, VU meter, Stop button](docs/screenshots/recording.png) |
 
 | Speaker-ID gate | Summary editor |
 | --- | --- |
-| ![Speaker ID](docs/screenshots/speaker-id.png) | ![Summary](docs/screenshots/summary.png) |
+| ![Detail view parked at the speaker-ID gate — amber banner above the pipeline timeline prompts naming unknown voices before summarise runs](docs/screenshots/speaker-id.png) | ![Finished meeting — pipeline complete, rendered summary with sections, identified speakers, action-items ready to export](docs/screenshots/summary.png) |
 
 ## Why
 
