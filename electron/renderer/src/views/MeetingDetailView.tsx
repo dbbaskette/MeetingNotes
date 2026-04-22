@@ -678,7 +678,37 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
   // regardless of who X is). `exporting` holds both the exporter id and a
   // human label so the modal knows where it's sending.
   const [exporting, setExporting] = useState<{ id: string; label: string } | null>(null);
+  const [markdownError, setMarkdownError] = useState<string | null>(null);
   const hasItems = meeting.actionItems.length > 0;
+  // Markdown export includes the summary + a checklist of action items,
+  // so it's useful whenever there's something on disk to export — even a
+  // summary with zero action items is worth downloading. Apple Reminders
+  // and (future) Google Tasks only sync action items, so those stay
+  // gated on hasItems.
+  const hasSummary = Boolean(meeting.summaryMd && meeting.summaryMd.trim().length > 0);
+  const canMarkdown = hasItems || hasSummary;
+
+  // When there are action items the user probably wants to pick which ones
+  // to include, so open the item-picker modal. When there aren't (summary-
+  // only export), bypass the modal — just prompt for a save location and
+  // write the file with an empty items array (the markdown exporter
+  // renders just the summary + an empty "## Action Items" section).
+  async function exportMarkdown(): Promise<void> {
+    if (hasItems) { setExporting({ id: 'markdown', label: 'Markdown' }); return; }
+    setMarkdownError(null);
+    try {
+      const safeTitle = meeting.title.replace(/[^\w\s-]+/g, '').trim() || 'meeting';
+      const picked = await api.dialog.save({
+        defaultPath: `${safeTitle}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!picked) return;
+      await api.export.run('markdown', meeting.id, [], picked);
+      await onReload();
+    } catch (e) {
+      setMarkdownError((e as Error).message);
+    }
+  }
 
   return (
     <div className="border-l border-surface-border p-4 space-y-3">
@@ -696,25 +726,36 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
           disabled={!hasItems}
           onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
           className="w-full bg-brand-indigo text-white text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-indigo/90 transition"
+          title={hasItems ? undefined : 'Needs action items — run Extract first'}
         >
           → Apple Reminders
         </button>
         <button
-          disabled={!hasItems}
-          onClick={() => setExporting({ id: 'markdown', label: 'Markdown' })}
+          disabled={!canMarkdown}
+          onClick={() => void exportMarkdown()}
           className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 transition"
+          title={canMarkdown ? undefined : 'Needs a summary — run Summarize first'}
         >
           ↓ Markdown
         </button>
+        {markdownError && (
+          <div className="text-[11px] text-rose-600">{markdownError}</div>
+        )}
         <button
           disabled
           className="w-full bg-surface-sunken text-ink-muted text-xs font-semibold rounded-lg py-2 cursor-not-allowed"
         >
           → Google Tasks (soon)
         </button>
-        {!hasItems && (
+        {!hasItems && hasSummary && (
           <div className="text-[11px] text-ink-muted italic mt-1">
-            No action items yet. Run summarize + extract to get some.
+            Summary ready — no action items extracted. Markdown download
+            still works; Reminders needs action items.
+          </div>
+        )}
+        {!hasSummary && !hasItems && (
+          <div className="text-[11px] text-ink-muted italic mt-1">
+            No summary or action items yet. Run Summarize + Extract.
           </div>
         )}
       </div>
