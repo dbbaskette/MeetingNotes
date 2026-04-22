@@ -1,12 +1,18 @@
 // electron/renderer/src/components/LibraryRow.tsx
 //
-// A processed (or in-flight / failed) meeting in the Library zone. Richer
-// than an InboxRow: shows speakers, action-item count, live stage spinner,
-// colored left edge by state. No inline retry — failed rows open the detail
-// view where the user picks which stage to rewind to.
+// One row component for every meeting state — unprocessed, in-flight,
+// done, failed. Previously there were two zones with two components
+// (InboxRow vs LibraryRow); collapsing to one list with a filter chip
+// removed duplicated rendering logic and made search work across every
+// state, including pending.
+//
+// For pending meetings the row exposes a checkbox (for bulk Process)
+// and an inline ▶ Process button. For everything else it shows the
+// speakers/status/action-items side, and clicking the row opens detail.
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { MeetingRowMenu } from './MeetingRowMenu';
+import { api } from '../ipc/client';
 
 interface Meeting {
   id: string;
@@ -25,6 +31,11 @@ interface Props {
   meeting: Meeting;
   onOpen: (id: string) => void;
   onChanged: () => void;
+  /** Only meaningful when `meeting.status === 'pending'`. When present,
+   *  the pending row renders a selection checkbox (for bulk Process) and
+   *  toggling it calls `onToggle`. */
+  checked?: boolean;
+  onToggle?: () => void;
 }
 
 function fmtDur(s: number | null): string {
@@ -42,29 +53,69 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function LibraryRow({ meeting, onOpen, onChanged }: Props): JSX.Element {
+export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Props): JSX.Element {
   const status = meeting.status;
+  const isPending = status === 'pending';
   const edge =
     status === 'failed' ? 'before:bg-rose-500' :
     status === 'processing' ? 'before:bg-brand-indigo' :
     status === 'awaiting_user' ? 'before:bg-status-warn' :
     'before:bg-transparent';
 
+  // Pending rows have a subtly muted background so unprocessed items read as
+  // "not yet a finished meeting" without looking broken. Everything else
+  // sits on standard surface.
+  const bg = isPending ? 'bg-surface-sunken/40' : 'bg-surface';
+
+  async function processOne(e: React.MouseEvent): Promise<void> {
+    e.stopPropagation();
+    await api.meetings.start(meeting.id);
+    onChanged();
+  }
+
+  function handleRowClick(): void {
+    // On a pending row with selection props, clicking the row body toggles
+    // the checkbox (makes "select 5 and process" fast). Without selection
+    // props — or for any non-pending row — clicking opens detail.
+    if (isPending && onToggle) onToggle();
+    else onOpen(meeting.id);
+  }
+
   return (
     <div
-      onClick={() => onOpen(meeting.id)}
+      onClick={handleRowClick}
       className={`
-        group relative bg-surface border border-surface-border rounded-xl
+        group relative ${bg} border border-surface-border rounded-xl
         px-4 py-3 flex items-center gap-4 cursor-pointer transition
         hover:border-brand-indigo/60 hover:shadow-pop
         before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2
         before:w-[3px] before:rounded-r-full ${edge}
+        ${checked ? 'ring-1 ring-brand-indigo/40' : ''}
       `}
     >
-      <AvatarStack meeting={meeting} />
+      {isPending && onToggle ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          aria-label={checked ? 'Deselect' : 'Select for processing'}
+          className={`
+            w-[18px] h-[18px] rounded-[5px] border-2 shrink-0 flex items-center justify-center transition
+            ${checked
+              ? 'bg-brand-indigo border-brand-indigo text-white'
+              : 'border-ink/20 bg-surface group-hover:border-ink/40'}
+          `}
+        >
+          {checked && (
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 8l3.5 3.5L13 5" />
+            </svg>
+          )}
+        </button>
+      ) : (
+        <AvatarStack meeting={meeting} />
+      )}
 
       <div className="flex-1 min-w-0">
-        <div className="font-semibold text-sm text-ink truncate">{meeting.title}</div>
+        <div className={`font-semibold text-sm truncate ${isPending ? 'text-ink-muted font-mono' : 'text-ink'}`}>{meeting.title}</div>
         <div className="text-xs text-ink-muted mt-0.5 flex items-center gap-1.5">
           <span>{fmtDate(meeting.startedAt)}</span>
           {meeting.durationS !== null && (
@@ -98,11 +149,27 @@ export function LibraryRow({ meeting, onOpen, onChanged }: Props): JSX.Element {
 
       <StatusChip meeting={meeting} />
 
+      {isPending && (
+        <button
+          onClick={(e) => void processOne(e)}
+          className="
+            text-xs font-semibold px-3 py-1 rounded-full shrink-0
+            bg-surface-sunken text-ink-muted border border-surface-border
+            group-hover:bg-ink group-hover:text-surface group-hover:border-ink
+            transition
+          "
+        >
+          ▶ Process
+        </button>
+      )}
+
       <MeetingRowMenu meeting={meeting} onChanged={onChanged} />
 
-      <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 text-ink-muted/40 shrink-0 group-hover:text-brand-indigo transition-colors" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <path d="M6 3l5 5-5 5" />
-      </svg>
+      {!isPending && (
+        <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 text-ink-muted/40 shrink-0 group-hover:text-brand-indigo transition-colors" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M6 3l5 5-5 5" />
+        </svg>
+      )}
     </div>
   );
 }
@@ -186,6 +253,16 @@ const TOTAL_STEPS = 6;
 
 function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
   const status = meeting.status;
+
+  if (status === 'pending') {
+    // Neutral treatment so pending doesn't read as "error" or "in-flight" —
+    // it's just an arrival waiting on a user action.
+    return (
+      <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-surface-sunken text-ink-muted border border-surface-border shrink-0">
+        UNPROCESSED
+      </span>
+    );
+  }
 
   if (status === 'failed') {
     return (
