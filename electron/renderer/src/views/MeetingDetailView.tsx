@@ -119,6 +119,12 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
         </div>
       </div>
 
+      {/* Parked-at-gate banner renders ABOVE the timeline. The gate is the
+          one moment in the pipeline where the UI is waiting for a human
+          decision; hiding it below 8 pipeline chips hurt the time-to-
+          action. Returns null when not parked. */}
+      <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
+
       {/* The timeline is the canonical "where is this meeting in the pipeline"
           display. Always rendered — for never-processed meetings every stage
           is pending, while processing the current stage spins, after
@@ -127,17 +133,23 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
           pending so the progress is visible as it happens again. */}
       <StageTimeline meeting={m} />
 
-      <SpeakerIdControls meeting={m} onReload={reload} />
+      {/* Quiet pre-gate skip-toggle row. Returns null when parked — the
+          parked banner above already exposes the same control. */}
+      <SpeakerIdControls meeting={m} onReload={reload} placement="below-timeline" />
 
       {/* Responsive layout: stack single-column below lg (1024px) so the
           narrow rails don't clip center-pane content (transcript / audio
           player / summary). min-w-0 on each cell lets flex/grid children
           actually shrink — without it long lines of text force horizontal
-          overflow and the whole detail view gets cut off on the right. */}
+          overflow and the whole detail view gets cut off on the right.
+          On narrow, the CenterPane renders first (content first), then
+          LeftRail and RightRail below, so users aren't scrolling past
+          sidebar meta to reach the transcript. On lg+ the grid
+          columns-order lands them back in their natural visual order. */}
       <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
-        <div className="min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
-        <div className="min-w-0"><CenterPane meeting={m} tab={tab} onTab={setTab} /></div>
-        <div className="min-w-0"><RightRail meeting={m} onReload={reload} /></div>
+        <div className="order-1 lg:order-none min-w-0"><CenterPane meeting={m} tab={tab} onTab={setTab} /></div>
+        <div className="order-2 lg:order-first min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
+        <div className="order-3 min-w-0"><RightRail meeting={m} onReload={reload} /></div>
       </div>
     </div>
   );
@@ -157,18 +169,28 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
 //
 // Past the gate (summarizing/extracting/done) or on a failed meeting: render
 // nothing. The decision is already behind us.
+// The speaker-ID UI has two modes that want different placements:
+//   parked (awaiting_speaker_id) — critical gate, renders ABOVE the
+//     StageTimeline so the user doesn't have to scan past pipeline chips
+//     to find the action. That's the whole point of the gate.
+//   pre-gate — quiet skip-toggle row, renders below the timeline where
+//     it's available but doesn't shout.
+// Kept as one component with a `placement` prop so each call site asks
+// for its own half — returns null for the other mode.
 function SpeakerIdControls({
-  meeting, onReload,
+  meeting, onReload, placement,
 }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
+  placement: 'above-timeline' | 'below-timeline';
 }): JSX.Element | null {
   const stage = meeting.pipelineStage;
   const parked = meeting.status === 'awaiting_user' && stage === 'awaiting_speaker_id';
   const preGate =
     stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing' ||
     stage === 'merging' || stage === 'identifying';
-  if (!parked && !preGate) return null;
+  if (placement === 'above-timeline' && !parked) return null;
+  if (placement === 'below-timeline' && !preGate) return null;
 
   const unidentified = meeting.speakers.filter((s) => !s.rosterId).length;
   const totalSpeakers = meeting.speakers.length;
@@ -352,15 +374,15 @@ function LeftRail({
   return (
     <div className="border-r border-surface-border p-4 space-y-3">
       <div>
-        <div className="text-xs font-bold text-ink-muted uppercase">Title</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Title</div>
         <div className="font-semibold">{meeting.title}</div>
       </div>
       <div>
-        <div className="text-xs font-bold text-ink-muted uppercase">Date</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Date</div>
         <div className="text-sm">{meeting.startedAt?.slice(0, 10) ?? '—'}</div>
       </div>
       <div>
-        <div className="text-xs font-bold text-ink-muted uppercase">Models</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Models</div>
         {meeting.models.stt && <div className="text-xs">STT: {meeting.models.stt}</div>}
         {meeting.models.llm && <div className="text-xs">LLM: {meeting.models.llm}</div>}
       </div>
@@ -379,7 +401,7 @@ function LeftRail({
           </div>
         ) : (
           <div className="space-y-1">
-            <div className="text-xs font-bold text-ink-muted uppercase mb-1">Re-run pipeline from…</div>
+            <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">Re-run pipeline from…</div>
             {([
               ['transcribing', 'transcribe + everything after'],
               ['diarizing', 'diarize + everything after'],
@@ -413,14 +435,20 @@ function CenterPane({
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
     <div>
+      {/* Tab labels share the ALL-CAPS tracked treatment used by the
+          Library/Inbox section headings, so section-level typography is
+          consistent across views. */}
       <div className="flex border-b border-surface-border px-4">
         {(['summary', 'transcript', 'audio'] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTab(t)}
-            className={`px-3 py-3 text-sm ${tab === t ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold' : 'text-ink-muted'}`}
+            className={`px-3 py-3 font-mono text-[11px] tracking-[0.2em] uppercase transition
+              ${tab === t
+                ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold -mb-px'
+                : 'text-ink-muted hover:text-ink'}`}
           >
-            {t[0]!.toUpperCase() + t.slice(1)}
+            {t}
           </button>
         ))}
       </div>
@@ -434,15 +462,23 @@ function CenterPane({
                 will be filled in once diarization + merge finish.
               </div>
             )}
-            <pre className="text-sm whitespace-pre-wrap leading-relaxed">
+            {/* Sans-serif prose for the dialogue text with whitespace-pre-wrap
+                to preserve line breaks from transcript.md. The "[Speaker 00:12]"
+                prefixes appear inline; treated as part of the prose so names
+                like "Alice" read as prose, not code. */}
+            <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
               {meeting.transcriptMd
                 ?? meeting.rawTranscriptText
                 ?? 'No transcript yet. Waiting for the transcribe stage to finish.'}
-            </pre>
+            </div>
           </>
         )}
         {tab === 'audio' && (
-          <audio controls src={`file://${meeting.audioPath}`} className="w-full" />
+          // Wrap the native audio player in a card so it doesn't look
+          // like an unstyled OS widget against the rest of the design.
+          <div className="bg-surface-sunken border border-surface-border rounded-xl p-4">
+            <audio controls src={`file://${meeting.audioPath}`} className="w-full" />
+          </div>
         )}
       </div>
     </div>
@@ -648,7 +684,7 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
     <div className="border-l border-surface-border p-4 space-y-3">
       <SpeakersPanel meeting={meeting} onReload={onReload} />
       <div className="pt-3 border-t border-surface-border space-y-2">
-        <div className="text-xs font-bold text-ink-muted uppercase flex items-center justify-between">
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex items-center justify-between">
           <span>Export</span>
           {hasItems && (
             <span className="text-ink-muted/80 font-normal tabular-nums">
@@ -878,7 +914,7 @@ function SpeakersPanel({
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <div className="text-xs font-bold text-ink-muted uppercase">Speakers</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Speakers</div>
         {meeting.speakers.length > 0 && (
           <div className="text-[10px] text-ink-muted tabular-nums">
             {meeting.speakers.filter((sp) => sp.rosterId).length}/{meeting.speakers.length} named

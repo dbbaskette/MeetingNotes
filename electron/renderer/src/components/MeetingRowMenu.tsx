@@ -69,10 +69,12 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
       <button
         ref={btnRef}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        aria-label="More actions"
+        aria-label="Actions"
+        title="Actions"
         className="
-          w-7 h-7 rounded-md shrink-0 flex items-center justify-center
+          w-9 h-9 rounded-md shrink-0 flex items-center justify-center
           text-ink-muted/60 hover:text-ink hover:bg-surface-sunken
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40
           transition
         "
       >

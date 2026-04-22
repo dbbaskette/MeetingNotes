@@ -56,7 +56,7 @@ export function LibraryRow({ meeting, onOpen, onChanged }: Props): JSX.Element {
       className={`
         group relative bg-surface border border-surface-border rounded-xl
         px-4 py-3 flex items-center gap-4 cursor-pointer transition
-        hover:-translate-y-px hover:border-brand-indigo/60 hover:shadow-pop
+        hover:border-brand-indigo/60 hover:shadow-pop
         before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2
         before:w-[3px] before:rounded-r-full ${edge}
       `}
@@ -85,9 +85,12 @@ export function LibraryRow({ meeting, onOpen, onChanged }: Props): JSX.Element {
       </div>
 
       {meeting.actionItemsCount > 0 && status === 'done' && (
+        // Outline style (not filled) so the row's state chip + left edge
+        // read first, and the action-item count reads second. Filled
+        // indigo competed too hard with PROCESSED for attention on scan.
         <span
           title={`${meeting.actionItemsCount} action item${meeting.actionItemsCount === 1 ? '' : 's'}`}
-          className="bg-brand-indigo/10 text-brand-indigo text-xs font-semibold px-2 py-0.5 rounded-full"
+          className="border border-ink-muted/25 text-ink-muted text-xs font-semibold px-2 py-0.5 rounded-full"
         >
           ✓ {meeting.actionItemsCount}
         </span>

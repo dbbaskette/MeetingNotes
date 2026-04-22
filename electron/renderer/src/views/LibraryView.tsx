@@ -146,9 +146,16 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
         <button
           onClick={onSettings}
           aria-label="Settings"
-          className="text-ink-muted hover:text-ink px-2 py-1 rounded-lg hover:bg-surface-sunken transition"
+          title="Settings"
+          className="w-9 h-9 rounded-md shrink-0 flex items-center justify-center
+                     text-ink-muted hover:text-ink hover:bg-surface-sunken
+                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40
+                     transition"
         >
-          ⚙
+          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.14.68.36.93.66.24.3.41.65.48 1.02L21 11a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
         </button>
       </header>
 
@@ -215,8 +222,12 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           </span>
         </div>
 
-        {/* Filter chips — declarative, replaces the mixed-status list */}
-        <div className="flex items-center gap-2 mb-3">
+        {/* Filter chips — declarative, replaces the mixed-status list.
+            Wraps on narrow windows; search yields width first via flex-1 on
+            narrow, fixed width on sm+. All status chips share the same
+            conditional rendering rule (count > 0) for consistency — only
+            the default "All" chip is always visible. */}
+        <div className="flex items-center flex-wrap gap-2 mb-3">
           <FilterChip
             active={libFilter === 'all'}
             onClick={() => setLibFilter('all')}
@@ -232,13 +243,15 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
               dotClass="bg-brand-indigo animate-pulse"
             />
           )}
-          <FilterChip
-            active={libFilter === 'done'}
-            onClick={() => setLibFilter('done')}
-            label="Processed"
-            n={libCounts.done}
-            dotClass="bg-status-ok"
-          />
+          {libCounts.done > 0 && (
+            <FilterChip
+              active={libFilter === 'done'}
+              onClick={() => setLibFilter('done')}
+              label="Processed"
+              n={libCounts.done}
+              dotClass="bg-status-ok"
+            />
+          )}
           {libCounts.failed > 0 && (
             <FilterChip
               active={libFilter === 'failed'}
@@ -248,12 +261,11 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
               dotClass="bg-rose-500"
             />
           )}
-          <div className="flex-1" />
           <input
             placeholder="Search…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-56 py-1.5 px-3 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
+            className="flex-1 sm:flex-none sm:w-56 sm:ml-auto min-w-[8rem] py-1.5 px-3 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
                        focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
           />
         </div>
