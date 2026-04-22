@@ -137,7 +137,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
       </Field>
 
       <section className="border-t border-surface-border pt-5">
-        <div className="text-xs font-bold text-ink-muted uppercase mb-2">Recording quality</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Recording quality</div>
         <label className="block">
           <div className="text-sm text-ink mb-1">AAC bitrate</div>
           <select
@@ -156,7 +156,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
       </section>
 
       <section className="border-t border-surface-border pt-5">
-        <div className="text-xs font-bold text-ink-muted uppercase mb-2">Meeting auto-detect</div>
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Meeting auto-detect</div>
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -185,7 +185,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
 
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
-          <div className="text-xs font-bold text-ink-muted uppercase flex-1">Permissions</div>
+          <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">Permissions</div>
           <button
             onClick={recheckPerms}
             className="text-xs font-semibold text-brand-indigo hover:underline"
@@ -230,7 +230,7 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
 function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
   return (
     <label className="block">
-      <div className="text-xs font-bold text-ink-muted uppercase mb-1">{label}</div>
+      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">{label}</div>
       {children}
     </label>
   );

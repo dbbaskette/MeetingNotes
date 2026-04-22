@@ -7,6 +7,63 @@
   </head>
   <body class="bg-stone-50">
     <div id="root"></div>
+    <!-- Dev-only shim: when running under `vite` (browser preview) the Electron
+         preload hasn't set window.api, so every IPC call throws and the whole
+         tree unmounts. Install an inert stub so designers can inspect the UI
+         in a regular browser. In a packaged Electron build, the preload's
+         contextBridge.exposeInMainWorld has already set window.api before this
+         script runs, so the `if (!window.api)` guard is a no-op. -->
+    <script>
+      if (!window.api) {
+        const noop = () => {};
+        const asyncNoop = async () => {};
+        // Dev-preview sample data so designers see populated rows. Electron
+        // runs never hit this branch (preload sets window.api before this
+        // script executes), so this can't leak into production.
+        window.__mnDevMeetings = [
+          { id: 'a', slug: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T09:00:00', durationS: 3200, pipelineStage: 'done', status: 'done', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 9, speakers: [{localLabel:'A', rosterId:'r', displayName:'Alice', confidence: 0.95},{localLabel:'B', rosterId:'r', displayName:'Bob', confidence: 0.95}] },
+          { id: 'b', slug: 'b', title: 'Design critique — detail view', startedAt: '2026-04-20T11:00:00', durationS: 2100, pipelineStage: 'awaiting_speaker_id', status: 'awaiting_user', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 2, actionItemsCount: 0, speakers: [] },
+          { id: 'c', slug: 'c', title: 'Whisper misfire', startedAt: '2026-04-20T14:00:00', durationS: 400, pipelineStage: 'transcribing', status: 'failed', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 0, speakers: [] },
+          { id: 'd', slug: 'd', title: 'Standup notes', startedAt: '2026-04-21T09:00:00', durationS: 900, pipelineStage: 'done', status: 'done', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 3, speakers: [{localLabel:'A', rosterId:'r', displayName:'Alice', confidence: 0.95}] },
+        ];
+        window.api = {
+          meetings: {
+            list: async () => window.__mnDevMeetings || [],
+            get: async () => null,
+            rename: asyncNoop, delete: asyncNoop,
+            start: asyncNoop, startMany: async () => 0, rerun: asyncNoop,
+            setSkipSpeakerId: asyncNoop, continueFromSpeakerId: asyncNoop,
+            saveSummary: async () => '',
+          },
+          recording: {
+            listSources: async () => [],
+            start: async () => ({ sessionId: 'dev' }),
+            stop: asyncNoop, state: async () => 'idle',
+            onLevel: () => noop, onStateChange: () => noop,
+          },
+          speakers: {
+            list: async () => [], confirm: async () => '',
+            rename: asyncNoop, sample: async () => null,
+            assign: asyncNoop, unlink: asyncNoop,
+          },
+          actionItems: { setStatus: asyncNoop },
+          exports: { run: async () => ({}) },
+          dialog: { save: async () => null },
+          settings: {
+            getAll: async () => ({ userName: '', autoDetectMeetings: false }),
+            set: asyncNoop,
+          },
+          models: { list: async () => [] },
+          permissions: {
+            audio: async () => ({ mic: 'granted', audioCapture: 'granted' }),
+            requestMic: async () => true,
+            micStatus: async () => 'granted',
+          },
+          meetingDetector: { onDetected: () => noop, dismiss: asyncNoop },
+          on: () => noop,
+        };
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
