@@ -416,11 +416,21 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const items = Array.isArray(input.itemIds)
       ? allItems.filter((ai) => input.itemIds!.includes(ai.id))
       : allItems;
-    if (items.length === 0) throw new Error('No action items selected');
     const exporter = s.exporters[input.exporter];
     if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
     const summaryPath = path.join(folder, 'summary.md');
     const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
+    // Markdown exports the summary + a checklist. With no items it's still
+    // a valid "save this meeting as one file" — don't block it. Other
+    // exporters (Apple Reminders, future Google Tasks) only push action
+    // items to external systems, so an empty set there would be a no-op
+    // at best and confusing at worst.
+    if (items.length === 0 && input.exporter !== 'markdown') {
+      throw new Error('No action items selected');
+    }
+    if (items.length === 0 && !summaryMd) {
+      throw new Error('Nothing to export — this meeting has no summary or action items yet.');
+    }
     const result = await exporter.export({
       items, meetingTitle: meeting.title, meetingFolder: folder,
       summaryMd,
