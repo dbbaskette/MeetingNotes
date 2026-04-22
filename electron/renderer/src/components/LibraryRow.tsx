@@ -167,6 +167,23 @@ const STAGE_CHIP_LABEL: Record<string, string> = {
   extracting: 'EXTRACTING',
 };
 
+// User-facing progress steps. Distinct from the internal PIPELINE_STAGES
+// ordering — users don't care that transcribing + diarizing run in parallel,
+// or that identifying is separate from diarizing. They just want "2 of 6".
+// We collapse parallel / gate stages into step numbers so the row reads as
+// linear progress, which matches user expectation even if it's a small lie
+// about the underlying state machine.
+const STAGE_STEP: Record<string, number> = {
+  transcribing: 1,
+  diarizing: 2,
+  merging: 3,
+  identifying: 4,
+  awaiting_speaker_id: 4, // still on step 4 — it's the gate after identify
+  summarizing: 5,
+  extracting: 6,
+};
+const TOTAL_STEPS = 6;
+
 function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
   const status = meeting.status;
 
@@ -216,10 +233,19 @@ function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
 
 function ProcessingChip({ meeting }: { meeting: Meeting }): JSX.Element {
   const elapsed = useElapsed(meeting.stageStartedAt, meeting.status === 'processing');
+  // Show linear progress N/6 instead of the internal stage name. Users don't
+  // want to learn "diarizing" vs "merging" vs "identifying" — they want to
+  // know "is this close to done". The detail view's StageTimeline still
+  // surfaces full stage-level detail for anyone who wants it.
+  const step = STAGE_STEP[meeting.pipelineStage];
+  const progress = step ? `${step}/${TOTAL_STEPS}` : STAGE_CHIP_LABEL[meeting.pipelineStage] ?? meeting.pipelineStage.toUpperCase();
   return (
-    <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-status-processingBg text-status-processing shrink-0 flex items-center gap-1.5 tabular-nums">
+    <span
+      className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-status-processingBg text-status-processing shrink-0 flex items-center gap-1.5 tabular-nums"
+      title={`${STAGE_CHIP_LABEL[meeting.pipelineStage] ?? meeting.pipelineStage} — ${progress}`}
+    >
       <Spinner />
-      {STAGE_CHIP_LABEL[meeting.pipelineStage] ?? meeting.pipelineStage.toUpperCase()}
+      PROCESSING {progress}
       {elapsed !== null && (
         <span className="text-status-processing/70 font-normal">· {fmtElapsed(elapsed)}</span>
       )}
