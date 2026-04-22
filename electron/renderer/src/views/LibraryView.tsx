@@ -13,23 +13,30 @@ import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
+import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
+import type { LiveRecording } from '../App';
 
 interface Props {
   onOpen: (id: string) => void;
   onSettings: () => void;
+  /** Recording state is owned by App (so it survives view navigation).
+   *  LibraryView just reads + notifies on start/stop. */
+  liveRecording: LiveRecording | null;
+  onStartRecording: (r: LiveRecording) => void;
+  onRecordingStopped: () => void;
 }
 
 type LibFilter = 'all' | 'unprocessed' | 'processing' | 'done' | 'failed';
 
-export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
+export function LibraryView({
+  onOpen, onSettings, liveRecording, onStartRecording, onRecordingStopped,
+}: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
-  const [liveRecording, setLiveRecording] = useState<
-    { sessionId: string; label: string; startedAt: string } | null
-  >(null);
+  const toast = useToast();
 
   useEffect(() => {
     void refresh();
@@ -111,6 +118,13 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
     if (ids.length === 0) return;
     setSelected(new Set());
     await api.meetings.startMany(ids);
+    // Explicit confirmation — the row immediately re-sorts (pending → processing
+    // moves it down the list to the in-flight bucket), which users often read
+    // as "nothing happened". A toast makes the action unambiguous.
+    toast.show({
+      message: `Processing ${ids.length} recording${ids.length === 1 ? '' : 's'}…`,
+      durationMs: 4000,
+    });
     void refresh();
   }
 
@@ -126,7 +140,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
         <div className="flex-1" />
-        <RecordButton onStarted={({ sessionId, label }) => setLiveRecording({
+        <RecordButton onStarted={({ sessionId, label }) => onStartRecording({
           sessionId, label, startedAt: new Date().toISOString(),
         })} />
         <button
@@ -147,7 +161,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
 
       {!liveRecording && (
         <MeetingDetectedBanner
-          onStartRecording={({ sessionId, label }) => setLiveRecording({
+          onStartRecording={({ sessionId, label }) => onStartRecording({
             sessionId, label, startedAt: new Date().toISOString(),
           })}
         />
@@ -159,7 +173,7 @@ export function LibraryView({ onOpen, onSettings }: Props): JSX.Element {
             sessionId={liveRecording.sessionId}
             label={liveRecording.label}
             startedAt={liveRecording.startedAt}
-            onStopped={() => { setLiveRecording(null); void refresh(); }}
+            onStopped={() => { onRecordingStopped(); void refresh(); }}
           />
         </div>
       )}

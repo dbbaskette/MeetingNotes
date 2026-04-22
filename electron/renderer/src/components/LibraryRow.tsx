@@ -12,6 +12,7 @@
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { MeetingRowMenu } from './MeetingRowMenu';
+import { useToast } from './Toasts';
 import { api } from '../ipc/client';
 
 interface Meeting {
@@ -56,6 +57,7 @@ function fmtDate(iso: string | null): string {
 export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
+  const toast = useToast();
   const edge =
     status === 'failed' ? 'before:bg-rose-500' :
     status === 'processing' ? 'before:bg-brand-indigo' :
@@ -70,6 +72,14 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
   async function processOne(e: React.MouseEvent): Promise<void> {
     e.stopPropagation();
     await api.meetings.start(meeting.id);
+    // The row is about to move out of the Unprocessed bucket into the
+    // in-flight section (sort rank: pending=0, processing=2). Without a
+    // toast that move reads as "nothing happened" because the user's mouse
+    // is now hovering a different row.
+    toast.show({
+      message: `Processing "${meeting.title}"…`,
+      durationMs: 4000,
+    });
     onChanged();
   }
 
