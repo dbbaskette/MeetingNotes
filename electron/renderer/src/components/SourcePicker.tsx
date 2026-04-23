@@ -26,7 +26,7 @@ export function SourcePicker({
   }, []);
 
   return (
-    <div className="absolute right-0 top-full mt-2 z-30 w-72 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
+    <div className="absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
       <div className="text-[11px] font-mono uppercase tracking-wider text-ink-muted px-2 py-1">
         Recording from
       </div>
@@ -52,6 +52,16 @@ export function SourcePicker({
       <button onClick={onCancel} className="w-full text-left px-2 py-1.5 rounded-md text-sm text-ink-muted hover:text-ink">
         Cancel
       </button>
+      {/* Tip: attaching a Process Tap to an idle meeting app (Zoom, Teams)
+          BEFORE the app has joined a meeting can hang the app at meeting-
+          connect time (CoreAudio Process Tap vs. app's device negotiation;
+          see GitHub issue #33). Cheapest fix is a reminder to the user. */}
+      <div className="border-t border-surface-border my-1" />
+      <div className="px-2 py-2 text-[11px] text-ink-muted leading-snug">
+        <span className="font-semibold text-ink">Tip:</span>{' '}
+        Join your meeting first, then start recording — attaching to an
+        idle meeting app can disrupt its audio setup.
+      </div>
     </div>
   );
 }
