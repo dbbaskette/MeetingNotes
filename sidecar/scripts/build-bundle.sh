@@ -24,6 +24,25 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
 
 # pyannote loads model files dynamically and registers many submodules. The
 # common-issue collect-* flags below pull those in. torch is huge but standard.
+#
+# The --exclude-module block trims transitive pulls that diarization does not
+# actually exercise at inference time. Each entry below has been verified to
+# not break `/health` + a real end-to-end `/diarize` call against a 15-second
+# WAV using a cached pyannote model:
+#   matplotlib, mpl_toolkits — plotting; pyannote only uses it in its
+#                              experiment + metric scripts we never run
+#   PIL                      — image ops; same rationale
+#   IPython, jupyter, notebook — pulled by some pyannote tutorial imports
+#   pytest, _pytest          — test framework pulled by one transitive dep
+#
+# Modules we tried to exclude but had to restore (inference imports them
+# despite being conspicuously absent from the inference code — pyannote's
+# dependency graph is less surgical than it looks):
+#   pandas                   — ModuleNotFoundError at diarize time
+#   opentelemetry            — same
+#   grpc                     — not re-tested after opentelemetry restore
+#                              (assumed needed since otel imports it)
+# Net savings after the back-offs: ~25 MB.
 "$VENV_PY" -m PyInstaller \
   --name meeting-notes-diarize \
   --noconfirm \
@@ -38,6 +57,14 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
   --collect-data pytorch_lightning \
   --hidden-import sklearn.utils._typedefs \
   --hidden-import sklearn.neighbors._partition_nodes \
+  --exclude-module matplotlib \
+  --exclude-module mpl_toolkits \
+  --exclude-module PIL \
+  --exclude-module IPython \
+  --exclude-module jupyter \
+  --exclude-module notebook \
+  --exclude-module pytest \
+  --exclude-module _pytest \
   serve.py
 
 # Write BUILD_ID next to the bundle. The sidecar reads it at startup and
