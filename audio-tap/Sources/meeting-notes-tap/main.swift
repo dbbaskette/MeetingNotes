@@ -70,6 +70,7 @@ case .listAudioProcesses:
     if let b = p.bundleID { out["bundle_id"] = b }
     if let n = p.name { out["name"] = n }
     out["is_meeting_app"] = (p.bundleID.map { MEETING_APP_BUNDLE_IDS.contains($0) }) ?? false
+    out["is_running_output"] = p.isRunningOutput
     return out
   }
   StatusEvent.emit(["event": "processes", "items": procs])
