@@ -5,6 +5,24 @@ directories:
 files:
   - dist/**
   - package.json
+  # Strip better-sqlite3 build artifacts we don't need at runtime. The
+  # native module itself (build/Release/better_sqlite3.node, ~1.8 MB) is
+  # all that's required; everything below is source code, build-time
+  # intermediates, or SQLite's bundled C tree that electron-rebuild
+  # already consumed. Each `!` entry here is negated against the include
+  # globs above — electron-builder's defaults pull in production
+  # node_modules, so we're trimming the fat on top of that. Drops about
+  # 19 MB from app.asar (34 MB → ~15 MB).
+  - "!**/node_modules/better-sqlite3/deps/**"
+  - "!**/node_modules/better-sqlite3/src/**"
+  - "!**/node_modules/better-sqlite3/build/deps/**"
+  - "!**/node_modules/better-sqlite3/build/Release/obj/**"
+  - "!**/node_modules/better-sqlite3/build/Release/obj.target/**"
+  - "!**/node_modules/better-sqlite3/build/Release/.deps/**"
+  - "!**/node_modules/better-sqlite3/build/Release/test_extension.node"
+  - "!**/node_modules/better-sqlite3/build/Makefile"
+  - "!**/node_modules/better-sqlite3/build/config.gypi"
+  - "!**/node_modules/better-sqlite3/build/*.mk"
 extraResources:
   # Ship only the PyInstaller bundle — the user does not need Python installed.
   # Dev runs out of the source tree where the .venv path is used instead.
