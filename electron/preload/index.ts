@@ -42,6 +42,10 @@ const IPC_CHANNELS = {
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
+  onboardingWhisperList: 'onboarding:whisper-list',
+  onboardingWhisperInstall: 'onboarding:whisper-install',
+  onboardingHfTokenSave: 'onboarding:hf-token-save',
+  onboardingOpenExternal: 'onboarding:open-external',
 } as const;
 
 const api = {
@@ -171,6 +175,26 @@ const api = {
       return () => ipcRenderer.off(IPC_CHANNELS.meetingDetectedEvent, wrapped);
     },
     dismiss: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, url),
+  },
+  onboarding: {
+    /** List currently-installed Whisper models (by inspecting
+     *  whisper-server.sh's models directory). */
+    listWhisperModels: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperList) as Promise<string[]>,
+    /** Download and install a Whisper model by name (e.g. "medium.en").
+     *  Resolves on completion; rejects with a readable message on failure.
+     *  No progress stream yet — shows a spinner for the full ~1-3 min
+     *  download depending on model + connection. */
+    installWhisperModel: (model: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperInstall, model) as Promise<void>,
+    /** Write an HF token to ~/.cache/huggingface/token with 0600 perms.
+     *  Caller is expected to have validated it already. */
+    saveHfToken: (token: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenSave, token) as Promise<void>,
+    /** Open an external URL (HF model-gate pages, LM Studio download,
+     *  System Settings deep-links) via shell.openExternal. */
+    openExternal: (url: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingOpenExternal, url) as Promise<void>,
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{

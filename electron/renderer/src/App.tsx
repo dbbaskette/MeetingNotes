@@ -6,6 +6,7 @@ import { SettingsView } from './views/SettingsView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
+import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 
 type View = { kind: 'library' } | { kind: 'detail'; id: string } | { kind: 'settings' };
@@ -23,6 +24,15 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'library' });
   const [permsOk, setPermsOk] = useState(true);
   const [liveRecording, setLiveRecording] = useState<LiveRecording | null>(null);
+  // Wizard state (#43). `null` = not loaded yet (show nothing),
+  // 'needed' = show wizard, 'done' = past onboarding.
+  const [onboardStatus, setOnboardStatus] = useState<null | 'needed' | 'done'>(null);
+  useEffect(() => {
+    void (async () => {
+      const all = (await api.settings.getAll()) as { onboardedAt: string | null };
+      setOnboardStatus(all.onboardedAt ? 'done' : 'needed');
+    })();
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -48,7 +58,11 @@ export function App(): JSX.Element {
     return () => { off(); };
   }, []);
 
-  const body = !permsOk ? (
+  const body = onboardStatus === null ? (
+    <div className="p-8 text-sm text-ink-muted">Loading…</div>
+  ) : onboardStatus === 'needed' ? (
+    <OnboardingView onFinished={() => setOnboardStatus('done')} />
+  ) : !permsOk ? (
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
   ) : view.kind === 'library' ? (
     <LibraryView

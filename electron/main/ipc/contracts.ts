@@ -74,4 +74,8 @@ export const IPC_CHANNELS = {
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
+  onboardingWhisperList: 'onboarding:whisper-list',
+  onboardingWhisperInstall: 'onboarding:whisper-install',
+  onboardingHfTokenSave: 'onboarding:hf-token-save',
+  onboardingOpenExternal: 'onboarding:open-external',
 } as const;

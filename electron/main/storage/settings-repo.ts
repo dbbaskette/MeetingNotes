@@ -24,6 +24,9 @@ export interface Settings {
   /** Display name used for the local user's voice in stem-aware transcripts.
    *  Empty → the literal "You" is used. (#13 Phase 3.) */
   userName: string;
+  /** ISO timestamp of the first-run onboarding wizard completion or skip.
+   *  Null → wizard shows on next launch. Set by OnboardingView. (#43) */
+  onboardedAt: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -45,6 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   recordingBitrateKbps: 128,
   autoDetectMeetings: false,
   userName: '',
+  onboardedAt: null,
 };
 
 type Key = keyof Settings;

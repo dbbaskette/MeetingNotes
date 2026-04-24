@@ -1,6 +1,8 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow, dialog, shell } from 'electron';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS } from './contracts.js';
@@ -506,5 +508,51 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
     try { return await s.lmStudio.listModels(); }
     catch { return []; }
+  });
+
+  // Onboarding-wizard handlers (#43). Kept out of the main settings
+  // block because they're only used during first-run setup.
+  ipc.handle(IPC_CHANNELS.onboardingWhisperList, async () => {
+    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin'))
+      .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
+    if (typeof model !== 'string' || !/^[a-z0-9][a-z0-9.\-]*$/i.test(model)) {
+      throw new Error('invalid model id');
+    }
+    // Wrap the existing whisper-server.sh install command. Works in dev
+    // (scripts live in the source tree) and in a packaged .app (scripts
+    // are extraResources'd too, TODO — for now only dev supports this
+    // path cleanly).
+    const scriptPath = path.join(process.env.APP_ROOT ?? process.cwd(), 'scripts', 'whisper-server.sh');
+    const actualScript = fs.existsSync(scriptPath) ? scriptPath : 'scripts/whisper-server.sh';
+    await new Promise<void>((resolve, reject) => {
+      execFile('bash', [actualScript, 'install', model], { timeout: 10 * 60 * 1000 }, (err, _stdout, stderr) => {
+        if (err) return reject(new Error(stderr || err.message));
+        resolve();
+      });
+    });
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
+    if (typeof token !== 'string' || token.length < 8) throw new Error('invalid token');
+    const dir = path.join(os.homedir(), '.cache', 'huggingface');
+    fs.mkdirSync(dir, { recursive: true });
+    const tokenPath = path.join(dir, 'token');
+    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+    // Set perms explicitly in case writeFileSync's mode arg is honored
+    // only at file creation on some filesystems.
+    try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
+    if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
+      throw new Error('invalid url');
+    }
+    await shell.openExternal(url);
   });
 }
