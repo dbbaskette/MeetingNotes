@@ -32,6 +32,9 @@ const IPC_CHANNELS = {
   speakersAssign: 'speakers:assign',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
+  actionItemsUpdate: 'action-items:update',
+  actionItemsDelete: 'action-items:delete',
+  actionItemsCreate: 'action-items:create',
   exportRun: 'export:run',
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
@@ -122,6 +125,17 @@ const api = {
   },
   actionItems: {
     setStatus: (id: string, status: string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
+    /** Inline-edit a single field of an existing item (#44). Pass undefined
+     *  for fields you want to leave unchanged, null to clear. */
+    update: (id: string, patch: { text?: string; ownerName?: string | null; dueDate?: string | null }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsUpdate, id, patch) as Promise<void>,
+    /** Hard-delete a single action item. No undo (these are cheap to
+     *  retype; the undo budget is spent on meeting-level delete). */
+    delete: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsDelete, id) as Promise<void>,
+    /** Create a single action item for the "Add item" button. */
+    create: (meetingId: string, patch: { text: string; ownerName?: string | null; dueDate?: string | null }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsCreate, meetingId, patch) as Promise<void>,
   },
   export: {
     // `itemIds` is optional — omitting it falls back to exporting every

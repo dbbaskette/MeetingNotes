@@ -10,8 +10,9 @@ import { parseTranscript, fmtTimestamp, type TranscriptLine } from '../lib/trans
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
-// or transcript. See #42.
-type Tab = 'summary' | 'transcript';
+// or transcript. See #42. Actions tab exposes inline edit / add / delete
+// for the action items that used to only surface in the export modal. #44
+type Tab = 'summary' | 'transcript' | 'actions';
 
 interface MeetingDetail {
   id: string;
@@ -170,6 +171,7 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
             onTab={setTab}
             currentTime={currentTime}
             onSeek={seekTo}
+            onReload={reload}
           />
         </div>
         <div className="order-2 lg:order-first min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
@@ -462,13 +464,14 @@ function LeftRail({
 }
 
 function CenterPane({
-  meeting, tab, onTab, currentTime, onSeek,
+  meeting, tab, onTab, currentTime, onSeek, onReload,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
   onTab: (t: Tab) => void;
   currentTime: number;
   onSeek: (seconds: number) => void;
+  onReload: () => Promise<void>;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
@@ -478,7 +481,7 @@ function CenterPane({
           consistent across views. Audio is now a sticky footer, not a
           tab — keeps playback alive while reading either tab. */}
       <div className="flex border-b border-surface-border px-4">
-        {(['summary', 'transcript'] as const).map((t) => (
+        {(['summary', 'transcript', 'actions'] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTab(t)}
@@ -501,6 +504,7 @@ function CenterPane({
             onSeek={onSeek}
           />
         )}
+        {tab === 'actions' && <ActionItemsPanel meeting={meeting} onReload={onReload} />}
       </div>
     </div>
   );
@@ -612,6 +616,223 @@ function TranscriptLine({ line }: { line: TranscriptLine }): JSX.Element {
       <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
       <span>{line.text}</span>
     </>
+  );
+}
+
+// Inline-editable list of action items (#44). Click a row → expands to
+// text / owner / due-date inputs. Add-item row at the bottom. Delete is
+// hard-delete (no undo — users can retype if they change their mind).
+function ActionItemsPanel({
+  meeting, onReload,
+}: {
+  meeting: MeetingDetail;
+  onReload: () => Promise<void>;
+}): JSX.Element {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const items = meeting.actionItems;
+
+  return (
+    <div>
+      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-3 flex items-center gap-2">
+        <span>Action items</span>
+        <span className="font-normal opacity-70">
+          {items.length > 0 ? `· ${items.length}` : ''}
+        </span>
+      </div>
+      {items.length === 0 && !adding && (
+        <div className="text-sm text-ink-muted italic mb-3">
+          No action items yet. Run Summarize + Extract to get some, or click
+          &ldquo;Add item&rdquo; below to write one by hand.
+        </div>
+      )}
+      <div className="space-y-2">
+        {items.map((it) => (
+          editing === it.id ? (
+            <ActionItemEditor
+              key={it.id}
+              initial={it}
+              onCancel={() => setEditing(null)}
+              onSaved={async () => { setEditing(null); await onReload(); }}
+              onDeleted={async () => { setEditing(null); await onReload(); }}
+            />
+          ) : (
+            <ActionItemDisplay
+              key={it.id}
+              item={it}
+              onOpen={() => setEditing(it.id)}
+            />
+          )
+        ))}
+        {adding && (
+          <ActionItemEditor
+            key="__new__"
+            meetingId={meeting.id}
+            onCancel={() => setAdding(false)}
+            onSaved={async () => { setAdding(false); await onReload(); }}
+          />
+        )}
+      </div>
+      {!adding && (
+        <button
+          onClick={() => setAdding(true)}
+          className="mt-3 text-xs font-semibold text-brand-indigo hover:underline"
+        >
+          + Add item
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ActionItemDisplay({
+  item, onOpen,
+}: {
+  item: MeetingDetail['actionItems'][number];
+  onOpen: () => void;
+}): JSX.Element {
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left rounded-lg border border-surface-border bg-surface
+                 hover:border-brand-indigo/60 hover:shadow-pop px-3 py-2 transition"
+    >
+      <div className="text-sm text-ink">{item.text}</div>
+      <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
+        {item.ownerName && <span>👤 {item.ownerName}</span>}
+        {item.dueDate && <span>📅 {item.dueDate}</span>}
+        {item.status === 'done' && (
+          <span className="bg-status-okBg text-status-ok font-semibold px-1.5 rounded">DONE</span>
+        )}
+        {item.exportedTo.length > 0 && (
+          <span className="text-ink-muted/70">
+            exported to {item.exportedTo.join(', ')}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function ActionItemEditor({
+  initial, meetingId, onCancel, onSaved, onDeleted,
+}: {
+  /** When editing an existing item, `initial` carries the current values.
+   *  When creating a new one, `meetingId` is set and `initial` is absent. */
+  initial?: MeetingDetail['actionItems'][number];
+  meetingId?: string;
+  onCancel: () => void;
+  onSaved: () => Promise<void>;
+  onDeleted?: () => Promise<void>;
+}): JSX.Element {
+  const [text, setText] = useState(initial?.text ?? '');
+  const [owner, setOwner] = useState(initial?.ownerName ?? '');
+  const [due, setDue] = useState(initial?.dueDate ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => { textareaRef.current?.focus(); }, []);
+
+  async function save(): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) { setErr('Text cannot be empty.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      if (initial) {
+        await api.actionItems.update(initial.id, {
+          text: trimmed,
+          ownerName: owner.trim() || null,
+          dueDate: due || null,
+        });
+      } else if (meetingId) {
+        await api.actionItems.create(meetingId, {
+          text: trimmed,
+          ownerName: owner.trim() || null,
+          dueDate: due || null,
+        });
+      }
+      await onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  async function deleteItem(): Promise<void> {
+    if (!initial) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.actionItems.delete(initial.id);
+      await onDeleted?.();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-brand-indigo/40 bg-brand-indigo/5 p-3 space-y-2">
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); }
+          if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        }}
+        placeholder="What needs to happen?"
+        rows={2}
+        className="w-full text-sm p-2 border border-surface-border rounded-md bg-surface
+                   focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]
+                   resize-y min-h-[44px]"
+      />
+      <div className="flex gap-2">
+        <input
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+          placeholder="Owner (optional)"
+          maxLength={200}
+          className="flex-1 text-sm p-2 border border-surface-border rounded-md bg-surface
+                     focus:outline-none focus:border-brand-indigo"
+        />
+        <input
+          type="date"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          className="text-sm p-2 border border-surface-border rounded-md bg-surface
+                     focus:outline-none focus:border-brand-indigo"
+        />
+      </div>
+      {err && <div className="text-xs text-rose-600">{err}</div>}
+      <div className="flex items-center gap-2">
+        {initial && onDeleted && (
+          <button
+            onClick={() => void deleteItem()}
+            disabled={busy}
+            className="text-xs font-semibold text-rose-600 hover:text-rose-700 px-2 py-1
+                       rounded hover:bg-rose-50 disabled:opacity-50"
+          >
+            Delete
+          </button>
+        )}
+        <div className="flex-1" />
+        <button
+          onClick={onCancel}
+          disabled={busy}
+          className="text-xs text-ink-muted hover:text-ink px-3 py-1.5 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => void save()}
+          disabled={busy}
+          className="text-xs font-semibold text-white bg-brand-indigo hover:bg-brand-indigo/90
+                     px-3 py-1.5 rounded-lg disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : initial ? 'Save' : 'Add'}
+        </button>
+      </div>
+    </div>
   );
 }
 

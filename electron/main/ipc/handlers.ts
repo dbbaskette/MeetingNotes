@@ -139,7 +139,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       summaryMd: read(path.join(folder, 'summary.md')),
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
-        id: ai.id, text: ai.text, ownerName: null,
+        id: ai.id, text: ai.text, ownerName: ai.ownerName,
         dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
       })),
       models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
@@ -396,6 +396,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.actionItems.setStatus(id, status);
   });
 
+  // Inline edit / create / delete for action items (#44).
+  ipc.handle(IPC_CHANNELS.actionItemsUpdate, (_e, id: unknown, patch: unknown) => {
+    if (typeof id !== 'string' || !patch || typeof patch !== 'object') throw new Error('invalid args');
+    const { text, ownerName, dueDate } = patch as { text?: unknown; ownerName?: unknown; dueDate?: unknown };
+    const normalized: { text?: string; ownerName?: string | null; dueDate?: string | null } = {};
+    if (text !== undefined) {
+      if (typeof text !== 'string' || text.trim() === '') throw new Error('text must be a non-empty string');
+      normalized.text = text.trim().slice(0, 2000);
+    }
+    if (ownerName !== undefined) {
+      if (ownerName !== null && typeof ownerName !== 'string') throw new Error('ownerName must be string or null');
+      normalized.ownerName = ownerName === null ? null : (ownerName as string).trim().slice(0, 200) || null;
+    }
+    if (dueDate !== undefined) {
+      if (dueDate !== null && typeof dueDate !== 'string') throw new Error('dueDate must be string or null');
+      // YYYY-MM-DD — lenient: accept empty string as "clear the date".
+      normalized.dueDate = dueDate === null || dueDate === '' ? null : dueDate as string;
+    }
+    s.actionItems.update(id, normalized);
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsDelete, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
+    s.actionItems.delete(id);
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsCreate, (_e, meetingId: unknown, patch: unknown) => {
+    if (typeof meetingId !== 'string' || !patch || typeof patch !== 'object') throw new Error('invalid args');
+    const { text, ownerName, dueDate } = patch as { text?: unknown; ownerName?: unknown; dueDate?: unknown };
+    if (typeof text !== 'string' || text.trim() === '') throw new Error('text required');
+    s.actionItems.create(meetingId, {
+      text: text.trim().slice(0, 2000),
+      ownerName: typeof ownerName === 'string' && ownerName.trim() ? ownerName.trim().slice(0, 200) : null,
+      dueDate: typeof dueDate === 'string' && dueDate ? dueDate : null,
+    });
+  });
+
   ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {
     exporter: string;
     meetingId: string;
@@ -407,7 +444,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const allItems = s.actionItems.listByMeeting(input.meetingId).map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: null, dueDate: ai.dueDate, status: ai.status,
+      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
     }));
     const items = Array.isArray(input.itemIds)
       ? allItems.filter((ai) => input.itemIds!.includes(ai.id))
