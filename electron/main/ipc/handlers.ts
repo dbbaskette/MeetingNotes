@@ -1,6 +1,8 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow, dialog } from 'electron';
+import { BrowserWindow, dialog, shell } from 'electron';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS } from './contracts.js';
@@ -139,7 +141,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       summaryMd: read(path.join(folder, 'summary.md')),
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
-        id: ai.id, text: ai.text, ownerName: null,
+        id: ai.id, text: ai.text, ownerName: ai.ownerName,
         dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
       })),
       models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
@@ -396,6 +398,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.actionItems.setStatus(id, status);
   });
 
+  // Inline edit / create / delete for action items (#44).
+  ipc.handle(IPC_CHANNELS.actionItemsUpdate, (_e, id: unknown, patch: unknown) => {
+    if (typeof id !== 'string' || !patch || typeof patch !== 'object') throw new Error('invalid args');
+    const { text, ownerName, dueDate } = patch as { text?: unknown; ownerName?: unknown; dueDate?: unknown };
+    const normalized: { text?: string; ownerName?: string | null; dueDate?: string | null } = {};
+    if (text !== undefined) {
+      if (typeof text !== 'string' || text.trim() === '') throw new Error('text must be a non-empty string');
+      normalized.text = text.trim().slice(0, 2000);
+    }
+    if (ownerName !== undefined) {
+      if (ownerName !== null && typeof ownerName !== 'string') throw new Error('ownerName must be string or null');
+      normalized.ownerName = ownerName === null ? null : (ownerName as string).trim().slice(0, 200) || null;
+    }
+    if (dueDate !== undefined) {
+      if (dueDate !== null && typeof dueDate !== 'string') throw new Error('dueDate must be string or null');
+      // YYYY-MM-DD — lenient: accept empty string as "clear the date".
+      normalized.dueDate = dueDate === null || dueDate === '' ? null : dueDate as string;
+    }
+    s.actionItems.update(id, normalized);
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsDelete, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
+    s.actionItems.delete(id);
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsCreate, (_e, meetingId: unknown, patch: unknown) => {
+    if (typeof meetingId !== 'string' || !patch || typeof patch !== 'object') throw new Error('invalid args');
+    const { text, ownerName, dueDate } = patch as { text?: unknown; ownerName?: unknown; dueDate?: unknown };
+    if (typeof text !== 'string' || text.trim() === '') throw new Error('text required');
+    s.actionItems.create(meetingId, {
+      text: text.trim().slice(0, 2000),
+      ownerName: typeof ownerName === 'string' && ownerName.trim() ? ownerName.trim().slice(0, 200) : null,
+      dueDate: typeof dueDate === 'string' && dueDate ? dueDate : null,
+    });
+  });
+
   ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {
     exporter: string;
     meetingId: string;
@@ -407,7 +446,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const allItems = s.actionItems.listByMeeting(input.meetingId).map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: null, dueDate: ai.dueDate, status: ai.status,
+      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
     }));
     const items = Array.isArray(input.itemIds)
       ? allItems.filter((ai) => input.itemIds!.includes(ai.id))
@@ -470,4 +509,149 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     try { return await s.lmStudio.listModels(); }
     catch { return []; }
   });
+
+  // Onboarding-wizard handlers (#43). Kept out of the main settings
+  // block because they're only used during first-run setup.
+  ipc.handle(IPC_CHANNELS.onboardingWhisperList, async () => {
+    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin'))
+      .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
+    if (typeof model !== 'string' || !/^[a-z0-9][a-z0-9.\-]*$/i.test(model)) {
+      throw new Error('invalid model id');
+    }
+    // Wrap the existing whisper-server.sh install command. Works in dev
+    // (scripts live in the source tree) and in a packaged .app (scripts
+    // are extraResources'd too, TODO — for now only dev supports this
+    // path cleanly).
+    const scriptPath = path.join(process.env.APP_ROOT ?? process.cwd(), 'scripts', 'whisper-server.sh');
+    const actualScript = fs.existsSync(scriptPath) ? scriptPath : 'scripts/whisper-server.sh';
+    await new Promise<void>((resolve, reject) => {
+      execFile('bash', [actualScript, 'install', model], { timeout: 10 * 60 * 1000 }, (err, _stdout, stderr) => {
+        if (err) return reject(new Error(stderr || err.message));
+        resolve();
+      });
+    });
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
+    if (typeof token !== 'string' || token.length < 8) throw new Error('invalid token');
+    const dir = path.join(os.homedir(), '.cache', 'huggingface');
+    fs.mkdirSync(dir, { recursive: true });
+    const tokenPath = path.join(dir, 'token');
+    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
+    // Set perms explicitly in case writeFileSync's mode arg is honored
+    // only at file creation on some filesystems.
+    try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
+  });
+
+  ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
+    if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
+      throw new Error('invalid url');
+    }
+    await shell.openExternal(url);
+  });
+
+  // Cmd+K global search (#45). File-based grep over the meeting library.
+  // Works up to a few thousand meetings without needing SQLite FTS5; past
+  // that, reach for FTS5 or a proper search index.
+  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown) => {
+    if (typeof query !== 'string') return [];
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;
+
+    interface Hit {
+      meetingId: string;
+      title: string;
+      source: 'title' | 'summary' | 'transcript';
+      snippet: string;
+      seconds?: number;
+      score: number;
+    }
+    const hits: Hit[] = [];
+
+    for (const m of s.meetings.listAll()) {
+      const folder = meetingFolderPath(s.libraryRoot, m.slug);
+      // Title hit — rank highest so an exact-title match surfaces first.
+      if (m.title.toLowerCase().includes(q)) {
+        hits.push({
+          meetingId: m.id, title: m.title, source: 'title',
+          snippet: m.title, score: 1000,
+        });
+      }
+      // Summary — one hit per meeting, showing the first match's line.
+      const summaryPath = path.join(folder, 'summary.md');
+      if (fs.existsSync(summaryPath)) {
+        try {
+          const text = fs.readFileSync(summaryPath, 'utf8');
+          const lower = text.toLowerCase();
+          const idx = lower.indexOf(q);
+          if (idx >= 0) {
+            const line = snippetAround(text, idx, 120);
+            hits.push({
+              meetingId: m.id, title: m.title, source: 'summary',
+              snippet: line, score: 500,
+            });
+          }
+        } catch { /* ignore unreadable summaries */ }
+      }
+      // Transcript — one hit per match (up to 3 per meeting so a single
+      // noisy word doesn't drown the result list).
+      const transcriptPath = path.join(folder, 'transcript.md');
+      if (fs.existsSync(transcriptPath)) {
+        try {
+          const text = fs.readFileSync(transcriptPath, 'utf8');
+          const lines = text.split('\n');
+          let perMeeting = 0;
+          for (const raw of lines) {
+            if (perMeeting >= 3) break;
+            if (!raw.toLowerCase().includes(q)) continue;
+            // Parse leading "[Speaker MM:SS]" to produce a seconds offset.
+            const m2 = raw.match(/^\[(.+?)\s+(?:(\d+):)?(\d+):(\d{2})\]\s?(.*)$/);
+            if (m2) {
+              const hh = m2[2] ? parseInt(m2[2], 10) : 0;
+              const seconds = hh * 3600 + parseInt(m2[3]!, 10) * 60 + parseInt(m2[4]!, 10);
+              hits.push({
+                meetingId: m.id, title: m.title, source: 'transcript',
+                snippet: `${m2[1]}: ${(m2[5] ?? '').trim()}`,
+                seconds,
+                score: 100,
+              });
+            } else {
+              hits.push({
+                meetingId: m.id, title: m.title, source: 'transcript',
+                snippet: raw.trim().slice(0, 160),
+                score: 100,
+              });
+            }
+            perMeeting += 1;
+          }
+        } catch { /* ignore unreadable transcripts */ }
+      }
+    }
+
+    // Sort by score, then meeting start desc so newer meetings surface
+    // first within the same source tier.
+    hits.sort((a, b) => b.score - a.score);
+    return hits.slice(0, max).map((h) => ({
+      meetingId: h.meetingId, title: h.title, source: h.source,
+      snippet: h.snippet,
+      ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
+    }));
+  });
+}
+
+// Extract a ~n-char window around an index, expanded to word boundaries
+// and with ellipses on either side when truncated.
+function snippetAround(text: string, idx: number, window: number): string {
+  const start = Math.max(0, idx - Math.floor(window / 2));
+  const end = Math.min(text.length, idx + Math.ceil(window / 2));
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < text.length ? '…' : '';
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
 }

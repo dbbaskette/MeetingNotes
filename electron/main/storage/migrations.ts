@@ -153,6 +153,18 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_meetings_deleted ON meetings(deleted_at);
     `,
   },
+  {
+    version: 8,
+    // Free-text owner name on action items (#44). The existing
+    // owner_speaker_id FK is rarely populated because Extract pulls owner
+    // strings out of the transcript that don't match the roster cleanly.
+    // Keep the FK column but add a sibling TEXT column the UI writes to
+    // directly — lets users type "Alice" or "Marketing team" without
+    // needing a matching roster entry.
+    up: `
+      ALTER TABLE action_items ADD COLUMN owner_name TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

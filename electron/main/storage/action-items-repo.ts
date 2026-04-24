@@ -4,7 +4,8 @@ import type { ActionItem } from '../lib/action-item-schema.js';
 
 export interface ActionItemRow {
   id: string; meetingId: string; text: string;
-  ownerSpeakerId: string | null; dueDate: string | null;
+  ownerSpeakerId: string | null; ownerName: string | null;
+  dueDate: string | null;
   status: string; exportedTo: string[]; createdAt: string;
 }
 
@@ -14,6 +15,7 @@ function row(r: Record<string, unknown>): ActionItemRow {
     meetingId: r.meeting_id as string,
     text: r.text as string,
     ownerSpeakerId: (r.owner_speaker_id as string) ?? null,
+    ownerName: (r.owner_name as string) ?? null,
     dueDate: (r.due_date as string) ?? null,
     status: r.status as string,
     exportedTo: JSON.parse((r.exported_to as string) || '[]'),
@@ -66,5 +68,41 @@ export class ActionItemsRepo {
     const list: string[] = JSON.parse(r.exported_to || '[]');
     if (!list.includes(target)) list.push(target);
     this.db.prepare('UPDATE action_items SET exported_to = ? WHERE id = ?').run(JSON.stringify(list), id);
+  }
+
+  /** User-edited single-field update for #44. text / ownerName / dueDate
+   *  are each optional; passing undefined leaves the existing value
+   *  untouched, passing null clears it (useful to remove a wrong owner). */
+  update(id: string, patch: { text?: string; ownerName?: string | null; dueDate?: string | null }): ActionItemRow | null {
+    const current = this.db.prepare('SELECT * FROM action_items WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!current) return null;
+    const text = patch.text !== undefined ? patch.text : (current.text as string);
+    const ownerName = patch.ownerName !== undefined ? patch.ownerName : ((current.owner_name as string | null) ?? null);
+    const dueDate = patch.dueDate !== undefined ? patch.dueDate : ((current.due_date as string | null) ?? null);
+    this.db.prepare('UPDATE action_items SET text = ?, owner_name = ?, due_date = ? WHERE id = ?')
+      .run(text, ownerName, dueDate, id);
+    const updated = this.db.prepare('SELECT * FROM action_items WHERE id = ?').get(id) as Record<string, unknown>;
+    return row(updated);
+  }
+
+  /** Hard-delete a single action item. Used by the row-level Delete
+   *  action in the detail view (#44). Unlike meeting deletion, these
+   *  don't have a trash path — an unwanted action item can just be
+   *  re-added via create() if the user changes their mind. */
+  delete(id: string): void {
+    this.db.prepare('DELETE FROM action_items WHERE id = ?').run(id);
+  }
+
+  /** Create a single action item. For the "Add item" button in the
+   *  detail view's right rail — lets users add things Extract missed. */
+  create(meetingId: string, patch: { text: string; ownerName?: string | null; dueDate?: string | null }): ActionItemRow {
+    const id = `ai_${shortId()}`;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, owner_name, due_date, status, exported_to, created_at)
+      VALUES (?, ?, ?, NULL, ?, ?, 'open', '[]', ?)
+    `).run(id, meetingId, patch.text, patch.ownerName ?? null, patch.dueDate ?? null, now);
+    const row_ = this.db.prepare('SELECT * FROM action_items WHERE id = ?').get(id) as Record<string, unknown>;
+    return row(row_);
   }
 }

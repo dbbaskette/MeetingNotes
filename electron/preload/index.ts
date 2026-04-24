@@ -32,6 +32,9 @@ const IPC_CHANNELS = {
   speakersAssign: 'speakers:assign',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
+  actionItemsUpdate: 'action-items:update',
+  actionItemsDelete: 'action-items:delete',
+  actionItemsCreate: 'action-items:create',
   exportRun: 'export:run',
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
@@ -39,6 +42,11 @@ const IPC_CHANNELS = {
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
+  onboardingWhisperList: 'onboarding:whisper-list',
+  onboardingWhisperInstall: 'onboarding:whisper-install',
+  onboardingHfTokenSave: 'onboarding:hf-token-save',
+  onboardingOpenExternal: 'onboarding:open-external',
+  searchQuery: 'search:query',
 } as const;
 
 const api = {
@@ -122,6 +130,17 @@ const api = {
   },
   actionItems: {
     setStatus: (id: string, status: string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
+    /** Inline-edit a single field of an existing item (#44). Pass undefined
+     *  for fields you want to leave unchanged, null to clear. */
+    update: (id: string, patch: { text?: string; ownerName?: string | null; dueDate?: string | null }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsUpdate, id, patch) as Promise<void>,
+    /** Hard-delete a single action item. No undo (these are cheap to
+     *  retype; the undo budget is spent on meeting-level delete). */
+    delete: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsDelete, id) as Promise<void>,
+    /** Create a single action item for the "Add item" button. */
+    create: (meetingId: string, patch: { text: string; ownerName?: string | null; dueDate?: string | null }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsCreate, meetingId, patch) as Promise<void>,
   },
   export: {
     // `itemIds` is optional — omitting it falls back to exporting every
@@ -157,6 +176,43 @@ const api = {
       return () => ipcRenderer.off(IPC_CHANNELS.meetingDetectedEvent, wrapped);
     },
     dismiss: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, url),
+  },
+  onboarding: {
+    /** List currently-installed Whisper models (by inspecting
+     *  whisper-server.sh's models directory). */
+    listWhisperModels: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperList) as Promise<string[]>,
+    /** Download and install a Whisper model by name (e.g. "medium.en").
+     *  Resolves on completion; rejects with a readable message on failure.
+     *  No progress stream yet — shows a spinner for the full ~1-3 min
+     *  download depending on model + connection. */
+    installWhisperModel: (model: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperInstall, model) as Promise<void>,
+    /** Write an HF token to ~/.cache/huggingface/token with 0600 perms.
+     *  Caller is expected to have validated it already. */
+    saveHfToken: (token: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenSave, token) as Promise<void>,
+    /** Open an external URL (HF model-gate pages, LM Studio download,
+     *  System Settings deep-links) via shell.openExternal. */
+    openExternal: (url: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingOpenExternal, url) as Promise<void>,
+  },
+  search: {
+    /** Full-text search across meeting titles + summaries + transcripts.
+     *  Returns at most `limit` results, sorted title > summary >
+     *  transcript. Each result carries the meeting id, the matched
+     *  snippet, and a `seconds` offset when the hit was on a specific
+     *  transcript line (so callers can jump to the timestamp). */
+    query: (q: string, limit?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20) as Promise<{
+        meetingId: string;
+        title: string;
+        source: 'title' | 'summary' | 'transcript';
+        snippet: string;
+        /** For transcript hits, the timestamp seconds so the detail view
+         *  can seek right to the matched line. */
+        seconds?: number;
+      }[]>,
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{

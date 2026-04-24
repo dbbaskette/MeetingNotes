@@ -49,11 +49,23 @@
             rename: asyncNoop, sample: async () => null,
             assign: asyncNoop, unlink: asyncNoop,
           },
-          actionItems: { setStatus: asyncNoop },
+          actionItems: {
+            setStatus: asyncNoop,
+            update: asyncNoop, delete: asyncNoop, create: asyncNoop,
+          },
+          onboarding: {
+            listWhisperModels: async () => [],
+            installWhisperModel: asyncNoop,
+            saveHfToken: asyncNoop,
+            openExternal: asyncNoop,
+          },
+          search: { query: async () => [] },
           exports: { run: async () => ({}) },
           dialog: { save: async () => null },
           settings: {
-            getAll: async () => ({ userName: '', autoDetectMeetings: false }),
+            // onboardedAt truthy so the preview opens straight to Library.
+            // For previewing the wizard itself, edit this line to `null`.
+            getAll: async () => ({ userName: '', autoDetectMeetings: false, onboardedAt: '2026-01-01T00:00:00Z' }),
             set: asyncNoop,
           },
           models: { list: async () => [] },
