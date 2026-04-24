@@ -67,6 +67,44 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
   --exclude-module _pytest \
   serve.py
 
+# Post-build prune: strip torch subtrees that `--collect-all torch` pulls
+# wholesale but inference never touches. Verified by a full end-to-end
+# /diarize call on a short WAV after each addition; any entry here that
+# broke that smoke has been removed.
+#
+# Subtrees stripped (measured ~67 MB on top of the --exclude-module wins):
+#   torch/include/       C++ headers for compiling torch extensions; we
+#                        don't compile extensions at runtime
+#   torch/testing/       pytest utilities
+#   torch/onnx/          ONNX export path; pyannote doesn't export
+#
+# Kept even though they look prunable:
+#   torch/bin/           torch spawns torch_shm_manager from here for
+#                        shared-memory ops — removing it made /diarize
+#                        fail with "Unable to find torch_shm_manager"
+#   torch/_export/       torch/export/decomp_utils.py imports it, then
+#                        config.py does inspect.getsource() on itself —
+#                        removing it produced "OSError: could not get
+#                        source code" at load time
+#   torch/export/        same
+#   torch/distributed/   imported unconditionally by torch init
+#   torch/_dynamo/       same
+#   torch/_inductor/     same
+#
+# Anyone adding an entry here: rerun the smoke
+#   HF_TOKEN=$(cat ~/.cache/huggingface/token) \
+#     ./dist/meeting-notes-diarize/meeting-notes-diarize --port 8767 &
+#   curl -sS -X POST http://127.0.0.1:8767/diarize \
+#     -H 'content-type: application/json' \
+#     --data "{\"audio_path\": \"/path/to/short.wav\"}"
+# Expect HTTP 200 with non-empty segments array.
+TORCH_INTERNAL="dist/meeting-notes-diarize/_internal/torch"
+if [ -d "$TORCH_INTERNAL" ]; then
+  for sub in include testing onnx; do
+    rm -rf "$TORCH_INTERNAL/$sub"
+  done
+fi
+
 # Write BUILD_ID next to the bundle. The sidecar reads it at startup and
 # reports it on /health; the supervisor reads this file to know what's fresh.
 printf '%s\n' "$BUILD_ID" > dist/BUILD_ID
