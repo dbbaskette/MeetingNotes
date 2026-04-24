@@ -6,8 +6,12 @@ import { api } from '../ipc/client';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
+import { parseTranscript, fmtTimestamp, type TranscriptLine } from '../lib/transcript-lines';
 
-type Tab = 'summary' | 'transcript' | 'audio';
+// Audio is no longer a tab — it lives in a sticky footer below the
+// center pane so playback stays alive while the user reads the summary
+// or transcript. See #42.
+type Tab = 'summary' | 'transcript';
 
 interface MeetingDetail {
   id: string;
@@ -53,6 +57,18 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
 export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const [m, setM] = useState<MeetingDetail | null>(null);
   const [tab, setTab] = useState<Tab>('summary');
+  // Lifted audio state so the transcript's click-to-seek + current-line
+  // highlight can reach the <audio> element in the sticky footer. The
+  // ref survives tab switches; tab switches alone never unmount the
+  // player. (#42)
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const seekTo = (seconds: number): void => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = seconds;
+    if (el.paused) void el.play();
+  };
 
   // `kick` is a deliberate re-run trigger for the polling effect. Mutations
   // that change the meeting's live state (rerun, speaker assign) bump it so
@@ -147,9 +163,31 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
           sidebar meta to reach the transcript. On lg+ the grid
           columns-order lands them back in their natural visual order. */}
       <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
-        <div className="order-1 lg:order-none min-w-0"><CenterPane meeting={m} tab={tab} onTab={setTab} /></div>
+        <div className="order-1 lg:order-none min-w-0">
+          <CenterPane
+            meeting={m}
+            tab={tab}
+            onTab={setTab}
+            currentTime={currentTime}
+            onSeek={seekTo}
+          />
+        </div>
         <div className="order-2 lg:order-first min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
         <div className="order-3 min-w-0"><RightRail meeting={m} onReload={reload} /></div>
+      </div>
+
+      {/* Sticky audio player. Lives outside the CenterPane so it stays
+          visible while the user reads the summary OR transcript — no more
+          "switch tabs to play". Click-to-seek on transcript lines pipes
+          through `seekTo` to this element. */}
+      <div className="sticky bottom-0 bg-surface-sunken border-t border-surface-border px-5 py-3">
+        <audio
+          ref={audioRef}
+          controls
+          src={`file://${m.audioPath}`}
+          onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+          className="w-full"
+        />
       </div>
     </div>
   );
@@ -424,22 +462,23 @@ function LeftRail({
 }
 
 function CenterPane({
-  meeting,
-  tab,
-  onTab,
+  meeting, tab, onTab, currentTime, onSeek,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
   onTab: (t: Tab) => void;
+  currentTime: number;
+  onSeek: (seconds: number) => void;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
     <div>
       {/* Tab labels share the ALL-CAPS tracked treatment used by the
           Library/Inbox section headings, so section-level typography is
-          consistent across views. */}
+          consistent across views. Audio is now a sticky footer, not a
+          tab — keeps playback alive while reading either tab. */}
       <div className="flex border-b border-surface-border px-4">
-        {(['summary', 'transcript', 'audio'] as const).map((t) => (
+        {(['summary', 'transcript'] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTab(t)}
@@ -455,33 +494,124 @@ function CenterPane({
       <div className="p-5">
         {tab === 'summary' && <SummaryPanel meeting={meeting} />}
         {tab === 'transcript' && (
-          <>
-            {showRaw && (
-              <div className="mb-3 text-xs text-status-warnText bg-status-warnBg border border-status-warn/40 rounded-lg px-3 py-2">
-                Early preview — raw whisper output. Speaker labels and timestamps
-                will be filled in once diarization + merge finish.
-              </div>
-            )}
-            {/* Sans-serif prose for the dialogue text with whitespace-pre-wrap
-                to preserve line breaks from transcript.md. The "[Speaker 00:12]"
-                prefixes appear inline; treated as part of the prose so names
-                like "Alice" read as prose, not code. */}
-            <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
-              {meeting.transcriptMd
-                ?? meeting.rawTranscriptText
-                ?? 'No transcript yet. Waiting for the transcribe stage to finish.'}
-            </div>
-          </>
-        )}
-        {tab === 'audio' && (
-          // Wrap the native audio player in a card so it doesn't look
-          // like an unstyled OS widget against the rest of the design.
-          <div className="bg-surface-sunken border border-surface-border rounded-xl p-4">
-            <audio controls src={`file://${meeting.audioPath}`} className="w-full" />
-          </div>
+          <TranscriptPanel
+            meeting={meeting}
+            showRaw={showRaw}
+            currentTime={currentTime}
+            onSeek={onSeek}
+          />
         )}
       </div>
     </div>
+  );
+}
+
+// Click-to-seek transcript (#42). Each parsed line becomes a button that
+// calls onSeek. A timeupdate-driven currentTime highlights the line
+// covering that second. Falls back to plain-text rendering for raw
+// pre-merge transcripts (no speaker prefixes to parse).
+function TranscriptPanel({
+  meeting, showRaw, currentTime, onSeek,
+}: {
+  meeting: MeetingDetail;
+  showRaw: boolean;
+  currentTime: number;
+  onSeek: (seconds: number) => void;
+}): JSX.Element {
+  const body = meeting.transcriptMd ?? meeting.rawTranscriptText ?? '';
+  const parsed = useMemo(() => parseTranscript(body), [body]);
+
+  // Active line = the one whose [start, nextStart) window covers currentTime.
+  const activeIdx = useMemo(() => {
+    if (parsed.lines.length === 0) return -1;
+    let lo = 0, hi = parsed.lines.length - 1, best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (parsed.lines[mid]!.seconds <= currentTime) { best = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return best;
+  }, [parsed, currentTime]);
+
+  // Auto-scroll the active line into view — but only when the user hasn't
+  // scrolled manually in the last few seconds (don't fight them). A
+  // "lastUserScrollAt" timestamp bumps on any wheel/touch event inside the
+  // scroll container.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  const lastManualScrollAt = useRef(0);
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    const onScroll = (): void => { lastManualScrollAt.current = Date.now(); };
+    el.addEventListener('wheel', onScroll, { passive: true });
+    el.addEventListener('touchmove', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', onScroll);
+      el.removeEventListener('touchmove', onScroll);
+    };
+  }, []);
+  useEffect(() => {
+    if (Date.now() - lastManualScrollAt.current < 3000) return;
+    activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [activeIdx]);
+
+  if (body === '') {
+    return (
+      <div className="text-sm text-ink-muted italic">
+        No transcript yet. Waiting for the transcribe stage to finish.
+      </div>
+    );
+  }
+  if (parsed.hasUnparsed || parsed.lines.length === 0) {
+    // Raw / partial transcript — just render as prose.
+    return (
+      <>
+        {showRaw && (
+          <div className="mb-3 text-xs text-status-warnText bg-status-warnBg border border-status-warn/40 rounded-lg px-3 py-2">
+            Early preview — raw whisper output. Speaker labels and timestamps
+            will be filled in once diarization + merge finish.
+          </div>
+        )}
+        <div className="text-sm leading-relaxed whitespace-pre-wrap font-sans">
+          {body}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div ref={panelRef} className="text-sm leading-relaxed font-sans max-h-[60vh] overflow-y-auto pr-1">
+      {parsed.lines.map((line, i) => {
+        const active = i === activeIdx;
+        return (
+          <button
+            key={i}
+            ref={active ? activeRef : undefined}
+            onClick={() => onSeek(line.seconds)}
+            title={`Jump to ${fmtTimestamp(line.seconds)}`}
+            className={`w-full text-left rounded-md px-2 py-1 mb-0.5 transition-colors
+              ${active
+                ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
+                : 'hover:bg-surface-sunken'}`}
+          >
+            <TranscriptLine line={line} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TranscriptLine({ line }: { line: TranscriptLine }): JSX.Element {
+  return (
+    <>
+      <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
+        {fmtTimestamp(line.seconds)}
+      </span>
+      <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
+      <span>{line.text}</span>
+    </>
   );
 }
 
