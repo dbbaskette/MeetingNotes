@@ -555,4 +555,103 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     await shell.openExternal(url);
   });
+
+  // Cmd+K global search (#45). File-based grep over the meeting library.
+  // Works up to a few thousand meetings without needing SQLite FTS5; past
+  // that, reach for FTS5 or a proper search index.
+  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown) => {
+    if (typeof query !== 'string') return [];
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;
+
+    interface Hit {
+      meetingId: string;
+      title: string;
+      source: 'title' | 'summary' | 'transcript';
+      snippet: string;
+      seconds?: number;
+      score: number;
+    }
+    const hits: Hit[] = [];
+
+    for (const m of s.meetings.listAll()) {
+      const folder = meetingFolderPath(s.libraryRoot, m.slug);
+      // Title hit — rank highest so an exact-title match surfaces first.
+      if (m.title.toLowerCase().includes(q)) {
+        hits.push({
+          meetingId: m.id, title: m.title, source: 'title',
+          snippet: m.title, score: 1000,
+        });
+      }
+      // Summary — one hit per meeting, showing the first match's line.
+      const summaryPath = path.join(folder, 'summary.md');
+      if (fs.existsSync(summaryPath)) {
+        try {
+          const text = fs.readFileSync(summaryPath, 'utf8');
+          const lower = text.toLowerCase();
+          const idx = lower.indexOf(q);
+          if (idx >= 0) {
+            const line = snippetAround(text, idx, 120);
+            hits.push({
+              meetingId: m.id, title: m.title, source: 'summary',
+              snippet: line, score: 500,
+            });
+          }
+        } catch { /* ignore unreadable summaries */ }
+      }
+      // Transcript — one hit per match (up to 3 per meeting so a single
+      // noisy word doesn't drown the result list).
+      const transcriptPath = path.join(folder, 'transcript.md');
+      if (fs.existsSync(transcriptPath)) {
+        try {
+          const text = fs.readFileSync(transcriptPath, 'utf8');
+          const lines = text.split('\n');
+          let perMeeting = 0;
+          for (const raw of lines) {
+            if (perMeeting >= 3) break;
+            if (!raw.toLowerCase().includes(q)) continue;
+            // Parse leading "[Speaker MM:SS]" to produce a seconds offset.
+            const m2 = raw.match(/^\[(.+?)\s+(?:(\d+):)?(\d+):(\d{2})\]\s?(.*)$/);
+            if (m2) {
+              const hh = m2[2] ? parseInt(m2[2], 10) : 0;
+              const seconds = hh * 3600 + parseInt(m2[3]!, 10) * 60 + parseInt(m2[4]!, 10);
+              hits.push({
+                meetingId: m.id, title: m.title, source: 'transcript',
+                snippet: `${m2[1]}: ${(m2[5] ?? '').trim()}`,
+                seconds,
+                score: 100,
+              });
+            } else {
+              hits.push({
+                meetingId: m.id, title: m.title, source: 'transcript',
+                snippet: raw.trim().slice(0, 160),
+                score: 100,
+              });
+            }
+            perMeeting += 1;
+          }
+        } catch { /* ignore unreadable transcripts */ }
+      }
+    }
+
+    // Sort by score, then meeting start desc so newer meetings surface
+    // first within the same source tier.
+    hits.sort((a, b) => b.score - a.score);
+    return hits.slice(0, max).map((h) => ({
+      meetingId: h.meetingId, title: h.title, source: h.source,
+      snippet: h.snippet,
+      ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
+    }));
+  });
+}
+
+// Extract a ~n-char window around an index, expanded to word boundaries
+// and with ellipses on either side when truncated.
+function snippetAround(text: string, idx: number, window: number): string {
+  const start = Math.max(0, idx - Math.floor(window / 2));
+  const end = Math.min(text.length, idx + Math.ceil(window / 2));
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < text.length ? '…' : '';
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
 }

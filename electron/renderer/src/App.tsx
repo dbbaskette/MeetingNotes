@@ -6,10 +6,14 @@ import { SettingsView } from './views/SettingsView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
+import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 
-type View = { kind: 'library' } | { kind: 'detail'; id: string } | { kind: 'settings' };
+type View =
+  | { kind: 'library' }
+  | { kind: 'detail'; id: string; seekSeconds?: number }
+  | { kind: 'settings' };
 /** Lives at the App level (not inside LibraryView) so navigating between
  *  Library / Detail / Settings doesn't wipe the recording state. The Swift
  *  helper is a separate process and keeps running regardless; this state is
@@ -24,6 +28,21 @@ export function App(): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'library' });
   const [permsOk, setPermsOk] = useState(true);
   const [liveRecording, setLiveRecording] = useState<LiveRecording | null>(null);
+  // Cmd+K global search palette state (#45). Opens over any view.
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const onPaletteOpen = (t: PaletteTarget): void => {
+    setView({ kind: 'detail', id: t.meetingId, seekSeconds: t.seekSeconds });
+  };
   // Wizard state (#43). `null` = not loaded yet (show nothing),
   // 'needed' = show wizard, 'done' = past onboarding.
   const [onboardStatus, setOnboardStatus] = useState<null | 'needed' | 'done'>(null);
@@ -73,7 +92,11 @@ export function App(): JSX.Element {
       onRecordingStopped={() => setLiveRecording(null)}
     />
   ) : view.kind === 'detail' ? (
-    <MeetingDetailView id={view.id} onBack={() => setView({ kind: 'library' })} />
+    <MeetingDetailView
+      id={view.id}
+      seekSeconds={view.seekSeconds}
+      onBack={() => setView({ kind: 'library' })}
+    />
   ) : (
     <SettingsView onBack={() => setView({ kind: 'library' })} />
   );
@@ -97,6 +120,11 @@ export function App(): JSX.Element {
         </div>
       )}
       {body}
+      <SearchPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onOpenMeeting={onPaletteOpen}
+      />
     </ToastHost>
   );
 }

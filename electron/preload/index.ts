@@ -46,6 +46,7 @@ const IPC_CHANNELS = {
   onboardingWhisperInstall: 'onboarding:whisper-install',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingOpenExternal: 'onboarding:open-external',
+  searchQuery: 'search:query',
 } as const;
 
 const api = {
@@ -195,6 +196,23 @@ const api = {
      *  System Settings deep-links) via shell.openExternal. */
     openExternal: (url: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.onboardingOpenExternal, url) as Promise<void>,
+  },
+  search: {
+    /** Full-text search across meeting titles + summaries + transcripts.
+     *  Returns at most `limit` results, sorted title > summary >
+     *  transcript. Each result carries the meeting id, the matched
+     *  snippet, and a `seconds` offset when the hit was on a specific
+     *  transcript line (so callers can jump to the timestamp). */
+    query: (q: string, limit?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20) as Promise<{
+        meetingId: string;
+        title: string;
+        source: 'title' | 'summary' | 'transcript';
+        snippet: string;
+        /** For transcript hits, the timestamp seconds so the detail view
+         *  can seek right to the matched line. */
+        seconds?: number;
+      }[]>,
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{

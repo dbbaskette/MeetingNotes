@@ -55,7 +55,16 @@ const STAGE_LABELS: Record<PipelineStage, string> = {
   extracting: 'extract',
 };
 
-export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
+export function MeetingDetailView({
+  id, onBack, seekSeconds,
+}: {
+  id: string;
+  onBack: () => void;
+  /** When set (e.g. coming from the search palette), seek the audio to
+   *  this time once it's loadable and switch to the Transcript tab so
+   *  the matched line is visible. (#42 / #45) */
+  seekSeconds?: number;
+}): JSX.Element {
   const [m, setM] = useState<MeetingDetail | null>(null);
   const [tab, setTab] = useState<Tab>('summary');
   // Lifted audio state so the transcript's click-to-seek + current-line
@@ -70,6 +79,20 @@ export function MeetingDetailView({ id, onBack }: { id: string; onBack: () => vo
     el.currentTime = seconds;
     if (el.paused) void el.play();
   };
+
+  // Palette-driven jump (#45): when opened with `seekSeconds`, switch to
+  // the transcript tab and seek the audio once it's ready. readyState >= 1
+  // means metadata is loaded and `currentTime` writes will stick;
+  // otherwise the seek silently drops.
+  useEffect(() => {
+    if (seekSeconds === undefined) return;
+    setTab('transcript');
+    const el = audioRef.current;
+    if (!el) return;
+    const apply = (): void => seekTo(seekSeconds);
+    if (el.readyState >= 1) apply();
+    else el.addEventListener('loadedmetadata', apply, { once: true });
+  }, [seekSeconds]);
 
   // `kick` is a deliberate re-run trigger for the polling effect. Mutations
   // that change the meeting's live state (rerun, speaker assign) bump it so

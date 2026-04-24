@@ -78,4 +78,5 @@ export const IPC_CHANNELS = {
   onboardingWhisperInstall: 'onboarding:whisper-install',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingOpenExternal: 'onboarding:open-external',
+  searchQuery: 'search:query',
 } as const;

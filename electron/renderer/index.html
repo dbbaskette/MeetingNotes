@@ -59,6 +59,7 @@
             saveHfToken: asyncNoop,
             openExternal: asyncNoop,
           },
+          search: { query: async () => [] },
           exports: { run: async () => ({}) },
           dialog: { save: async () => null },
           settings: {
