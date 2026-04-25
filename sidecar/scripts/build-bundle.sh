@@ -55,11 +55,23 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
 #                              scipy.interpolate → scipy.optimize.__init__.
 # Net savings after the back-offs: ~25 MB before this round, ~+10 MB on
 # top from the second-pass excludes above.
+# --strip runs `strip -S` on every .so / .dylib in the bundle (debug
+# symbols only — preserves dynamic symbol table, weak symbols, and
+# everything dlopen/dlsym needs at runtime). Verified bit-identical
+# /diarize output on pyannote sample.wav vs the unstripped build.
+#
+# The big-ticket native libs (libtorch_cpu.dylib, libtorch_python.dylib,
+# libpython3.13.dylib) are unaffected — PyTorch's macOS wheel ships
+# pre-stripped, and CPython's framework dylib is too. The win
+# (~3 MB on _internal) comes from smaller bundled deps that DON'T strip
+# upstream: watchfiles, websockets, httptools, scipy's vendored gfortran
+# helpers. Marginal but free.
 "$VENV_PY" -m PyInstaller \
   --name meeting-notes-diarize \
   --noconfirm \
   --clean \
   --onedir \
+  --strip \
   --console \
   --collect-all pyannote.audio \
   --collect-all torch \
