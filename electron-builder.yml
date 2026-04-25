@@ -63,3 +63,8 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: MeetingNotes records meetings by capturing your microphone.
     NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
+# Post-package hook strips Chromium's unused .lproj locale string dirs
+# (~37 MB across 50+ languages) from the bundled Electron Framework.
+# `electronLanguages` doesn't reach those — they're macOS-style strings
+# files, not per-locale .pak files. See build/strip-electron-locales.js.
+afterPack: build/strip-electron-locales.cjs

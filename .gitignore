@@ -5,6 +5,8 @@ out/
 build/*
 # Keep the electron-builder entitlements file even though build/ is ignored.
 !build/entitlements.mac.plist
+# Keep the electron-builder afterPack hook even though build/ is ignored.
+!build/strip-electron-locales.cjs
 .DS_Store
 *.log
 .env
