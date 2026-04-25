@@ -23,6 +23,19 @@ files:
   - "!**/node_modules/better-sqlite3/build/Makefile"
   - "!**/node_modules/better-sqlite3/build/config.gypi"
   - "!**/node_modules/better-sqlite3/build/*.mk"
+  # Drop dev-only artifacts that prod node_modules ship anyway. The remark/
+  # mdast tree alone leaks 263 .map files (~1.5 MB after asar compression)
+  # plus a .d.ts.map next to every .d.ts. Type stubs (.d.ts) ride along
+  # because tsc emits them next to .js — runtime ignores them.
+  - "!**/node_modules/**/*.map"
+  - "!**/node_modules/**/*.d.ts"
+  - "!**/node_modules/**/*.d.ts.map"
+  # README / CHANGELOG / HISTORY files are pure docs — none of MIT, BSD,
+  # or Apache-2 require redistributing them. (We deliberately KEEP
+  # LICENSE, NOTICE, and AUTHORS files; MIT/Apache-2 mandate license-text
+  # redistribution, and BSD/Apache-2 have an authors-attribution clause.)
+  - "!**/node_modules/**/{README,README.md,README.markdown,readme,readme.md}"
+  - "!**/node_modules/**/{CHANGELOG,CHANGELOG.md,HISTORY.md}"
 extraResources:
   # Ship only the PyInstaller bundle — the user does not need Python installed.
   # Dev runs out of the source tree where the .venv path is used instead.
