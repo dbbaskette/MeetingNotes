@@ -34,6 +34,12 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
 #   PIL                      — image ops; same rationale
 #   IPython, jupyter, notebook — pulled by some pyannote tutorial imports
 #   pytest, _pytest          — test framework pulled by one transitive dep
+#   scipy.io._fast_matrix_market — Matrix Market format reader; not used
+#   hf_xet                   — Xet large-file backend for huggingface_hub;
+#                              with a locally-cached model, HF falls back
+#                              to plain HTTP cleanly
+#   uvloop                   — alternative asyncio loop; pyannote and our
+#                              sidecar's stdlib asyncio path don't depend on it
 #
 # Modules we tried to exclude but had to restore (inference imports them
 # despite being conspicuously absent from the inference code — pyannote's
@@ -42,7 +48,13 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
 #   opentelemetry            — same
 #   grpc                     — not re-tested after opentelemetry restore
 #                              (assumed needed since otel imports it)
-# Net savings after the back-offs: ~25 MB.
+#   scipy.optimize._highspy  — scipy.optimize.__init__ unconditionally
+#                              imports _linprog which imports _highspy.
+#                              Caught by the /diarize smoke. The chain:
+#                              lightning → torchmetrics → scipy.signal →
+#                              scipy.interpolate → scipy.optimize.__init__.
+# Net savings after the back-offs: ~25 MB before this round, ~+10 MB on
+# top from the second-pass excludes above.
 "$VENV_PY" -m PyInstaller \
   --name meeting-notes-diarize \
   --noconfirm \
@@ -65,6 +77,9 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(git rev-parse --short HEAD 2>/dev/null ||
   --exclude-module notebook \
   --exclude-module pytest \
   --exclude-module _pytest \
+  --exclude-module scipy.io._fast_matrix_market \
+  --exclude-module hf_xet \
+  --exclude-module uvloop \
   serve.py
 
 # Post-build prune: strip torch subtrees that `--collect-all torch` pulls
@@ -103,6 +118,40 @@ if [ -d "$TORCH_INTERNAL" ]; then
   for sub in include testing onnx; do
     rm -rf "$TORCH_INTERNAL/$sub"
   done
+fi
+
+# Strip pure-metadata files that PyInstaller's --collect-all hauls in but
+# the runtime never reads. Each category here was verified against an
+# end-to-end /diarize call.
+INTERNAL="dist/meeting-notes-diarize/_internal"
+if [ -d "$INTERNAL" ]; then
+  # 1. .pyi type stubs — static-type-checker fodder, never imported. The
+  #    big offenders are torch/_VF.pyi (~2.1 MB) and
+  #    torch/_C/_VariableFunctions.pyi (~2.1 MB) but they exist throughout
+  #    the bundle (numpy, scipy, pandas, etc.) and add up.
+  find "$INTERNAL" -type f -name '*.pyi' -delete
+
+  # 2. Wheel install metadata. pip writes these so it can later uninstall
+  #    or verify a package. At runtime nothing reads them. RECORD alone is
+  #    ~2.1 MB for torch-2.11.0.dist-info because every shipped file is
+  #    listed with its sha256.
+  #
+  #    NOTE: we deliberately do NOT delete LICENSE / NOTICE / AUTHORS
+  #    inside dist-info dirs — MIT/BSD/Apache-2 require redistributing
+  #    those when shipping the package, so they stay even though they're
+  #    a few KB each.
+  find "$INTERNAL" -type d -name '*.dist-info' | while read -r dinfo; do
+    for stale in RECORD WHEEL INSTALLER REQUESTED top_level.txt; do
+      rm -f "$dinfo/$stale"
+    done
+  done
+
+  # 3. torch/bin/protoc — the protobuf compiler is a build-time codegen
+  #    tool that generates Python message classes from .proto files. Torch
+  #    ships pre-generated message classes, so inference never invokes it.
+  #    Two ~4 MB copies are shipped (`protoc` and the versioned alias
+  #    `protoc-3.13.0.0`); both are dead weight at runtime.
+  rm -f "$INTERNAL/torch/bin/protoc" "$INTERNAL/torch/bin/protoc-3.13.0.0"
 fi
 
 # Write BUILD_ID next to the bundle. The sidecar reads it at startup and
