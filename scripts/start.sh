@@ -128,12 +128,20 @@ if [ "$MODE" = "dev" ]; then
   echo "Starting dev mode (Vite + Electron, hot reload)..."
   exec npm run dev
 else
-  APP="release/mac-arm64/MeetingNotes.app"
+  # Prefer the dmg-installed copy in /Applications. The loose
+  # release/mac-arm64/MeetingNotes.app used to live here too, but
+  # `npm run dist` now cleans it up — it was getting registered
+  # with LaunchServices and showing up as a Launchpad duplicate.
+  if [ -d "/Applications/MeetingNotes.app" ]; then
+    APP="/Applications/MeetingNotes.app"
+  else
+    APP="release/mac-arm64/MeetingNotes.app"
+  fi
   if [ ! -d "$APP" ]; then
     echo
-    echo "Packaged app not found at $APP."
-    echo "Build it first:  npm run dist"
-    echo "Or run dev mode: $0 --dev"
+    echo "MeetingNotes.app not found in /Applications. Build + install:"
+    echo "  npm run dist"
+    echo "  open release/MeetingNotes-0.1.0-arm64.dmg   # then drag to /Applications"
     exit 1
   fi
   echo
