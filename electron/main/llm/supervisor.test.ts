@@ -101,6 +101,103 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  it('lm-studio mode auto-loads the configured model when not already loaded', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    const lmsLoadModel = vi.fn(async () => {});
+    const lmsListLoadedModels = vi.fn(async () => [] as string[]);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels,
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(lmsListLoadedModels).toHaveBeenCalledWith('127.0.0.1', 1234);
+    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b');
+    await sup.stop();
+  });
+
+  it('lm-studio mode skips auto-load when the model is already loaded', async () => {
+    const probe = async (): Promise<{ ok: boolean }> => ({ ok: true });
+    const spawn = vi.fn(() => fakeProc() as any);
+    const lmsLoadModel = vi.fn(async () => {});
+    const lmsListLoadedModels = vi.fn(async () => ['qwen/qwen3.5-9b']);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels,
+    });
+    await sup.ensureReady();
+    expect(lmsLoadModel).not.toHaveBeenCalled();
+    await sup.stop();
+  });
+
+  it('lm-studio mode tolerates auto-load failures without throwing', async () => {
+    const probe = async (): Promise<{ ok: boolean }> => ({ ok: true });
+    const spawn = vi.fn(() => fakeProc() as any);
+    const lmsLoadModel = vi.fn(async () => { throw new Error('lms exit 1'); });
+    const lmsListLoadedModels = vi.fn(async () => [] as string[]);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels,
+    });
+    // Should NOT throw — the chat() call surfaces the real error if
+    // the model isn't actually available.
+    await expect(sup.ensureReady()).resolves.toBeUndefined();
+    await sup.stop();
+  });
+
+  it('ollama mode does NOT call the LM Studio loader', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    const lmsLoadModel = vi.fn(async () => {});
+    const lmsListLoadedModels = vi.fn(async () => [] as string[]);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'ollama',
+      getModelId: () => 'llama3:8b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: async () => ({ ok: false }),
+      ollamaProbe: probe,
+      lmsLoadModel,
+      lmsListLoadedModels,
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(lmsLoadModel).not.toHaveBeenCalled();
+    expect(lmsListLoadedModels).not.toHaveBeenCalled();
+    await sup.stop();
+  });
+
   it('switching providers routes ensureReady to the new one', async () => {
     let probeCalls = { lms: 0, ollama: 0 };
     const lmsProbe = async (): Promise<{ ok: boolean }> => {

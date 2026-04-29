@@ -76,8 +76,16 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: MeetingNotes records meetings by capturing your microphone.
     NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
-# Post-package hook strips Chromium's unused .lproj locale string dirs
-# (~37 MB across 50+ languages) from the bundled Electron Framework.
-# `electronLanguages` doesn't reach those — they're macOS-style strings
-# files, not per-locale .pak files. See build/strip-electron-locales.js.
-afterPack: build/strip-electron-locales.cjs
+# Post-package hook trims dead weight from Chromium's bundled Electron
+# Framework. Strips ~55 unused locale .lproj dirs (~37 MB across 50+
+# languages) AND the software-WebGL fallback libs `libvk_swiftshader.dylib`
+# + `libGLESv2.dylib` (~23 MB), since MeetingNotes renders no
+# WebGL/Canvas3D surface and Apple Silicon's hardware path always wins.
+# See build/trim-electron-framework.cjs for the full rationale + risk
+# tradeoffs.
+afterPack: build/trim-electron-framework.cjs
+
+# Maximum compression on dmg/zip. Slower build (adds ~30–60s of LZMA at
+# higher settings) for ~5–10 MB off the download. The installed .app size
+# is unaffected; this only shrinks the artifacts users download.
+compression: maximum

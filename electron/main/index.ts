@@ -118,6 +118,7 @@ app.whenReady().then(async () => {
   // / `ollama serve` on demand and idle-shutdown after 10 min.
   const llmSupervisor = new LLMSupervisor({
     getProvider: () => settings.get('summaryProvider'),
+    getModelId: () => settings.get('llmModel'),
     onLog: (l) => logger.info('llm', { line: l }),
   });
 
