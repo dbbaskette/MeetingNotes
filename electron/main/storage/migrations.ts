@@ -165,6 +165,35 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE action_items ADD COLUMN owner_name TEXT;
     `,
   },
+  {
+    version: 9,
+    // Weekly summaries (#weekly): cached LLM narrative + decisions for
+    // an ISO week's worth of meetings. We persist only the LLM output
+    // (which is expensive to regenerate) — meetings list and action
+    // items are joined live on each read because both are already
+    // indexed by date / meeting_id and the joins are cheap.
+    //
+    // input_hash is a sha256 over sorted (meeting_id, updated_at) pairs
+    // for meetings whose started_at falls in the week. On each get(),
+    // we recompute the hash and compare against the cached row; a
+    // mismatch forces regeneration so a newly-arrived meeting or an
+    // edited title invalidates the cache.
+    //
+    // PRIMARY KEY (iso_year, iso_week) keeps it one row per week. No FK
+    // to meetings — deletion of a meeting just changes the input_hash,
+    // which the next get() detects.
+    up: `
+      CREATE TABLE IF NOT EXISTS weekly_summaries (
+        iso_year INTEGER NOT NULL,
+        iso_week INTEGER NOT NULL,
+        narrative TEXT NOT NULL,
+        decisions_json TEXT NOT NULL DEFAULT '[]',
+        input_hash TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        PRIMARY KEY (iso_year, iso_week)
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

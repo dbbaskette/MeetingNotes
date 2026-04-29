@@ -1,0 +1,176 @@
+// electron/main/weekly/aggregator.test.ts
+//
+// Tests the cache-or-regenerate flow + action item grouping. Uses a
+// real in-memory SQLite (better-sqlite3 ":memory:") so the repo
+// queries are exercised end-to-end, not stubbed. The LLM call is
+// stubbed via the AggregatorDeps.generateNarrative seam.
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { runMigrations } from '../storage/migrations.js';
+import { MeetingsRepo } from '../storage/meetings-repo.js';
+import { ActionItemsRepo } from '../storage/action-items-repo.js';
+import { SpeakersRepo } from '../storage/speakers-repo.js';
+import { SettingsRepo } from '../storage/settings-repo.js';
+import { WeeklySummariesRepo } from '../storage/weekly-summaries-repo.js';
+import { WeeklyAggregator } from './aggregator.js';
+
+function setupDb(): { db: Database.Database; meetings: MeetingsRepo; actionItems: ActionItemsRepo; speakers: SpeakersRepo; settings: SettingsRepo; weekly: WeeklySummariesRepo } {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys = ON');
+  runMigrations(db);
+  return {
+    db,
+    meetings: new MeetingsRepo(db),
+    actionItems: new ActionItemsRepo(db),
+    speakers: new SpeakersRepo(db),
+    settings: new SettingsRepo(db),
+    weekly: new WeeklySummariesRepo(db),
+  };
+}
+
+function setupLib(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'mn-week-'));
+}
+
+function insertMeeting(meetings: MeetingsRepo, db: Database.Database, opts: {
+  id: string; title: string; startedAt: string; slug?: string;
+  durationS?: number;
+}): void {
+  meetings.insert({
+    id: opts.id,
+    slug: opts.slug ?? opts.id,
+    title: opts.title,
+    startedAt: opts.startedAt,
+    durationS: opts.durationS ?? 1800,
+    audioPath: `/tmp/${opts.id}.m4a`,
+    status: 'done',
+    pipelineStage: 'done',
+  });
+}
+
+describe('WeeklyAggregator', () => {
+  let lib: string;
+  beforeEach(() => {
+    lib = setupLib();
+  });
+
+  it('returns empty data with no LLM call when the week has no meetings', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    const generate = vi.fn(async () => ({ narrative: 'unused', decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const data = await agg.getWeek(2026, 17);
+    expect(data.meetings).toEqual([]);
+    expect(data.openActionGroups).toEqual([]);
+    expect(data.openActionCount).toBe(0);
+    expect(data.narrative).toBe('');
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('generates + caches narrative on first call, reuses cache on second', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
+    });
+    const generate = vi.fn(async () => ({
+      narrative: 'Focus was Q2.',
+      decisions: ['Locked OKRs — Q2 planning'],
+    }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const first = await agg.getWeek(2026, 17);
+    expect(first.narrative).toBe('Focus was Q2.');
+    expect(first.decisions).toEqual(['Locked OKRs — Q2 planning']);
+    expect(generate).toHaveBeenCalledTimes(1);
+
+    const second = await agg.getWeek(2026, 17);
+    expect(second.narrative).toBe('Focus was Q2.');
+    expect(generate).toHaveBeenCalledTimes(1); // cache hit
+  });
+
+  it('regenerates when input hash changes (new meeting added)', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
+    });
+    let callCount = 0;
+    const generate = vi.fn(async () => {
+      callCount += 1;
+      return {
+        narrative: callCount === 1 ? 'first' : 'second',
+        decisions: [],
+      };
+    });
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const first = await agg.getWeek(2026, 17);
+    expect(first.narrative).toBe('first');
+
+    // Add a second meeting in the same week. Hash changes → regenerate.
+    insertMeeting(meetings, undefined as never, {
+      id: 'm2', title: 'Vendor sync', startedAt: '2026-04-22T14:00:00.000Z',
+    });
+    const second = await agg.getWeek(2026, 17);
+    expect(second.narrative).toBe('second');
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('forces regeneration on regenerateWeek even if hash unchanged', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
+    });
+    const generate = vi.fn(async () => ({ narrative: 'paragraph', decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    await agg.getWeek(2026, 17);
+    expect(generate).toHaveBeenCalledTimes(1);
+    await agg.regenerateWeek(2026, 17);
+    expect(generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('groups open action items by owner, with the user pinned first', async () => {
+    const { meetings, actionItems, speakers, settings, weekly, db } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Mtg', startedAt: '2026-04-20T10:00:00.000Z',
+    });
+    const youId = speakers.create({ displayName: 'You' });
+    settings.set('userSpeakerId', youId);
+
+    // Three items: one to "You", one to Alex, one with no owner.
+    const insAi = db.prepare(`
+      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, owner_name, due_date, status, exported_to, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?)
+    `);
+    const now = new Date().toISOString();
+    insAi.run('ai1', 'm1', 'Send SOC2', youId, null, '2026-04-25', 'open', now);
+    insAi.run('ai2', 'm1', 'Pilot SLA', null, 'Alex', null, 'open', now);
+    insAi.run('ai3', 'm1', 'Closed item', null, null, null, 'done', now);
+    insAi.run('ai4', 'm1', 'Unowned action', null, null, null, 'open', now);
+
+    const generate = vi.fn(async () => ({ narrative: 'x', decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const data = await agg.getWeek(2026, 17);
+    // 3 open items (excluded the done one).
+    expect(data.openActionCount).toBe(3);
+    // Groups: You first, then alphabetical (Alex), then Unassigned.
+    expect(data.openActionGroups.map((g) => g.ownerLabel)).toEqual(['You', 'Alex', 'Unassigned']);
+    expect(data.openActionGroups[0]!.isYou).toBe(true);
+    expect(data.openActionGroups[0]!.items[0]!.text).toBe('Send SOC2');
+  });
+});

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { LibraryView } from './views/LibraryView';
 import { MeetingDetailView } from './views/MeetingDetailView';
 import { SettingsView } from './views/SettingsView';
+import { WeeklyView } from './views/WeeklyView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
@@ -13,7 +14,8 @@ import { api } from './ipc/client';
 type View =
   | { kind: 'library' }
   | { kind: 'detail'; id: string; seekSeconds?: number }
-  | { kind: 'settings' };
+  | { kind: 'settings' }
+  | { kind: 'weekly' };
 /** Lives at the App level (not inside LibraryView) so navigating between
  *  Library / Detail / Settings doesn't wipe the recording state. The Swift
  *  helper is a separate process and keeps running regardless; this state is
@@ -87,6 +89,7 @@ export function App(): JSX.Element {
     <LibraryView
       onOpen={(id) => setView({ kind: 'detail', id })}
       onSettings={() => setView({ kind: 'settings' })}
+      onWeekly={() => setView({ kind: 'weekly' })}
       liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
       onRecordingStopped={() => setLiveRecording(null)}
@@ -96,6 +99,11 @@ export function App(): JSX.Element {
       id={view.id}
       seekSeconds={view.seekSeconds}
       onBack={() => setView({ kind: 'library' })}
+    />
+  ) : view.kind === 'weekly' ? (
+    <WeeklyView
+      onBack={() => setView({ kind: 'library' })}
+      onOpenMeeting={(id) => setView({ kind: 'detail', id })}
     />
   ) : (
     <SettingsView onBack={() => setView({ kind: 'library' })} />

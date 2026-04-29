@@ -17,7 +17,10 @@ interface Settings {
   recordingBitrateKbps: number;
   autoDetectMeetings: boolean;
   userName: string;
+  userSpeakerId: string | null;
 }
+
+interface SpeakerListEntry { id: string; displayName: string }
 
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
@@ -26,12 +29,14 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   const [s, setS] = useState<Settings | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [perms, setPerms] = useState<AudioPerms | null>(null);
+  const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
 
   useEffect(() => {
     void (async () => {
       setS((await api.settings.getAll()) as Settings);
       setModels((await api.models.list()) as string[]);
       setPerms((await api.permissions.audio()) as AudioPerms);
+      setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
     })();
   }, []);
 
@@ -136,6 +141,24 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         <div className="text-xs text-ink-muted mt-1">
           Used to label your voice in transcripts when dual-stem capture
           is active. Leave blank to just see &ldquo;You&rdquo;.
+        </div>
+      </Field>
+      <Field label="You are…">
+        <select
+          value={s.userSpeakerId ?? ''}
+          onChange={(e) => update('userSpeakerId', e.target.value === '' ? null : e.target.value)}
+          className="input"
+        >
+          <option value="">— not set —</option>
+          {speakers.map((sp) => (
+            <option key={sp.id} value={sp.id}>{sp.displayName}</option>
+          ))}
+        </select>
+        <div className="text-xs text-ink-muted mt-1">
+          The roster speaker that represents you. When set, the Weekly view
+          pins your open action items to the top in a &ldquo;You&rdquo; group.
+          Confirm a speaker as yourself in any meeting&rsquo;s Speakers panel
+          first to populate this list.
         </div>
       </Field>
 

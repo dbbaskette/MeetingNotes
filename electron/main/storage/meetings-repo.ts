@@ -68,6 +68,20 @@ export class MeetingsRepo {
     return rows.map(rowToMeeting);
   }
 
+  /** Returns meetings whose started_at falls within [startIso, endIso].
+   *  Inclusive on both ends. Used by the weekly-summary view to gather
+   *  meetings for one ISO week. Soft-deleted rows are excluded. */
+  listInRange(startIso: string, endIso: string): MeetingRow[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM meetings
+      WHERE deleted_at IS NULL
+        AND started_at IS NOT NULL
+        AND started_at >= ? AND started_at <= ?
+      ORDER BY started_at ASC
+    `).all(startIso, endIso) as Record<string, unknown>[];
+    return rows.map(rowToMeeting);
+  }
+
   findNonTerminal(): MeetingRow[] {
     const rows = this.db.prepare(
       "SELECT * FROM meetings WHERE pipeline_stage != 'done' AND deleted_at IS NULL",

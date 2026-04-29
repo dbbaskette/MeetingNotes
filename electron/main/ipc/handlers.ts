@@ -33,6 +33,8 @@ import {
 } from '../speakers/sample-extractor.js';
 import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
+import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -48,6 +50,7 @@ export interface IpcServices {
   exporters: Record<string, Exporter>;
   libraryRoot: string;
   meetingDetector?: MeetingDetector;
+  weeklyAggregator: WeeklyAggregator;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -643,6 +646,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       snippet: h.snippet,
       ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
     }));
+  });
+
+  // Weekly summary (#weekly). Year/week pair identifies an ISO week.
+  // The aggregator handles cache-or-regenerate based on input hash.
+  const validWeek = (y: unknown, w: unknown): { year: number; week: number } | null => {
+    if (typeof y !== 'number' || typeof w !== 'number') return null;
+    if (!Number.isInteger(y) || !Number.isInteger(w)) return null;
+    if (y < 1970 || y > 9999) return null;
+    if (w < 1 || w > 53) return null;
+    return { year: y, week: w };
+  };
+
+  ipc.handle(IPC_CHANNELS.weeklyGet, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
+    const w = validWeek(year, week);
+    if (!w) throw new Error('invalid year/week');
+    return s.weeklyAggregator.getWeek(w.year, w.week);
+  });
+
+  ipc.handle(IPC_CHANNELS.weeklyRegenerate, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
+    const w = validWeek(year, week);
+    if (!w) throw new Error('invalid year/week');
+    return s.weeklyAggregator.regenerateWeek(w.year, w.week);
+  });
+
+  ipc.handle(IPC_CHANNELS.weeklyExportMarkdown, async (_e, year: unknown, week: unknown): Promise<{ path: string | null; markdown: string }> => {
+    const w = validWeek(year, week);
+    if (!w) throw new Error('invalid year/week');
+    const data = await s.weeklyAggregator.getWeek(w.year, w.week);
+    const markdown = renderWeeklyMarkdown(data);
+    const filename = `weekly-${w.year}-W${String(w.week).padStart(2, '0')}.md`;
+    const result = await dialog.showSaveDialog({
+      defaultPath: filename,
+      filters: [{ name: 'Markdown', extensions: ['md'] }],
+    });
+    if (result.canceled || !result.filePath) return { path: null, markdown };
+    fs.writeFileSync(result.filePath, markdown, 'utf8');
+    return { path: result.filePath, markdown };
   });
 }
 

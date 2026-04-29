@@ -27,6 +27,11 @@ export interface Settings {
   /** ISO timestamp of the first-run onboarding wizard completion or skip.
    *  Null → wizard shows on next launch. Set by OnboardingView. (#43) */
   onboardedAt: string | null;
+  /** Roster speaker that is the local user. When set, the weekly view
+   *  pins this speaker's open action items at the top in a "You"
+   *  group. Null = no preference; weekly view groups action items by
+   *  owner without a "You" pin. */
+  userSpeakerId: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -49,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDetectMeetings: false,
   userName: '',
   onboardedAt: null,
+  userSpeakerId: null,
 };
 
 type Key = keyof Settings;
