@@ -23,8 +23,11 @@
 // the user can switch providers in Settings without restarting
 // the app.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import fs from 'node:fs';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 import {
   ManagedService,
   type ManagedServiceDeps,
@@ -36,6 +39,9 @@ export type LLMProvider = 'external' | 'lm-studio' | 'ollama';
 export interface LLMSupervisorOpts {
   /** Reads the user's chosen provider from settings.summaryProvider. */
   getProvider: () => LLMProvider;
+  /** Reads settings.llmModel — used by the LM Studio auto-load step
+   *  to bring the right model into VRAM after `lms server start`. */
+  getModelId?: () => string | null | undefined;
   /** LM Studio's port (default 1234). */
   lmStudioPort?: number;
   /** Ollama's port (default 11434). */
@@ -51,6 +57,12 @@ export interface LLMSupervisorOpts {
   /** Override health probes for tests. */
   lmStudioProbe?: ManagedServiceDeps['healthProbe'];
   ollamaProbe?: ManagedServiceDeps['healthProbe'];
+  /** Test seam for the LM Studio model-load step. Defaults to
+   *  shelling out via execFile to the resolved `lms` binary. */
+  lmsLoadModel?: (binary: string, modelId: string) => Promise<void>;
+  /** Test seam for the loaded-models check. Returns ids that LM
+   *  Studio's /v1/models endpoint reports as currently loaded. */
+  lmsListLoadedModels?: (host: string, port: number) => Promise<string[]>;
   onLog?: (line: string) => void;
 }
 
@@ -101,6 +113,28 @@ async function modelsListProbe(host: string, port: number): Promise<ProbeResult>
   } catch {
     return { ok: false };
   }
+}
+
+/** Default implementation of "what's loaded right now" — hits LM
+ *  Studio's /v1/models. Returns the list of model ids in `data[]`.
+ *  Lifted out for testability. */
+async function defaultLmsListLoaded(host: string, port: number): Promise<string[]> {
+  const resp = await fetch(`http://${host}:${port}/v1/models`, {
+    signal: AbortSignal.timeout(2000),
+  });
+  if (!resp.ok) return [];
+  const body = (await resp.json().catch(() => null)) as
+    | { data?: Array<{ id?: string }> }
+    | null;
+  const data = body?.data ?? [];
+  return data.map((m) => m.id ?? '').filter((id) => id.length > 0);
+}
+
+/** Default model-load implementation — shells out to `lms load`.
+ *  60s timeout matches the worst-case Q5 load time for a 7B-class
+ *  model on Apple Silicon. */
+async function defaultLmsLoadModel(binary: string, modelId: string): Promise<void> {
+  await execFileAsync(binary, ['load', modelId], { timeout: 60_000 });
 }
 
 /** Reports which providers are available (binary present + reachable
@@ -179,16 +213,68 @@ export class LLMSupervisor {
   }
 
   /** Wakes the configured provider on demand. No-op when provider
-   *  is 'external' (user-managed). */
+   *  is 'external' (user-managed). For 'lm-studio' also triggers an
+   *  `lms load <model>` if the configured model isn't already loaded
+   *  in VRAM (LM Studio's `lms server start` brings the OpenAI-compat
+   *  server up but doesn't auto-load any model — without this step
+   *  the first `chat()` call returns a 404). */
   async ensureReady(): Promise<void> {
     const provider = this.opts.getProvider();
     switch (provider) {
       case 'external':
         return;
       case 'lm-studio':
-        return this.lmStudio.ensureReady();
+        await this.lmStudio.ensureReady();
+        await this.ensureLmStudioModelLoaded();
+        return;
       case 'ollama':
+        // Ollama lazy-loads models on first inference — no equivalent
+        // step needed. The OpenAI-compat call to /v1/chat/completions
+        // triggers the load and the response just takes longer.
         return this.ollama.ensureReady();
+    }
+  }
+
+  /** Best-effort: load the configured model into VRAM if it isn't
+   *  already. Failure is non-fatal — the user might be deliberately
+   *  using a different model than `settings.llmModel`, or the model
+   *  id might be misspelled. We log and continue; the subsequent
+   *  chat() call will surface a clearer error if the model truly
+   *  isn't available. */
+  private async ensureLmStudioModelLoaded(): Promise<void> {
+    const wanted = this.opts.getModelId?.()?.trim();
+    if (!wanted) return;
+    const host = '127.0.0.1';
+    const port = this.opts.lmStudioPort ?? 1234;
+    const lister = this.opts.lmsListLoadedModels ?? defaultLmsListLoaded;
+    let loaded: string[] = [];
+    try {
+      loaded = await lister(host, port);
+    } catch (e) {
+      this.opts.onLog?.(`lm-studio: list-loaded-models failed: ${String(e)}`);
+      // Fall through and try to load — worst case the load is a no-op.
+    }
+    if (loaded.includes(wanted)) return;
+
+    const findLms = this.opts.findLmsBinary ?? findLmsBinary;
+    let binary: string;
+    try {
+      binary = findLms();
+    } catch (e) {
+      this.opts.onLog?.(`lm-studio: skipping auto-load — ${String(e)}`);
+      return;
+    }
+    const loader = this.opts.lmsLoadModel ?? defaultLmsLoadModel;
+    try {
+      this.opts.onLog?.(`lm-studio: loading ${wanted}…`);
+      await loader(binary, wanted);
+      this.opts.onLog?.(`lm-studio: ${wanted} loaded`);
+    } catch (e) {
+      this.opts.onLog?.(
+        `lm-studio: auto-load of ${wanted} failed (${String(e)}). ` +
+        'The next chat() call may 404 if the model isn\'t loaded — ' +
+        'load it manually via `lms load <model>` or the GUI.',
+      );
     }
   }
 
