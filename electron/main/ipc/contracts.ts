@@ -82,4 +82,5 @@ export const IPC_CHANNELS = {
   weeklyGet: 'weekly:get',
   weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
+  llmDetectProviders: 'llm:detect-providers',
 } as const;

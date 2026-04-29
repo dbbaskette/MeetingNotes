@@ -50,6 +50,7 @@ const IPC_CHANNELS = {
   weeklyGet: 'weekly:get',
   weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
+  llmDetectProviders: 'llm:detect-providers',
 } as const;
 
 const api = {
@@ -237,6 +238,16 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.weeklyExportMarkdown, year, week) as Promise<{
         path: string | null;
         markdown: string;
+      }>,
+  },
+  llm: {
+    /** Probe whether `lms` and `ollama` CLIs are installed and
+     *  whether their default ports already have something listening.
+     *  Used by the Settings UI to dim unavailable provider options. */
+    detectProviders: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.llmDetectProviders) as Promise<{
+        lmStudio: { binary: boolean; running: boolean };
+        ollama: { binary: boolean; running: boolean };
       }>,
   },
   permissions: {

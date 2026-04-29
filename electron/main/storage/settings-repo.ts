@@ -32,6 +32,13 @@ export interface Settings {
    *  group. Null = no preference; weekly view groups action items by
    *  owner without a "You" pin. */
   userSpeakerId: string | null;
+  /** Provider that hosts the summarization / extraction LLM.
+   *  - 'external': user runs LM Studio / Ollama / etc. themselves;
+   *    we just POST to lmStudioUrl. (Backwards-compatible default.)
+   *  - 'lm-studio': MeetingNotes spawns `lms server start` on demand
+   *    and shuts it down after idle.
+   *  - 'ollama': MeetingNotes spawns `ollama serve` on demand. */
+  summaryProvider: 'external' | 'lm-studio' | 'ollama';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,6 +62,7 @@ export const DEFAULT_SETTINGS: Settings = {
   userName: '',
   onboardedAt: null,
   userSpeakerId: null,
+  summaryProvider: 'external',
 };
 
 type Key = keyof Settings;

@@ -11,6 +11,10 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   const transcript = fs.readFileSync(path.join(folder, 'transcript.md'), 'utf8');
+  // Wake the LLM provider on demand. No-op when summaryProvider='external'
+  // (user-managed LM Studio / Ollama). For managed providers, spawns the
+  // server if needed and resets the idle timer.
+  await ctx.llmSupervisor.ensureReady();
   const raw = await ctx.lmStudio.chat({
     model: ctx.settings.get('llmModel'),
     temperature: 0,

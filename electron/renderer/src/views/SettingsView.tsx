@@ -18,9 +18,14 @@ interface Settings {
   autoDetectMeetings: boolean;
   userName: string;
   userSpeakerId: string | null;
+  summaryProvider: 'external' | 'lm-studio' | 'ollama';
 }
 
 interface SpeakerListEntry { id: string; displayName: string }
+interface ProviderAvailability {
+  lmStudio: { binary: boolean; running: boolean };
+  ollama: { binary: boolean; running: boolean };
+}
 
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
@@ -30,6 +35,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   const [models, setModels] = useState<string[]>([]);
   const [perms, setPerms] = useState<AudioPerms | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
+  const [providers, setProviders] = useState<ProviderAvailability | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -37,6 +43,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
       setModels((await api.models.list()) as string[]);
       setPerms((await api.permissions.audio()) as AudioPerms);
       setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
+      setProviders((await api.llm.detectProviders()) as ProviderAvailability);
     })();
   }, []);
 
@@ -60,12 +67,38 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         <h1 className="font-semibold">Settings</h1>
       </div>
 
+      <Field label="Summary provider (LLM lifecycle)">
+        <select
+          value={s.summaryProvider}
+          onChange={(e) => update('summaryProvider', e.target.value as Settings['summaryProvider'])}
+          className="input"
+        >
+          <option value="external">External — I run LM Studio / Ollama myself</option>
+          <option value="lm-studio" disabled={providers != null && !providers.lmStudio.binary}>
+            LM Studio (managed) {providers && !providers.lmStudio.binary ? '— `lms` CLI not found' : providers?.lmStudio.running ? '— already running' : ''}
+          </option>
+          <option value="ollama" disabled={providers != null && !providers.ollama.binary}>
+            Ollama (managed) {providers && !providers.ollama.binary ? '— ollama not installed' : providers?.ollama.running ? '— already running' : ''}
+          </option>
+        </select>
+        <div className="text-xs text-ink-muted mt-1">
+          <strong>External</strong> matches the original behavior — you start the
+          server yourself and MeetingNotes just POSTs to it.
+          <br />
+          <strong>LM Studio</strong> / <strong>Ollama</strong> have MeetingNotes spawn the server
+          on demand (first summary wakes it) and shut it down after 10 min of idle to free RAM.
+        </div>
+      </Field>
       <Field label="LM Studio URL (chat / LLM)">
         <input
           value={s.lmStudioUrl}
           onChange={(e) => update('lmStudioUrl', e.target.value)}
           className="input"
         />
+        <div className="text-xs text-ink-muted mt-1">
+          Default for the &lsquo;external&rsquo; provider. Managed providers use their own
+          ports (1234 for LM Studio, 11434 for Ollama).
+        </div>
       </Field>
       <Field label="LLM Model (loaded in LM Studio)">
         <select
