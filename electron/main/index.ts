@@ -12,6 +12,9 @@ import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
 import { createDiarizationSupervisor } from './diarization/supervisor.js';
 import { createWhisperSupervisor } from './whisper/supervisor.js';
+import { WeeklySummariesRepo } from './storage/weekly-summaries-repo.js';
+import { WeeklyAggregator } from './weekly/aggregator.js';
+import { createNarrativeGenerator } from './weekly/prompt.js';
 import { RecordingManager } from './recording/manager.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
@@ -243,6 +246,22 @@ app.whenReady().then(async () => {
   if (s.autoDetectMeetings) meetingDetector.start();
 
   const exporters = buildExporterRegistry();
+  // Weekly summary aggregator (#weekly). Builds the per-week digest
+  // from the existing meetings + action_items tables, with an LLM-
+  // narrative cache backed by the weekly_summaries table.
+  const weeklySummaries = new WeeklySummariesRepo(db);
+  const weeklyAggregator = new WeeklyAggregator({
+    meetings,
+    actionItems,
+    speakers,
+    settings,
+    weeklySummaries,
+    libraryRoot,
+    generateNarrative: createNarrativeGenerator(
+      lmStudio,
+      () => settings.get('llmModel'),
+    ),
+  });
   registerIpcHandlers(ipcMain, {
     meetings,
     speakers,
@@ -257,6 +276,7 @@ app.whenReady().then(async () => {
     exporters,
     libraryRoot,
     meetingDetector,
+    weeklyAggregator,
   });
 
   await createWindow();

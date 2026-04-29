@@ -79,4 +79,7 @@ export const IPC_CHANNELS = {
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
+  weeklyGet: 'weekly:get',
+  weeklyRegenerate: 'weekly:regenerate',
+  weeklyExportMarkdown: 'weekly:export-markdown',
 } as const;

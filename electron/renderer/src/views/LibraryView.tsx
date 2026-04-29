@@ -20,6 +20,7 @@ import type { LiveRecording } from '../App';
 interface Props {
   onOpen: (id: string) => void;
   onSettings: () => void;
+  onWeekly: () => void;
   /** Recording state is owned by App (so it survives view navigation).
    *  LibraryView just reads + notifies on start/stop. */
   liveRecording: LiveRecording | null;
@@ -30,7 +31,7 @@ interface Props {
 type LibFilter = 'all' | 'unprocessed' | 'processing' | 'done' | 'failed';
 
 export function LibraryView({
-  onOpen, onSettings, liveRecording, onStartRecording, onRecordingStopped,
+  onOpen, onSettings, onWeekly, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [query, setQuery] = useState('');
@@ -139,6 +140,19 @@ export function LibraryView({
           />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
+        <nav className="flex items-center gap-1 ml-4 text-sm">
+          <button
+            className="px-3 py-1.5 rounded-md bg-surface-sunken text-ink font-medium"
+          >
+            Library
+          </button>
+          <button
+            onClick={onWeekly}
+            className="px-3 py-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-sunken transition"
+          >
+            Weekly
+          </button>
+        </nav>
         <div className="flex-1" />
         <RecordButton onStarted={({ sessionId, label }) => onStartRecording({
           sessionId, label, startedAt: new Date().toISOString(),

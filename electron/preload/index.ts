@@ -47,6 +47,9 @@ const IPC_CHANNELS = {
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
+  weeklyGet: 'weekly:get',
+  weeklyRegenerate: 'weekly:regenerate',
+  weeklyExportMarkdown: 'weekly:export-markdown',
 } as const;
 
 const api = {
@@ -213,6 +216,28 @@ const api = {
          *  can seek right to the matched line. */
         seconds?: number;
       }[]>,
+  },
+  weekly: {
+    /** Fetch the data needed to render the weekly view for an ISO
+     *  year/week. The first call for a given week (or any call after
+     *  the input meetings change) blocks while the LLM regenerates
+     *  the narrative; subsequent calls return cached data instantly. */
+    get: (year: number, week: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyGet, year, week) as Promise<unknown>,
+    /** Force-clear the cache and regenerate the LLM narrative.
+     *  Useful when the user thinks the cached narrative is stale
+     *  even though the input hash matches (e.g. they tweaked a
+     *  per-meeting summary out of band). */
+    regenerate: (year: number, week: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyRegenerate, year, week) as Promise<unknown>,
+    /** Save the rendered Markdown to disk via a Save dialog.
+     *  Returns { path: null, markdown } when the user cancels;
+     *  the markdown is still useful for clipboard fallbacks. */
+    exportMarkdown: (year: number, week: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyExportMarkdown, year, week) as Promise<{
+        path: string | null;
+        markdown: string;
+      }>,
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{

@@ -1,0 +1,342 @@
+// electron/main/weekly/aggregator.ts
+//
+// Pulls together everything the weekly view needs for one ISO week:
+// the list of meetings, action items grouped by owner, and the cached
+// LLM narrative (or a freshly-generated one when the input hash
+// invalidates the cache). No state of its own — all storage goes
+// through the repos.
+
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
+import type { ActionItemsRepo, ActionItemRow } from '../storage/action-items-repo.js';
+import type { SpeakersRepo } from '../storage/speakers-repo.js';
+import type { SettingsRepo } from '../storage/settings-repo.js';
+import type { WeeklySummariesRepo } from '../storage/weekly-summaries-repo.js';
+import { isoWeekRange } from '../lib/iso-week.js';
+import { meetingFolderPath } from '../storage/meeting-folder.js';
+
+// ──────── Public types ────────
+
+export interface WeeklyMeeting {
+  id: string;
+  title: string;
+  startedAt: string;
+  durationS: number | null;
+  /** First sentence of the meeting's existing summary (Overview), if
+   *  available. Used as the in-list highlight. */
+  highlight: string | null;
+  /** Number of distinct speakers identified in diarization. Null if
+   *  the meeting hasn't been diarized yet. */
+  speakerCount: number | null;
+}
+
+export interface WeeklyActionItem {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  /** Display text. */
+  text: string;
+  /** Resolved owner display name. Falls back to owner_name (free
+   *  text) when no roster speaker is linked. Null = unowned. */
+  ownerLabel: string | null;
+  /** True if the owner matches settings.userSpeakerId — pinned to
+   *  the top of the UI as the "You" group. */
+  isYou: boolean;
+  status: string;
+  dueDate: string | null;
+  /** Source meeting's startedAt. Used by the view to label items
+   *  with "Mon" / "Tue" etc. */
+  meetingStartedAt: string;
+}
+
+export interface WeeklyOwnerGroup {
+  ownerLabel: string;
+  isYou: boolean;
+  items: WeeklyActionItem[];
+}
+
+export interface WeeklyData {
+  isoYear: number;
+  isoWeek: number;
+  /** ISO timestamps for the Mon 00:00 / Sun 23:59 bounds. */
+  rangeStart: string;
+  rangeEnd: string;
+  /** Total meeting time across the week, in seconds. */
+  totalDurationS: number;
+  meetings: WeeklyMeeting[];
+  /** Open action items, grouped by owner. "You" group (if any)
+   *  always appears first. */
+  openActionGroups: WeeklyOwnerGroup[];
+  /** Total open count across all groups (avoids the renderer having
+   *  to re-sum). */
+  openActionCount: number;
+  /** LLM-generated 2-3 paragraph narrative. Empty string when the
+   *  week has no meetings. */
+  narrative: string;
+  /** LLM-extracted decisions list. */
+  decisions: string[];
+  /** When the cached narrative + decisions were generated. Empty
+   *  string when no cache exists yet (i.e., narrative === ''). */
+  generatedAt: string;
+  /** True when the week contains at least one meeting whose
+   *  started_at is in the future of "now" (i.e. the user is viewing
+   *  the in-progress current week). The view shows an "in progress"
+   *  badge in this case. */
+  inProgress: boolean;
+}
+
+// ──────── Implementation ────────
+
+export interface AggregatorDeps {
+  meetings: MeetingsRepo;
+  actionItems: ActionItemsRepo;
+  speakers: SpeakersRepo;
+  settings: SettingsRepo;
+  weeklySummaries: WeeklySummariesRepo;
+  libraryRoot: string;
+  /** Generates the LLM narrative from the structured week data.
+   *  Pluggable so tests can supply a deterministic fake. */
+  generateNarrative: (data: NarrativeInput) => Promise<NarrativeOutput>;
+  /** Wakes the LM Studio supervisor before the narrative call.
+   *  No-op for v1; reserved for Phase 3. */
+  ensureLLMReady?: () => Promise<void>;
+}
+
+export interface NarrativeInput {
+  weekLabel: string;
+  meetings: Array<{ title: string; startedAt: string; durationS: number | null; summaryMd: string | null }>;
+  openActions: Array<{ owner: string; text: string; due: string | null }>;
+}
+
+export interface NarrativeOutput {
+  narrative: string;
+  decisions: string[];
+}
+
+export class WeeklyAggregator {
+  constructor(private readonly deps: AggregatorDeps) {}
+
+  /** Returns the full week's data, generating + caching the narrative
+   *  when the input hash has changed since the last cached row. */
+  async getWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
+    const { start, end } = isoWeekRange(isoYear, isoWeek);
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    const meetings = this.deps.meetings.listInRange(startIso, endIso);
+    const inProgress = end.getTime() > Date.now();
+
+    const totalDurationS = meetings.reduce((s, m) => s + (m.durationS ?? 0), 0);
+    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
+
+    const openActionGroups = this.collectOpenActions(meetings);
+    const openActionCount = openActionGroups.reduce((s, g) => s + g.items.length, 0);
+
+    // Cache check. Hash inputs cover the things that should
+    // invalidate the narrative: the set of meetings (by id) and
+    // their last-modified time (so an edited title or fresh
+    // summary triggers regeneration).
+    const inputHash = this.computeInputHash(meetings);
+    const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
+
+    let narrative = '';
+    let decisions: string[] = [];
+    let generatedAt = '';
+
+    if (cached && cached.inputHash === inputHash) {
+      narrative = cached.narrative;
+      decisions = cached.decisions;
+      generatedAt = cached.generatedAt;
+    } else if (meetings.length > 0) {
+      const out = await this.regenerate(isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash);
+      narrative = out.narrative;
+      decisions = out.decisions;
+      generatedAt = out.generatedAt;
+    }
+
+    return {
+      isoYear, isoWeek,
+      rangeStart: startIso,
+      rangeEnd: endIso,
+      totalDurationS,
+      meetings: weeklyMeetings,
+      openActionGroups,
+      openActionCount,
+      narrative,
+      decisions,
+      generatedAt,
+      inProgress,
+    };
+  }
+
+  /** Forces narrative regeneration even when the input hash is
+   *  unchanged. Used by the renderer's "Regenerate" button. */
+  async regenerateWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
+    this.deps.weeklySummaries.clear(isoYear, isoWeek);
+    return this.getWeek(isoYear, isoWeek);
+  }
+
+  // ──────── Internals ────────
+
+  private buildWeeklyMeeting(m: MeetingRow): WeeklyMeeting {
+    const folder = meetingFolderPath(this.deps.libraryRoot, m.slug);
+    const summaryPath = path.join(folder, 'summary.md');
+    let highlight: string | null = null;
+    if (fs.existsSync(summaryPath)) {
+      try {
+        const md = fs.readFileSync(summaryPath, 'utf8');
+        // First non-heading sentence from the summary. The existing
+        // summarizing.ts produces an "Overview" section first; pull
+        // its opening sentence as the highlight.
+        const overview = md.split(/^##\s+/m).slice(1).find((s) => /^Overview/i.test(s));
+        const body = (overview ?? md).replace(/^Overview\s*\n+/i, '').trim();
+        const firstSentence = body.split(/(?<=[.!?])\s+/)[0];
+        highlight = (firstSentence ?? '').slice(0, 200) || null;
+      } catch { /* best-effort */ }
+    }
+    let speakerCount: number | null = null;
+    const diarPath = path.join(folder, 'diarization.json');
+    if (fs.existsSync(diarPath)) {
+      try {
+        const d = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as { num_speakers?: number };
+        speakerCount = typeof d.num_speakers === 'number' ? d.num_speakers : null;
+      } catch { /* best-effort */ }
+    }
+    return {
+      id: m.id,
+      title: m.title,
+      startedAt: m.startedAt ?? m.createdAt,
+      durationS: m.durationS,
+      highlight,
+      speakerCount,
+    };
+  }
+
+  private collectOpenActions(meetings: readonly MeetingRow[]): WeeklyOwnerGroup[] {
+    const userSpeakerId = this.deps.settings.get('userSpeakerId');
+    // Build a quick speaker_id → display_name lookup to resolve
+    // owner labels without N round-trips per item.
+    const speakers = this.deps.speakers.list();
+    const speakerName = new Map(speakers.map((s) => [s.id, s.displayName]));
+
+    const byOwner = new Map<string, WeeklyOwnerGroup>();
+    for (const m of meetings) {
+      const items = this.deps.actionItems.listByMeeting(m.id);
+      for (const it of items) {
+        if (it.status !== 'open') continue;
+        const ownerLabel = this.resolveOwnerLabel(it, speakerName);
+        const isYou = userSpeakerId != null && it.ownerSpeakerId === userSpeakerId;
+        const key = isYou ? '__YOU__' : (ownerLabel ?? '__UNOWNED__');
+        const group = byOwner.get(key) ?? {
+          ownerLabel: isYou ? 'You' : (ownerLabel ?? 'Unassigned'),
+          isYou,
+          items: [],
+        };
+        group.items.push({
+          id: it.id,
+          meetingId: m.id,
+          meetingTitle: m.title,
+          text: it.text,
+          ownerLabel: isYou ? 'You' : ownerLabel,
+          isYou,
+          status: it.status,
+          dueDate: it.dueDate,
+          meetingStartedAt: m.startedAt ?? m.createdAt,
+        });
+        byOwner.set(key, group);
+      }
+    }
+
+    // Sort: "You" first, then alphabetical by label, with Unassigned last.
+    const groups = [...byOwner.values()];
+    groups.sort((a, b) => {
+      if (a.isYou !== b.isYou) return a.isYou ? -1 : 1;
+      const aUn = a.ownerLabel === 'Unassigned';
+      const bUn = b.ownerLabel === 'Unassigned';
+      if (aUn !== bUn) return aUn ? 1 : -1;
+      return a.ownerLabel.localeCompare(b.ownerLabel);
+    });
+    return groups;
+  }
+
+  private resolveOwnerLabel(
+    it: ActionItemRow,
+    speakerName: Map<string, string>,
+  ): string | null {
+    if (it.ownerSpeakerId && speakerName.has(it.ownerSpeakerId)) {
+      return speakerName.get(it.ownerSpeakerId) ?? null;
+    }
+    return it.ownerName ?? null;
+  }
+
+  private computeInputHash(meetings: readonly MeetingRow[]): string {
+    const sorted = [...meetings].sort((a, b) => a.id.localeCompare(b.id));
+    const payload = sorted.map((m) => `${m.id}:${m.updatedAt}`).join('|');
+    return crypto.createHash('sha256').update(payload).digest('hex');
+  }
+
+  private async regenerate(
+    isoYear: number,
+    isoWeek: number,
+    meetings: readonly MeetingRow[],
+    weeklyMeetings: readonly WeeklyMeeting[],
+    openActionGroups: readonly WeeklyOwnerGroup[],
+    inputHash: string,
+  ): Promise<{ narrative: string; decisions: string[]; generatedAt: string }> {
+    if (this.deps.ensureLLMReady) await this.deps.ensureLLMReady();
+
+    // Build the structured input for the prompt. Each meeting
+    // contributes its existing summary.md so the LLM has source
+    // material for the narrative; if a meeting hasn't been
+    // summarized yet, we pass an empty body and the LLM is told to
+    // skip it.
+    const meetingsForPrompt = meetings.map((m) => {
+      const folder = meetingFolderPath(this.deps.libraryRoot, m.slug);
+      const summaryPath = path.join(folder, 'summary.md');
+      const summaryMd = fs.existsSync(summaryPath)
+        ? fs.readFileSync(summaryPath, 'utf8')
+        : null;
+      return {
+        title: m.title,
+        startedAt: m.startedAt ?? m.createdAt,
+        durationS: m.durationS,
+        summaryMd,
+      };
+    });
+
+    const openActions: Array<{ owner: string; text: string; due: string | null }> = [];
+    for (const g of openActionGroups) {
+      for (const it of g.items) {
+        openActions.push({
+          owner: g.ownerLabel,
+          text: it.text,
+          due: it.dueDate,
+        });
+      }
+    }
+
+    const weekLabel = `${weeklyMeetings[0]?.startedAt ?? ''} – ISO ${isoYear}-W${String(isoWeek).padStart(2, '0')}`;
+    const out = await this.deps.generateNarrative({
+      weekLabel,
+      meetings: meetingsForPrompt,
+      openActions,
+    });
+
+    this.deps.weeklySummaries.upsert({
+      isoYear,
+      isoWeek,
+      narrative: out.narrative,
+      decisions: out.decisions,
+      inputHash,
+    });
+
+    const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
+    return {
+      narrative: out.narrative,
+      decisions: out.decisions,
+      generatedAt: cached?.generatedAt ?? new Date().toISOString(),
+    };
+  }
+}
