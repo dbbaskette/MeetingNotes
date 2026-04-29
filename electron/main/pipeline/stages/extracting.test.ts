@@ -17,6 +17,7 @@ describe('runExtracting', () => {
     const replace = vi.fn();
     const ctx: any = {
       libraryRoot: dir,
+      llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: { findById: () => ({ slug: 'slug' }) },
       actionItems: { replaceForMeeting: replace },

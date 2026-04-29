@@ -89,7 +89,19 @@ export interface ChatInput {
 }
 
 export class LMStudioClient {
-  constructor(public readonly baseUrl: string) {}
+  /** Either a fixed URL string or a resolver function (for the
+   *  Phase 3 managed-LLM-provider path, where the URL switches
+   *  between LM Studio's :1234 and Ollama's :11434 based on the
+   *  user's summaryProvider setting). */
+  constructor(private readonly urlOrResolver: string | (() => string)) {}
+
+  /** Live-resolved base URL. Existing code reads `this.baseUrl` so
+   *  this getter keeps the call sites unchanged. */
+  get baseUrl(): string {
+    return typeof this.urlOrResolver === 'string'
+      ? this.urlOrResolver
+      : this.urlOrResolver();
+  }
 
   async listModels(): Promise<string[]> {
     let resp: Response;
