@@ -1,15 +1,27 @@
-import type { ChildProcess } from 'node:child_process';
-import { spawn as realSpawn } from 'node:child_process';
+// electron/main/diarization/supervisor.ts
+//
+// Pyannote-specific factory over ManagedService. The lifecycle logic
+// (spawn, restart budget, idle shutdown, adopt-existing) lives in
+// the shared ManagedService class — this file just supplies the
+// pyannote-specific bits: where to find the binary (venv in dev vs
+// bundled PyInstaller in a packaged .app), how to inject HF_TOKEN,
+// and how to read the on-disk BUILD_ID for stale-vs-fresh adoption.
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  ManagedService,
+  type ManagedServiceDeps,
+  type LaunchSpec,
+} from '../lib/managed-service.js';
 
 /**
  * Resolves an HF_TOKEN to inject into the sidecar's environment.
- * Priority: existing env var → standard HuggingFace cache file. The .app
- * launched via `open` doesn't inherit shell env vars, so we read the
- * cache file directly. Returns null when no token is available; the
- * sidecar will surface its own clear error in that case.
+ * Priority: existing env var → standard HuggingFace cache file. The
+ * .app launched via `open` doesn't inherit shell env vars, so we
+ * read the cache file directly. Returns null when no token is
+ * available; the sidecar will surface its own clear error in that case.
  */
 function readHFToken(): string | null {
   if (process.env.HF_TOKEN) return process.env.HF_TOKEN;
@@ -22,45 +34,8 @@ function readHFToken(): string | null {
   }
 }
 
-export interface SupervisorDeps {
-  spawn?: typeof realSpawn;
-  sidecarDir: string;
-  host?: string;
-  port?: number;
-  maxRestarts?: number;
-  restartDelayMs?: number;
-  /** Process must stay up at least this long for the restart counter to reset. */
-  healthyUptimeMs?: number;
-  /** Hard kill timeout when stopping. */
-  stopGraceMs?: number;
-  onLog?: (line: string) => void;
-  /** Override for tests. Probes /health on host:port and returns the reported
-   *  build_id (or empty string if unreachable). */
-  healthProbe?: (host: string, port: number) => Promise<{ ok: boolean; buildId: string }>;
-}
-
-const PORT_IN_USE_RE = /address already in use|errno 48/i;
-
-async function defaultHealthProbe(
-  host: string,
-  port: number,
-): Promise<{ ok: boolean; buildId: string }> {
-  try {
-    const resp = await fetch(`http://${host}:${port}/health`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (!resp.ok) return { ok: false, buildId: '' };
-    const body = (await resp.json().catch(() => null)) as
-      | { status?: string; build_id?: string }
-      | null;
-    return { ok: body?.status === 'ok', buildId: body?.build_id ?? '' };
-  } catch {
-    return { ok: false, buildId: '' };
-  }
-}
-
 function readExpectedBuildId(sidecarDir: string): string {
-  // BUILD_ID is written next to the bundle during `npm run build:sidecar`.
+  // BUILD_ID is written next to the bundle during `npm run sidecar:bundle`.
   // Matches the _read_build_id search order in app.py.
   for (const p of [
     path.join(sidecarDir, 'BUILD_ID'),
@@ -75,182 +50,89 @@ function readExpectedBuildId(sidecarDir: string): string {
   return '';
 }
 
-async function killOnPort(port: number): Promise<void> {
-  // Best-effort: free the port so we can respawn. Only called when we've
-  // decided the current owner is a stale sidecar of ours.
-  const { spawn } = await import('node:child_process');
-  await new Promise<void>((resolve) => {
-    const p = spawn('sh', ['-c', `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`]);
-    p.on('exit', () => resolve());
-    p.on('error', () => resolve());
-  });
-  // Give the OS a beat to release the port.
-  await new Promise((r) => setTimeout(r, 250));
+// Prefer the venv when it exists (dev iteration: edits to .py files
+// are picked up on next sidecar restart, no PyInstaller rebuild
+// needed). The bundle is the fallback for shipped .apps where end
+// users have no venv.
+function resolvePyannoteLaunch(
+  sidecarDir: string,
+  host: string,
+  port: number,
+): LaunchSpec {
+  const venvPython = path.join(sidecarDir, '.venv', 'bin', 'python');
+  const hfToken = readHFToken();
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...(hfToken ? { HF_TOKEN: hfToken } : {}),
+  };
+  if (fs.existsSync(venvPython)) {
+    return {
+      cmd: venvPython,
+      args: [
+        '-m', 'uvicorn',
+        'meeting_notes_diarize.app:app',
+        '--host', host,
+        '--port', String(port),
+      ],
+      env,
+      cwd: sidecarDir,
+    };
+  }
+  const bundled = path.join(
+    sidecarDir, 'dist', 'meeting-notes-diarize', 'meeting-notes-diarize',
+  );
+  return {
+    cmd: bundled,
+    args: ['--host', host, '--port', String(port)],
+    env,
+    cwd: sidecarDir,
+  };
 }
 
-export class DiarizationSupervisor {
-  private proc: ChildProcess | null = null;
-  private restarts = 0;
-  private stopped = false;
-  private startedAt = 0;
-  /** True when an externally-started sidecar already owns the port — we'll
-   *  reuse it and refuse to kill it on shutdown. */
-  private external = false;
-  /** True when start aborted because the port is held by a foreign process. */
-  private portConflict = false;
-  private readonly spawnFn: typeof realSpawn;
-  private readonly maxRestarts: number;
-  private readonly restartDelay: number;
-  private readonly healthyUptime: number;
-  private readonly stopGrace: number;
-  private readonly probe: (host: string, port: number) => Promise<{ ok: boolean; buildId: string }>;
+export interface DiarizationSupervisorOpts {
+  sidecarDir: string;
+  /** Override for tests. */
+  spawn?: ManagedServiceDeps['spawn'];
+  /** Override for tests. */
+  healthProbe?: ManagedServiceDeps['healthProbe'];
+  host?: string;
+  port?: number;
+  maxRestarts?: number;
+  restartDelayMs?: number;
+  healthyUptimeMs?: number;
+  stopGraceMs?: number;
+  /** Default 10 min. Set to 0 to disable. */
+  idleShutdownMs?: number;
+  startupTimeoutMs?: number;
+  startupPollIntervalMs?: number;
+  onLog?: (line: string) => void;
+}
 
-  constructor(private readonly deps: SupervisorDeps) {
-    this.spawnFn = deps.spawn ?? realSpawn;
-    this.maxRestarts = deps.maxRestarts ?? 3;
-    this.restartDelay = deps.restartDelayMs ?? 1000;
-    this.healthyUptime = deps.healthyUptimeMs ?? 60_000;
-    this.stopGrace = deps.stopGraceMs ?? 5000;
-    this.probe = deps.healthProbe ?? defaultHealthProbe;
-  }
+const DEFAULT_IDLE_SHUTDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
-  async start(): Promise<void> {
-    if (this.proc || this.external || this.stopped || this.portConflict) return;
-    const host = this.deps.host ?? '127.0.0.1';
-    const port = this.deps.port ?? 8765;
-
-    // Pre-flight: if a healthy sidecar already owns the port, compare its
-    // build_id against the on-disk one. Match => reuse. Mismatch => it's a
-    // leftover from a previous .app build still running old Python code; kill
-    // it so we can launch the fresh bundle. This is what prevents "I rebuilt
-    // but the bug is still there" confusion.
-    const expectedBuildId = readExpectedBuildId(this.deps.sidecarDir);
-    const probe = await this.probe(host, port);
-    if (probe.ok) {
-      if (!expectedBuildId || probe.buildId === expectedBuildId) {
-        this.external = true;
-        this.deps.onLog?.(
-          `sidecar: reusing existing instance at ${host}:${port} (build_id=${probe.buildId || 'unknown'})`,
-        );
-        return;
-      }
-      this.deps.onLog?.(
-        `sidecar: stale instance at ${host}:${port} ` +
-        `(running=${probe.buildId}, expected=${expectedBuildId}) — killing and respawning`,
-      );
-      await killOnPort(port);
-    }
-
-    const launch = this.resolveLaunch(host, port);
-    // The sidecar reads HF_TOKEN from env to download pyannote models.
-    // When the .app is launched via `open` (not via scripts/start.sh),
-    // shell env vars don't propagate, so we read the cache file directly.
-    const hfToken = readHFToken();
-    const childEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...(hfToken ? { HF_TOKEN: hfToken } : {}),
-    };
-    let proc: ChildProcess;
-    try {
-      proc = this.spawnFn(launch.cmd, launch.args, {
-        cwd: this.deps.sidecarDir,
-        env: childEnv,
-      });
-    } catch (e) {
-      this.deps.onLog?.(`spawn failed: ${String(e)}`);
-      this.scheduleRestart();
-      return;
-    }
-    this.proc = proc;
-    this.startedAt = Date.now();
-    proc.stdout?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
-    proc.stderr?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
-    proc.on('error', (err) => {
-      // ENOENT (missing python venv) lands here; without this listener it
-      // becomes an uncaught error event and crashes the main process.
-      this.deps.onLog?.(`sidecar error: ${String(err)}`);
-    });
-    proc.on('exit', (code, signal) => {
-      const uptime = Date.now() - this.startedAt;
-      this.proc = null;
-      this.deps.onLog?.(`sidecar exited code=${code} signal=${signal} uptime=${uptime}ms`);
-      if (this.stopped) return;
-      if (this.portConflict) return;     // foreign owner; don't fight it
-      if (uptime >= this.healthyUptime) this.restarts = 0;
-      this.scheduleRestart();
-    });
-  }
-
-  private onChildOutput(d: Buffer, host: string, port: number): void {
-    const line = d.toString();
-    this.deps.onLog?.(line);
-    if (PORT_IN_USE_RE.test(line) && !this.portConflict) {
-      this.portConflict = true;
-      // Re-probe: maybe the squatter IS a working sidecar we can reuse.
-      void this.probe(host, port).then(({ ok }) => {
-        if (ok) {
-          this.external = true;
-          this.deps.onLog?.(`sidecar: port ${port} held by working instance — reusing`);
-        } else {
-          this.deps.onLog?.(
-            `sidecar: port ${port} held by foreign process (not a sidecar). ` +
-            `Free it with: lsof -ti :${port} | xargs kill -9`,
-          );
-        }
-      });
-      // Stop the loop either way; on-exit handler checks portConflict.
-      try { this.proc?.kill('SIGTERM'); } catch { /* noop */ }
-    }
-  }
-
-  // Prefer the venv when it exists (dev iteration: edits to .py files are
-  // picked up on next sidecar restart, no PyInstaller rebuild needed). The
-  // bundle is the fallback for shipped .apps where end users have no venv.
-  private resolveLaunch(host: string, port: number): { cmd: string; args: string[] } {
-    const venvPython = path.join(this.deps.sidecarDir, '.venv', 'bin', 'python');
-    if (fs.existsSync(venvPython)) {
-      return {
-        cmd: venvPython,
-        args: ['-m', 'uvicorn', 'meeting_notes_diarize.app:app', '--host', host, '--port', String(port)],
-      };
-    }
-    const bundled = path.join(
-      this.deps.sidecarDir, 'dist', 'meeting-notes-diarize', 'meeting-notes-diarize',
-    );
-    return { cmd: bundled, args: ['--host', host, '--port', String(port)] };
-  }
-
-  private scheduleRestart(): void {
-    if (this.stopped || this.portConflict || this.external) return;
-    if (this.restarts >= this.maxRestarts) {
-      this.deps.onLog?.(`sidecar restart budget exhausted (${this.maxRestarts})`);
-      return;
-    }
-    this.restarts += 1;
-    setTimeout(() => { void this.start(); }, this.restartDelay);
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true;
-    if (this.external) {
-      // We didn't start it; leaving it alone for whoever did.
-      this.deps.onLog?.('sidecar: not stopping externally-owned instance');
-      return;
-    }
-    const proc = this.proc;
-    if (!proc) return;
-    const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
-    proc.kill('SIGTERM');
-    const timeout = new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), this.stopGrace));
-    const result = await Promise.race([exited.then(() => 'ok' as const), timeout]);
-    if (result === 'timeout' && this.proc) {
-      this.proc.kill('SIGKILL');
-      await exited;
-    }
-    this.proc = null;
-  }
-
-  isRunning(): boolean { return this.proc !== null || this.external; }
-  /** True if start aborted because something else owns the port and isn't a sidecar. */
-  hasPortConflict(): boolean { return this.portConflict && !this.external; }
+/** Build a ManagedService configured for the pyannote diarization sidecar. */
+export function createDiarizationSupervisor(
+  opts: DiarizationSupervisorOpts,
+): ManagedService {
+  return new ManagedService({
+    name: 'sidecar',
+    host: opts.host ?? '127.0.0.1',
+    port: opts.port ?? 8765,
+    spawn: opts.spawn,
+    healthProbe: opts.healthProbe,
+    maxRestarts: opts.maxRestarts ?? 3,
+    restartDelayMs: opts.restartDelayMs ?? 1000,
+    healthyUptimeMs: opts.healthyUptimeMs ?? 60_000,
+    stopGraceMs: opts.stopGraceMs ?? 5000,
+    idleShutdownMs: opts.idleShutdownMs ?? DEFAULT_IDLE_SHUTDOWN_MS,
+    // Pyannote needs more than 30s on first run because it downloads
+    // model weights from HuggingFace. Subsequent runs read from the
+    // local HF cache and warm up in 5-10s. 90s is a sane upper bound
+    // for both cold + warm starts.
+    startupTimeoutMs: opts.startupTimeoutMs ?? 90_000,
+    startupPollIntervalMs: opts.startupPollIntervalMs ?? 250,
+    expectedBuildId: () => readExpectedBuildId(opts.sidecarDir),
+    resolveLaunch: (host, port) => resolvePyannoteLaunch(opts.sidecarDir, host, port),
+    onLog: opts.onLog,
+  });
 }

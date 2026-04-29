@@ -20,6 +20,7 @@ describe('runTranscribing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
+      whisperSupervisor: { ensureReady: async () => {} },
       stt: {
         transcribe: vi.fn(async () => ({
           text: 'hi',
@@ -46,6 +47,7 @@ describe('runTranscribing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
+      whisperSupervisor: { ensureReady: async () => {} },
       stt: {
         transcribe: vi.fn(async () => ({
           text: 'real content. [Music]',
@@ -76,6 +78,7 @@ describe('runTranscribing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
+      whisperSupervisor: { ensureReady: async () => {} },
       stt: {
         transcribe: vi.fn(async () => ({
           text: 'x',

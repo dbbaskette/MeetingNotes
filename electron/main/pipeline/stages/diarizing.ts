@@ -21,6 +21,11 @@ export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   // transcribed. When #27 is fixed and stem-aware transcribe comes back,
   // restore the `hasStems ? system : mixed` branch here.
   ctx.logger.info('diarize:start', { meetingId });
+  // Wake the pyannote sidecar on demand. First call after a cold app
+  // start blocks for ~5–10s while the model loads; subsequent calls
+  // within the idle window are instant. The supervisor adopts an
+  // existing healthy instance if one is already bound to :8765.
+  await ctx.diarSupervisor.ensureReady();
   const wav = await ensureWav(meeting.audioPath);
   try {
     const result = await ctx.diarization.diarize(wav.path);
