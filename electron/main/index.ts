@@ -12,6 +12,7 @@ import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
 import { createDiarizationSupervisor } from './diarization/supervisor.js';
 import { createWhisperSupervisor } from './whisper/supervisor.js';
+import { LLMSupervisor } from './llm/supervisor.js';
 import { WeeklySummariesRepo } from './storage/weekly-summaries-repo.js';
 import { WeeklyAggregator } from './weekly/aggregator.js';
 import { createNarrativeGenerator } from './weekly/prompt.js';
@@ -80,7 +81,16 @@ app.whenReady().then(async () => {
   const actionItems = new ActionItemsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
 
-  const lmStudio = new LMStudioClient(s.lmStudioUrl);
+  // The LLM URL follows the active provider so a `lmStudio.chat()` call
+  // hits the right port even after the user switches provider in
+  // Settings without restarting the app. 'external' falls back to the
+  // user-configured lmStudioUrl.
+  const lmStudio = new LMStudioClient(() => {
+    const provider = settings.get('summaryProvider');
+    if (provider === 'lm-studio') return 'http://127.0.0.1:1234';
+    if (provider === 'ollama') return 'http://127.0.0.1:11434';
+    return settings.get('lmStudioUrl');
+  });
   const stt = new LMStudioClient(s.sttUrl);
   const diarization = new DiarizationClient('http://127.0.0.1:8765');
   // In dev, sidecar lives next to source. In a packaged .app, electron-builder
@@ -100,6 +110,15 @@ app.whenReady().then(async () => {
   const whisperSupervisor = createWhisperSupervisor({
     getModelId: () => settings.get('sttModel'),
     onLog: (l) => logger.info('whisper', { line: l }),
+  });
+  // Phase 3 LLM-provider lifecycle. When summaryProvider='external'
+  // (the default), this is a no-op and behavior matches today's
+  // user-managed LM Studio / Ollama. Switching to 'lm-studio' or
+  // 'ollama' in Settings makes the supervisor spawn `lms server start`
+  // / `ollama serve` on demand and idle-shutdown after 10 min.
+  const llmSupervisor = new LLMSupervisor({
+    getProvider: () => settings.get('summaryProvider'),
+    onLog: (l) => logger.info('llm', { line: l }),
   });
 
   // Built-in audio capture helper. The
@@ -145,6 +164,7 @@ app.whenReady().then(async () => {
     diarization,
     diarSupervisor,
     whisperSupervisor,
+    llmSupervisor,
     meetings,
     speakers,
     actionItems,
@@ -261,6 +281,7 @@ app.whenReady().then(async () => {
       lmStudio,
       () => settings.get('llmModel'),
     ),
+    ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
     meetings,
@@ -305,6 +326,7 @@ app.whenReady().then(async () => {
         await Promise.all([
           diarSupervisor.stop(),
           whisperSupervisor.stop(),
+          llmSupervisor.stop(),
           watcher.stop(),
         ]);
       } catch (err) {

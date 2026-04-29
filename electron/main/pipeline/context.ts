@@ -25,6 +25,12 @@ export interface PipelineContext {
    *  `await whisperSupervisor.ensureReady()` before invoking
    *  `stt.transcribe()`. */
   whisperSupervisor: ManagedService;
+  /** Lazy-spawn supervisor for the summarization LLM (LM Studio /
+   *  Ollama). When provider='external', ensureReady() is a no-op
+   *  and the existing user-managed flow continues unchanged.
+   *  Stages call `await llmSupervisor.ensureReady()` before
+   *  invoking `lmStudio.chat()`. */
+  llmSupervisor: { ensureReady: () => Promise<void> };
   meetings: MeetingsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;

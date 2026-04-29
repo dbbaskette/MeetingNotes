@@ -47,6 +47,9 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   const transcript = fs.readFileSync(path.join(folder, 'transcript.md'), 'utf8');
+  // Wake the LLM provider on demand (managed mode) or no-op
+  // (external mode). See ctx.llmSupervisor docs.
+  await ctx.llmSupervisor.ensureReady();
   const content = await ctx.lmStudio.chat({
     model: ctx.settings.get('llmModel'),
     temperature: 0.2,

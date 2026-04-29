@@ -35,6 +35,7 @@ import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
+import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -683,6 +684,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (result.canceled || !result.filePath) return { path: null, markdown };
     fs.writeFileSync(result.filePath, markdown, 'utf8');
     return { path: result.filePath, markdown };
+  });
+
+  // Phase 3 LLM-provider lifecycle. Settings UI calls this to dim
+  // managed-mode options when their CLI isn't installed and to show
+  // running-status hints.
+  ipc.handle(IPC_CHANNELS.llmDetectProviders, async (): Promise<ProviderAvailability> => {
+    return detectProviders();
   });
 }
 

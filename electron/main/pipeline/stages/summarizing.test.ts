@@ -14,6 +14,7 @@ describe('runSummarizing', () => {
     const chat = vi.fn(async () => '## Overview\nshort meeting.');
     const ctx: any = {
       libraryRoot: dir,
+      llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: { findById: () => ({ slug: 'slug', title: 'Team sync' }), updateTitle: vi.fn() },
       settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : '') },
@@ -37,6 +38,7 @@ describe('runSummarizing', () => {
     const updateTitle = vi.fn();
     const ctx: any = {
       libraryRoot: dir,
+      llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: {
         findById: () => ({ slug: 'slug', title: 'recording-20260421-163203-47c0c0f5' }),
