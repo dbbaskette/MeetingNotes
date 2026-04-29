@@ -1,8 +1,24 @@
-import { describe, it, expect, vi } from 'vitest';
-import { EventEmitter } from 'node:events';
-import { DiarizationSupervisor } from './supervisor.js';
+// electron/main/diarization/supervisor.test.ts
+//
+// Regression tests for the pyannote-specific factory. The lifecycle
+// machinery itself (spawn, restart, adopt, idle shutdown) is covered
+// by lib/managed-service.test.ts — this file only verifies the bits
+// that live in supervisor.ts (HF_TOKEN injection, venv vs bundled
+// resolution, BUILD_ID read).
 
-function fakeProc() {
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { createDiarizationSupervisor } from './supervisor.js';
+
+function fakeProc(): EventEmitter & {
+  kill: (sig?: string) => void;
+  pid: number;
+  stdout: EventEmitter;
+  stderr: EventEmitter;
+} {
   const ee = new EventEmitter() as EventEmitter & {
     kill: (sig?: string) => void;
     pid: number;
@@ -16,66 +32,124 @@ function fakeProc() {
   return ee;
 }
 
-const noProbe = async (): Promise<{ ok: boolean; buildId: string }> =>
-  ({ ok: false, buildId: '' }); // never reuse — always spawn
+const okProbe = async (): Promise<{ ok: boolean }> => ({ ok: true });
 
-describe('DiarizationSupervisor', () => {
-  it('spawns the sidecar on start()', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
-    const sup = new DiarizationSupervisor({ spawn, sidecarDir: '/tmp', healthProbe: noProbe });
-    await sup.start();
-    expect(spawn).toHaveBeenCalledTimes(1);
-    await sup.stop();
+describe('createDiarizationSupervisor', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidecar-test-'));
   });
 
-  it('restarts on unexpected exit, up to max retries', async () => {
-    let procs = 0;
-    const spawn = vi.fn(() => {
-      procs += 1;
-      const p = fakeProc();
-      setImmediate(() => p.emit('exit', 1, null));
-      return p as any;
-    });
-    const sup = new DiarizationSupervisor({
-      spawn, sidecarDir: '/tmp', maxRestarts: 2, restartDelayMs: 0, healthProbe: noProbe,
-    });
-    await sup.start();
-    await new Promise((r) => setTimeout(r, 50));
-    expect(procs).toBe(3); // initial + 2 restarts
-    await sup.stop();
-  });
-
-  it('reuses an existing healthy instance instead of spawning', async () => {
+  it('adopts an existing healthy instance instead of spawning', async () => {
     const spawn = vi.fn(() => fakeProc() as any);
-    const sup = new DiarizationSupervisor({
-      spawn, sidecarDir: '/tmp', healthProbe: async () => ({ ok: true, buildId: '' }),
+    const sup = createDiarizationSupervisor({
+      sidecarDir: tmpDir,
+      spawn,
+      healthProbe: okProbe,
     });
-    await sup.start();
+    await sup.ensureReady();
     expect(spawn).not.toHaveBeenCalled();
     expect(sup.isRunning()).toBe(true);
     await sup.stop();
   });
 
-  it('stops restart loop when port is held by foreign process', async () => {
-    let procs = 0;
-    const spawn = vi.fn(() => {
-      procs += 1;
-      const p = fakeProc();
-      // Simulate uvicorn's EADDRINUSE log line, then the process exits.
-      setImmediate(() => {
-        p.stderr.emit('data', Buffer.from('ERROR: [Errno 48] address already in use'));
-        p.emit('exit', 1, null);
+  it('uses the venv python when sidecar/.venv/bin/python exists', async () => {
+    const venvBin = path.join(tmpDir, '.venv', 'bin');
+    fs.mkdirSync(venvBin, { recursive: true });
+    fs.writeFileSync(path.join(venvBin, 'python'), '');
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    const sup = createDiarizationSupervisor({
+      sidecarDir: tmpDir,
+      spawn,
+      healthProbe: probe,
+      startupPollIntervalMs: 5,
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [cmd, args] = spawn.mock.calls[0];
+    expect(cmd).toBe(path.join(venvBin, 'python'));
+    expect(args).toContain('uvicorn');
+    expect(args).toContain('meeting_notes_diarize.app:app');
+    await sup.stop();
+  });
+
+  it('falls back to bundled binary when no venv is present', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    const sup = createDiarizationSupervisor({
+      sidecarDir: tmpDir,
+      spawn,
+      healthProbe: probe,
+      startupPollIntervalMs: 5,
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    const [cmd] = spawn.mock.calls[0];
+    expect(cmd).toBe(path.join(tmpDir, 'dist', 'meeting-notes-diarize', 'meeting-notes-diarize'));
+    await sup.stop();
+  });
+
+  it('injects HF_TOKEN from env into the spawned child', async () => {
+    process.env.HF_TOKEN = 'test-token-123';
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    try {
+      const sup = createDiarizationSupervisor({
+        sidecarDir: tmpDir,
+        spawn,
+        healthProbe: probe,
+        startupPollIntervalMs: 5,
+        idleShutdownMs: 0,
       });
-      return p as any;
+      await sup.ensureReady();
+      const [, , spawnOpts] = spawn.mock.calls[0];
+      expect(spawnOpts.env.HF_TOKEN).toBe('test-token-123');
+      await sup.stop();
+    } finally {
+      delete process.env.HF_TOKEN;
+    }
+  });
+
+  it('reads expected build_id from sidecarDir/BUILD_ID for stale-vs-fresh adoption', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'BUILD_ID'), 'fresh-xyz\n');
+    const killOnPort = vi.fn(async () => {});
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean; buildId?: string }> => {
+      probeCalls += 1;
+      // Pre-flight: stale instance running. Post-spawn: healthy.
+      if (probeCalls === 1) return { ok: true, buildId: 'stale-abc' };
+      return { ok: probeCalls >= 3 };
+    };
+    const spawn = vi.fn(() => fakeProc() as any);
+    // We can't pass killOnPort through the factory — instead we
+    // verify the side effect: spawn is invoked because the build_id
+    // mismatch forces a respawn. In production the default
+    // killOnPort frees the port; in this test we accept that the
+    // shell-out is a no-op (no real port held).
+    const sup = createDiarizationSupervisor({
+      sidecarDir: tmpDir,
+      spawn,
+      healthProbe: probe,
+      startupPollIntervalMs: 5,
+      idleShutdownMs: 0,
     });
-    const sup = new DiarizationSupervisor({
-      spawn, sidecarDir: '/tmp', maxRestarts: 5, restartDelayMs: 0,
-      healthProbe: async () => ({ ok: false, buildId: '' }), // foreign owner, not a sidecar
-    });
-    await sup.start();
-    await new Promise((r) => setTimeout(r, 50));
-    expect(procs).toBe(1); // never restarted
-    expect(sup.hasPortConflict()).toBe(true);
+    await sup.ensureReady();
+    expect(spawn).toHaveBeenCalledTimes(1);
     await sup.stop();
   });
 });

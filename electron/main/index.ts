@@ -10,7 +10,8 @@ import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
-import { DiarizationSupervisor } from './diarization/supervisor.js';
+import { createDiarizationSupervisor } from './diarization/supervisor.js';
+import { createWhisperSupervisor } from './whisper/supervisor.js';
 import { RecordingManager } from './recording/manager.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
@@ -84,11 +85,19 @@ app.whenReady().then(async () => {
   const sidecarDir = isDev
     ? path.join(app.getAppPath(), 'sidecar')
     : path.join(process.resourcesPath, 'sidecar');
-  const supervisor = new DiarizationSupervisor({
+  // Lazy-spawn supervisors. Neither the pyannote sidecar nor
+  // whisper-server starts at app launch — the first pipeline stage
+  // that needs them calls `await ensureReady()`. Both shut down
+  // automatically after 10 minutes of inactivity to free RAM
+  // (~500 MB pyannote, ~1.5–3 GB whisper depending on model).
+  const diarSupervisor = createDiarizationSupervisor({
     sidecarDir,
     onLog: (l) => logger.info('sidecar', { line: l }),
   });
-  void supervisor.start();
+  const whisperSupervisor = createWhisperSupervisor({
+    getModelId: () => settings.get('sttModel'),
+    onLog: (l) => logger.info('whisper', { line: l }),
+  });
 
   // Built-in audio capture helper. The
   // helper binary is bundled inside MeetingNotes.app; resolve its path so
@@ -131,6 +140,8 @@ app.whenReady().then(async () => {
     lmStudio,
     stt,
     diarization,
+    diarSupervisor,
+    whisperSupervisor,
     meetings,
     speakers,
     actionItems,
@@ -271,7 +282,11 @@ app.whenReady().then(async () => {
       try {
         meetingDetector.stop();
         clearInterval(trashPurgeTimer);
-        await Promise.all([supervisor.stop(), watcher.stop()]);
+        await Promise.all([
+          diarSupervisor.stop(),
+          whisperSupervisor.stop(),
+          watcher.stop(),
+        ]);
       } catch (err) {
         logger.error('shutdown:error', { err: String(err) });
       } finally {

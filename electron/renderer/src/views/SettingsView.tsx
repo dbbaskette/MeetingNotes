@@ -86,7 +86,8 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
-          Default http://127.0.0.1:8080. Start with: ./scripts/whisper-server.sh daemon
+          Default http://127.0.0.1:8080. MeetingNotes auto-launches whisper-server
+          on first transcription and shuts it down after 10 minutes of inactivity.
         </div>
       </Field>
       <Field label="STT Model name">
@@ -96,7 +97,9 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
-          Informational. The actual model is whichever one whisper-server was started with.
+          The model file to load when starting whisper-server. Must be installed in
+          ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
+          (use the onboarding wizard or ./scripts/whisper-server.sh install &lt;name&gt;).
         </div>
       </Field>
       <Field label="Library Path">

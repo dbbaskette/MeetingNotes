@@ -19,6 +19,7 @@ describe('runDiarizing', () => {
 
     const ctx: any = {
       libraryRoot: dir,
+      diarSupervisor: { ensureReady: async () => {} },
       diarization: {
         diarize: vi.fn(async () => ({
           segments: [
@@ -56,6 +57,7 @@ describe('runDiarizing', () => {
     }));
     const ctx: any = {
       libraryRoot: dir,
+      diarSupervisor: { ensureReady: async () => {} },
       diarization: { diarize },
       meetings: { findById: () => ({ slug: 'slug', audioPath: mixed }) },
       logger: { info: vi.fn() },

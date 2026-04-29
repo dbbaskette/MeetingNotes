@@ -307,15 +307,20 @@ bold "Done."
 cat <<EOF
 
 Run everything (recommended — one command):
-  ./scripts/start.sh             # starts whisper-server + opens the .app
-  ./scripts/start.sh --dev       # starts whisper-server + 'npm run dev'
-  ./scripts/start.sh --stop      # stops the background services
+  ./scripts/start.sh             # opens the .app (auto-launches LM Studio)
+  ./scripts/start.sh --dev       # 'npm run dev' (auto-launches LM Studio)
+  ./scripts/start.sh --stop      # stops any leftover whisper-server daemon
 
 Or do it manually:
-  ./scripts/whisper-server.sh daemon
   Start LM Studio and load a chat LLM (for summarization)
   open release/mac-arm64/MeetingNotes.app
   ./scripts/doctor.sh             # verify the stack
+
+  (Whisper-server is auto-spawned by the app on first transcription
+   and shut down after 10 minutes of inactivity to free RAM. You no
+   longer need to run './scripts/whisper-server.sh daemon' yourself —
+   though if you do, the app will adopt your instance and leave it
+   alone.)
 
 Re-run setup any time:
   ./scripts/setup.sh                              # full interactive

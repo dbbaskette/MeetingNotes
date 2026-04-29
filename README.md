@@ -61,7 +61,7 @@ brew install whisper-cpp ffmpeg
 ./scripts/start.sh
 ```
 
-`start.sh` launches whisper-server, auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development.
+`start.sh` auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development. **Whisper-server and the diarization sidecar are spawned by the app itself on demand** (first transcription wakes whisper, first diarize wakes the sidecar) and shut down automatically after 10 minutes of inactivity to keep RAM low.
 
 **First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security. If you enable **Watch browser tabs for meeting URLs** in Settings, macOS will also prompt once per browser for Automation access.
 
@@ -158,22 +158,25 @@ Whisper model picker offers `tiny.en` · `base.en` · `small.en` · `medium.en` 
 ## Launcher + runtime tools
 
 ```bash
-./scripts/start.sh                  # production: STT server + LM Studio + .app
-./scripts/start.sh --dev            # development: STT server + `npm run dev`
+./scripts/start.sh                  # production: opens .app (also auto-launches LM Studio)
+./scripts/start.sh --dev            # development: `npm run dev`
 ./scripts/start.sh --status         # what's running
-./scripts/start.sh --stop           # stop STT server
+./scripts/start.sh --stop           # stops any leftover whisper-server daemon from prior versions
 
-./scripts/whisper-server.sh daemon  # start STT server in background
+./scripts/whisper-server.sh install # interactive model picker — installs to ~/Library/Application Support/MeetingNotes/whisper-models
+./scripts/whisper-server.sh models  # list installed
+
+# These are still in the script for power users who want to run whisper-server
+# manually. The app no longer requires them — it spawns whisper-server itself
+# on demand and adopts an existing instance if one is already running.
+./scripts/whisper-server.sh daemon  # start STT server in background (manual mode)
 ./scripts/whisper-server.sh status
 ./scripts/whisper-server.sh stop
-./scripts/whisper-server.sh install # interactive model picker
-./scripts/whisper-server.sh models  # list installed
 
 ./scripts/doctor.sh                 # read-only health check
 ```
 
-Whisper-server logs: `~/Library/Logs/MeetingNotes/whisper-server.log`.
-App logs: `~/Library/Logs/MeetingNotes/app.log`.
+App logs: `~/Library/Logs/MeetingNotes/app.log`. Whisper-server logs (when run manually): `~/Library/Logs/MeetingNotes/whisper-server.log`.
 
 ### `doctor.sh`
 
@@ -187,7 +190,7 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 | --- | --- | --- |
 | `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
-| `sttModel` | `whisper-1` | informational; actual model is whichever whisper-server started with |
+| `sttModel` | `whisper-1` | model file to load when the app spawns whisper-server. Resolved against `~/Library/Application Support/MeetingNotes/whisper-models/ggml-<name>.bin`. If the named model isn't installed, falls back to the auto-pick preference order (medium.en → small.en → large-v3-turbo → ...). |
 | `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction (must be loaded in LM Studio) |
 | `libraryPath` | `~/Documents/MeetingNotes` | meetings, db, embeddings |
 | `audioWatchPath` | `~/Music/MeetingNotes` | folder watched for new recordings (also watches `~/Music/Audio Hijack` for one release as a legacy fallback) |

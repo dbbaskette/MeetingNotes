@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # One-shot launcher for MeetingNotes.
-# Default mode: start whisper-server in the background, then open the packaged .app.
+#
+# Since the lazy-managed-services change, MeetingNotes spawns
+# whisper-server itself on demand (first transcription wakes it,
+# 10 minutes of idle time shuts it down). This script no longer
+# auto-starts the whisper daemon. It still:
+#   - kills any stale MeetingNotes process so we relaunch into the
+#     fresh build instead of focusing the old window
+#   - frees ports 8080/8765 in case a detached child outlived its parent
+#   - launches LM Studio if installed but not running
+#   - opens the .app (or runs `npm run dev`)
 #
 # Usage:
-#   scripts/start.sh             # production: whisper-server + open .app
-#   scripts/start.sh --dev       # development: whisper-server + 'npm run dev'
-#   scripts/start.sh --stop      # stop background services started by this script
+#   scripts/start.sh             # production: open .app
+#   scripts/start.sh --dev       # development: 'npm run dev'
+#   scripts/start.sh --stop      # stop any whisper-server daemon left over from a prior install
 #   scripts/start.sh --status    # show what's running
 
 set -euo pipefail
@@ -66,11 +75,14 @@ case "$MODE" in
       lsof -ti :8765 | xargs kill -9 2>/dev/null || true
     fi
 
-    # 1. Whisper server (background daemon, idempotent).
+    # 1. Whisper server: MeetingNotes spawns it lazily on first
+    #    transcription. We don't pre-launch it here — the supervisor
+    #    in the app handles spawn + idle shutdown. If a user started
+    #    whisper-server.sh daemon manually, the supervisor adopts it.
     if "$WS" status 2>&1 | grep -q "Running"; then
-      echo "whisper-server: already running"
+      echo "whisper-server: already running (will be adopted by the app)"
     else
-      "$WS" daemon
+      echo "whisper-server: not running — app will start it on first transcribe"
     fi
 
     # 2. LM Studio: auto-launch if installed but not reachable, then wait for it.

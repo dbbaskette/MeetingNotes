@@ -24,6 +24,13 @@ export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
   // Stem-aware diarization is still active (diarizing.ts uses the system
   // stem when present) because that path works fine and gives cleaner
   // pyannote input.
+
+  // Wake whisper-server on demand. First call after a cold app start
+  // pays the model-load wait (~5–15s depending on model size);
+  // subsequent calls within the idle window are instant. The
+  // supervisor adopts an existing healthy whisper-server if one is
+  // already bound to :8080 (e.g. user-launched daemon).
+  await ctx.whisperSupervisor.ensureReady();
   const wav = await ensureWav(meeting.audioPath);
   try {
     const result = await ctx.stt.transcribe({

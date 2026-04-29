@@ -52,8 +52,11 @@ if [ -d "$HOME/.cache/huggingface/hub" ]; then
 fi
 
 section "Services"
-if http_ok "$STT_URL/v1/models"; then ok "whisper-server reachable at $STT_URL"
-else bad "whisper-server not reachable at $STT_URL — start with: ./scripts/whisper-server.sh daemon"; fi
+if http_ok "$STT_URL/v1/models"; then
+  ok "whisper-server reachable at $STT_URL"
+else
+  hmm "whisper-server not currently running at $STT_URL (the app spawns it on first transcribe and shuts it down after 10 min idle)"
+fi
 
 if http_ok "$LM_STUDIO_URL/v1/models"; then
   models=$(curl -fsS "$LM_STUDIO_URL/v1/models" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -5 | paste -sd, -)
@@ -65,7 +68,7 @@ fi
 if http_ok "$DIAR_URL/health" || http_ok "$DIAR_URL/"; then
   ok "diarization sidecar reachable at $DIAR_URL"
 else
-  hmm "diarization sidecar not reachable at $DIAR_URL (the app supervises this; will start when app launches)"
+  hmm "diarization sidecar not currently running at $DIAR_URL (the app spawns it on first diarize and shuts it down after 10 min idle)"
 fi
 
 section "Native modules"
