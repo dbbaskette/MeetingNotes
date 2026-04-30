@@ -111,15 +111,17 @@ export function resolveModelPath(modelId: string | null | undefined): string {
   );
 }
 
-/** Whisper-server doesn't expose /health — it's a stock OpenAI-compat
- *  server. /v1/models returns a JSON list when the server is up; we
- *  treat any 2xx response as healthy. */
+/** Whisper-server exposes a /health endpoint that returns 200 with
+ *  {"status":"ok"} once the model is loaded and the server is ready.
+ *  Older versions of the comment here said to use /v1/models, but
+ *  whisper-server returns 404 on that path — the health check was
+ *  always failing, causing every startup to time out. */
 async function whisperHealthProbe(
   host: string,
   port: number,
 ): Promise<ProbeResult> {
   try {
-    const resp = await fetch(`http://${host}:${port}/v1/models`, {
+    const resp = await fetch(`http://${host}:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
     return { ok: resp.ok };
@@ -170,9 +172,10 @@ export function createWhisperSupervisor(
     stopGraceMs: opts.stopGraceMs ?? 5000,
     idleShutdownMs: opts.idleShutdownMs ?? DEFAULT_IDLE_SHUTDOWN_MS,
     // Whisper model load varies wildly: tiny.en ~1s, medium.en ~5s,
-    // large-v3 ~15s on Apple Silicon. 60s upper bound covers cold
-    // disk-cache misses and Metal compilation.
-    startupTimeoutMs: opts.startupTimeoutMs ?? 60_000,
+    // large-v3-turbo ~2s model load + up to 90s of Metal pipeline
+    // compilation on first launch after a macOS or whisper-cpp update.
+    // 120s covers that worst case comfortably.
+    startupTimeoutMs: opts.startupTimeoutMs ?? 120_000,
     startupPollIntervalMs: opts.startupPollIntervalMs ?? 250,
     resolveLaunch: (host, port): LaunchSpec => {
       const cmd = findBin();
