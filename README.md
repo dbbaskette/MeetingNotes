@@ -205,8 +205,8 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `summaryProvider` | `lm-studio` | LLM runtime: `lm-studio`, `ollama`, or `external` (you manage it). The first two are spawned and idle-shutdown by the app. |
-| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint (used for both LM Studio and Ollama; default port differs — Ollama listens on `11434`) |
+| `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external` (you manage it). The first two are spawned and idle-shutdown by the app; `external` assumes you already have a server running. Set to `lm-studio` or `ollama` for hands-free operation. |
+| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint (used when `summaryProvider` is `external`; ignored when the app manages the runtime itself) |
 | `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction. Auto-loaded into the runtime on first use. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
 | `sttModel` | `whisper-1` | model file to load when the app spawns whisper-server. Resolved against `~/Library/Application Support/MeetingNotes/whisper-models/ggml-<name>.bin`. If the named model isn't installed, falls back to the auto-pick preference order (medium.en → small.en → large-v3-turbo → ...). |
@@ -236,16 +236,28 @@ After that, the model is cached at `~/.cache/huggingface/hub/` and inference nee
 
 ## Packaging
 
-`npm run dist` builds three artifacts:
+`./scripts/rebuild.sh` is the one-command build — compiles the Swift helper, bundles the Python sidecar, builds the Electron app, and produces an installable `.dmg` + `.zip`:
+
+```bash
+./scripts/rebuild.sh                 # full rebuild (~10 min): audio-tap + sidecar + app + .dmg
+./scripts/rebuild.sh --skip-sidecar  # skip the slow PyInstaller step (~2 min)
+./scripts/rebuild.sh --app-only      # just the Electron app + packaging (~9 min)
+
+open release/MeetingNotes-0.1.0-arm64.dmg   # install the result
+```
+
+Three artifacts get compiled:
 
 1. **Swift helper** — `audio-tap/build/meeting-notes-tap`, codesigned with `com.apple.security.device.audio-input` entitlement.
 2. **Sidecar PyInstaller bundle** — embeds Python + pyannote + torch into `sidecar/dist/meeting-notes-diarize/`. End users don't need Python installed. The supervisor prefers the source-tree `.venv` when present (fast dev iteration), otherwise spawns the bundled binary.
-3. **`.app` via electron-builder** — ships the helper at `Contents/Resources/bin/meeting-notes-tap` and the sidecar bundle as `extraResources`, rebuilds `better-sqlite3` against Electron's ABI, produces `release/mac-arm64/MeetingNotes.app` plus `.dmg` and `.zip`.
+3. **`.app` via electron-builder** — ships the helper at `Contents/Resources/bin/meeting-notes-tap` and the sidecar bundle as `extraResources`, rebuilds `better-sqlite3` against Electron's ABI, produces `.dmg` and `.zip` under `release/`.
+
+Individual build commands:
 
 ```bash
 npm run build:audio-tap              # just the Swift helper (~2 sec)
 npm run sidecar:bundle               # just the Python bundle (~10 min, 1.5 GB)
-npm run dist                         # everything + .app + DMG + ZIP
+npm run dist                         # everything + .app + DMG + ZIP (npm script equivalent)
 npx electron-builder --mac --dir     # faster rebuild for dev (.app only, no DMG)
 ```
 
@@ -283,9 +295,13 @@ electron/renderer/    React UI
                       PermissionsModal, InboxRow, LibraryRow, SearchPalette,
                       MeetingRowMenu, MeetingDetectedBanner
 sidecar/              Python (pyannote) diarization sidecar, FastAPI on 8765
-scripts/              setup.sh · start.sh · whisper-server.sh · doctor.sh
+scripts/              setup.sh · start.sh · rebuild.sh · whisper-server.sh · doctor.sh
 docs/                 manual smoke-test checklist + design specs + plans
 ```
+
+## Packaged-app considerations
+
+Electron apps launched from Finder inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that excludes Homebrew. The app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew install paths (`/opt/homebrew/bin`, `/usr/local/bin`) so that the `.dmg` works the same as `npm run dev`. If a binary isn't found, the error message tells you the exact `brew install` command.
 
 ## Security
 
@@ -306,4 +322,5 @@ MIT — see [LICENSE](LICENSE).
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — fast local Whisper inference
 - [pyannote-audio](https://github.com/pyannote/pyannote-audio) — speaker diarization
 - [LM Studio](https://lmstudio.ai) — local LLM runtime with an OpenAI-compatible API
+- [Ollama](https://ollama.com) — local LLM runtime with auto-managed model loading
 - [AudioCap by @insidegui](https://github.com/insidegui/AudioCap) — Process Tap reference implementation that unblocked our audio capture work
