@@ -143,7 +143,11 @@ The Summary tab has three modes — **Preview** (rendered markdown), **Split** (
 
 ### Weekly view
 
-Switch to the **Week** tab for a Mon–Fri rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened, all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant. **Export to Markdown** ships the whole rollup as one file.
+Switch to the **Week** tab for a Mon–Fri rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened, all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant — adding/editing/deleting any meeting in the week invalidates the cache automatically. **Export to Markdown** ships the whole rollup as one file (cancel = copies to clipboard).
+
+Prev/next arrows step through weeks; a slow first view paints the structured rollup immediately and shows a "drafting from N meetings… [elapsed]" skeleton in the Overview card while the LLM works.
+
+To pin **your** open action items to a "You" group at the top, set Settings → "You are…" to the roster speaker that represents you. The dropdown is populated from speakers you've confirmed in any meeting's Speakers panel — confirm one as yourself first to make it appear.
 
 ### Search
 
@@ -211,6 +215,7 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 | `recordingBitrateKbps` | `128` | AAC bitrate for new recordings (96 / 128 / 192) |
 | `sttLanguage` | `en` | passed to Whisper |
 | `userName` | `""` | your name — substituted for `VOICE_YOU` in transcripts after speaker-ID (empty falls back to the literal "You") |
+| `userSpeakerId` | `null` | the roster speaker that represents you. When set, the Weekly view pins your own open action items to a "You" group at the top. Picker in Settings → "You are…" — populated by speakers you've confirmed in any meeting's Speakers panel. |
 | `autoDetectMeetings` | `false` | poll the frontmost browser tab for meeting URLs and offer to record. Requires granting Automation permission to each browser the first time |
 | `onboardedAt` | unset | timestamp the first-run wizard was completed or skipped |
 | `exporterApple` | `true` | enable Apple Reminders exporter |
