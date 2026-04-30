@@ -31,14 +31,14 @@ Most meeting-transcription tools either ship your audio to a SaaS, lock you into
 - **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar, on the same mixed file as transcription so timestamps align
 - **Speaker identification** by matching voice embeddings against a roster you build over time
 - **Summarisation + action items** via any chat LLM in [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), with a managed lifecycle: the app spawns the runtime, auto-loads the model, and shuts it down on idle. Reasoning models welcome — `<think>` blocks are stripped before rendering
-- **Weekly view** rolls Mon–Fri meetings into a cached LLM-generated narrative with grouped open action items and key decisions, exportable to Markdown
+- **Weekly view** rolls Mon–Sun meetings into a cached LLM-generated narrative (past weeks only — the current week's narrative is skipped because it would go stale within hours) with grouped open action items and key decisions, exportable to Markdown
 - **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
 
 You bring the models. MeetingNotes orchestrates everything else.
 
 ## Status
 
-Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built-in recording → transcribe → diarize → speaker-ID gate → summarise → extract → export. Rough edges in error-state polish and "All system audio" capture path.
+Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built-in recording → transcribe → diarize → speaker-ID gate → summarise → extract → export. The packaged `.dmg` runs the same pipeline as `npm run dev` (Homebrew-installed `ffmpeg`/`ffprobe`/`whisper-server` are resolved by absolute path, not by the minimal Finder PATH). Rough edges remain in error-state polish and the "All system audio" capture path.
 
 ## Requirements
 
@@ -100,17 +100,18 @@ Every row in the Inbox, Library, and the detail-view header exposes a **⋯** ac
                               ▼ user clicks Process
                        ┌──────────────┐
                        │  Pipeline    │
-                       │              │
+                       │              │       (M4A → 16 kHz WAV via ffmpeg
+                       │              │        once, reused by transcribe
+                       │              │        and diarize; soxr resampler
+                       │              │        when available)
                        │  transcribe ─┼──▶ whisper-server (8080)
                        │              │       (mixed file, hallucination
                        │              │        filter on output)
                        │  diarize ────┼──▶ pyannote sidecar (8765)
-                       │              │       (mixed file — same audio as
-                       │              │        transcribe, so timestamps
-                       │  merge       │        align)
-                       │  identify ───┼──▶    (M4A → 16kHz WAV via ffmpeg
-                       │              │        before STT; soxr when
-                       │              │        available for best quality)
+                       │              │       (same WAV as transcribe so
+                       │              │        timestamps align)
+                       │  merge       │
+                       │  identify    │   (voice embeddings vs. roster)
                        │  ▼           │
                        │  awaiting_   │   ◀── pause: name unknown voices
                        │  speaker_id  │       (or check Skip for this meeting)
@@ -143,9 +144,11 @@ The Summary tab has three modes — **Preview** (rendered markdown), **Split** (
 
 ### Weekly view
 
-Switch to the **Week** tab for a Mon–Fri rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened, all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant — adding/editing/deleting any meeting in the week invalidates the cache automatically. **Export to Markdown** ships the whole rollup as one file (cancel = copies to clipboard).
+Switch to the **Week** tab for a Mon–Sun rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened (past weeks only), all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant — adding/editing/deleting any meeting in the week invalidates the cache automatically. **Export to Markdown** ships the whole rollup as one file (cancel = copies to clipboard).
 
-Prev/next arrows step through weeks; a slow first view paints the structured rollup immediately and shows a "drafting from N meetings… [elapsed]" skeleton in the Overview card while the LLM works.
+Prev/next arrows step through weeks. The structured rollup (meetings list, action items, decisions) paints immediately; for past weeks the Overview card then shows a "drafting from N meetings… [elapsed]" skeleton while the LLM works.
+
+**Current week is intentionally narrative-free.** The structured rollup updates live as new meetings finish processing, but the LLM Overview is gated until the week ends — generating it mid-week would burn 30+ seconds of GPU on a summary that goes stale within hours. The card shows a placeholder explaining this, and the Regenerate button is hidden.
 
 To pin **your** open action items to a "You" group at the top, set Settings → "You are…" to the roster speaker that represents you. The dropdown is populated from speakers you've confirmed in any meeting's Speakers panel — confirm one as yourself first to make it appear.
 
@@ -175,9 +178,9 @@ Whisper model picker offers `tiny.en` · `base.en` · `small.en` · `medium.en` 
 ## Launcher + runtime tools
 
 ```bash
-./scripts/start.sh                  # production: opens .app (also auto-launches LM Studio)
+./scripts/start.sh                  # production: opens .app (auto-launches LM Studio if installed)
 ./scripts/start.sh --dev            # development: `npm run dev`
-./scripts/start.sh --status         # what's running
+./scripts/start.sh --status         # what's running (whisper, sidecar, LM Studio reachability)
 ./scripts/start.sh --stop           # stops any leftover whisper-server daemon from prior versions
 
 ./scripts/whisper-server.sh install # interactive model picker — installs to ~/Library/Application Support/MeetingNotes/whisper-models
@@ -193,7 +196,7 @@ Whisper model picker offers `tiny.en` · `base.en` · `small.en` · `medium.en` 
 ./scripts/doctor.sh                 # read-only health check
 ```
 
-App logs: `~/Library/Logs/MeetingNotes/app.log`. Whisper-server logs (when run manually): `~/Library/Logs/MeetingNotes/whisper-server.log`.
+App logs: `~/Library/Logs/MeetingNotes/app.log` — includes interleaved whisper-server, pyannote sidecar, and LLM supervisor output, all tagged by source. Whisper-server logs (when run manually via `whisper-server.sh daemon`): `~/Library/Logs/MeetingNotes/whisper-server.log`.
 
 ### `doctor.sh`
 
@@ -205,8 +208,8 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external` (you manage it). The first two are spawned and idle-shutdown by the app; `external` assumes you already have a server running. Set to `lm-studio` or `ollama` for hands-free operation. |
-| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint (used when `summaryProvider` is `external`; ignored when the app manages the runtime itself) |
+| `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. With `lm-studio` or `ollama`, the app spawns the runtime, auto-loads `llmModel`, and idle-shuts-down after 10 min. With `external`, you manage the server yourself and it must be reachable at `lmStudioUrl`. The app adopts a healthy externally-started server in any mode (won't kill it on shutdown). |
+| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint, only used when `summaryProvider` is `external`. The `lm-studio` and `ollama` modes hardcode their canonical ports (1234 / 11434) instead. |
 | `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction. Auto-loaded into the runtime on first use. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
 | `sttModel` | `whisper-1` | model file to load when the app spawns whisper-server. Resolved against `~/Library/Application Support/MeetingNotes/whisper-models/ggml-<name>.bin`. If the named model isn't installed, falls back to the auto-pick preference order (medium.en → small.en → large-v3-turbo → ...). |
@@ -239,9 +242,10 @@ After that, the model is cached at `~/.cache/huggingface/hub/` and inference nee
 `./scripts/rebuild.sh` is the one-command build — compiles the Swift helper, bundles the Python sidecar, builds the Electron app, and produces an installable `.dmg` + `.zip`:
 
 ```bash
-./scripts/rebuild.sh                 # full rebuild (~10 min): audio-tap + sidecar + app + .dmg
-./scripts/rebuild.sh --skip-sidecar  # skip the slow PyInstaller step (~2 min)
-./scripts/rebuild.sh --app-only      # just the Electron app + packaging (~9 min)
+./scripts/rebuild.sh                  # full rebuild (~10 min): audio-tap + sidecar + app + .dmg
+./scripts/rebuild.sh --skip-sidecar   # skip the slow PyInstaller step
+./scripts/rebuild.sh --skip-audio-tap # skip the Swift helper
+./scripts/rebuild.sh --app-only       # both flags above — just the Electron app + packaging (~9 min)
 
 open release/MeetingNotes-0.1.0-arm64.dmg   # install the result
 ```
@@ -285,9 +289,17 @@ electron/main/        main process: pipeline, storage, IPC, watcher, services
   meeting-detector/   browser-tab URL polling (Meet/Zoom/Teams/Whereby/etc.)
   llm/                managed lifecycle for LM Studio / Ollama runtimes
                       (spawn, model auto-load, idle shutdown)
+  whisper/            whisper-server supervisor (lazy spawn, /health probe)
+  diarization/        pyannote sidecar supervisor + HTTP client
+  weekly/             aggregator + LLM prompt for the Mon–Sun rollup
   pipeline/stages/    transcribing, diarizing, merging, identifying,
                       summarising, extracting
+  lib/find-ffmpeg.ts  resolves ffmpeg/ffprobe absolute paths so the
+                      packaged .app works without relying on shell PATH
   lib/stem-paths.ts   voice/system stem path derivation + hasStems()
+  lib/managed-service.ts
+                      shared service lifecycle: lazy spawn, health probe,
+                      idle shutdown, adopt-existing-daemon, restart budget
 electron/preload/     preload bridge (CJS, IPC surface with parity test)
 electron/renderer/    React UI
   views/              MeetingDetailView, WeeklyView, OnboardingView, ...
