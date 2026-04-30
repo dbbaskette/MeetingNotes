@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { ffmpegPath } from '../lib/find-ffmpeg.js';
 
 const pExecFile = promisify(execFile);
 
@@ -95,7 +96,7 @@ export async function extractSpeakerSample(opts: ExtractOpts): Promise<ExtractRe
   // -ss before -i is fast-seek; good enough for sample clips. -c:a libmp3lame
   // (re-encode) rather than stream-copy so the output is always a clean mp3
   // regardless of input container/codec (could be m4a, wav, etc.).
-  await runner('ffmpeg', [
+  await runner(ffmpegPath(), [
     '-y',
     '-ss', win.start.toFixed(3),
     '-to', win.end.toFixed(3),

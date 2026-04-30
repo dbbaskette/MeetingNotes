@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, basename, extname } from 'node:path';
 import { mkdirSync, existsSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { ffmpegPath } from './find-ffmpeg.js';
 
 // Detect once whether this ffmpeg build links libsoxr. Homebrew's default
 // ffmpeg does NOT ship soxr; anyone who needs the very best downsample
@@ -15,7 +16,7 @@ function ffmpegHasSoxr(): boolean {
     // Try a tiny null-source transcode with soxr. If the binary lacks soxr,
     // ffmpeg prints "Requested resampling engine is unavailable" and exits
     // non-zero. 1s of silence is enough; the pipe never hits disk.
-    const r = spawnSync('ffmpeg', [
+    const r = spawnSync(ffmpegPath(), [
       '-v', 'error',
       '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono',
       '-af', 'aresample=resampler=soxr:precision=28',
@@ -67,7 +68,7 @@ export async function ensureWav(audioPath: string): Promise<EnsuredWav> {
     const filter = ffmpegHasSoxr()
       ? 'aresample=resampler=soxr:precision=28'
       : 'aresample=resampler=swr:filter_size=256:phase_shift=14:dither_method=triangular_hp';
-    const proc = spawn('ffmpeg', [
+    const proc = spawn(ffmpegPath(), [
       '-y', '-loglevel', 'error',
       '-i', audioPath,
       '-af', filter,

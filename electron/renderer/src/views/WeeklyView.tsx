@@ -179,12 +179,22 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
       setNarrative(null);
     }
 
+    // Track whether the structured fetch succeeded within this call
+    // so the catch block knows which error state to set. (Using a
+    // local variable avoids depending on structState in the useCallback
+    // deps — that dependency caused an infinite re-render loop where
+    // the structured fetch completing recreated load, re-fired the
+    // useEffect, bumped fetchSeq, and silently discarded the in-flight
+    // narrative response every time.)
+    let structuredOk = false;
+
     // 1) Structured fetch — fast.
     try {
       const result = (await api.weekly.getStructured(target.year, target.week)) as WeeklyStructured;
       if (seq !== fetchSeq.current) return; // user navigated away
       setStructured(result);
       setStructState('ready');
+      structuredOk = true;
 
       // 2) Narrative fetch — fires immediately after structured
       //    resolves so we know whether the cache is fresh (and
@@ -208,7 +218,7 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
       // structured layout stays visible and the narrative card
       // surfaces the error inline.
       const msg = e instanceof Error ? e.message : String(e);
-      if (structState === 'loading') {
+      if (!structuredOk) {
         setStructState('error');
         setErrorMsg(msg);
       } else {
@@ -216,7 +226,7 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
         setErrorMsg(msg);
       }
     }
-  }, [structState]);
+  }, []);
 
   useEffect(() => {
     void load(week);
