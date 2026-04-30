@@ -112,10 +112,16 @@ export function resolveModelPath(modelId: string | null | undefined): string {
 }
 
 /** Whisper-server exposes a /health endpoint that returns 200 with
- *  {"status":"ok"} once the model is loaded and the server is ready.
- *  Older versions of the comment here said to use /v1/models, but
- *  whisper-server returns 404 on that path — the health check was
- *  always failing, causing every startup to time out. */
+ *  the literal JSON body {"status":"ok"} once the model is loaded
+ *  and the server is ready.
+ *
+ *  We parse and verify the body — not just the 200 — because port
+ *  8080 is a popular default and many other things (Spring Boot SPAs,
+ *  generic dev servers) happily return 200 from /health by virtue of
+ *  a wildcard route serving index.html. Without the body check, the
+ *  supervisor would "adopt" the wrong server and every transcribe
+ *  call would die with a 4xx from a process that has no idea what
+ *  whisper is. */
 async function whisperHealthProbe(
   host: string,
   port: number,
@@ -124,7 +130,17 @@ async function whisperHealthProbe(
     const resp = await fetch(`http://${host}:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
-    return { ok: resp.ok };
+    if (!resp.ok) return { ok: false };
+    // Whisper-server's body is tiny — read fully and confirm the
+    // shape. A non-JSON body (HTML index, etc.) means it's not
+    // whisper-server.
+    const text = await resp.text();
+    try {
+      const parsed = JSON.parse(text) as { status?: unknown };
+      return { ok: parsed?.status === 'ok' };
+    } catch {
+      return { ok: false };
+    }
   } catch {
     return { ok: false };
   }
