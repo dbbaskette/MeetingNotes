@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { StageHandler } from '../context.js';
 import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { ensureWav } from '../../lib/ensure-wav.js';
+import { chunkWavIfNeeded } from '../../lib/chunk-wav.js';
 import { filterHallucinations } from '../hallucination-filter.js';
 
 export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
@@ -32,30 +33,61 @@ export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
   // already bound to :8080 (e.g. user-launched daemon).
   await ctx.whisperSupervisor.ensureReady();
   const wav = await ensureWav(meeting.audioPath);
+  // For long meetings (>~70 min at 16 kHz mono) the resulting WAV
+  // exceeds whisper.cpp's HTTP body limit (~128 MB) and the upload
+  // comes back as 413. Split into 25-min slices and stitch the
+  // segments together with timestamp offsets. Short meetings get a
+  // single-chunk passthrough — same code path, no extra ffmpeg work.
+  const chunks = await chunkWavIfNeeded(wav.path);
   try {
-    const result = await ctx.stt.transcribe({
-      audioPath: wav.path,
-      model: ctx.settings.get('sttModel'),
-      language: ctx.settings.get('sttLanguage'),
-    });
+    if (chunks.length > 1) {
+      ctx.logger.info('transcribe:chunked', { meetingId, chunks: chunks.length });
+    }
+
+    const allSegments: { start: number; end: number; text: string }[] = [];
+    const textParts: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      const result = await ctx.stt.transcribe({
+        audioPath: chunk.path,
+        model: ctx.settings.get('sttModel'),
+        language: ctx.settings.get('sttLanguage'),
+      });
+      for (const seg of result.segments) {
+        allSegments.push({
+          start: seg.start + chunk.startS,
+          end: seg.end + chunk.startS,
+          text: seg.text,
+        });
+      }
+      if (result.text) textParts.push(result.text);
+      if (chunks.length > 1) {
+        ctx.logger.info('transcribe:chunk-done', {
+          meetingId, chunk: i + 1, of: chunks.length, segments: result.segments.length,
+        });
+      }
+    }
+    const totalSegments = allSegments.length;
+
     // End-of-audio hallucination filter: Whisper emits "Thank you",
     // "[Music]", etc. past the real audio length. Drop segments whose
     // start is beyond the known duration (+0.5s slack).
     const afterEoa = meeting.durationS != null
-      ? result.segments.filter((s) => s.start < (meeting.durationS as number) + 0.5)
-      : result.segments;
+      ? allSegments.filter((s) => s.start < (meeting.durationS as number) + 0.5)
+      : allSegments;
     // Mid-recording hallucination filter: drop known-boilerplate phrases
     // ("[BLANK_AUDIO]", "Thanks for watching", etc.) and clusters of
     // repeated "Thank you" which are the signature of Whisper predicting
     // into silent chunks.
     const kept = filterHallucinations(afterEoa);
-    const dropped = result.segments.length - kept.length;
+    const dropped = totalSegments - kept.length;
     fs.writeFileSync(
       path.join(folder, 'transcript.raw.json'),
-      JSON.stringify({ ...result, segments: kept }, null, 2),
+      JSON.stringify({ text: textParts.join(' '), segments: kept }, null, 2),
     );
     ctx.logger.info('transcribe:done', { meetingId, segments: kept.length, dropped });
   } finally {
+    for (const c of chunks) c.cleanup();
     wav.cleanup();
   }
 };
