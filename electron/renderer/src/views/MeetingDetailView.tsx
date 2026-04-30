@@ -8,6 +8,7 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import { parseTranscript, fmtTimestamp, type TranscriptLine } from '../lib/transcript-lines';
 import { shortcutMod } from '../lib/shortcut';
+import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -40,21 +41,8 @@ interface MeetingDetail {
   models: { stt?: string; llm?: string };
 }
 
-const PIPELINE_STAGES = [
-  'transcribing', 'diarizing', 'merging', 'identifying',
-  'awaiting_speaker_id',
-  'summarizing', 'extracting',
-] as const;
-type PipelineStage = (typeof PIPELINE_STAGES)[number];
-const STAGE_LABELS: Record<PipelineStage, string> = {
-  transcribing: 'transcribe',
-  diarizing: 'diarize',
-  merging: 'merge',
-  identifying: 'identify',
-  awaiting_speaker_id: 'name voices',
-  summarizing: 'summarize',
-  extracting: 'extract',
-};
+// User-facing pipeline step model lives in lib/pipeline-steps so the
+// LibraryRow chip and the StageTimeline below agree on counts and labels.
 
 export function MeetingDetailView({
   id, onBack, seekSeconds,
@@ -283,12 +271,12 @@ function SpeakerIdControls({
 
   if (parked) {
     return (
-      <div ref={bannerRef} className="px-5 py-4 border-b border-surface-border bg-amber-50 flex items-center gap-4">
+      <div ref={bannerRef} className="px-5 py-4 border-b border-surface-border bg-status-warnBg flex items-center gap-4">
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-amber-900 text-sm">
+          <div className="font-semibold text-status-warnText text-sm">
             Paused — name your speakers before summarize runs
           </div>
-          <div className="text-xs text-amber-900/80 mt-0.5">
+          <div className="text-xs text-status-warnText/80 mt-0.5">
             {totalSpeakers === 0
               ? 'No speakers detected yet.'
               : unidentified === 0
@@ -296,18 +284,18 @@ function SpeakerIdControls({
                 : `${unidentified} of ${totalSpeakers} voices still unidentified. Use the Speakers panel on the right to label them, then Continue.`}
           </div>
         </div>
-        <label className="flex items-center gap-2 text-xs text-amber-900 cursor-pointer select-none">
+        <label className="flex items-center gap-2 text-xs text-status-warnText cursor-pointer select-none">
           <input
             type="checkbox"
             checked={meeting.skipSpeakerId}
             onChange={(e) => void setSkip(e.target.checked)}
-            className="w-3.5 h-3.5 accent-amber-700"
+            className="w-3.5 h-3.5 accent-status-warn"
           />
           Skip for this meeting
         </label>
         <button
           onClick={() => void continueNow()}
-          className="text-sm font-semibold bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+          className="text-sm font-semibold bg-status-warn hover:opacity-90 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
         >
           Continue →
         </button>
@@ -333,16 +321,18 @@ function SpeakerIdControls({
 }
 
 function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
-  // Three visual states per stage: done (check), current (spinner or X), pending.
-  // - pipelineStage='done' => every stage is done (full row of checkmarks,
+  // Three visual states per step: done (check), current (spinner or X), pending.
+  // - pipelineStage='done' => every step is done (full row of checkmarks,
   //   so you can see "yes, it ran the whole pipeline").
-  // - status='processing'  => stages before currentIdx are done, currentIdx is
+  // - status='processing'  => steps before currentIdx are done, currentIdx is
   //   the live spinner with elapsed time, rest are pending.
-  // - status='failed'      => stages before currentIdx are done, currentIdx is
+  // - status='failed'      => steps before currentIdx are done, currentIdx is
   //   a red X (this is where it died), rest are pending.
+  // The user-facing step model is shared with LibraryRow so the row's
+  // "PROCESSING N/<total>" matches the position highlighted here.
   const isFullyDone = meeting.pipelineStage === 'done';
-  const rawIdx = PIPELINE_STAGES.indexOf(meeting.pipelineStage as PipelineStage);
-  const currentIdx = isFullyDone ? PIPELINE_STAGES.length : rawIdx;
+  const rawIdx = stepIndexFor(meeting.pipelineStage);
+  const currentIdx = isFullyDone ? USER_STEPS.length : rawIdx;
   const elapsed = useElapsed(meeting.stageStartedAt, meeting.status === 'processing');
   const isFailed = meeting.status === 'failed';
   const isProcessing = meeting.status === 'processing';
@@ -350,14 +340,14 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
 
   return (
     <div className="flex items-center gap-1 px-5 py-3 border-b border-surface-border bg-surface-sunken overflow-x-auto">
-      {PIPELINE_STAGES.map((stage, i) => {
+      {USER_STEPS.map((step, i) => {
         const isDone = currentIdx > i;
         const isCurrent = !isFullyDone && currentIdx === i;
         const isPending = currentIdx < i;
         const isFailedHere = isCurrent && isFailed;
         const isAwaitingHere = isCurrent && isAwaiting;
         return (
-          <div key={stage} className="flex items-center gap-1 shrink-0">
+          <div key={step} className="flex items-center gap-1 shrink-0">
             <div
               className={`
                 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums
@@ -373,13 +363,13 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
               {isFailedHere && <XMark />}
               {isAwaitingHere && <PauseMark />}
               {isPending && <EmptyDot />}
-              <span>{STAGE_LABELS[stage]}</span>
+              <span>{step}</span>
               {isCurrent && isProcessing && elapsed !== null && (
                 <span className="font-normal opacity-80">{fmtElapsed(elapsed)}</span>
               )}
               {isAwaitingHere && <span className="font-normal opacity-80">waiting</span>}
             </div>
-            {i < PIPELINE_STAGES.length - 1 && (
+            {i < USER_STEPS.length - 1 && (
               <div className={`w-3 h-px ${isDone ? 'bg-status-ok/40' : 'bg-surface-border'}`} />
             )}
           </div>
@@ -882,20 +872,26 @@ function Placeholder({ text }: { text: string }): JSX.Element {
 
 // ─── Summary panel ─────────────────────────────────────────────────────────
 //
-// View / Edit / Split modes for the LLM-generated summary. The user owns the
-// final text — the summarize stage gives a starting draft, but cleanup is
-// almost always needed (model hallucinations, formatting tweaks, redactions).
-// Saved markdown is written straight to summary.md on disk; the next pipeline
-// run that touches summarize will overwrite, so users wanting to preserve
-// edits across re-runs should avoid re-summarizing.
+// Two modes for the LLM-generated summary:
+//   view — rendered markdown only
+//   edit — textarea + live preview side-by-side
+// The previous third mode (full-width textarea, no preview) overlapped with
+// edit's editor pane and added decision-fatigue without unique value.
+// Anyone wanting more horizontal room can resize the window.
+//
+// The user owns the final text — the summarize stage gives a starting draft,
+// but cleanup is almost always needed (model hallucinations, formatting
+// tweaks, redactions). Saved markdown is written straight to summary.md on
+// disk; the next pipeline run that touches summarize will overwrite, so
+// users wanting to preserve edits across re-runs should avoid re-summarizing.
 //
 // Edits are kept in component state and only persisted on Save. Disk writes
 // happen via the meetings:save-summary IPC, NOT via re-running the pipeline.
-type SummaryMode = 'preview' | 'edit' | 'split';
+type SummaryMode = 'view' | 'edit';
 
 function SummaryPanel({ meeting }: { meeting: MeetingDetail }): JSX.Element {
   const original = meeting.summaryMd ?? '';
-  const [mode, setMode] = useState<SummaryMode>('preview');
+  const [mode, setMode] = useState<SummaryMode>('view');
   const [draft, setDraft] = useState(original);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
@@ -903,9 +899,9 @@ function SummaryPanel({ meeting }: { meeting: MeetingDetail }): JSX.Element {
   // Re-seed the draft when the underlying summary changes (e.g. summarize
   // re-ran, or the user switched meetings without unmounting). We don't want
   // to silently clobber unsaved edits, so we only re-seed when the user is
-  // currently in preview mode.
+  // currently in view mode.
   useEffect(() => {
-    if (mode === 'preview') setDraft(original);
+    if (mode === 'view') setDraft(original);
   }, [original, mode]);
 
   const dirty = draft !== original;
@@ -916,9 +912,9 @@ function SummaryPanel({ meeting }: { meeting: MeetingDetail }): JSX.Element {
     try {
       await api.meetings.saveSummary(meeting.id, draft);
       setSavedAt(new Date());
-      // After a successful save, drop back into preview so the rendered
+      // After a successful save, drop back into view so the rendered
       // markdown reflects what's now on disk.
-      setMode('preview');
+      setMode('view');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -942,10 +938,9 @@ function SummaryPanel({ meeting }: { meeting: MeetingDetail }): JSX.Element {
         onSave={save}
         onRevert={() => { setDraft(original); setError(null); }}
       />
-      {mode === 'preview' && <MarkdownPreview source={draft} />}
-      {mode === 'edit' && <MarkdownEditor value={draft} onChange={setDraft} />}
-      {mode === 'split' && (
-        <div className="grid grid-cols-2 gap-4">
+      {mode === 'view' && <MarkdownPreview source={draft} />}
+      {mode === 'edit' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MarkdownEditor value={draft} onChange={setDraft} />
           <div className="border border-surface-border rounded-lg p-4 bg-surface-sunken/40 overflow-auto max-h-[60vh]">
             <MarkdownPreview source={draft} />
@@ -971,7 +966,7 @@ function SummaryToolbar({
   return (
     <div className="flex items-center gap-2">
       <div className="inline-flex bg-surface-sunken rounded-lg p-0.5 text-xs font-semibold">
-        {(['preview', 'split', 'edit'] as const).map((m) => (
+        {(['view', 'edit'] as const).map((m) => (
           <button
             key={m}
             onClick={() => onMode(m)}
@@ -979,7 +974,7 @@ function SummaryToolbar({
               mode === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
             }`}
           >
-            {m === 'preview' ? 'Preview' : m === 'split' ? 'Split' : 'Edit'}
+            {m === 'view' ? 'View' : 'Edit'}
           </button>
         ))}
       </div>

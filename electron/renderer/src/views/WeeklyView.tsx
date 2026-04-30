@@ -464,22 +464,34 @@ function WeeklyBody({
                   {data.openActionCount} across {data.openActionGroups.length} owner{data.openActionGroups.length === 1 ? '' : 's'}
                 </span>
               </div>
-              <div className="bg-surface rounded-xl shadow-card border border-surface-border overflow-hidden">
+              {/* One card per owner with whitespace between, so multi-owner
+                  weeks read as distinct buckets instead of one flat scroll.
+                  isYou cards are tinted the whole way down (not just the
+                  header) so "what's mine?" pops the moment the view opens.
+                  Each item also repeats the owner badge — the header avatar
+                  is below the fold once you scroll, the per-row one isn't. */}
+              <div className="flex flex-col gap-6">
                 {data.openActionGroups.map((group, gi) => {
                   const initials = group.isYou
                     ? 'YOU'
                     : group.ownerLabel.split(/\s+/).map((s) => s[0]).join('').slice(0, 2).toUpperCase();
+                  const badgeStyle: React.CSSProperties = group.isYou
+                    ? { background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#ffffff' }
+                    : { backgroundColor: '#f5f5f4', color: '#44403c' };
                   return (
-                    <div key={gi} className={gi > 0 ? 'border-t border-surface-border' : ''}>
-                      <div className={`px-5 pt-4 pb-2 ${group.isYou ? 'bg-gradient-to-b from-indigo-50/50 to-transparent' : ''}`}>
+                    <div
+                      key={gi}
+                      className={`rounded-xl shadow-card border overflow-hidden ${
+                        group.isYou
+                          ? 'bg-status-processingBg/40 border-status-processing/30'
+                          : 'bg-surface border-surface-border'
+                      }`}
+                    >
+                      <div className="px-5 pt-4 pb-2">
                         <div className="flex items-center gap-2.5">
                           <div
-                            className="w-6 h-6 rounded-full text-white text-[10px] font-semibold flex items-center justify-center"
-                            style={
-                              group.isYou
-                                ? { background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }
-                                : { backgroundColor: '#f5f5f4', color: '#44403c' }
-                            }
+                            className="w-6 h-6 rounded-full text-[10px] font-semibold flex items-center justify-center shrink-0"
+                            style={badgeStyle}
                           >
                             {initials}
                           </div>
@@ -489,7 +501,7 @@ function WeeklyBody({
                           </span>
                         </div>
                       </div>
-                      <div className="divide-y divide-surface-border">
+                      <div className="divide-y divide-surface-border/70">
                         {group.items.map((it) => {
                           const due = fmtDueLabel(it.dueDate, data.rangeEnd);
                           return (
@@ -499,6 +511,13 @@ function WeeklyBody({
                               onClick={() => onOpenMeeting(it.meetingId)}
                               className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-sunken text-left transition"
                             >
+                              <div
+                                className="w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center shrink-0"
+                                style={badgeStyle}
+                                aria-hidden
+                              >
+                                {initials.slice(0, 2)}
+                              </div>
                               <div className="flex-1 min-w-0">
                                 <div className="text-sm text-ink truncate">{it.text}</div>
                                 <div className="text-[11px] text-ink-muted truncate">
