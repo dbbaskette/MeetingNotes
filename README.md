@@ -30,7 +30,8 @@ Most meeting-transcription tools either ship your audio to a SaaS, lock you into
 - **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon). With stems present, each stream is transcribed independently: you're always labelled "You", remote speakers get clean per-stream audio
 - **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar (runs on the system stem only when stems are present)
 - **Speaker identification** by matching voice embeddings against a roster you build over time
-- **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai). Reasoning models welcome — `<think>` blocks are stripped before rendering
+- **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com). Reasoning models welcome — `<think>` blocks are stripped before rendering. The app can either talk to an external server you already run, or spawn `lms server start` / `ollama serve` on demand and shut it down after idle
+- **Weekly digest** (Mon–Fri) — a tab that rolls every meeting in the current ISO week into a 2–3 paragraph LLM-synthesised narrative + a meetings list + open action items grouped by owner + key decisions. Cached per week, regenerable, exportable as Markdown
 - **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
 
 You bring the models. MeetingNotes orchestrates everything else.
@@ -43,7 +44,7 @@ Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built
 
 - **macOS 14.2 (Sonoma) or later** on Apple Silicon
 - ~16 GB RAM minimum (whisper + a 9B LLM)
-- [LM Studio](https://lmstudio.ai) installed with a chat model loaded (default: `qwen/qwen3.5-9b`)
+- A chat-LLM runtime — either [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), with a model installed (default: `qwen/qwen3.5-9b` in LM Studio). MeetingNotes can either talk to it externally (you start it yourself) or manage its lifecycle for you (Settings → "Summary provider" → managed). Default is external for backward compat.
 - HuggingFace account with three pyannote model licences accepted (one-time, see below)
 
 ## Quick start
@@ -61,7 +62,7 @@ brew install whisper-cpp ffmpeg
 ./scripts/start.sh
 ```
 
-`start.sh` auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development. **Whisper-server and the diarization sidecar are spawned by the app itself on demand** (first transcription wakes whisper, first diarize wakes the sidecar) and shut down automatically after 10 minutes of inactivity to keep RAM low.
+`start.sh` auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development. **All three model services run on demand** — the diarization sidecar (~500 MB), whisper-server (~1.5 GB for `medium.en`), and (in `lm-studio` / `ollama` managed mode) the summarisation LLM. First call wakes the service; 10 minutes of inactivity shuts it down. RAM stays at zero between meetings.
 
 **First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security. If you enable **Watch browser tabs for meeting URLs** in Settings, macOS will also prompt once per browser for Automation access.
 
@@ -140,6 +141,19 @@ Don't care for this meeting? Toggle **Skip speaker ID** at the top of the detail
 
 The Summary tab has three modes — **Preview** (rendered markdown), **Split** (textarea + live preview), **Edit** (full-width textarea). LLM hallucination, formatting tweaks, redactions — fix in place and Save. Edits write to `summary.md` on disk. Re-running summarize from the rerun buttons will overwrite, so don't re-summarize work you've hand-edited.
 
+### Weekly view
+
+The **Weekly** tab in the top bar (next to the MeetingNotes logo) rolls every meeting in an ISO week — Mon → Sun, defaulting to the current week — into a single page:
+
+- **Overview** — a 2–3 paragraph LLM-synthesised narrative covering the week's focus, follow-ups owed, and what's heading into next week. Cached per week; regenerable from the Overview card. Cache invalidates automatically when meetings are added, retitled, or deleted.
+- **Meetings** — chronological list with day/time/duration/highlight; click a row to drill into that meeting.
+- **Open action items** — grouped by owner. If you've set yourself as a roster speaker (Settings → "You are…"), your own items pin to the top in a "You" group. Otherwise it's plain owner alphabetical.
+- **Key decisions** — extracted by the same LLM call as the narrative.
+
+**Navigation**: prev/next arrows step through weeks. Empty weeks show a placeholder rather than running the LLM. The first view of a non-cached week kicks off the LLM call (10–60 s typical on a local model); the page paints the structured rollup immediately while the Overview card shows a skeleton with an elapsed-time counter so you can see progress.
+
+**Export**: top-right Export button opens a save dialog for `weekly-YYYY-Www.md`. Cancel = copies to clipboard instead.
+
 ## Setup script
 
 `./scripts/setup.sh` is idempotent — re-run any time to repair an install, change Whisper models, swap the LLM, or rotate the HF token.
@@ -188,10 +202,12 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint |
+| `summaryProvider` | `external` | who manages the summarization LLM lifecycle. `external` = you run LM Studio / Ollama yourself (this matches the original behavior). `lm-studio` = MeetingNotes spawns `lms server start` on demand and runs `lms load <llmModel>` to pull the model into VRAM, idle-shutdown after 10 min. `ollama` = MeetingNotes spawns `ollama serve` (Ollama auto-loads/unloads models via `OLLAMA_KEEP_ALIVE`). The Settings UI dims options whose CLI isn't installed. |
+| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint for `external` mode. Managed providers use their own ports (`lm-studio` → `:1234`, `ollama` → `:11434`); the `LMStudioClient`'s base URL follows the active provider live. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
 | `sttModel` | `whisper-1` | model file to load when the app spawns whisper-server. Resolved against `~/Library/Application Support/MeetingNotes/whisper-models/ggml-<name>.bin`. If the named model isn't installed, falls back to the auto-pick preference order (medium.en → small.en → large-v3-turbo → ...). |
-| `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction (must be loaded in LM Studio) |
+| `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction. In `external` mode it's informational (whatever you've loaded in LM Studio is what gets used); in `lm-studio` managed mode the supervisor runs `lms load <id>` for it; in `ollama` mode it's the model the OpenAI-compat call requests (Ollama lazy-loads). |
+| `userSpeakerId` | `null` | the roster speaker that represents you. When set, the Weekly view pins your own open action items to a "You" group at the top. Picker in Settings → "You are…" — populated by speakers you've confirmed in any meeting's Speakers panel. |
 | `libraryPath` | `~/Documents/MeetingNotes` | meetings, db, embeddings |
 | `audioWatchPath` | `~/Music/MeetingNotes` | folder watched for new recordings (also watches `~/Music/Audio Hijack` for one release as a legacy fallback) |
 | `recordingBitrateKbps` | `128` | AAC bitrate for new recordings (96 / 128 / 192) |
