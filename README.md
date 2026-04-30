@@ -25,12 +25,13 @@ Local-first meeting notes for macOS. Hit Record, pick which app's audio you want
 
 Most meeting-transcription tools either ship your audio to a SaaS, lock you into their recorder, or only do half the job. MeetingNotes runs the whole pipeline locally:
 
-- **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic into a mixed M4A plus two sidecar stems (`.voice.m4a`, `.system.m4a`) for stem-aware transcription
+- **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic into a mixed M4A, plus two sidecar stems (`.voice.m4a`, `.system.m4a`) written for future stem-aware processing
 - **Meeting auto-detect** (opt-in) watches your frontmost browser tab for known meeting URLs — Meet, Zoom web, Teams, Whereby, Jitsi, and others — and offers to record with one click
-- **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon). With stems present, each stream is transcribed independently: you're always labelled "You", remote speakers get clean per-stream audio
-- **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar (runs on the system stem only when stems are present)
+- **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon), run against the mixed file with a hallucination filter on top
+- **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar, on the same mixed file as transcription so timestamps align
 - **Speaker identification** by matching voice embeddings against a roster you build over time
-- **Summarisation + action items** via any chat LLM loaded in [LM Studio](https://lmstudio.ai). Reasoning models welcome — `<think>` blocks are stripped before rendering
+- **Summarisation + action items** via any chat LLM in [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), with a managed lifecycle: the app spawns the runtime, auto-loads the model, and shuts it down on idle. Reasoning models welcome — `<think>` blocks are stripped before rendering
+- **Weekly view** rolls Mon–Fri meetings into a cached LLM-generated narrative with grouped open action items and key decisions, exportable to Markdown
 - **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
 
 You bring the models. MeetingNotes orchestrates everything else.
@@ -43,7 +44,7 @@ Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built
 
 - **macOS 14.2 (Sonoma) or later** on Apple Silicon
 - ~16 GB RAM minimum (whisper + a 9B LLM)
-- [LM Studio](https://lmstudio.ai) installed with a chat model loaded (default: `qwen/qwen3.5-9b`)
+- An LLM runtime: either [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), with a chat model installed (default: `qwen/qwen3.5-9b`). The app manages the runtime lifecycle for you — it spawns and auto-loads the model on first summarise, and shuts down on idle.
 - HuggingFace account with three pyannote model licences accepted (one-time, see below)
 
 ## Quick start
@@ -61,9 +62,9 @@ brew install whisper-cpp ffmpeg
 ./scripts/start.sh
 ```
 
-`start.sh` auto-opens LM Studio if installed, exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development. **Whisper-server and the diarization sidecar are spawned by the app itself on demand** (first transcription wakes whisper, first diarize wakes the sidecar) and shut down automatically after 10 minutes of inactivity to keep RAM low.
+`start.sh` exports the HF token, health-checks the stack, and opens the packaged `.app`. Use `start.sh --dev` for hot-reload development. **Whisper-server, the diarization sidecar, and the configured LLM runtime (LM Studio or Ollama) are spawned by the app itself on demand** (first transcription wakes whisper, first diarize wakes the sidecar, first summarise wakes the LLM and auto-loads the model) and shut down automatically after 10 minutes of inactivity to keep RAM low.
 
-**First launch**: macOS will prompt for two permissions — microphone, then "Screen & System Audio Recording" the first time you click ⏺ Record. Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security. If you enable **Watch browser tabs for meeting URLs** in Settings, macOS will also prompt once per browser for Automation access.
+**First launch**: a four-step onboarding wizard walks you through macOS permissions, Whisper model install, Hugging Face token, and LLM runtime readiness — every step is skippable. macOS will prompt for two permissions on first record — microphone, then "Screen & System Audio Recording". Grant both; MeetingNotes will appear by name in System Settings → Privacy & Security. If you enable **Watch browser tabs for meeting URLs** in Settings, macOS will also prompt once per browser for Automation access.
 
 ## Recording a meeting
 
@@ -75,9 +76,9 @@ brew install whisper-cpp ffmpeg
 
 Each recording writes three files to `~/Music/MeetingNotes/`:
 
-- `recording-<timestamp>-<id>.m4a` — mixed mic + tap, the primary file you play back
-- `recording-<timestamp>-<id>.voice.m4a` — mic stem only
-- `recording-<timestamp>-<id>.system.m4a` — tap stem only
+- `recording-<timestamp>-<id>.m4a` — mixed mic + tap, the primary file used by the pipeline (transcribe + diarize)
+- `recording-<timestamp>-<id>.voice.m4a` — mic stem only (written for future stem-aware processing; not currently used by the pipeline)
+- `recording-<timestamp>-<id>.system.m4a` — tap stem only (same)
 
 AAC mono at 128 kbps. A one-hour meeting is ~60 MB for the mixed file plus similar per stem.
 
@@ -101,22 +102,22 @@ Every row in the Inbox, Library, and the detail-view header exposes a **⋯** ac
                        │  Pipeline    │
                        │              │
                        │  transcribe ─┼──▶ whisper-server (8080)
-                       │              │       (stems present → voice +
-                       │              │        system transcribed
-                       │              │        separately, voice = "You")
+                       │              │       (mixed file, hallucination
+                       │              │        filter on output)
                        │  diarize ────┼──▶ pyannote sidecar (8765)
-                       │              │       (system stem only when stems
-                       │              │        exist; mixed file otherwise)
-                       │  merge       │       (M4A → 16kHz WAV via ffmpeg
-                       │  identify ───┼──▶     before STT; soxr when
+                       │              │       (mixed file — same audio as
+                       │              │        transcribe, so timestamps
+                       │  merge       │        align)
+                       │  identify ───┼──▶    (M4A → 16kHz WAV via ffmpeg
+                       │              │        before STT; soxr when
                        │              │        available for best quality)
                        │  ▼           │
                        │  awaiting_   │   ◀── pause: name unknown voices
                        │  speaker_id  │       (or check Skip for this meeting)
                        │  ▼           │
                        │  re-merge    │   ◀── transcript.md gets real names
-                       │  summarise ──┼──▶ LM Studio (1234)
-                       │  extract ────┼──▶ LM Studio (1234)
+                       │  summarise ──┼──▶ LM Studio (1234) or Ollama (11434)
+                       │  extract ────┼──▶ LM Studio (1234) or Ollama (11434)
                        └──────┬───────┘
                               ▼
                   ~/Documents/MeetingNotes/meetings/<slug>/
@@ -139,6 +140,18 @@ Don't care for this meeting? Toggle **Skip speaker ID** at the top of the detail
 ### Summary editor
 
 The Summary tab has three modes — **Preview** (rendered markdown), **Split** (textarea + live preview), **Edit** (full-width textarea). LLM hallucination, formatting tweaks, redactions — fix in place and Save. Edits write to `summary.md` on disk. Re-running summarize from the rerun buttons will overwrite, so don't re-summarize work you've hand-edited.
+
+### Weekly view
+
+Switch to the **Week** tab for a Mon–Fri rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened, all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant. **Export to Markdown** ships the whole rollup as one file.
+
+### Search
+
+`⌘K` (or `Ctrl+K`) anywhere opens a global search palette across titles, summaries, and transcript text. Click-through to the matching meeting.
+
+### Click-to-play transcript
+
+Timestamps in the transcript are clickable — they seek the sticky audio player to that moment and start playback. The player survives tab switches inside the meeting, so you can keep listening while editing the summary.
 
 ## Setup script
 
@@ -188,16 +201,18 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint |
+| `summaryProvider` | `lm-studio` | LLM runtime: `lm-studio`, `ollama`, or `external` (you manage it). The first two are spawned and idle-shutdown by the app. |
+| `lmStudioUrl` | `http://localhost:1234` | chat/LLM endpoint (used for both LM Studio and Ollama; default port differs — Ollama listens on `11434`) |
+| `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction. Auto-loaded into the runtime on first use. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint |
 | `sttModel` | `whisper-1` | model file to load when the app spawns whisper-server. Resolved against `~/Library/Application Support/MeetingNotes/whisper-models/ggml-<name>.bin`. If the named model isn't installed, falls back to the auto-pick preference order (medium.en → small.en → large-v3-turbo → ...). |
-| `llmModel` | `qwen/qwen3.5-9b` | model id for summarisation/extraction (must be loaded in LM Studio) |
 | `libraryPath` | `~/Documents/MeetingNotes` | meetings, db, embeddings |
 | `audioWatchPath` | `~/Music/MeetingNotes` | folder watched for new recordings (also watches `~/Music/Audio Hijack` for one release as a legacy fallback) |
 | `recordingBitrateKbps` | `128` | AAC bitrate for new recordings (96 / 128 / 192) |
 | `sttLanguage` | `en` | passed to Whisper |
-| `userName` | `""` | your name — used to label the voice stem in transcripts (empty falls back to the literal "You") |
+| `userName` | `""` | your name — substituted for `VOICE_YOU` in transcripts after speaker-ID (empty falls back to the literal "You") |
 | `autoDetectMeetings` | `false` | poll the frontmost browser tab for meeting URLs and offer to record. Requires granting Automation permission to each browser the first time |
+| `onboardedAt` | unset | timestamp the first-run wizard was completed or skipped |
 | `exporterApple` | `true` | enable Apple Reminders exporter |
 | `exporterMarkdown` | `true` | enable Markdown exporter |
 
@@ -251,13 +266,16 @@ electron/main/        main process: pipeline, storage, IPC, watcher, services
   recording/          RecordingManager, AppEnumerator, orphan-recovery
   permissions/        mic state probe via systemPreferences API
   meeting-detector/   browser-tab URL polling (Meet/Zoom/Teams/Whereby/etc.)
-  pipeline/stages/    transcribing (stem-aware), diarizing, merging,
-                      identifying, summarising, extracting
+  llm/                managed lifecycle for LM Studio / Ollama runtimes
+                      (spawn, model auto-load, idle shutdown)
+  pipeline/stages/    transcribing, diarizing, merging, identifying,
+                      summarising, extracting
   lib/stem-paths.ts   voice/system stem path derivation + hasStems()
 electron/preload/     preload bridge (CJS, IPC surface with parity test)
 electron/renderer/    React UI
+  views/              MeetingDetailView, WeeklyView, OnboardingView, ...
   components/         RecordButton, SourcePicker, LiveRecordingRow, VuMeter,
-                      PermissionsModal, InboxRow, LibraryRow,
+                      PermissionsModal, InboxRow, LibraryRow, SearchPalette,
                       MeetingRowMenu, MeetingDetectedBanner
 sidecar/              Python (pyannote) diarization sidecar, FastAPI on 8765
 scripts/              setup.sh · start.sh · whisper-server.sh · doctor.sh
