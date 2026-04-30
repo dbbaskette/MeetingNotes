@@ -44,12 +44,6 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
           <div className="font-semibold">Welcome to MeetingNotes</div>
           <div className="text-xs text-ink-muted">Setup · step {idx + 1} of {STEPS.length}</div>
         </div>
-        <button
-          onClick={() => void finish()}
-          className="text-xs text-ink-muted hover:text-ink"
-        >
-          Skip all
-        </button>
       </div>
 
       <div className="p-6 min-h-[260px]">
@@ -59,6 +53,10 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
         {step === 'llm' && <LlmStep />}
       </div>
 
+      {/* Skip lives in the action row, not buried in a corner. Both are
+          first-class buttons so a user who's bailing knows they can — at
+          any step, with one click. "Skip step" advances past this one
+          taking no action; "Skip all" ends the wizard immediately. */}
       <div className="px-6 py-4 border-t border-surface-border flex items-center gap-3">
         <button
           disabled={idx === 0}
@@ -75,19 +73,34 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
             />
           ))}
         </div>
-        {done ? (
+        {!done && (
+          <>
+            <button
+              onClick={next}
+              className="text-sm text-ink-muted hover:text-ink border border-surface-border hover:border-ink/30 px-3 py-1.5 rounded-lg transition"
+            >
+              Skip step
+            </button>
+            <button
+              onClick={() => void finish()}
+              className="text-sm text-ink-muted hover:text-ink border border-surface-border hover:border-ink/30 px-3 py-1.5 rounded-lg transition"
+            >
+              Skip all
+            </button>
+            <button
+              onClick={next}
+              className="text-sm font-semibold bg-gradient-to-br from-brand-indigo to-brand-violet text-white px-4 py-1.5 rounded-lg"
+            >
+              Next →
+            </button>
+          </>
+        )}
+        {done && (
           <button
             onClick={() => void finish()}
             className="text-sm font-semibold bg-gradient-to-br from-brand-indigo to-brand-violet text-white px-4 py-1.5 rounded-lg"
           >
             Finish
-          </button>
-        ) : (
-          <button
-            onClick={next}
-            className="text-sm font-semibold bg-gradient-to-br from-brand-indigo to-brand-violet text-white px-4 py-1.5 rounded-lg"
-          >
-            Next →
           </button>
         )}
       </div>

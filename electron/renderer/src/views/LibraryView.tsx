@@ -3,7 +3,7 @@
 // Single unified list. Previously the view was split into an Inbox zone
 // (pending recordings) and a Library zone (everything processed or in-
 // flight). The two-zone split duplicated row rendering, filtering, and
-// search logic; merging into one list with an "Unprocessed" filter chip
+// search logic; merging into one list with a "Pending" filter chip
 // makes the whole catalog searchable and removes the conceptual split
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
@@ -28,7 +28,7 @@ interface Props {
   onRecordingStopped: () => void;
 }
 
-type LibFilter = 'all' | 'unprocessed' | 'processing' | 'done' | 'failed';
+type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 
 export function LibraryView({
   onOpen, onSettings, onWeekly, liveRecording, onStartRecording, onRecordingStopped,
@@ -57,7 +57,7 @@ export function LibraryView({
     const searched = q ? meetings.filter((m) => m.title.toLowerCase().includes(q)) : meetings;
     const filtered = libFilter === 'all'
       ? searched
-      : libFilter === 'unprocessed'
+      : libFilter === 'pending'
         ? searched.filter((m) => m.status === 'pending')
         : libFilter === 'processing'
           ? searched.filter((m) => isInFlight(m.status))
@@ -78,7 +78,7 @@ export function LibraryView({
 
   const libCounts = useMemo(() => ({
     all: meetings.length,
-    unprocessed: meetings.filter((m) => m.status === 'pending').length,
+    pending: meetings.filter((m) => m.status === 'pending').length,
     processing: meetings.filter((m) => isInFlight(m.status)).length,
     done: meetings.filter((m) => m.status === 'done').length,
     failed: meetings.filter((m) => m.status === 'failed').length,
@@ -203,9 +203,11 @@ export function LibraryView({
           </span>
         </div>
 
-        {/* Filter chips — each status chip hides when its count is zero so
-            users aren't staring at "Failed 0" on a fresh install. Search
-            yields width first on narrow via flex-1. */}
+        {/* Filter chips — always rendered so the surface is discoverable
+            even on a fresh install; chips with a zero count are disabled
+            (greyed + non-clickable) rather than hidden, which keeps the
+            row visually stable as state evolves. Search yields width
+            first on narrow via flex-1. */}
         <div className="flex items-center flex-wrap gap-2 mb-3">
           <FilterChip
             active={libFilter === 'all'}
@@ -213,42 +215,34 @@ export function LibraryView({
             label="All"
             n={libCounts.all}
           />
-          {libCounts.unprocessed > 0 && (
-            <FilterChip
-              active={libFilter === 'unprocessed'}
-              onClick={() => setLibFilter('unprocessed')}
-              label="Unprocessed"
-              n={libCounts.unprocessed}
-              dotClass="bg-ink-muted"
-            />
-          )}
-          {libCounts.processing > 0 && (
-            <FilterChip
-              active={libFilter === 'processing'}
-              onClick={() => setLibFilter('processing')}
-              label="Processing"
-              n={libCounts.processing}
-              dotClass="bg-brand-indigo animate-pulse"
-            />
-          )}
-          {libCounts.done > 0 && (
-            <FilterChip
-              active={libFilter === 'done'}
-              onClick={() => setLibFilter('done')}
-              label="Processed"
-              n={libCounts.done}
-              dotClass="bg-status-ok"
-            />
-          )}
-          {libCounts.failed > 0 && (
-            <FilterChip
-              active={libFilter === 'failed'}
-              onClick={() => setLibFilter('failed')}
-              label="Failed"
-              n={libCounts.failed}
-              dotClass="bg-rose-500"
-            />
-          )}
+          <FilterChip
+            active={libFilter === 'pending'}
+            onClick={() => setLibFilter('pending')}
+            label="Pending"
+            n={libCounts.pending}
+            dotClass="bg-ink-muted"
+          />
+          <FilterChip
+            active={libFilter === 'processing'}
+            onClick={() => setLibFilter('processing')}
+            label="Processing"
+            n={libCounts.processing}
+            dotClass={libCounts.processing > 0 ? 'bg-brand-indigo animate-pulse' : 'bg-brand-indigo'}
+          />
+          <FilterChip
+            active={libFilter === 'done'}
+            onClick={() => setLibFilter('done')}
+            label="Processed"
+            n={libCounts.done}
+            dotClass="bg-status-ok"
+          />
+          <FilterChip
+            active={libFilter === 'failed'}
+            onClick={() => setLibFilter('failed')}
+            label="Failed"
+            n={libCounts.failed}
+            dotClass="bg-rose-500"
+          />
           <input
             placeholder="Search…"
             value={query}
@@ -301,18 +295,23 @@ function FilterChip({
   n: number;
   dotClass?: string;
 }): JSX.Element {
+  const disabled = n === 0 && !active;
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      aria-disabled={disabled}
       className={`
         inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full
         transition border
         ${active
           ? 'bg-ink text-surface border-ink'
-          : 'bg-surface text-ink-muted border-surface-border hover:text-ink hover:border-ink/30'}
+          : disabled
+            ? 'bg-surface text-ink-muted/60 border-surface-border opacity-50 cursor-not-allowed'
+            : 'bg-surface text-ink-muted border-surface-border hover:text-ink hover:border-ink/30'}
       `}
     >
-      {dotClass && <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />}
+      {dotClass && <span className={`w-1.5 h-1.5 rounded-full ${dotClass} ${disabled ? 'opacity-50' : ''}`} />}
       <span>{label}</span>
       <span className={`tabular-nums ${active ? 'opacity-80' : 'opacity-60'}`}>{n}</span>
     </button>
@@ -334,10 +333,9 @@ function LibraryEmpty({
     );
   }
   if (hasAny && filter !== 'all') {
-    const filterLabel = filter === 'unprocessed' ? 'unprocessed' : filter;
     return (
       <div className="text-center py-10 text-sm text-ink-muted">
-        No {filterLabel} meetings.
+        No {filter} meetings.
       </div>
     );
   }
