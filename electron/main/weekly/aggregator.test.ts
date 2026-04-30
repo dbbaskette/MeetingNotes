@@ -141,6 +141,46 @@ describe('WeeklyAggregator', () => {
     expect(generate).toHaveBeenCalledTimes(2);
   });
 
+  it('skips narrative generation for the in-progress (current) week', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    // Meeting in the future — guarantees the resolved week's end is
+    // ahead of "now", which is how the aggregator detects in-progress.
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    insertMeeting(meetings, undefined as never, {
+      id: 'm-current',
+      title: 'Mid-week sync',
+      startedAt: future.toISOString(),
+    });
+    // Compute the ISO week of `future` the same way the aggregator does.
+    const target = new Date(Date.UTC(future.getUTCFullYear(), future.getUTCMonth(), future.getUTCDate()));
+    const dow = (target.getUTCDay() + 6) % 7;
+    target.setUTCDate(target.getUTCDate() - dow + 3);
+    const isoYear = target.getUTCFullYear();
+    const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+    const jan4Dow = (jan4.getUTCDay() + 6) % 7;
+    const week1Thu = new Date(jan4);
+    week1Thu.setUTCDate(jan4.getUTCDate() - jan4Dow + 3);
+    const isoWeek = 1 + Math.round(
+      (target.getTime() - week1Thu.getTime()) / (7 * 24 * 60 * 60 * 1000),
+    );
+
+    const generate = vi.fn(async () => ({ narrative: 'should not happen', decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const data = await agg.getWeek(isoYear, isoWeek);
+    expect(data.meetings).toHaveLength(1); // structured rollup still works
+    expect(data.narrative).toBe('');       // narrative gated
+    expect(data.decisions).toEqual([]);
+    expect(generate).not.toHaveBeenCalled();
+
+    // Even force=true (Regenerate button) doesn't override — answer
+    // would be obsolete by the time the user reads it.
+    await agg.regenerateWeek(isoYear, isoWeek);
+    expect(generate).not.toHaveBeenCalled();
+  });
+
   it('groups open action items by owner, with the user pinned first', async () => {
     const { meetings, actionItems, speakers, settings, weekly, db } = setupDb();
     insertMeeting(meetings, undefined as never, {

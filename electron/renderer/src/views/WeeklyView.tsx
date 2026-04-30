@@ -199,8 +199,11 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
       // 2) Narrative fetch — fires immediately after structured
       //    resolves so we know whether the cache is fresh (and
       //    thus whether to even show the "drafting" skeleton).
-      if (result.meetings.length === 0) {
-        // Empty week — no narrative to show.
+      if (result.meetings.length === 0 || result.inProgress) {
+        // Empty week or current (still-in-progress) week — no
+        // narrative to fetch. Current-week narratives are intentionally
+        // skipped because meetings keep getting added all week and
+        // any LLM output would be stale within hours.
         setNarrState('idle');
         return;
       }
@@ -410,9 +413,10 @@ function WeeklyBody({
 
       {!empty && (
         <>
-          {/* Narrative card. Three states: loading (skeleton + elapsed
+          {/* Narrative card. Four states: loading (skeleton + elapsed
               timer + meeting count), error (inline message + retry),
-              ready (the rendered prose). */}
+              ready (the rendered prose), and in-progress (no narrative
+              yet — current week is still being filled in). */}
           <section className="mb-10">
             <NarrativeCard
               meetingCount={data.meetings.length}
@@ -420,6 +424,7 @@ function WeeklyBody({
               narrState={narrState}
               narrElapsedMs={narrElapsedMs}
               narrError={narrError}
+              inProgress={data.inProgress}
               onRegenerate={onRegenerate}
             />
           </section>
@@ -594,11 +599,17 @@ interface NarrativeCardProps {
   narrState: 'idle' | 'loading' | 'ready' | 'error';
   narrElapsedMs: number;
   narrError: string | null;
+  /** True when viewing the current (still-running) week. We skip
+   *  narrative generation in that case because meetings keep getting
+   *  added all week — show a friendly placeholder instead. */
+  inProgress: boolean;
   onRegenerate: () => Promise<void>;
 }
 
-/** Three-state narrative card:
+/** Four-state narrative card:
  *
+ *   - in-progress: friendly "available after the week ends" placeholder.
+ *     Wins over all other states for the current ISO week.
  *   - loading: pulsing skeleton lines + elapsed timer + N-meetings hint.
  *     Sized to roughly match a real 3-paragraph narrative so the layout
  *     doesn't reflow when the real text arrives.
@@ -606,7 +617,7 @@ interface NarrativeCardProps {
  *   - ready:   the rendered narrative + "Generated X ago" + Regenerate.
  */
 function NarrativeCard({
-  meetingCount, narrative, narrState, narrElapsedMs, narrError, onRegenerate,
+  meetingCount, narrative, narrState, narrElapsedMs, narrError, inProgress, onRegenerate,
 }: NarrativeCardProps): JSX.Element {
   const elapsedSec = Math.floor(narrElapsedMs / 1000);
   return (
@@ -617,19 +628,27 @@ function NarrativeCard({
         <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
           Overview
         </div>
-        {narrState === 'loading' && (
+        {!inProgress && narrState === 'loading' && (
           <span className="text-[11px] text-ink-muted ml-2 inline-flex items-center gap-1.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-indigo animate-pulse" />
             drafting from {meetingCount} meeting{meetingCount === 1 ? '' : 's'}
             {elapsedSec >= 1 && <span className="font-mono">· {elapsedSec}s</span>}
           </span>
         )}
-        {narrState === 'ready' && narrative?.fromCache === false && (
+        {!inProgress && narrState === 'ready' && narrative?.fromCache === false && (
           <span className="text-[11px] text-status-ok ml-2">just generated</span>
         )}
       </div>
 
-      {narrState === 'loading' && (
+      {inProgress && (
+        <div className="text-sm text-ink-muted leading-relaxed">
+          The week is still in progress, so the Overview is generated only
+          after the week ends. The meetings, action items, and decisions
+          below update live as new recordings finish processing.
+        </div>
+      )}
+
+      {!inProgress && narrState === 'loading' && (
         <div aria-busy="true" aria-live="polite" className="space-y-2.5 animate-pulse">
           {/* Skeleton — 3 paragraphs of varying-length pulsing bars
               that approximate the LLM's typical 200-350 word output. */}
@@ -651,7 +670,7 @@ function NarrativeCard({
         </div>
       )}
 
-      {narrState === 'error' && (
+      {!inProgress && narrState === 'error' && (
         <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-lg p-3 text-sm">
           <div className="font-medium mb-1">Couldn't draft the narrative.</div>
           <div className="text-xs">{narrError ?? 'unknown error'}</div>
@@ -663,7 +682,7 @@ function NarrativeCard({
         </div>
       )}
 
-      {narrState === 'ready' && narrative != null && (
+      {!inProgress && narrState === 'ready' && narrative != null && (
         narrative.narrative ? (
           <div className="prose prose-sm max-w-none text-ink-soft leading-relaxed whitespace-pre-line">
             {narrative.narrative}
@@ -675,26 +694,31 @@ function NarrativeCard({
         )
       )}
 
-      <div className="mt-5 pt-4 border-t border-surface-border flex items-center justify-between text-xs text-ink-muted">
-        <span>
-          {narrative?.generatedAt
-            ? `Generated ${new Date(narrative.generatedAt).toLocaleString()}`
-            : narrState === 'loading'
-              ? '…'
-              : 'Not yet generated'}
-        </span>
-        <button
-          onClick={onRegenerate}
-          disabled={narrState === 'loading'}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md hover:bg-surface-sunken text-ink-soft hover:text-ink transition disabled:opacity-50"
-        >
-          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path d="M21 12a9 9 0 1 1-3.5-7.1L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
-          {narrState === 'loading' ? 'Drafting…' : 'Regenerate'}
-        </button>
-      </div>
+      {/* Footer hidden for in-progress weeks — there's nothing to
+          regenerate and "Not yet generated" implies an action that
+          isn't actually available. */}
+      {!inProgress && (
+        <div className="mt-5 pt-4 border-t border-surface-border flex items-center justify-between text-xs text-ink-muted">
+          <span>
+            {narrative?.generatedAt
+              ? `Generated ${new Date(narrative.generatedAt).toLocaleString()}`
+              : narrState === 'loading'
+                ? '…'
+                : 'Not yet generated'}
+          </span>
+          <button
+            onClick={onRegenerate}
+            disabled={narrState === 'loading'}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md hover:bg-surface-sunken text-ink-soft hover:text-ink transition disabled:opacity-50"
+          >
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M21 12a9 9 0 1 1-3.5-7.1L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+            {narrState === 'loading' ? 'Drafting…' : 'Regenerate'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -219,6 +219,16 @@ export class WeeklyAggregator {
     opts: { force?: boolean },
   ): Promise<WeeklyNarrative> {
     const { start, end } = isoWeekRange(isoYear, isoWeek);
+    // Skip narrative generation for the current (in-progress) week —
+    // meetings keep getting added all week, so any LLM output goes
+    // stale within hours and the compute is wasted. The view shows a
+    // friendly explanation in place of the Overview card. Even the
+    // Regenerate button (force=true) is gated because the answer
+    // would be obsolete by the time the user reads it.
+    const inProgress = end.getTime() > Date.now();
+    if (inProgress) {
+      return { narrative: '', decisions: [], generatedAt: '', fromCache: false };
+    }
     const meetings = this.deps.meetings.listInRange(
       start.toISOString(),
       end.toISOString(),
