@@ -80,6 +80,8 @@ export const IPC_CHANNELS = {
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',
+  weeklyGetStructured: 'weekly:get-structured',
+  weeklyGetNarrative: 'weekly:get-narrative',
   weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
