@@ -665,6 +665,26 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.weeklyAggregator.getWeek(w.year, w.week);
   });
 
+  // Fast path: structured data only (meetings + actions + decisions
+  // groups), no LLM call. Used by the WeeklyView's parallel-fetch
+  // pattern so the page paints immediately while the narrative is
+  // still being drafted.
+  ipc.handle(IPC_CHANNELS.weeklyGetStructured, async (_e, year: unknown, week: unknown) => {
+    const w = validWeek(year, week);
+    if (!w) throw new Error('invalid year/week');
+    return s.weeklyAggregator.getStructuredWeek(w.year, w.week);
+  });
+
+  // Slow path: returns the cached narrative if fresh, else triggers
+  // an LLM call. Pass force=true to bypass the cache (Regenerate).
+  ipc.handle(IPC_CHANNELS.weeklyGetNarrative, async (_e, year: unknown, week: unknown, force: unknown) => {
+    const w = validWeek(year, week);
+    if (!w) throw new Error('invalid year/week');
+    return s.weeklyAggregator.getOrGenerateNarrative(w.year, w.week, {
+      force: force === true,
+    });
+  });
+
   ipc.handle(IPC_CHANNELS.weeklyRegenerate, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
     const w = validWeek(year, week);
     if (!w) throw new Error('invalid year/week');

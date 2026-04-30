@@ -156,6 +156,24 @@ app.whenReady().then(async () => {
   // gone get marked 'orphaned' so the UI doesn't think they're still going.
   await recoverOrphans({ repo: recordingSessionsRepo });
 
+  // One-shot backfill: rows from earlier app versions can have started_at
+  // NULL because the built-in recorder filename format
+  // (recording-YYYYMMDD-HHMMSS-...) wasn't recognized at the time. Parse
+  // the timestamp out now so the Weekly view can group those meetings into
+  // the correct ISO week. Idempotent — only updates rows where
+  // started_at IS NULL and the filename actually parses.
+  {
+    const missing = meetings.findMissingStartedAt();
+    let filled = 0;
+    for (const m of missing) {
+      const parsed = parseAudioHijackFilename(m.audioPath);
+      if (!parsed.startedAtIso) continue;
+      meetings.setStartedAt(m.id, parsed.startedAtIso);
+      filled += 1;
+    }
+    if (filled > 0) logger.info('startup:backfilled-started-at', { filled });
+  }
+
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {

@@ -68,16 +68,26 @@ export class MeetingsRepo {
     return rows.map(rowToMeeting);
   }
 
-  /** Returns meetings whose started_at falls within [startIso, endIso].
-   *  Inclusive on both ends. Used by the weekly-summary view to gather
-   *  meetings for one ISO week. Soft-deleted rows are excluded. */
+  /** Returns meetings whose effective start time falls within
+   *  [startIso, endIso]. Inclusive on both ends. Used by the weekly-
+   *  summary view to gather meetings for one ISO week. Soft-deleted
+   *  rows are excluded.
+   *
+   *  Effective start time is `COALESCE(started_at, created_at)` —
+   *  the recording pipeline doesn't always set `started_at` (it's
+   *  populated from audio metadata via ffprobe and from the
+   *  `recording-YYYYMMDD-HHMMSS-...` filename when present, but
+   *  legacy rows + some Audio Hijack imports leave it NULL). Falling
+   *  back to `created_at` makes those rows visible in the weekly view
+   *  rather than silently disappearing — created_at lands within a
+   *  few minutes of the real start time in practice. */
   listInRange(startIso: string, endIso: string): MeetingRow[] {
     const rows = this.db.prepare(`
       SELECT * FROM meetings
       WHERE deleted_at IS NULL
-        AND started_at IS NOT NULL
-        AND started_at >= ? AND started_at <= ?
-      ORDER BY started_at ASC
+        AND COALESCE(started_at, created_at) >= ?
+        AND COALESCE(started_at, created_at) <= ?
+      ORDER BY COALESCE(started_at, created_at) ASC
     `).all(startIso, endIso) as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
@@ -156,5 +166,22 @@ export class MeetingsRepo {
    *  job that runs on startup + on a timer to empty the trash. */
   hardDelete(id: string): void {
     this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
+  }
+
+  /** All rows where `started_at` is unset. Used by the startup backfill
+   *  job that parses the timestamp out of the audio filename. */
+  findMissingStartedAt(): { id: string; audioPath: string }[] {
+    const rows = this.db.prepare(
+      'SELECT id, audio_path FROM meetings WHERE started_at IS NULL AND deleted_at IS NULL',
+    ).all() as Array<{ id: string; audio_path: string }>;
+    return rows.map((r) => ({ id: r.id, audioPath: r.audio_path }));
+  }
+
+  /** Set `started_at` directly. Backfill path only — normal inserts
+   *  pass startedAt through `insert()`. Touches updated_at so the
+   *  weekly aggregator's input-hash invalidation picks up the change. */
+  setStartedAt(id: string, startedAtIso: string): void {
+    this.db.prepare('UPDATE meetings SET started_at = ?, updated_at = ? WHERE id = ?')
+      .run(startedAtIso, new Date().toISOString(), id);
   }
 }

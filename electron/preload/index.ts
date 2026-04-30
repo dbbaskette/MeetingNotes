@@ -49,6 +49,8 @@ const IPC_CHANNELS = {
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',
   weeklyRegenerate: 'weekly:regenerate',
+  weeklyGetStructured: 'weekly:get-structured',
+  weeklyGetNarrative: 'weekly:get-narrative',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
 } as const;
@@ -219,16 +221,30 @@ const api = {
       }[]>,
   },
   weekly: {
-    /** Fetch the data needed to render the weekly view for an ISO
-     *  year/week. The first call for a given week (or any call after
-     *  the input meetings change) blocks while the LLM regenerates
-     *  the narrative; subsequent calls return cached data instantly. */
+    /** Fetch the full data needed to render the weekly view in a
+     *  single call. The first call for a given week (or any call
+     *  after the input meetings change) blocks while the LLM
+     *  regenerates the narrative; subsequent calls return cached
+     *  data instantly. Prefer the {getStructured, getNarrative}
+     *  pair for new code so the renderer can paint the structured
+     *  sections immediately and stream the narrative card in. */
     get: (year: number, week: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.weeklyGet, year, week) as Promise<unknown>,
+    /** Fast path: structured data only (meetings + action items +
+     *  range info). No LLM call — returns within tens of ms. Used
+     *  by the WeeklyView to paint the page before the narrative
+     *  finishes drafting. */
+    getStructured: (year: number, week: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyGetStructured, year, week) as Promise<unknown>,
+    /** Slow path: returns the cached narrative if the input hash
+     *  matches, otherwise triggers an LLM call (10–60 s typical).
+     *  Pass force=true to bypass the cache (used by the Regenerate
+     *  button). */
+    getNarrative: (year: number, week: number, force = false) =>
+      ipcRenderer.invoke(IPC_CHANNELS.weeklyGetNarrative, year, week, force) as Promise<unknown>,
     /** Force-clear the cache and regenerate the LLM narrative.
-     *  Useful when the user thinks the cached narrative is stale
-     *  even though the input hash matches (e.g. they tweaked a
-     *  per-meeting summary out of band). */
+     *  Equivalent to getNarrative(year, week, true). Kept for the
+     *  legacy callers that still use the single-call IPC. */
     regenerate: (year: number, week: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.weeklyRegenerate, year, week) as Promise<unknown>,
     /** Save the rendered Markdown to disk via a Save dialog.

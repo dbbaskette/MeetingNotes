@@ -115,46 +115,66 @@ export interface NarrativeOutput {
   decisions: string[];
 }
 
+/** What `getStructuredWeek` returns — everything the renderer needs
+ *  to lay out the page WITHOUT making an LLM call. Returned in tens
+ *  of ms so the page doesn't sit blank while the model thinks. */
+export interface WeeklyStructured {
+  isoYear: number;
+  isoWeek: number;
+  rangeStart: string;
+  rangeEnd: string;
+  totalDurationS: number;
+  meetings: WeeklyMeeting[];
+  openActionGroups: WeeklyOwnerGroup[];
+  openActionCount: number;
+  inProgress: boolean;
+  /** True when the cached narrative is still valid for the current
+   *  input set. Lets the renderer skip the spinner when the second
+   *  IPC call is going to return instantly anyway. */
+  hasFreshCache: boolean;
+}
+
+/** What `getOrGenerateNarrative` returns. */
+export interface WeeklyNarrative {
+  narrative: string;
+  decisions: string[];
+  generatedAt: string;
+  /** True when the result came from the cache (no LLM call made). */
+  fromCache: boolean;
+}
+
 export class WeeklyAggregator {
+  /** In-flight narrative generations, keyed by `${year}:${week}`.
+   *  Concurrent callers (e.g. the user clicking the prev arrow twice
+   *  before the first LLM call returns) share one promise so we
+   *  never queue duplicate chat requests behind LM Studio's
+   *  serial inference pipeline. Entries clear themselves on
+   *  resolution or rejection. */
+  private narrativeInFlight = new Map<string, Promise<WeeklyNarrative>>();
+
   constructor(private readonly deps: AggregatorDeps) {}
 
-  /** Returns the full week's data, generating + caching the narrative
-   *  when the input hash has changed since the last cached row. */
-  async getWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
+  /** Fast path: meetings + action items + decisions buckets, no
+   *  LLM call. Returns within ~10s of an action-item-heavy week and
+   *  much faster for a typical week. The renderer paints this
+   *  immediately, then a separate getOrGenerateNarrative() call
+   *  fills in the Overview card.
+   *
+   *  Idempotent + side-effect-free; safe to call repeatedly. */
+  async getStructuredWeek(isoYear: number, isoWeek: number): Promise<WeeklyStructured> {
     const { start, end } = isoWeekRange(isoYear, isoWeek);
     const startIso = start.toISOString();
     const endIso = end.toISOString();
-
     const meetings = this.deps.meetings.listInRange(startIso, endIso);
     const inProgress = end.getTime() > Date.now();
-
     const totalDurationS = meetings.reduce((s, m) => s + (m.durationS ?? 0), 0);
     const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
-
     const openActionGroups = this.collectOpenActions(meetings);
     const openActionCount = openActionGroups.reduce((s, g) => s + g.items.length, 0);
 
-    // Cache check. Hash inputs cover the things that should
-    // invalidate the narrative: the set of meetings (by id) and
-    // their last-modified time (so an edited title or fresh
-    // summary triggers regeneration).
     const inputHash = this.computeInputHash(meetings);
     const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
-
-    let narrative = '';
-    let decisions: string[] = [];
-    let generatedAt = '';
-
-    if (cached && cached.inputHash === inputHash) {
-      narrative = cached.narrative;
-      decisions = cached.decisions;
-      generatedAt = cached.generatedAt;
-    } else if (meetings.length > 0) {
-      const out = await this.regenerate(isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash);
-      narrative = out.narrative;
-      decisions = out.decisions;
-      generatedAt = out.generatedAt;
-    }
+    const hasFreshCache = !!(cached && cached.inputHash === inputHash);
 
     return {
       isoYear, isoWeek,
@@ -164,10 +184,92 @@ export class WeeklyAggregator {
       meetings: weeklyMeetings,
       openActionGroups,
       openActionCount,
-      narrative,
-      decisions,
-      generatedAt,
       inProgress,
+      hasFreshCache,
+    };
+  }
+
+  /** Slow path: returns the cached narrative if fresh, otherwise
+   *  triggers an LLM call. The two-call split (getStructuredWeek
+   *  first, then this) means the renderer can paint the layout
+   *  before this resolves. Pass `force: true` to bypass the cache
+   *  (used by the "Regenerate" button).
+   *
+   *  Concurrent calls for the same week share an in-flight promise —
+   *  the user can click the prev arrow twice before the first LLM
+   *  call returns and we won't queue a duplicate chat request behind
+   *  LM Studio's serial inference pipeline. */
+  async getOrGenerateNarrative(
+    isoYear: number,
+    isoWeek: number,
+    opts: { force?: boolean } = {},
+  ): Promise<WeeklyNarrative> {
+    const key = `${isoYear}:${isoWeek}:${opts.force ? 'force' : 'normal'}`;
+    const existing = this.narrativeInFlight.get(key);
+    if (existing) return existing;
+    const promise = this.runGetOrGenerate(isoYear, isoWeek, opts)
+      .finally(() => { this.narrativeInFlight.delete(key); });
+    this.narrativeInFlight.set(key, promise);
+    return promise;
+  }
+
+  private async runGetOrGenerate(
+    isoYear: number,
+    isoWeek: number,
+    opts: { force?: boolean },
+  ): Promise<WeeklyNarrative> {
+    const { start, end } = isoWeekRange(isoYear, isoWeek);
+    const meetings = this.deps.meetings.listInRange(
+      start.toISOString(),
+      end.toISOString(),
+    );
+    const inputHash = this.computeInputHash(meetings);
+    const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
+    if (!opts.force && cached && cached.inputHash === inputHash) {
+      return {
+        narrative: cached.narrative,
+        decisions: cached.decisions,
+        generatedAt: cached.generatedAt,
+        fromCache: true,
+      };
+    }
+    if (meetings.length === 0) {
+      return { narrative: '', decisions: [], generatedAt: '', fromCache: false };
+    }
+    if (opts.force) {
+      this.deps.weeklySummaries.clear(isoYear, isoWeek);
+    }
+    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
+    const openActionGroups = this.collectOpenActions(meetings);
+    const out = await this.regenerate(
+      isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash,
+    );
+    return {
+      narrative: out.narrative,
+      decisions: out.decisions,
+      generatedAt: out.generatedAt,
+      fromCache: false,
+    };
+  }
+
+  /** Returns the full week's data, generating + caching the narrative
+   *  when the input hash has changed since the last cached row.
+   *  Equivalent to getStructuredWeek + getOrGenerateNarrative
+   *  squashed into one call — kept for backward compat with the
+   *  weeklyGet IPC. New callers should prefer the split pair so
+   *  the renderer can show the structured view while the narrative
+   *  is still being drafted. */
+  async getWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
+    const [structured, narrative] = await Promise.all([
+      this.getStructuredWeek(isoYear, isoWeek),
+      this.getOrGenerateNarrative(isoYear, isoWeek),
+    ]);
+    const { hasFreshCache: _drop, ...structuredOut } = structured;
+    return {
+      ...structuredOut,
+      narrative: narrative.narrative,
+      decisions: narrative.decisions,
+      generatedAt: narrative.generatedAt,
     };
   }
 
