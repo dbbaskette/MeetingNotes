@@ -2,6 +2,61 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Color palette (light) ────────────────────────────────────────────────
+   CSS custom properties are referenced from tailwind.config.js so each
+   class like `bg-surface` / `text-ink-muted` stays the same across modes
+   and just resolves to a different RGB triple. Values are space-separated
+   RGB so Tailwind's `<alpha-value>` opacity modifiers keep working.
+
+   `ink-muted` was bumped from #78716c (~3.5:1 on surface, sub-AA) to
+   #57534e (~5.0:1) so muted body text clears WCAG AA. */
+:root {
+  --ink: 28 25 23;
+  --ink-soft: 68 64 60;
+  --ink-muted: 87 83 78;
+
+  --surface: 255 255 255;
+  --surface-sunken: 250 250 249;
+  --surface-border: 231 229 228;
+
+  --brand-indigo: 99 102 241;
+  --brand-violet: 139 92 246;
+
+  --status-ok: 22 163 74;
+  --status-ok-bg: 220 252 231;
+  --status-warn: 245 158 11;
+  --status-warn-bg: 254 243 199;
+  --status-warn-text: 146 64 14;
+  --status-processing: 99 102 241;
+  --status-processing-bg: 224 231 255;
+}
+
+/* ── Color palette (dark) ─────────────────────────────────────────────────
+   Mid-grey background instead of pitch black so the photographic banner
+   image and the gradient brand mark still ship cleanly. Status colors
+   are tuned brighter so amber/rose/green stay legible against the dark
+   surface. */
+.dark {
+  --ink: 245 245 244;
+  --ink-soft: 214 211 209;
+  --ink-muted: 168 162 158;
+
+  --surface: 24 24 28;
+  --surface-sunken: 17 17 21;
+  --surface-border: 51 51 56;
+
+  --brand-indigo: 129 140 248;
+  --brand-violet: 167 139 250;
+
+  --status-ok: 74 222 128;
+  --status-ok-bg: 6 78 59;
+  --status-warn: 251 191 36;
+  --status-warn-bg: 69 26 3;
+  --status-warn-text: 252 211 77;
+  --status-processing: 129 140 248;
+  --status-processing-bg: 30 27 75;
+}
+
 html,
 body,
 #root {
@@ -9,8 +64,14 @@ body,
 }
 body {
   font-family: theme('fontFamily.sans');
-  color: theme('colors.ink.DEFAULT');
-  background: theme('colors.surface.sunken');
+  color: rgb(var(--ink));
+  background: rgb(var(--surface-sunken));
+  /* Hint native form controls (scrollbars, range sliders, validation UI)
+     about which palette they're rendering against. */
+  color-scheme: light;
+}
+.dark body {
+  color-scheme: dark;
 }
 
 .input {
@@ -32,4 +93,20 @@ body {
 }
 button, a, input, select, textarea {
   -webkit-app-region: no-drag;
+}
+
+/* ── Focus-visible default ────────────────────────────────────────────────
+   Every interactive element gets a visible keyboard focus ring without
+   per-component churn. Components that need a custom ring color or
+   offset can override locally. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid rgb(var(--brand-indigo));
+  outline-offset: 2px;
+  border-radius: 4px;
 }

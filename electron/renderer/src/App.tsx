@@ -32,6 +32,22 @@ export function App(): JSX.Element {
   const [liveRecording, setLiveRecording] = useState<LiveRecording | null>(null);
   // Cmd+K global search palette state (#45). Opens over any view.
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Track the OS dark-mode preference and toggle the `dark` class on
+  // <html> so the CSS-variable palette in index.css swaps the whole UI.
+  // Class-based (not pure media-query) so a future Settings toggle can
+  // override the OS preference without re-architecting.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = (dark: boolean): void => {
+      document.documentElement.classList.toggle('dark', dark);
+    };
+    apply(mq.matches);
+    const onChange = (e: MediaQueryListEvent): void => apply(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {

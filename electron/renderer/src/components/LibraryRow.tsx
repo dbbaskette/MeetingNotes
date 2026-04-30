@@ -11,6 +11,7 @@
 // speakers/status/action-items side, and clicking the row opens detail.
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
+import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
 import { MeetingRowMenu } from './MeetingRowMenu';
 import { useToast } from './Toasts';
 import { api } from '../ipc/client';
@@ -244,22 +245,9 @@ const STAGE_CHIP_LABEL: Record<string, string> = {
   extracting: 'EXTRACTING',
 };
 
-// User-facing progress steps. Distinct from the internal PIPELINE_STAGES
-// ordering — users don't care that transcribing + diarizing run in parallel,
-// or that identifying is separate from diarizing. They just want "2 of 6".
-// We collapse parallel / gate stages into step numbers so the row reads as
-// linear progress, which matches user expectation even if it's a small lie
-// about the underlying state machine.
-const STAGE_STEP: Record<string, number> = {
-  transcribing: 1,
-  diarizing: 2,
-  merging: 3,
-  identifying: 4,
-  awaiting_speaker_id: 4, // still on step 4 — it's the gate after identify
-  summarizing: 5,
-  extracting: 6,
-};
-const TOTAL_STEPS = 6;
+// User-facing progress steps come from the shared pipeline-steps model.
+// The same model drives the StageTimeline in MeetingDetailView, so a row
+// that says "PROCESSING 2/5" matches step 2 of 5 in the detail view.
 
 function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
   const status = meeting.status;
@@ -320,12 +308,15 @@ function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
 
 function ProcessingChip({ meeting }: { meeting: Meeting }): JSX.Element {
   const elapsed = useElapsed(meeting.stageStartedAt, meeting.status === 'processing');
-  // Show linear progress N/6 instead of the internal stage name. Users don't
-  // want to learn "diarizing" vs "merging" vs "identifying" — they want to
-  // know "is this close to done". The detail view's StageTimeline still
-  // surfaces full stage-level detail for anyone who wants it.
-  const step = STAGE_STEP[meeting.pipelineStage];
-  const progress = step ? `${step}/${TOTAL_STEPS}` : STAGE_CHIP_LABEL[meeting.pipelineStage] ?? meeting.pipelineStage.toUpperCase();
+  // Show linear progress N/<total> instead of the internal stage name. Users
+  // don't want to learn "diarizing" vs "merging" vs "identifying" — they
+  // want to know "is this close to done". The detail view's StageTimeline
+  // surfaces the same user-step model from lib/pipeline-steps so the
+  // numbers agree across both surfaces.
+  const idx = stepIndexFor(meeting.pipelineStage);
+  const progress = idx >= 0
+    ? `${idx + 1}/${TOTAL_USER_STEPS}`
+    : STAGE_CHIP_LABEL[meeting.pipelineStage] ?? meeting.pipelineStage.toUpperCase();
   return (
     <span
       className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-status-processingBg text-status-processing shrink-0 flex items-center gap-1.5 tabular-nums"

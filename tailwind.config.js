@@ -1,26 +1,45 @@
 import typography from '@tailwindcss/typography';
 
+// Color tokens are sourced from CSS custom properties defined in
+// renderer/src/index.css (`:root` for light, `.dark` for dark). That keeps
+// the per-class JSX (e.g. `bg-surface`, `text-ink-muted`) identical across
+// modes — the variables swap; the classnames don't move. The `<alpha-value>`
+// suffix lets Tailwind opacity modifiers like `text-ink/70` keep working
+// against the custom properties.
+const cssVar = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./electron/renderer/index.html', './electron/renderer/src/**/*.{ts,tsx}'],
+  // Class-based so the App can opt-in via OS preference + user override
+  // rather than being forced by media query alone.
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        ink: { DEFAULT: '#1c1917', soft: '#44403c', muted: '#78716c' },
-        surface: { DEFAULT: '#ffffff', sunken: '#fafaf9', border: '#e7e5e4' },
+        ink: {
+          DEFAULT: cssVar('ink'),
+          soft: cssVar('ink-soft'),
+          muted: cssVar('ink-muted'),
+        },
+        surface: {
+          DEFAULT: cssVar('surface'),
+          sunken: cssVar('surface-sunken'),
+          border: cssVar('surface-border'),
+        },
         brand: {
-          indigo: '#6366f1',
-          violet: '#8b5cf6',
+          indigo: cssVar('brand-indigo'),
+          violet: cssVar('brand-violet'),
           gradient: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
         },
         status: {
-          ok: '#16a34a',
-          okBg: '#dcfce7',
-          warn: '#f59e0b',
-          warnBg: '#fef3c7',
-          warnText: '#92400e',
-          processing: '#6366f1',
-          processingBg: '#e0e7ff',
+          ok: cssVar('status-ok'),
+          okBg: cssVar('status-ok-bg'),
+          warn: cssVar('status-warn'),
+          warnBg: cssVar('status-warn-bg'),
+          warnText: cssVar('status-warn-text'),
+          processing: cssVar('status-processing'),
+          processingBg: cssVar('status-processing-bg'),
         },
       },
       fontFamily: {
