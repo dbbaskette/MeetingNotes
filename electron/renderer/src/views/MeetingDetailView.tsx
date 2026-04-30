@@ -7,6 +7,7 @@ import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import { parseTranscript, fmtTimestamp, type TranscriptLine } from '../lib/transcript-lines';
+import { shortcutMod } from '../lib/shortcut';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -252,6 +253,19 @@ function SpeakerIdControls({
   const preGate =
     stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing' ||
     stage === 'merging' || stage === 'identifying';
+
+  // Parked banner is the one moment in the pipeline that blocks on a human
+  // decision. On a narrow viewport the banner can sit below the fold past
+  // the back button and header — the user wonders why nothing's happening,
+  // then scrolls and finds the CTA they were supposed to see immediately.
+  // Centring it on first parked render keeps the gate from hiding.
+  const bannerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (placement === 'above-timeline' && parked && bannerRef.current) {
+      bannerRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [placement, parked]);
+
   if (placement === 'above-timeline' && !parked) return null;
   if (placement === 'below-timeline' && !preGate) return null;
 
@@ -269,7 +283,7 @@ function SpeakerIdControls({
 
   if (parked) {
     return (
-      <div className="px-5 py-4 border-b border-surface-border bg-amber-50 flex items-center gap-4">
+      <div ref={bannerRef} className="px-5 py-4 border-b border-surface-border bg-amber-50 flex items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-amber-900 text-sm">
             Paused — name your speakers before summarize runs
@@ -838,6 +852,9 @@ function ActionItemEditor({
             Delete
           </button>
         )}
+        <span className="text-[11px] text-ink-muted">
+          <kbd className="font-mono">{shortcutMod()}+Enter</kbd> to save · <kbd className="font-mono">Esc</kbd> to cancel
+        </span>
         <div className="flex-1" />
         <button
           onClick={onCancel}

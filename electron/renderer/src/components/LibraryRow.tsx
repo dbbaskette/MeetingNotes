@@ -269,7 +269,7 @@ function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
     // it's just an arrival waiting on a user action.
     return (
       <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-surface-sunken text-ink-muted border border-surface-border shrink-0">
-        UNPROCESSED
+        PENDING
       </span>
     );
   }

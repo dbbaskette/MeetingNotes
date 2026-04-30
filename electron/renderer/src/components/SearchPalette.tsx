@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
+import { shortcutMod } from '../lib/shortcut';
 
 export interface PaletteTarget {
   meetingId: string;
@@ -120,7 +121,7 @@ export function SearchPalette({
             <div className="px-4 py-6 text-xs text-ink-muted">
               Type at least 2 characters to search titles, summaries, and
               transcripts. <kbd className="font-mono">Enter</kbd> opens;
-              {' '}<kbd className="font-mono">⌘+Enter</kbd> jumps to the
+              {' '}<kbd className="font-mono">{shortcutMod()}+Enter</kbd> jumps to the
               matched timestamp.
             </div>
           )}
@@ -171,6 +172,9 @@ function ResultRow({
           <>
             <span className="opacity-60">·</span>
             <span className="font-mono tabular-nums">{fmtSnippetTimestamp(result.seconds)}</span>
+            <span className="opacity-50 text-[10px]">
+              <kbd className="font-mono">{shortcutMod()}+Enter</kbd> to jump
+            </span>
           </>
         )}
       </div>
