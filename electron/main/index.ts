@@ -41,6 +41,7 @@ import { createMeetingFolder } from './storage/meeting-folder.js';
 import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
+import { createSplash } from './splash.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -58,6 +59,10 @@ async function createWindow(): Promise<BrowserWindow> {
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#fafaf9',
+    // Don't show until the renderer has painted — paired with the splash
+    // window, the user sees the loading card the whole time and then the
+    // fully-rendered library, never an empty white frame.
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -70,6 +75,12 @@ async function createWindow(): Promise<BrowserWindow> {
 }
 
 app.whenReady().then(async () => {
+  // Splash first — paints within ~100 ms of dock-icon click and stays
+  // up through the rest of init (db open, repo construction, IPC
+  // registration, library scan, supervisors). Closed in tandem with
+  // the real window's ready-to-show below.
+  const splash = createSplash();
+
   const settingsDb = openDb(path.join(os.homedir(), 'Documents', 'MeetingNotes', 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
   const s = settings.getAll();
@@ -319,7 +330,20 @@ app.whenReady().then(async () => {
     weeklyAggregator,
   });
 
-  await createWindow();
+  const mainWin = await createWindow();
+  // Hand off from splash → main as soon as the renderer has painted.
+  // ready-to-show fires AFTER the first paint, so the user never sees
+  // a blank window. If the renderer fails to load, fall back to a
+  // 5 s timeout so the splash doesn't get stuck on screen.
+  let handedOff = false;
+  const handoff = (): void => {
+    if (handedOff) return;
+    handedOff = true;
+    if (!mainWin.isDestroyed()) mainWin.show();
+    splash.close();
+  };
+  mainWin.once('ready-to-show', handoff);
+  setTimeout(handoff, 5000);
 
   let shuttingDown = false;
   app.on('before-quit', (e) => {
