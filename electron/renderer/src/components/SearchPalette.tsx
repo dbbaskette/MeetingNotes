@@ -13,6 +13,10 @@ import { shortcutMod } from '../lib/shortcut';
 
 export interface PaletteTarget {
   meetingId: string;
+  /** Title from the search hit — used as a hint so the detail view's
+   *  skeleton can render with the right title before meetings:get
+   *  resolves. */
+  title?: string;
   /** Optional — when present, open the meeting + seek the audio to
    *  this timestamp (the Cmd+Enter path). */
   seekSeconds?: number;
@@ -69,6 +73,7 @@ export function SearchPalette({
   function openResult(r: SearchResult, withTimestamp: boolean): void {
     onOpenMeeting({
       meetingId: r.meetingId,
+      title: r.title,
       ...(withTimestamp && r.seconds !== undefined ? { seekSeconds: r.seconds } : {}),
     });
     onClose();

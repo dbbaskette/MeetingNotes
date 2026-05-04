@@ -42,6 +42,7 @@ import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
 import { createSplash } from './splash.js';
+import { installAppMenu } from './menu.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -80,6 +81,12 @@ app.whenReady().then(async () => {
   // registration, library scan, supervisors). Closed in tandem with
   // the real window's ready-to-show below.
   const splash = createSplash();
+
+  // Custom app menu (File → New Recording, View → Library/Weekly/Settings,
+  // global Cmd+R / Cmd+K / Cmd+, accelerators). Items emit named menu
+  // actions to all renderer windows; AppInner listens via the preload
+  // bridge and routes them to local state changes.
+  installAppMenu();
 
   const settingsDb = openDb(path.join(os.homedir(), 'Documents', 'MeetingNotes', 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);

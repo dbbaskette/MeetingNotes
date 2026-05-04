@@ -712,6 +712,96 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.llmDetectProviders, async (): Promise<ProviderAvailability> => {
     return detectProviders();
   });
+
+  // Settings "Test connection" buttons. Both probes time out at 3 s
+  // so a misconfigured URL fails fast instead of hanging the form.
+  ipc.handle(IPC_CHANNELS.sttProbe, async (
+    _e, url: unknown,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (typeof url !== 'string' || !url) return { ok: false, error: 'invalid url' };
+    try {
+      const resp = await fetch(`${url.replace(/\/$/, '')}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status} from /health` };
+      const text = await resp.text();
+      try {
+        const parsed = JSON.parse(text) as { status?: unknown };
+        if (parsed?.status !== 'ok') {
+          return { ok: false, error: `/health returned unexpected body — is this whisper-server?` };
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, error: '/health returned non-JSON — likely a different server on this port' };
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg.includes('ECONNREFUSED') ? 'connection refused' : msg };
+    }
+  });
+
+  ipc.handle(IPC_CHANNELS.llmProbe, async (
+    _e, url: unknown,
+  ): Promise<{ ok: true; models: string[] } | { ok: false; error: string }> => {
+    if (typeof url !== 'string' || !url) return { ok: false, error: 'invalid url' };
+    try {
+      const resp = await fetch(`${url.replace(/\/$/, '')}/v1/models`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status} from /v1/models` };
+      const body = (await resp.json().catch(() => null)) as
+        | { data?: { id?: string }[] }
+        | null;
+      const models = (body?.data ?? [])
+        .map((m) => m.id ?? '')
+        .filter((id) => id.length > 0);
+      return { ok: true, models };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg.includes('ECONNREFUSED') ? 'connection refused' : msg };
+    }
+  });
+
+  // Drag-and-drop import. Copies dropped audio files into audioWatchPath
+  // (the chokidar-watched folder). The existing watcher then picks them
+  // up as new pending meetings — no new pipeline code required.
+  ipc.handle(IPC_CHANNELS.meetingsImportDropped, async (
+    _e, paths: unknown,
+  ): Promise<{ imported: number; skipped: { path: string; reason: string }[] }> => {
+    const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : [];
+    const watchDir = s.settings.get('audioWatchPath');
+    fs.mkdirSync(watchDir, { recursive: true });
+    const allowed = new Set(['.m4a', '.mp3', '.wav', '.aac', '.flac']);
+    let imported = 0;
+    const skipped: { path: string; reason: string }[] = [];
+    for (const src of list) {
+      try {
+        const ext = path.extname(src).toLowerCase();
+        if (!allowed.has(ext)) {
+          skipped.push({ path: src, reason: `unsupported format ${ext || '(none)'}` });
+          continue;
+        }
+        if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
+          skipped.push({ path: src, reason: 'not a file' });
+          continue;
+        }
+        // Avoid clobbering: if a same-named file already exists in the
+        // watch folder, append a short timestamp to disambiguate.
+        const base = path.basename(src);
+        let dest = path.join(watchDir, base);
+        if (fs.existsSync(dest)) {
+          const stem = path.basename(base, ext);
+          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+          dest = path.join(watchDir, `${stem}-${stamp}${ext}`);
+        }
+        fs.copyFileSync(src, dest);
+        imported += 1;
+      } catch (e) {
+        skipped.push({ path: src, reason: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return { imported, skipped };
+  });
 }
 
 // Extract a ~n-char window around an index, expanded to word boundaries

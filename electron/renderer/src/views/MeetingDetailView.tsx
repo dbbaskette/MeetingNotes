@@ -45,7 +45,7 @@ interface MeetingDetail {
 // LibraryRow chip and the StageTimeline below agree on counts and labels.
 
 export function MeetingDetailView({
-  id, onBack, seekSeconds,
+  id, onBack, seekSeconds, hint,
 }: {
   id: string;
   onBack: () => void;
@@ -53,6 +53,13 @@ export function MeetingDetailView({
    *  this time once it's loadable and switch to the Transcript tab so
    *  the matched line is visible. (#42 / #45) */
   seekSeconds?: number;
+  /** Row hints captured at click-time so the loading skeleton can
+   *  paint with real values (title, current pipeline stage) instead
+   *  of "Loading…" placeholders. The full meetings:get IPC pulls
+   *  hundreds of KB of transcript markdown for long meetings — the
+   *  hint lets us paint the chrome immediately and only the body
+   *  shows skeleton bars while the IPC resolves. */
+  hint?: { title?: string; pipelineStage?: string; status?: string };
 }): JSX.Element {
   const [m, setM] = useState<MeetingDetail | null>(null);
   const [tab, setTab] = useState<Tab>('summary');
@@ -113,18 +120,7 @@ export function MeetingDetailView({
   }, [id, kick]);
 
   if (!m)
-    return (
-      <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-          <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm">
-            ← Library
-          </button>
-          <div className="flex-1 text-center font-semibold text-ink-muted">Loading…</div>
-          <div className="w-[68px]" />
-        </div>
-        <div className="p-8 text-ink-muted">Loading…</div>
-      </div>
-    );
+    return <DetailSkeleton hint={hint} onBack={onBack} />;
 
   return (
     <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
@@ -202,6 +198,120 @@ export function MeetingDetailView({
           onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
           className="w-full"
         />
+      </div>
+    </div>
+  );
+}
+
+/** Layout-matching loading state. Paints the title bar, a static
+ *  approximation of the StageTimeline (every chip in pending state),
+ *  and skeleton bars in the center pane. Replaces the old double
+ *  "Loading…" placeholder which felt like the app had frozen.
+ *
+ *  When a hint is provided (Library row click, search palette hit),
+ *  we render the real title and — if pipelineStage is known —
+ *  highlight the current stage chip so the user perceives this as
+ *  "the page is here" not "we're starting from scratch." */
+function DetailSkeleton({
+  hint, onBack,
+}: {
+  hint?: { title?: string; pipelineStage?: string; status?: string };
+  onBack: () => void;
+}): JSX.Element {
+  const stageIdx = hint?.pipelineStage ? stepIndexFor(hint.pipelineStage) : -1;
+  const isFullyDone = hint?.pipelineStage === 'done';
+  const showLiveStage = hint?.status === 'processing';
+  return (
+    <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
+      {/* Title bar — uses real title when available */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
+          ← Library
+        </button>
+        <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
+          {hint?.title ?? (
+            <span className="inline-block h-4 w-48 bg-stone-200/80 rounded animate-pulse align-middle" />
+          )}
+        </div>
+        <div className="w-[68px]" />
+      </div>
+
+      {/* Stage timeline approximation */}
+      <div className="flex items-center gap-1 px-5 py-3 border-b border-surface-border bg-surface-sunken overflow-x-auto">
+        {USER_STEPS.map((step, i) => {
+          const isDone = !isFullyDone && stageIdx > i;
+          const isCurrent = !isFullyDone && stageIdx === i && showLiveStage;
+          const isAllDone = isFullyDone;
+          return (
+            <div key={step} className="flex items-center gap-1 shrink-0">
+              <div className={`
+                flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums
+                ${isAllDone || isDone ? 'bg-status-okBg/70 text-status-ok' : ''}
+                ${isCurrent ? 'bg-brand-indigo text-white shadow-sm' : ''}
+                ${!isCurrent && !isDone && !isAllDone ? 'bg-transparent text-ink-muted' : ''}
+              `}>
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  isCurrent ? 'bg-white/70 animate-pulse'
+                  : (isAllDone || isDone) ? 'bg-status-ok/40'
+                  : 'bg-ink-muted/40'
+                }`} />
+                <span>{step}</span>
+              </div>
+              {i < USER_STEPS.length - 1 && (
+                <div className={`w-3 h-px ${isAllDone || isDone ? 'bg-status-ok/40' : 'bg-surface-border'}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Three-column body — skeletons sized to match the real layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
+        {/* Left rail */}
+        <div className="order-2 lg:order-first border-r border-surface-border p-4 space-y-4 animate-pulse">
+          <div className="space-y-1.5">
+            <div className="h-2 w-12 bg-stone-200/70 rounded" />
+            <div className="h-4 w-32 bg-stone-200/80 rounded" />
+          </div>
+          <div className="space-y-1.5">
+            <div className="h-2 w-10 bg-stone-200/70 rounded" />
+            <div className="h-3 w-24 bg-stone-200/80 rounded" />
+          </div>
+          <div className="space-y-1.5">
+            <div className="h-2 w-14 bg-stone-200/70 rounded" />
+            <div className="h-3 w-28 bg-stone-200/80 rounded" />
+            <div className="h-3 w-20 bg-stone-200/80 rounded" />
+          </div>
+        </div>
+        {/* Center pane */}
+        <div className="order-1 lg:order-none p-6">
+          <div className="flex gap-4 mb-6">
+            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
+          </div>
+          <div className="space-y-2.5 animate-pulse">
+            <div className="h-3 bg-stone-200/80 rounded w-[96%]" />
+            <div className="h-3 bg-stone-200/80 rounded w-[90%]" />
+            <div className="h-3 bg-stone-200/80 rounded w-[94%]" />
+            <div className="h-3 bg-stone-200/80 rounded w-[40%] mb-3" />
+            <div className="h-3 bg-stone-200/80 rounded w-[88%]" />
+            <div className="h-3 bg-stone-200/80 rounded w-[92%]" />
+            <div className="h-3 bg-stone-200/80 rounded w-[55%]" />
+          </div>
+        </div>
+        {/* Right rail */}
+        <div className="order-3 border-l border-surface-border p-4 space-y-3 animate-pulse">
+          <div className="h-2 w-16 bg-stone-200/70 rounded" />
+          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
+          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
+          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
+        </div>
+      </div>
+
+      {/* Audio player placeholder */}
+      <div className="sticky bottom-0 bg-surface-sunken border-t border-surface-border px-5 py-4">
+        <div className="h-8 bg-stone-200/60 rounded-md animate-pulse" />
       </div>
     </div>
   );

@@ -18,7 +18,13 @@ import { api } from '../ipc/client';
 import type { LiveRecording } from '../App';
 
 interface Props {
-  onOpen: (id: string) => void;
+  /** When opening a meeting, pass through hint data so the detail
+   *  view's skeleton can paint with the right title + stage instantly,
+   *  before the full meetings:get IPC resolves. */
+  onOpen: (
+    id: string,
+    hint: { title?: string; pipelineStage?: string; status?: string },
+  ) => void;
   onSettings: () => void;
   onWeekly: () => void;
   /** Recording state is owned by App (so it survives view navigation).
@@ -39,10 +45,32 @@ export function LibraryView({
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
   const toast = useToast();
 
+  // Conditional polling. The list only changes when the user is recording
+  // or the pipeline is moving something through processing/awaiting_user/
+  // pending. With 47 done meetings sitting around, the old "poll every 3 s
+  // forever" path was a battery drain (every tick re-runs the JOIN over
+  // speakers + the per-meeting action_items aggregate in handlers.ts).
+  // Now we poll while there's actual motion, refresh once on window
+  // visibility regain, and otherwise stay quiet until the user does
+  // something that should re-fetch (e.g. processSelected below).
+  const hasMotion = useMemo(
+    () => !!liveRecording || meetings.some((m) =>
+      m.status === 'pending' || m.status === 'processing' || m.status === 'awaiting_user',
+    ),
+    [meetings, liveRecording],
+  );
+  useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
-    void refresh();
+    if (!hasMotion) return;
     const t = setInterval(refresh, 3000);
     return () => clearInterval(t);
+  }, [refresh, hasMotion]);
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
   // From the user's perspective `awaiting_user` is just "still in flight"
@@ -264,7 +292,11 @@ export function LibraryView({
               <LibraryRow
                 key={m.id}
                 meeting={m}
-                onOpen={onOpen}
+                onOpen={(id) => onOpen(id, {
+                  title: m.title,
+                  pipelineStage: m.pipelineStage,
+                  status: m.status,
+                })}
                 onChanged={() => void refresh()}
                 checked={m.status === 'pending' ? selected.has(m.id) : undefined}
                 onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
@@ -343,9 +375,10 @@ function LibraryEmpty({
     <div className="text-center py-16">
       <div className="text-4xl mb-4 opacity-40">◈</div>
       <div className="text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-        Hit <span className="font-semibold text-ink">Record</span> to start a new session,
-        or drop an audio file in{' '}
-        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">~/Music/MeetingNotes</code>.
+        Hit <span className="font-semibold text-ink">Record</span>{' '}
+        <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">⌘R</kbd>{' '}
+        to start a new session,
+        or drag an audio file (.m4a, .mp3, .wav) onto this window.
       </div>
     </div>
   );

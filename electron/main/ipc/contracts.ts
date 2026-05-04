@@ -85,4 +85,17 @@ export const IPC_CHANNELS = {
   weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
+  /** Probe a custom STT URL for whisper-server's /health JSON. Used
+   *  by the Settings "Test" button so users can validate their
+   *  endpoint before walking into a 5–15 min pipeline run with a
+   *  misconfigured server. */
+  sttProbe: 'stt:probe',
+  /** Probe a custom LLM URL for /v1/models. Returns the loaded
+   *  model ids, or an error string. Same Settings "Test" button. */
+  llmProbe: 'llm:probe',
+  /** Drag-and-drop import: copies the given absolute file paths
+   *  into audioWatchPath (the chokidar-watched folder), where the
+   *  existing watcher picks them up as new pending meetings.
+   *  Returns the number imported and any per-file errors. */
+  meetingsImportDropped: 'meetings:import-dropped',
 } as const;

@@ -53,6 +53,9 @@ const IPC_CHANNELS = {
   weeklyGetNarrative: 'weekly:get-narrative',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
+  sttProbe: 'stt:probe',
+  llmProbe: 'llm:probe',
+  meetingsImportDropped: 'meetings:import-dropped',
 } as const;
 
 const api = {
@@ -89,6 +92,15 @@ const api = {
     // an extra meetings.get fetch.
     saveSummary: (id: string, markdown: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsSaveSummary, id, markdown) as Promise<string>,
+    /** Import audio files dropped into the window. Copies them into
+     *  audioWatchPath; the chokidar watcher picks them up as new
+     *  pending meetings. Returns counts so the renderer can toast
+     *  "Imported 3 of 5 (2 unsupported)." */
+    importDropped: (paths: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsImportDropped, paths) as Promise<{
+        imported: number;
+        skipped: { path: string; reason: string }[];
+      }>,
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
@@ -265,6 +277,21 @@ const api = {
         lmStudio: { binary: boolean; running: boolean };
         ollama: { binary: boolean; running: boolean };
       }>,
+    /** Probe a chat-completions endpoint. Returns ok with the loaded
+     *  model ids, or err with a human-readable message. */
+    probe: (url: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.llmProbe, url) as Promise<
+        | { ok: true; models: string[] }
+        | { ok: false; error: string }
+      >,
+  },
+  stt: {
+    /** Probe a whisper-server endpoint by parsing /health JSON. */
+    probe: (url: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.sttProbe, url) as Promise<
+        | { ok: true }
+        | { ok: false; error: string }
+      >,
   },
   permissions: {
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{
@@ -278,6 +305,15 @@ const api = {
     const wrapped = (_e: unknown, ...args: unknown[]) => handler(...args);
     ipcRenderer.on(channel, wrapped);
     return () => ipcRenderer.off(channel, wrapped);
+  },
+  /** Subscribe to custom application-menu actions. The main process
+   *  emits action names like 'toggle-record', 'view-library',
+   *  'open-search', etc. on the 'mn:menu-action' channel. Returns
+   *  an unsubscribe callback. */
+  onMenuAction: (cb: (action: string) => void) => {
+    const wrapped = (_e: unknown, action: string): void => cb(action);
+    ipcRenderer.on('mn:menu-action', wrapped);
+    return () => ipcRenderer.off('mn:menu-action', wrapped);
   },
 };
 

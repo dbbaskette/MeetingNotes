@@ -25,5 +25,10 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('meetings:get');
     expect(channels).toContain('export:run');
     expect(channels).toContain('models:list');
+    // New endpoints from the UX-review pass: Settings "Test connection"
+    // probes (one per LLM/STT side) and the drag-and-drop import handler.
+    expect(channels).toContain('stt:probe');
+    expect(channels).toContain('llm:probe');
+    expect(channels).toContain('meetings:import-dropped');
   });
 });

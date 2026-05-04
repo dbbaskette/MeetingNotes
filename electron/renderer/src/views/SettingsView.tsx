@@ -90,11 +90,14 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         </div>
       </Field>
       <Field label="LM Studio URL (chat / LLM)">
-        <input
-          value={s.lmStudioUrl}
-          onChange={(e) => update('lmStudioUrl', e.target.value)}
-          className="input"
-        />
+        <div className="flex gap-2">
+          <input
+            value={s.lmStudioUrl}
+            onChange={(e) => update('lmStudioUrl', e.target.value)}
+            className="input flex-1"
+          />
+          <TestButton kind="llm" url={s.lmStudioUrl} />
+        </div>
         <div className="text-xs text-ink-muted mt-1">
           Default for the &lsquo;external&rsquo; provider. Managed providers use their own
           ports (1234 for LM Studio, 11434 for Ollama).
@@ -118,11 +121,14 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         </div>
       </Field>
       <Field label="STT URL (whisper.cpp server)">
-        <input
-          value={s.sttUrl}
-          onChange={(e) => update('sttUrl', e.target.value)}
-          className="input"
-        />
+        <div className="flex gap-2">
+          <input
+            value={s.sttUrl}
+            onChange={(e) => update('sttUrl', e.target.value)}
+            className="input flex-1"
+          />
+          <TestButton kind="stt" url={s.sttUrl} />
+        </div>
         <div className="text-xs text-ink-muted mt-1">
           Default http://127.0.0.1:8080. MeetingNotes auto-launches whisper-server
           on first transcription and shuts it down after 10 minutes of inactivity.
@@ -292,5 +298,76 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
       <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">{label}</div>
       {children}
     </label>
+  );
+}
+
+/** Inline "Test" button that probes the given URL and shows the result.
+ *
+ *  Three states:
+ *    idle  — unstyled "Test" button, click to probe
+ *    busy  — disabled "Testing…"
+ *    done  — green ✓ "reachable, N models" / red ✗ "connection refused"
+ *
+ *  Surfaces config errors at edit time instead of letting them bite the
+ *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
+ *  so the row doesn't accumulate stale state as the user keeps editing. */
+function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<
+    | { ok: true; detail?: string }
+    | { ok: false; error: string }
+    | null
+  >(null);
+
+  useEffect(() => {
+    if (!result) return;
+    const t = window.setTimeout(() => setResult(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [result]);
+
+  // Editing the URL invalidates a stale result instantly — cleaner than
+  // showing ✓ next to a URL the user just changed.
+  useEffect(() => { setResult(null); }, [url]);
+
+  async function probe(): Promise<void> {
+    setBusy(true); setResult(null);
+    try {
+      if (kind === 'llm') {
+        const r = await api.llm.probe(url);
+        setResult(r.ok
+          ? { ok: true, detail: `${r.models.length} model${r.models.length === 1 ? '' : 's'} loaded` }
+          : { ok: false, error: r.error });
+      } else {
+        const r = await api.stt.probe(url);
+        setResult(r.ok ? { ok: true } : { ok: false, error: r.error });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void probe()}
+        disabled={busy || !url}
+        className="text-xs font-semibold px-3 py-1.5 rounded-md border border-surface-border
+                   bg-surface hover:border-ink/30 hover:text-ink text-ink-muted
+                   disabled:opacity-50 disabled:cursor-not-allowed transition shrink-0"
+      >
+        {busy ? 'Testing…' : 'Test'}
+      </button>
+      {result?.ok && (
+        <span className="text-xs text-status-ok font-medium whitespace-nowrap">
+          ✓ reachable{result.detail ? ` · ${result.detail}` : ''}
+        </span>
+      )}
+      {result && !result.ok && (
+        <span className="text-xs text-rose-600 truncate max-w-[16rem]" title={result.error}>
+          ✗ {result.error}
+        </span>
+      )}
+    </div>
   );
 }
