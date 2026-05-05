@@ -247,7 +247,7 @@ After that, the model is cached at `~/.cache/huggingface/hub/` and inference nee
 ./scripts/rebuild.sh --skip-audio-tap # skip the Swift helper
 ./scripts/rebuild.sh --app-only       # both flags above — just the Electron app + packaging (~9 min)
 
-open release/MeetingNotes-0.1.0-arm64.dmg   # install the result
+open release/MeetingNotes-0.2.0-arm64.dmg   # install the result
 ```
 
 Three artifacts get compiled:
