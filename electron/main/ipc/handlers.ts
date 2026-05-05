@@ -762,6 +762,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
   });
 
+  // Pipeline queue controls. Pause/resume don't touch DB rows — they
+  // just gate the runner. clear flips queued meetings back to 'pending'
+  // so the user can see them and decide whether to re-process.
+  ipc.handle(IPC_CHANNELS.pipelineStatus, () => s.pipeline.getStatus());
+  ipc.handle(IPC_CHANNELS.pipelinePause, () => { s.pipeline.pause(); });
+  ipc.handle(IPC_CHANNELS.pipelineResume, () => { s.pipeline.resume(); });
+  ipc.handle(IPC_CHANNELS.pipelineClear, () => {
+    const cleared = s.pipeline.clearQueue();
+    for (const id of cleared) {
+      try { s.meetings.updateStatus(id, 'pending'); } catch { /* best-effort */ }
+    }
+    return { cleared };
+  });
+
   // Transcript export. Renderer hands us the already-formatted content
   // plus the desired filename + format; we show the native save dialog
   // (filtered to the right extension) and write the file. Keeps fs

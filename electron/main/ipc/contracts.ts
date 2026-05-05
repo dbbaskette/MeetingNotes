@@ -103,4 +103,19 @@ export const IPC_CHANNELS = {
    *  through), main does the dialog + file write so we don't ship
    *  raw fs access into the renderer. */
   transcriptExport: 'transcript:export',
+  /** Pause the queue runner — current meeting finishes; nothing new
+   *  starts until resume. Idempotent. */
+  pipelinePause: 'pipeline:pause',
+  /** Resume the queue runner. Idempotent. */
+  pipelineResume: 'pipeline:resume',
+  /** Drop all queued (not-yet-started) meetings. Returns the IDs that
+   *  were cleared so the renderer can flip their status back to
+   *  'pending' for the user. */
+  pipelineClear: 'pipeline:clear',
+  /** Snapshot of paused / currentId / queueLength. Renderer polls this
+   *  alongside its meetings refresh. */
+  pipelineStatus: 'pipeline:status',
+  /** Push channel: main broadcasts a new PipelineStatus on every queue
+   *  state change (enqueue, dequeue, pause, resume, clear). */
+  pipelineStatusEvent: 'pipeline:status-change',
 } as const;

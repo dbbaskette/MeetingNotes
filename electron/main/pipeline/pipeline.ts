@@ -16,16 +16,35 @@ export interface PipelineDeps {
   stages: Record<WorkStage, StageHandler>;
 }
 
+/** Reported queue state for the renderer's pause/resume/clear UI. */
+export interface PipelineStatus {
+  /** True when pause() has been called and tick() is refusing to pull
+   *  the next item. The currently-in-flight meeting still finishes. */
+  paused: boolean;
+  /** ID of the meeting currently being worked on, or null if idle. */
+  currentId: string | null;
+  /** Number of meetings sitting in the queue, not yet started. */
+  queueLength: number;
+  /** IDs of queued (not-yet-started) meetings, in order. */
+  queueIds: string[];
+}
+
+export type PipelineStatusListener = (s: PipelineStatus) => void;
+
 export class Pipeline {
   private queue: string[] = [];
   private running = false;
   private draining = false;
+  private paused = false;
+  private currentId: string | null = null;
+  private readonly statusListeners: Set<PipelineStatusListener> = new Set();
 
   constructor(private readonly deps: PipelineDeps) {}
 
   enqueue(meetingId: string): void {
     if (this.draining) return;
     if (!this.queue.includes(meetingId)) this.queue.push(meetingId);
+    this.notify();
     void this.tick();
   }
 
@@ -33,10 +52,68 @@ export class Pipeline {
     await this.process(meetingId);
   }
 
-  /** Stop accepting new work; lets the in-flight stage finish. */
+  /** Stop accepting new work; lets the in-flight stage finish. Used at
+   *  app shutdown — different from pause(), which is user-initiated and
+   *  reversible. */
   drain(): void {
     this.draining = true;
     this.queue = [];
+    this.notify();
+  }
+
+  /** Tell the runner to stop pulling new items off the queue. The
+   *  currently in-flight meeting keeps going to completion (or failure)
+   *  — we deliberately don't try to abort mid-stage so that long
+   *  whisper / pyannote calls aren't wasted. */
+  pause(): void {
+    if (this.paused) return;
+    this.paused = true;
+    this.notify();
+  }
+
+  /** Resume processing the queue from where pause() left it. */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.notify();
+    void this.tick();
+  }
+
+  /** Drop all queued (not-yet-started) meetings. Their status stays
+   *  'processing' on disk if they had it — caller can flip them back
+   *  to 'pending' via the IPC layer (which also handles the audit
+   *  trail). Returns the IDs that were cleared so the caller can
+   *  emit a single targeted status update.
+   *
+   *  The currently in-flight meeting is NOT touched. */
+  clearQueue(): string[] {
+    const dropped = this.queue.slice();
+    this.queue = [];
+    if (dropped.length > 0) this.notify();
+    return dropped;
+  }
+
+  getStatus(): PipelineStatus {
+    return {
+      paused: this.paused,
+      currentId: this.currentId,
+      queueLength: this.queue.length,
+      queueIds: this.queue.slice(),
+    };
+  }
+
+  /** Subscribe to queue-state changes. Called every time the queue,
+   *  pause flag, or current-meeting pointer changes. */
+  onStatusChange(cb: PipelineStatusListener): () => void {
+    this.statusListeners.add(cb);
+    return () => { this.statusListeners.delete(cb); };
+  }
+
+  private notify(): void {
+    const status = this.getStatus();
+    for (const cb of this.statusListeners) {
+      try { cb(status); } catch { /* listener errors must not break the pipeline */ }
+    }
   }
 
   private async tick(): Promise<void> {
@@ -44,7 +121,10 @@ export class Pipeline {
     this.running = true;
     try {
       while (this.queue.length > 0) {
+        if (this.paused) break;
         const id = this.queue.shift()!;
+        this.currentId = id;
+        this.notify();
         try {
           await this.process(id);
         } catch (e) {
@@ -57,10 +137,14 @@ export class Pipeline {
             this.deps.ctx.meetings.updateStatus(id, 'failed');
           }
           this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
+        } finally {
+          this.currentId = null;
+          this.notify();
         }
       }
     } finally {
       this.running = false;
+      this.notify();
     }
   }
 

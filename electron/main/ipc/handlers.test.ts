@@ -15,7 +15,13 @@ describe('registerIpcHandlers', () => {
       appEnumerator: { list: async () => [] },
       helperPath: '/bin/meeting-notes-tap',
       roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
-      pipeline: { enqueue: () => {} },
+      pipeline: {
+        enqueue: () => {},
+        getStatus: () => ({ paused: false, currentId: null, queueLength: 0, queueIds: [] }),
+        pause: () => {},
+        resume: () => {},
+        clearQueue: () => [],
+      },
       exporters: {},
       libraryRoot: '/tmp',
     };
@@ -31,5 +37,10 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('llm:probe');
     expect(channels).toContain('meetings:import-dropped');
     expect(channels).toContain('transcript:export');
+    // Queue controls (pause / resume / clear / status snapshot).
+    expect(channels).toContain('pipeline:pause');
+    expect(channels).toContain('pipeline:resume');
+    expect(channels).toContain('pipeline:clear');
+    expect(channels).toContain('pipeline:status');
   });
 });

@@ -57,6 +57,11 @@ const IPC_CHANNELS = {
   llmProbe: 'llm:probe',
   meetingsImportDropped: 'meetings:import-dropped',
   transcriptExport: 'transcript:export',
+  pipelinePause: 'pipeline:pause',
+  pipelineResume: 'pipeline:resume',
+  pipelineClear: 'pipeline:clear',
+  pipelineStatus: 'pipeline:status',
+  pipelineStatusEvent: 'pipeline:status-change',
 } as const;
 
 const api = {
@@ -279,6 +284,42 @@ const api = {
         path: string | null;
         markdown: string;
       }>,
+  },
+  pipeline: {
+    /** Snapshot of current queue state. Cheap; safe to call every
+     *  few seconds alongside the library refresh. */
+    status: () => ipcRenderer.invoke(IPC_CHANNELS.pipelineStatus) as Promise<{
+      paused: boolean;
+      currentId: string | null;
+      queueLength: number;
+      queueIds: string[];
+    }>,
+    pause: () => ipcRenderer.invoke(IPC_CHANNELS.pipelinePause) as Promise<void>,
+    resume: () => ipcRenderer.invoke(IPC_CHANNELS.pipelineResume) as Promise<void>,
+    /** Drop everything that hasn't started yet. Returns the IDs that
+     *  were cleared so the caller can flip their DB rows back to
+     *  'pending' (the IPC handler does that for us). */
+    clear: () => ipcRenderer.invoke(IPC_CHANNELS.pipelineClear) as Promise<{
+      cleared: string[];
+    }>,
+    /** Subscribe to push notifications for queue state changes.
+     *  Avoids polling — the LibraryView refreshes the moment a
+     *  meeting moves from queue to current, finishes, etc. */
+    onStatusChange: (cb: (s: {
+      paused: boolean;
+      currentId: string | null;
+      queueLength: number;
+      queueIds: string[];
+    }) => void) => {
+      const wrapped = (_e: unknown, payload: {
+        paused: boolean;
+        currentId: string | null;
+        queueLength: number;
+        queueIds: string[];
+      }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.pipelineStatusEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.pipelineStatusEvent, wrapped);
+    },
   },
   llm: {
     /** Probe whether `lms` and `ollama` CLIs are installed and

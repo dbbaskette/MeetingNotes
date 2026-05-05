@@ -273,6 +273,15 @@ app.whenReady().then(async () => {
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
+  // Broadcast queue state changes to all renderer windows so the
+  // pause/resume/clear UI in the LibraryView reflects what's
+  // happening without a polling timer.
+  pipeline.onStatusChange((status) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.pipelineStatusEvent, status);
+    }
+  });
+
   // Trash purge (UX rec #2 undo-delete). Soft-deleted meetings stay
   // recoverable for UNDO_WINDOW_MS. On launch, purge anything that's
   // already past the window so the user doesn't see day-old trash come

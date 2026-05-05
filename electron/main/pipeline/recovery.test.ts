@@ -7,7 +7,7 @@ import { MeetingsRepo } from '../storage/meetings-repo.js';
 import { recoverPendingMeetings } from './recovery.js';
 
 describe('recoverPendingMeetings', () => {
-  it('rolls non-terminal meetings back one stage and enqueues them', () => {
+  it('rolls non-terminal meetings back to pending without auto-enqueueing', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-rec-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
     const meetings = new MeetingsRepo(db);
@@ -18,8 +18,15 @@ describe('recoverPendingMeetings', () => {
     const logger = { info: vi.fn() };
     recoverPendingMeetings({ meetings, enqueue, logger } as any);
 
+    // Stage rolled back to a safe re-entry point.
     expect(meetings.findById('a')?.pipelineStage).toBe('discovered');
-    expect(enqueue).toHaveBeenCalledWith('a');
-    expect(enqueue).not.toHaveBeenCalledWith('b');
+    // Status is now 'pending' — explicit user action required to resume.
+    // (Earlier behavior auto-enqueued and surprised users who had just
+    // dropped a batch of files and wanted to control what ran first.)
+    expect(meetings.findById('a')?.status).toBe('pending');
+    expect(enqueue).not.toHaveBeenCalled();
+    // Done meetings are untouched.
+    expect(meetings.findById('b')?.pipelineStage).toBe('done');
+    expect(meetings.findById('b')?.status).toBe('done');
   });
 });
