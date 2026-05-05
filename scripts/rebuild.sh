@@ -89,11 +89,26 @@ npm run rebuild:electron
 step "Building Electron app (TypeScript + Vite)"
 npm run build
 
-# ── Step 4: Package with electron-builder ─────────────────────────────
+# ── Step 4: Wipe stale artifacts ──────────────────────────────────────
+# Without this, every prior version's .dmg/.zip lives forever in
+# release/ and the post-build "Install:" hint picks the alphabetically
+# first one (e.g. 0.1.0.dmg even though we just built 0.2.0). Cleaning
+# also dodges the disk-fills-up-over-many-rebuilds problem.
+#
+# We don't `rm -rf release/` — electron-builder writes some persistent
+# state (latest-mac.yml, builder-effective-config.yaml, .icon-icns/)
+# that's faster left in place. Just the user-facing artifacts go.
+step "Removing old release artifacts"
+rm -f release/MeetingNotes-*.dmg \
+      release/MeetingNotes-*.dmg.blockmap \
+      release/MeetingNotes-*-mac.zip \
+      release/MeetingNotes-*-mac.zip.blockmap 2>/dev/null || true
+
+# ── Step 5: Package with electron-builder ─────────────────────────────
 step "Packaging .dmg and .zip with electron-builder"
 npx electron-builder --mac
 
-# ── Step 5: Clean up loose .app ───────────────────────────────────────
+# ── Step 6: Clean up loose .app ───────────────────────────────────────
 step "Cleaning up loose .app (use the .dmg instead)"
 npm run dist:cleanup-loose-app 2>/dev/null || true
 
