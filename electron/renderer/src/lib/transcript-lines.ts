@@ -63,3 +63,67 @@ export function fmtTimestamp(seconds: number): string {
   const ss = s.toString().padStart(2, '0');
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
+
+/** A run of consecutive same-speaker lines collapsed into one block.
+ *  The merged view renders these instead of individual lines so a
+ *  monologue reads as one paragraph rather than 30 timestamped
+ *  fragments — but conversation flow is preserved because a switch in
+ *  speaker (or a long silence, controlled by gapSeconds) ends the
+ *  group and starts a new one. */
+export interface TranscriptGroup {
+  speaker: string;
+  /** Start time of the first line in this group. Used for click-to-seek
+   *  on the whole block. */
+  startSeconds: number;
+  /** Time of the last line's start — handy for showing a range. */
+  endSeconds: number;
+  /** Merged spoken text. Non-empty pieces joined with a space. */
+  text: string;
+  /** Indices into the original `TranscriptLine[]` that this group
+   *  spans, in order. Lets the renderer keep its currentTime active
+   *  highlight working — a group is active if its first..last index
+   *  range covers the currently-active line. */
+  lineIndices: number[];
+}
+
+/** Collapse consecutive same-speaker lines into grouped blocks.
+ *
+ *  Two rules end a group and start the next one:
+ *    1. Different speaker — preserves conversation flow.
+ *    2. Time gap larger than `gapSeconds` between consecutive lines.
+ *       Without this, a single speaker who pauses for 30s of silence
+ *       (or the next speaker hasn't been diarized as such yet because
+ *       of a brief mis-classification) would smush an entire meeting
+ *       into one wall of text. 90s default is long enough that
+ *       continuous speech doesn't fragment; short enough that the
+ *       view stays scannable for meetings with long stretches of one
+ *       speaker. */
+export function groupConsecutiveBySpeaker(
+  lines: readonly TranscriptLine[],
+  opts: { gapSeconds?: number } = {},
+): TranscriptGroup[] {
+  const gap = opts.gapSeconds ?? 90;
+  const groups: TranscriptGroup[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const last = groups[groups.length - 1];
+    const continuesLast =
+      last != null
+      && last.speaker === line.speaker
+      && line.seconds - last.endSeconds <= gap;
+    if (continuesLast) {
+      last.text = line.text ? `${last.text} ${line.text}`.trim() : last.text;
+      last.endSeconds = line.seconds;
+      last.lineIndices.push(i);
+    } else {
+      groups.push({
+        speaker: line.speaker,
+        startSeconds: line.seconds,
+        endSeconds: line.seconds,
+        text: line.text,
+        lineIndices: [i],
+      });
+    }
+  }
+  return groups;
+}

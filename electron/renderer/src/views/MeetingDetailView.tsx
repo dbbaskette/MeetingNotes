@@ -6,7 +6,10 @@ import { api } from '../ipc/client';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
-import { parseTranscript, fmtTimestamp, type TranscriptLine } from '../lib/transcript-lines';
+import {
+  parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
+  type TranscriptLine, type TranscriptGroup,
+} from '../lib/transcript-lines';
 import { shortcutMod } from '../lib/shortcut';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 
@@ -651,6 +654,27 @@ function CenterPane({
 // calls onSeek. A timeupdate-driven currentTime highlights the line
 // covering that second. Falls back to plain-text rendering for raw
 // pre-merge transcripts (no speaker prefixes to parse).
+//
+// Two view modes (toggle in the header):
+//   - Per-line: every timestamped row gets its own clickable line.
+//     Closest to the on-disk transcript.md, finest-grained seek.
+//   - Grouped: consecutive same-speaker lines are collapsed into one
+//     paragraph, so a 30-line monologue reads as a paragraph instead
+//     of 30 timestamped fragments. Click anywhere in a group to seek
+//     to its start.
+//
+// The user's choice is persisted to localStorage so it survives view
+// navigation; defaults to per-line for backward compatibility with
+// users who already know that layout.
+type TranscriptViewMode = 'lines' | 'grouped';
+const VIEW_MODE_KEY = 'mn:transcript-view-mode';
+
+function readStoredViewMode(): TranscriptViewMode {
+  if (typeof localStorage === 'undefined') return 'lines';
+  const v = localStorage.getItem(VIEW_MODE_KEY);
+  return v === 'grouped' ? 'grouped' : 'lines';
+}
+
 function TranscriptPanel({
   meeting, showRaw, currentTime, onSeek,
 }: {
@@ -661,6 +685,14 @@ function TranscriptPanel({
 }): JSX.Element {
   const body = meeting.transcriptMd ?? meeting.rawTranscriptText ?? '';
   const parsed = useMemo(() => parseTranscript(body), [body]);
+  const groups = useMemo(
+    () => groupConsecutiveBySpeaker(parsed.lines),
+    [parsed.lines],
+  );
+  const [viewMode, setViewMode] = useState<TranscriptViewMode>(readStoredViewMode);
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_MODE_KEY, viewMode); } catch { /* private mode */ }
+  }, [viewMode]);
 
   // Active line = the one whose [start, nextStart) window covers currentTime.
   const activeIdx = useMemo(() => {
@@ -673,6 +705,15 @@ function TranscriptPanel({
     }
     return best;
   }, [parsed, currentTime]);
+
+  // Active group = the group whose lineIndices range contains activeIdx.
+  // Stored as a number for the same scrollIntoView trigger; -1 means none.
+  const activeGroupIdx = useMemo(() => {
+    if (activeIdx < 0) return -1;
+    return groups.findIndex(
+      (g) => activeIdx >= g.lineIndices[0]! && activeIdx <= g.lineIndices[g.lineIndices.length - 1]!,
+    );
+  }, [groups, activeIdx]);
 
   // Auto-scroll the active line into view — but only when the user hasn't
   // scrolled manually in the last few seconds (don't fight them). A
@@ -695,7 +736,7 @@ function TranscriptPanel({
   useEffect(() => {
     if (Date.now() - lastManualScrollAt.current < 3000) return;
     activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [activeIdx]);
+  }, [activeIdx, activeGroupIdx, viewMode]);
 
   if (body === '') {
     return (
@@ -722,29 +763,93 @@ function TranscriptPanel({
   }
 
   return (
-    <div ref={panelRef} className="text-sm leading-relaxed font-sans max-h-[60vh] overflow-y-auto pr-1">
-      {parsed.lines.map((line, i) => {
-        const active = i === activeIdx;
-        return (
-          <button
-            key={i}
-            ref={active ? activeRef : undefined}
-            onClick={() => onSeek(line.seconds)}
-            title={`Jump to ${fmtTimestamp(line.seconds)}`}
-            className={`w-full text-left rounded-md px-2 py-1 mb-0.5 transition-colors
-              ${active
-                ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
-                : 'hover:bg-surface-sunken'}`}
-          >
-            <TranscriptLine line={line} />
-          </button>
-        );
-      })}
+    <div className="space-y-2">
+      {/* View toggle. Right-aligned so it sits in the existing tab-row's
+          empty space without forcing the transcript text down. The two
+          buttons share a pill so the active state is unambiguous. */}
+      <div className="flex items-center justify-end -mt-2 mb-1">
+        <div className="inline-flex items-center text-[11px] font-semibold rounded-full border border-surface-border bg-surface overflow-hidden">
+          <ViewToggleButton
+            active={viewMode === 'lines'}
+            onClick={() => setViewMode('lines')}
+            label="Per line"
+            title="Show every timestamped line as its own row"
+          />
+          <ViewToggleButton
+            active={viewMode === 'grouped'}
+            onClick={() => setViewMode('grouped')}
+            label="Grouped"
+            title="Collapse consecutive same-speaker lines into one paragraph"
+          />
+        </div>
+      </div>
+
+      <div ref={panelRef} className="text-sm leading-relaxed font-sans max-h-[60vh] overflow-y-auto pr-1">
+        {viewMode === 'lines' ? (
+          parsed.lines.map((line, i) => {
+            const active = i === activeIdx;
+            return (
+              <button
+                key={i}
+                ref={active ? activeRef : undefined}
+                onClick={() => onSeek(line.seconds)}
+                title={`Jump to ${fmtTimestamp(line.seconds)}`}
+                className={`w-full text-left rounded-md px-2 py-1 mb-0.5 transition-colors
+                  ${active
+                    ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
+                    : 'hover:bg-surface-sunken'}`}
+              >
+                <TranscriptLineRow line={line} />
+              </button>
+            );
+          })
+        ) : (
+          groups.map((g, i) => {
+            const active = i === activeGroupIdx;
+            return (
+              <button
+                key={i}
+                ref={active ? activeRef : undefined}
+                onClick={() => onSeek(g.startSeconds)}
+                title={`Jump to ${fmtTimestamp(g.startSeconds)}`}
+                className={`w-full text-left rounded-md px-3 py-2 mb-2 transition-colors
+                  ${active
+                    ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
+                    : 'hover:bg-surface-sunken'}`}
+              >
+                <TranscriptGroupRow group={g} />
+              </button>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
 
-function TranscriptLine({ line }: { line: TranscriptLine }): JSX.Element {
+function ViewToggleButton({
+  active, onClick, label, title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  title: string;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`px-2.5 py-1 transition-colors ${
+        active ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink hover:bg-surface-sunken'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function TranscriptLineRow({ line }: { line: TranscriptLine }): JSX.Element {
   return (
     <>
       <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
@@ -752,6 +857,32 @@ function TranscriptLine({ line }: { line: TranscriptLine }): JSX.Element {
       </span>
       <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
       <span>{line.text}</span>
+    </>
+  );
+}
+
+/** Grouped-view row: speaker name on its own line above the merged
+ *  paragraph, with the start–end range to its right. Cleaner than
+ *  inlining everything when the merged text is long. */
+function TranscriptGroupRow({ group }: { group: TranscriptGroup }): JSX.Element {
+  const showRange = group.endSeconds > group.startSeconds;
+  return (
+    <>
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className="font-semibold text-ink">{group.speaker}</span>
+        <span className="font-mono text-[11px] text-ink-muted tabular-nums">
+          {fmtTimestamp(group.startSeconds)}
+          {showRange && (
+            <>
+              {' '}
+              <span className="opacity-60">–</span>
+              {' '}
+              {fmtTimestamp(group.endSeconds)}
+            </>
+          )}
+        </span>
+      </div>
+      <div className="text-ink-soft">{group.text}</div>
     </>
   );
 }

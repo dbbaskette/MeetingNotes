@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseTranscript, fmtTimestamp } from './transcript-lines.js';
+import {
+  parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
+} from './transcript-lines.js';
 
 describe('parseTranscript', () => {
   it('parses MM:SS lines into seekable records', () => {
@@ -40,6 +42,72 @@ describe('parseTranscript', () => {
     const out = parseTranscript(t);
     expect(out.lines).toHaveLength(2);
     expect(out.hasUnparsed).toBe(false);
+  });
+});
+
+describe('groupConsecutiveBySpeaker', () => {
+  it('collapses consecutive same-speaker lines into one block', () => {
+    const lines = parseTranscript([
+      '[Alice 00:00] Hi.',
+      '[Alice 00:05] What I wanted to say.',
+      '[Alice 00:12] Was about Q2.',
+      '[Bob 00:20] Got it.',
+    ].join('\n')).lines;
+    const groups = groupConsecutiveBySpeaker(lines);
+    expect(groups).toHaveLength(2);
+    expect(groups[0]).toMatchObject({
+      speaker: 'Alice',
+      startSeconds: 0,
+      endSeconds: 12,
+      text: 'Hi. What I wanted to say. Was about Q2.',
+      lineIndices: [0, 1, 2],
+    });
+    expect(groups[1]).toMatchObject({
+      speaker: 'Bob',
+      startSeconds: 20,
+      endSeconds: 20,
+      text: 'Got it.',
+      lineIndices: [3],
+    });
+  });
+
+  it('starts a new block when the speaker changes (preserves conversation flow)', () => {
+    const lines = parseTranscript([
+      '[Alice 00:00] One.',
+      '[Bob 00:05] Two.',
+      '[Alice 00:10] Three.',
+    ].join('\n')).lines;
+    const groups = groupConsecutiveBySpeaker(lines);
+    expect(groups.map((g) => g.speaker)).toEqual(['Alice', 'Bob', 'Alice']);
+  });
+
+  it('starts a new block when the gap exceeds gapSeconds', () => {
+    const lines = parseTranscript([
+      '[Alice 00:00] Earlier point.',
+      '[Alice 02:00] Much later point.',
+    ].join('\n')).lines;
+    // Default gap is 90s; 120s exceeds it.
+    const groups = groupConsecutiveBySpeaker(lines);
+    expect(groups).toHaveLength(2);
+    // With a generous override, the same lines collapse.
+    const merged = groupConsecutiveBySpeaker(lines, { gapSeconds: 600 });
+    expect(merged).toHaveLength(1);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(groupConsecutiveBySpeaker([])).toEqual([]);
+  });
+
+  it('skips empty text fragments cleanly when joining', () => {
+    const lines = parseTranscript([
+      '[Alice 00:00] Hello.',
+      '[Alice 00:02] ', // intentionally empty body
+      '[Alice 00:05] Goodbye.',
+    ].join('\n')).lines;
+    const groups = groupConsecutiveBySpeaker(lines);
+    expect(groups).toHaveLength(1);
+    // No double-space, no trailing space.
+    expect(groups[0]!.text).toBe('Hello. Goodbye.');
   });
 });
 
