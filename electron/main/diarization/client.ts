@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { fetchWithSlowAgent } from '../lib/slow-fetch.js';
 
 export const DiarSegmentSchema = z.object({
   start: z.number(), end: z.number(), speaker: z.string(), embedding: z.array(z.number()),
@@ -22,9 +23,15 @@ export class DiarizationClient {
   }
 
   async diarize(audioPath: string): Promise<DiarResponse> {
+    // Pyannote on a 60-90 min meeting can hold the connection open for
+    // 5-10 minutes before sending the first response byte. Plain `fetch`
+    // gets killed by undici's default 5-min headersTimeout long before
+    // our AbortSignal fires, surfacing as "fetch failed" with no detail.
+    // The slow-agent dispatcher bumps both header and body timeouts
+    // well past the 30-min user-facing ceiling.
     let resp: Response;
     try {
-      resp = await fetch(`${this.baseUrl}/diarize`, {
+      resp = await fetchWithSlowAgent(`${this.baseUrl}/diarize`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ audio_path: audioPath }),
