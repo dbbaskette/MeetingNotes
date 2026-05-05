@@ -762,6 +762,29 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
   });
 
+  // Transcript export. Renderer hands us the already-formatted content
+  // plus the desired filename + format; we show the native save dialog
+  // (filtered to the right extension) and write the file. Keeps fs
+  // access out of the renderer and matches the WeeklyView export shape.
+  ipc.handle(IPC_CHANNELS.transcriptExport, async (
+    _e, input: unknown,
+  ): Promise<{ path: string | null }> => {
+    const obj = (input ?? {}) as { content?: unknown; defaultName?: unknown; format?: unknown };
+    const content = typeof obj.content === 'string' ? obj.content : '';
+    const defaultName = typeof obj.defaultName === 'string' && obj.defaultName.trim()
+      ? obj.defaultName : 'transcript';
+    const format: 'md' | 'txt' = obj.format === 'txt' ? 'txt' : 'md';
+    if (!content) throw new Error('transcript:export: empty content');
+    const filterName = format === 'md' ? 'Markdown' : 'Plain text';
+    const result = await dialog.showSaveDialog({
+      defaultPath: `${defaultName}.${format}`,
+      filters: [{ name: filterName, extensions: [format] }],
+    });
+    if (result.canceled || !result.filePath) return { path: null };
+    fs.writeFileSync(result.filePath, content, 'utf8');
+    return { path: result.filePath };
+  });
+
   // Drag-and-drop import. Copies dropped audio files into audioWatchPath
   // (the chokidar-watched folder). The existing watcher then picks them
   // up as new pending meetings — no new pipeline code required.

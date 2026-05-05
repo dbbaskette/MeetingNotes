@@ -30,5 +30,6 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('stt:probe');
     expect(channels).toContain('llm:probe');
     expect(channels).toContain('meetings:import-dropped');
+    expect(channels).toContain('transcript:export');
   });
 });

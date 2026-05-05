@@ -98,4 +98,9 @@ export const IPC_CHANNELS = {
    *  existing watcher picks them up as new pending meetings.
    *  Returns the number imported and any per-file errors. */
   meetingsImportDropped: 'meetings:import-dropped',
+  /** Save a pre-rendered transcript export to disk. Renderer formats
+   *  the content (so the active per-line/grouped view choice flows
+   *  through), main does the dialog + file write so we don't ship
+   *  raw fs access into the renderer. */
+  transcriptExport: 'transcript:export',
 } as const;

@@ -86,6 +86,91 @@ export interface TranscriptGroup {
   lineIndices: number[];
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Export formatting
+// ────────────────────────────────────────────────────────────────────
+
+export type ExportFormat = 'md' | 'txt';
+export type ExportViewMode = 'lines' | 'grouped';
+
+export interface FormatTranscriptOpts {
+  /** Meeting title for the document header. Empty → header skipped. */
+  title?: string;
+  /** ISO timestamp when the meeting started (for the header subline). */
+  startedAt?: string | null;
+  /** Match the active view in the renderer so the exported file
+   *  reads the same way the user is seeing it. */
+  viewMode: ExportViewMode;
+  format: ExportFormat;
+}
+
+/** Render parsed transcript lines as a self-contained .md or .txt
+ *  document. Both formats include speaker labels + timestamps; the
+ *  difference is markdown styling (bold names, blockquote text vs.
+ *  plain prose).
+ *
+ *  Pure function — no IO. Called from the renderer just before
+ *  handing the string off to the file-save IPC. */
+export function formatTranscriptForExport(
+  lines: readonly TranscriptLine[],
+  opts: FormatTranscriptOpts,
+): string {
+  const isMd = opts.format === 'md';
+  const out: string[] = [];
+
+  // Header
+  if (opts.title) {
+    out.push(isMd ? `# ${opts.title}` : opts.title);
+    if (opts.startedAt) {
+      const d = new Date(opts.startedAt);
+      const human = isNaN(d.valueOf()) ? opts.startedAt : d.toLocaleString();
+      out.push(isMd ? `_${human}_` : human);
+    }
+    out.push('');
+  }
+
+  if (opts.viewMode === 'lines') {
+    // One row per timestamped line.
+    for (const line of lines) {
+      const ts = fmtTimestamp(line.seconds);
+      if (isMd) {
+        out.push(`**${line.speaker}** (${ts}): ${line.text}`);
+      } else {
+        out.push(`${line.speaker} [${ts}]: ${line.text}`);
+      }
+    }
+  } else {
+    // One block per consecutive same-speaker run. Groups read as
+    // paragraphs of merged text — better for sharing/reading.
+    const groups = groupConsecutiveBySpeaker(lines);
+    for (const g of groups) {
+      const startTs = fmtTimestamp(g.startSeconds);
+      const range = g.endSeconds > g.startSeconds
+        ? `${startTs} – ${fmtTimestamp(g.endSeconds)}`
+        : startTs;
+      if (isMd) {
+        out.push(`**${g.speaker}** (${range})`);
+        // Use a blockquote so multi-line groups stay visually grouped
+        // when rendered. Each newline inside the merged text becomes
+        // its own quoted line.
+        for (const piece of g.text.split('\n')) {
+          out.push(`> ${piece}`);
+        }
+      } else {
+        out.push(`${g.speaker} (${range}):`);
+        out.push(g.text);
+      }
+      out.push('');
+    }
+  }
+
+  // Strip the final blank line that the grouped path emits, then add
+  // a single trailing newline so editors don't fuss about no-newline-
+  // at-end-of-file.
+  while (out.length > 0 && out[out.length - 1] === '') out.pop();
+  return out.join('\n') + '\n';
+}
+
 /** Collapse consecutive same-speaker lines into grouped blocks.
  *
  *  Two rules end a group and start the next one:

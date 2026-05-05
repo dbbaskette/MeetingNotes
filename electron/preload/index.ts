@@ -56,6 +56,7 @@ const IPC_CHANNELS = {
   sttProbe: 'stt:probe',
   llmProbe: 'llm:probe',
   meetingsImportDropped: 'meetings:import-dropped',
+  transcriptExport: 'transcript:export',
 } as const;
 
 const api = {
@@ -101,6 +102,17 @@ const api = {
         imported: number;
         skipped: { path: string; reason: string }[];
       }>,
+    /** Save a pre-rendered transcript export. The renderer formats the
+     *  content (per-line vs grouped) then hands the string off; main
+     *  shows the native save dialog and writes the file. Returns the
+     *  chosen path or null if the user cancelled. */
+    exportTranscript: (input: {
+      content: string;
+      defaultName: string;
+      format: 'md' | 'txt';
+    }) => ipcRenderer.invoke(IPC_CHANNELS.transcriptExport, input) as Promise<{
+      path: string | null;
+    }>,
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),

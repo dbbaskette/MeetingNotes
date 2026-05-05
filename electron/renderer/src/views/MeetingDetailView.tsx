@@ -8,8 +8,10 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import {
   parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
-  type TranscriptLine, type TranscriptGroup,
+  formatTranscriptForExport,
+  type TranscriptLine, type TranscriptGroup, type ExportFormat,
 } from '../lib/transcript-lines';
+import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 
@@ -764,10 +766,12 @@ function TranscriptPanel({
 
   return (
     <div className="space-y-2">
-      {/* View toggle. Right-aligned so it sits in the existing tab-row's
-          empty space without forcing the transcript text down. The two
-          buttons share a pill so the active state is unambiguous. */}
-      <div className="flex items-center justify-end -mt-2 mb-1">
+      {/* View toggle + export. Right-aligned so they sit in the
+          existing tab-row's empty space without forcing the transcript
+          text down. The view toggle's two buttons share a pill so the
+          active state is unambiguous; export is a separate group with
+          a menu for the format choice. */}
+      <div className="flex items-center justify-end gap-2 -mt-2 mb-1">
         <div className="inline-flex items-center text-[11px] font-semibold rounded-full border border-surface-border bg-surface overflow-hidden">
           <ViewToggleButton
             active={viewMode === 'lines'}
@@ -782,6 +786,11 @@ function TranscriptPanel({
             title="Collapse consecutive same-speaker lines into one paragraph"
           />
         </div>
+        <ExportTranscriptButton
+          lines={parsed.lines}
+          viewMode={viewMode}
+          meeting={meeting}
+        />
       </div>
 
       <div ref={panelRef} className="text-sm leading-relaxed font-sans max-h-[60vh] overflow-y-auto pr-1">
@@ -845,6 +854,156 @@ function ViewToggleButton({
       }`}
     >
       {label}
+    </button>
+  );
+}
+
+/** Export-as menu next to the view toggle. Click → small popover with
+ *  "Markdown (.md)" / "Plain text (.txt)" choices. The chosen format
+ *  uses formatTranscriptForExport() with the active view mode, then
+ *  hands the string off to the transcript:export IPC which shows the
+ *  native save dialog and writes the file. */
+function ExportTranscriptButton({
+  lines, viewMode, meeting,
+}: {
+  lines: readonly TranscriptLine[];
+  viewMode: 'lines' | 'grouped';
+  meeting: { title: string; startedAt: string | null };
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const toast = useToast();
+
+  // Click-outside to dismiss. Mounted only while the menu is open.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent): void => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  // Slug-from-title helper — for the default save filename. Falls back
+  // to the literal "transcript" when the title is empty/all-symbols.
+  function defaultName(format: ExportFormat): string {
+    const slug = (meeting.title || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'transcript';
+    const suffix = viewMode === 'grouped' ? '-grouped' : '';
+    return `${slug}${suffix}.transcript.${format}`;
+    // Note: `.transcript.<ext>` keeps the filename distinct from the
+    // summary export the user might do later.
+  }
+
+  async function exportAs(format: ExportFormat): Promise<void> {
+    if (busy) return;
+    setOpen(false);
+    setBusy(true);
+    try {
+      const content = formatTranscriptForExport(lines, {
+        title: meeting.title,
+        startedAt: meeting.startedAt,
+        viewMode,
+        format,
+      });
+      const result = await api.meetings.exportTranscript({
+        content,
+        defaultName: defaultName(format).replace(/\.(md|txt)$/, ''),
+        format,
+      });
+      if (result.path) {
+        toast.show({ message: `Exported to ${result.path}`, durationMs: 4000 });
+      } else {
+        // Cancelled — fall back to clipboard so the keystrokes
+        // weren't wasted. Same pattern the WeeklyView export uses.
+        await navigator.clipboard.writeText(content);
+        toast.show({
+          message: `Save cancelled — transcript copied to clipboard instead`,
+          durationMs: 3500,
+        });
+      }
+    } catch (e) {
+      toast.show({
+        message: `Export failed: ${(e as Error).message}`,
+        durationMs: 5000,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const disabled = busy || lines.length === 0;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        title="Export transcript"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full border border-surface-border bg-surface px-2.5 py-1
+                   text-ink-muted hover:text-ink hover:border-ink/30
+                   disabled:opacity-50 disabled:cursor-not-allowed transition"
+      >
+        <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}>
+          <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+        <span>Export</span>
+        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 opacity-70" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-30 min-w-[200px] bg-surface rounded-lg border border-surface-border shadow-pop overflow-hidden text-sm"
+        >
+          <ExportMenuItem
+            label="Markdown (.md)"
+            sublabel="Bold names, blockquoted text"
+            onClick={() => void exportAs('md')}
+          />
+          <ExportMenuItem
+            label="Plain text (.txt)"
+            sublabel="No formatting, sharable anywhere"
+            onClick={() => void exportAs('txt')}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExportMenuItem({
+  label, sublabel, onClick,
+}: {
+  label: string;
+  sublabel: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      role="menuitem"
+      type="button"
+      onClick={onClick}
+      className="w-full text-left px-3 py-2 hover:bg-surface-sunken transition"
+    >
+      <div className="font-medium text-ink">{label}</div>
+      <div className="text-[11px] text-ink-muted">{sublabel}</div>
     </button>
   );
 }

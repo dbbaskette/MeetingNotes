@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
+  formatTranscriptForExport,
 } from './transcript-lines.js';
 
 describe('parseTranscript', () => {
@@ -108,6 +109,57 @@ describe('groupConsecutiveBySpeaker', () => {
     expect(groups).toHaveLength(1);
     // No double-space, no trailing space.
     expect(groups[0]!.text).toBe('Hello. Goodbye.');
+  });
+});
+
+describe('formatTranscriptForExport', () => {
+  const sample = parseTranscript([
+    '[Alice 00:00] Hi.',
+    '[Alice 00:05] More from Alice.',
+    '[Bob 00:10] Got it.',
+  ].join('\n')).lines;
+
+  it('per-line markdown bolds the speaker and uses inline timestamps', () => {
+    const out = formatTranscriptForExport(sample, { viewMode: 'lines', format: 'md' });
+    expect(out).toContain('**Alice** (00:00): Hi.');
+    expect(out).toContain('**Bob** (00:10): Got it.');
+  });
+
+  it('per-line plain text omits markdown styling', () => {
+    const out = formatTranscriptForExport(sample, { viewMode: 'lines', format: 'txt' });
+    expect(out).toContain('Alice [00:00]: Hi.');
+    expect(out).not.toContain('**');
+  });
+
+  it('grouped markdown collapses consecutive same-speaker lines into a quoted block', () => {
+    const out = formatTranscriptForExport(sample, { viewMode: 'grouped', format: 'md' });
+    // Alice gets one header with a range, then her merged text in a blockquote.
+    expect(out).toContain('**Alice** (00:00 – 00:05)');
+    expect(out).toContain('> Hi. More from Alice.');
+    // Bob is a single-timestamp group — no range dash.
+    expect(out).toContain('**Bob** (00:10)');
+    expect(out).not.toContain('**Bob** (00:10 –');
+  });
+
+  it('grouped plain text uses Speaker (range): paragraphs', () => {
+    const out = formatTranscriptForExport(sample, { viewMode: 'grouped', format: 'txt' });
+    expect(out).toContain('Alice (00:00 – 00:05):');
+    expect(out).toContain('Hi. More from Alice.');
+    expect(out).not.toContain('**');
+    expect(out).not.toContain('> ');
+  });
+
+  it('includes a header when a title is provided', () => {
+    const out = formatTranscriptForExport(sample, {
+      viewMode: 'lines', format: 'md', title: 'Q2 Review',
+    });
+    expect(out.startsWith('# Q2 Review')).toBe(true);
+  });
+
+  it('ends with exactly one trailing newline', () => {
+    const out = formatTranscriptForExport(sample, { viewMode: 'grouped', format: 'md' });
+    expect(out.endsWith('\n')).toBe(true);
+    expect(out.endsWith('\n\n')).toBe(false);
   });
 });
 
