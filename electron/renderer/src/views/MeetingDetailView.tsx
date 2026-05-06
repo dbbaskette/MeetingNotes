@@ -595,7 +595,7 @@ function LeftRail({
             finishes or fails.
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">Re-run pipeline from…</div>
             {([
               ['transcribing', 'transcribe + everything after'],
@@ -605,10 +605,11 @@ function LeftRail({
               <button
                 key={stage}
                 onClick={() => rerunFrom(stage)}
-                className="w-full text-left bg-surface-sunken border border-surface-border rounded-lg py-1 px-2 text-xs hover:border-brand-indigo hover:text-brand-indigo"
+                className="group w-full text-left bg-surface border-l-2 border-l-brand-indigo/40 border border-surface-border rounded-lg py-2 px-3 text-[13px] text-ink-soft transition-all duration-150 hover:border-l-brand-indigo hover:bg-brand-indigo/5 hover:text-brand-indigo hover:shadow-sm"
                 title={label}
               >
-                ↻ {label}
+                <span className="inline-block transition-transform duration-200 group-hover:rotate-[-45deg] mr-1.5">↻</span>
+                {label}
               </button>
             ))}
           </div>
