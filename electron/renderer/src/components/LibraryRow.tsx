@@ -13,8 +13,6 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
 import { MeetingRowMenu } from './MeetingRowMenu';
-import { useToast } from './Toasts';
-import { api } from '../ipc/client';
 
 interface Meeting {
   id: string;
@@ -58,7 +56,6 @@ function fmtDate(iso: string | null): string {
 export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
-  const toast = useToast();
   const edge =
     status === 'failed' ? 'before:bg-rose-500' :
     status === 'processing' ? 'before:bg-brand-indigo' :
@@ -69,20 +66,6 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
   // "not yet a finished meeting" without looking broken. Everything else
   // sits on standard surface.
   const bg = isPending ? 'bg-surface-sunken/40' : 'bg-surface';
-
-  async function processOne(e: React.MouseEvent): Promise<void> {
-    e.stopPropagation();
-    await api.meetings.start(meeting.id);
-    // The row is about to move out of the Unprocessed bucket into the
-    // in-flight section (sort rank: pending=0, processing=2). Without a
-    // toast that move reads as "nothing happened" because the user's mouse
-    // is now hovering a different row.
-    toast.show({
-      message: `Processing "${meeting.title}"…`,
-      durationMs: 4000,
-    });
-    onChanged();
-  }
 
   function handleRowClick(): void {
     // On a pending row with selection props, clicking the row body toggles
@@ -159,20 +142,6 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
       )}
 
       <StatusChip meeting={meeting} />
-
-      {isPending && (
-        <button
-          onClick={(e) => void processOne(e)}
-          className="
-            text-xs font-semibold px-3 py-1 rounded-full shrink-0
-            bg-surface-sunken text-ink-muted border border-surface-border
-            group-hover:bg-ink group-hover:text-surface group-hover:border-ink
-            transition
-          "
-        >
-          ▶ Process
-        </button>
-      )}
 
       <MeetingRowMenu meeting={meeting} onChanged={onChanged} />
 

@@ -101,6 +101,13 @@ const browser = await puppeteer.launch({
 async function newPage() {
   const page = await browser.newPage();
   await page.setViewport(VIEWPORT);
+  // Headless Chrome inherits the OS color-scheme preference, which on
+  // a dark-mode Mac flips the whole renderer to its dark palette.
+  // README screenshots are documented in the light palette, so force
+  // it here. (Override locally to capture dark-mode counterparts.)
+  await page.emulateMediaFeatures([
+    { name: 'prefers-color-scheme', value: 'light' },
+  ]);
   return page;
 }
 

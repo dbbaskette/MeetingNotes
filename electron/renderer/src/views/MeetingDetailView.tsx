@@ -482,7 +482,8 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
               {isCurrent && isProcessing && elapsed !== null && (
                 <span className="font-normal opacity-80">{fmtElapsed(elapsed)}</span>
               )}
-              {isAwaitingHere && <span className="font-normal opacity-80">waiting</span>}
+              {/* No "waiting" word — the pause icon + amber color already say it.
+                  Adding the word made the chip wrap to two lines on narrow widths. */}
             </div>
             {i < USER_STEPS.length - 1 && (
               <div className={`w-3 h-px ${isDone ? 'bg-status-ok/40' : 'bg-surface-border'}`} />
@@ -494,9 +495,15 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
   );
 }
 
+// Timeline icons are deliberately at 14px (w-3.5 h-3.5) with thick
+// strokes — 12px was glanceable for sighted users but too small to do
+// the work of conveying state on its own for users who can't read the
+// chip's color (red/green color-blindness, sun glare, etc.). At 14px
+// the icon shape (✓ / ✕ / ⏸ / spinner) is identifiable at a meter's
+// distance from the screen, regardless of color.
 function XMark(): JSX.Element {
   return (
-    <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 4l8 8M12 4l-8 8" />
     </svg>
   );
@@ -504,7 +511,7 @@ function XMark(): JSX.Element {
 
 function CheckMark(): JSX.Element {
   return (
-    <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 8l3.5 3.5L13 5" />
     </svg>
   );
@@ -512,7 +519,7 @@ function CheckMark(): JSX.Element {
 
 function MiniSpinner(): JSX.Element {
   return (
-    <svg viewBox="0 0 16 16" className="w-3 h-3 animate-spin" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
       <path d="M8 2a6 6 0 1 1-6 6" opacity="0.9" />
     </svg>
   );
@@ -524,7 +531,7 @@ function EmptyDot(): JSX.Element {
 
 function PauseMark(): JSX.Element {
   return (
-    <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor">
+    <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
       <rect x="4" y="3" width="2.5" height="10" rx="0.5" />
       <rect x="9.5" y="3" width="2.5" height="10" rx="0.5" />
     </svg>
@@ -553,18 +560,24 @@ function LeftRail({
     meeting.pipelineStage === 'discovered' && meeting.status === 'pending';
   const isProcessing = meeting.status === 'processing';
 
+  // Field labels in the left rail (`Title`, `Date`, `Models`) use a
+  // quieter sans-serif treatment than the tracked-monospace section
+  // headers (`SPEAKERS`, `EXPORT`, `RE-RUN PIPELINE FROM…`). Earlier
+  // both used the same treatment, which collapsed the hierarchy and
+  // made every label fight for attention. Now: tracked-mono for
+  // section headers, plain small caps for fields.
   return (
     <div className="border-r border-surface-border p-4 space-y-3">
       <div>
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Title</div>
+        <div className="text-[11px] text-ink-muted font-medium">Title</div>
         <div className="font-semibold">{meeting.title}</div>
       </div>
       <div>
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Date</div>
+        <div className="text-[11px] text-ink-muted font-medium">Date</div>
         <div className="text-sm">{meeting.startedAt?.slice(0, 10) ?? '—'}</div>
       </div>
       <div>
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Models</div>
+        <div className="text-[11px] text-ink-muted font-medium">Models</div>
         {meeting.models.stt && <div className="text-xs">STT: {meeting.models.stt}</div>}
         {meeting.models.llm && <div className="text-xs">LLM: {meeting.models.llm}</div>}
       </div>
@@ -1508,10 +1521,18 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
             </span>
           )}
         </div>
+        {/* All available exporters render with the same ghost-button
+            treatment so the panel doesn't claim a winner. The earlier
+            design painted Apple Reminders as the hero (saturated
+            indigo) and Markdown as the quiet alternative — but most
+            users export to Markdown for distribution and Reminders is
+            the platform-specific niche. Equal weight lets the user
+            choose without the UI nudging. Disabled exporters keep the
+            muted treatment so it's clear which options are live. */}
         <button
           disabled={!hasItems}
           onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
-          className="w-full bg-brand-indigo text-white text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-indigo/90 transition"
+          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           title={hasItems ? undefined : 'Needs action items — run Extract first'}
         >
           → Apple Reminders
@@ -1519,7 +1540,7 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
         <button
           disabled={!canMarkdown}
           onClick={() => void exportMarkdown()}
-          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 transition"
+          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           title={canMarkdown ? undefined : 'Needs a summary — run Summarize first'}
         >
           ↓ Markdown
@@ -1529,7 +1550,7 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
         )}
         <button
           disabled
-          className="w-full bg-surface-sunken text-ink-muted text-xs font-semibold rounded-lg py-2 cursor-not-allowed"
+          className="w-full bg-surface-sunken text-ink-muted/70 text-xs font-semibold rounded-lg py-2 cursor-not-allowed border border-transparent"
         >
           → Google Tasks (soon)
         </button>

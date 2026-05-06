@@ -293,9 +293,15 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  // Per-field labels use a plain sans-serif treatment so they don't
+  // compete with section headers (Permissions, Recording quality,
+  // Meeting auto-detect) which keep the tracked-monospace style. The
+  // form has 15+ field labels — making them all small-caps tracked
+  // upper-case turned every label into an attention-grab and made the
+  // section headers indistinguishable from fields.
   return (
     <label className="block">
-      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">{label}</div>
+      <div className="text-xs text-ink-muted font-medium mb-1">{label}</div>
       {children}
     </label>
   );

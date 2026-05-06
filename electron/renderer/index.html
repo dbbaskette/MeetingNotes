@@ -75,8 +75,42 @@
             micStatus: async () => 'granted',
           },
           meetingDetector: { onDetected: () => noop, dismiss: asyncNoop },
+          // Pipeline queue controls (pause/resume/clear) — added with the
+          // queue banner. The shim returns a quiet idle status.
+          pipeline: {
+            status: async () => ({ paused: false, currentId: null, queueLength: 0, queueIds: [] }),
+            pause: asyncNoop,
+            resume: asyncNoop,
+            clear: async () => ({ cleared: [] }),
+            onStatusChange: () => noop,
+          },
+          // Settings "Test connection" probes.
+          llm: {
+            detectProviders: async () => ({ lmStudio: { binary: false, running: false }, ollama: { binary: false, running: false } }),
+            probe: async () => ({ ok: true, models: [] }),
+          },
+          stt: { probe: async () => ({ ok: true }) },
+          // Weekly view IPC. Returns empty so the Weekly view paints
+          // its empty-week state cleanly when previewed in the browser.
+          weekly: {
+            get: async () => ({}),
+            getStructured: async () => ({
+              isoYear: 2026, isoWeek: 17,
+              rangeStart: '', rangeEnd: '',
+              totalDurationS: 0, meetings: [], openActionGroups: [],
+              openActionCount: 0, inProgress: false, hasFreshCache: false,
+            }),
+            getNarrative: async () => ({ narrative: '', decisions: [], generatedAt: '', fromCache: false }),
+            regenerate: async () => ({}),
+            exportMarkdown: async () => ({ path: null, markdown: '' }),
+          },
+          // Drag-and-drop import + transcript export.
           on: () => noop,
+          onMenuAction: () => noop,
         };
+        // Top-level extras that don't fit cleanly into a sub-namespace.
+        window.api.meetings.importDropped = async () => ({ imported: 0, skipped: [] });
+        window.api.meetings.exportTranscript = async () => ({ path: null });
       }
     </script>
     <script type="module" src="/src/main.tsx"></script>
