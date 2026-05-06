@@ -36,6 +36,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   const [perms, setPerms] = useState<AudioPerms | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
+  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     void (async () => {
@@ -44,6 +45,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
       setPerms((await api.permissions.audio()) as AudioPerms);
       setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
       setProviders((await api.llm.detectProviders()) as ProviderAvailability);
+      setAppVersion(await api.app.getVersion());
     })();
   }, []);
 
@@ -269,6 +271,15 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="border-t border-surface-border pt-5">
+        <div className="flex items-center gap-2">
+          <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">About</div>
+          <div className="font-mono text-xs text-ink-soft">
+            MeetingNotes v{appVersion || '…'}
+          </div>
+        </div>
       </section>
     </div>
   );

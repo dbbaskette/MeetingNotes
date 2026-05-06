@@ -118,4 +118,5 @@ export const IPC_CHANNELS = {
   /** Push channel: main broadcasts a new PipelineStatus on every queue
    *  state change (enqueue, dequeue, pause, resume, clear). */
   pipelineStatusEvent: 'pipeline:status-change',
+  appGetVersion: 'app:get-version',
 } as const;

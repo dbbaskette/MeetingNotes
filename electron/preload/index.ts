@@ -62,6 +62,7 @@ const IPC_CHANNELS = {
   pipelineClear: 'pipeline:clear',
   pipelineStatus: 'pipeline:status',
   pipelineStatusEvent: 'pipeline:status-change',
+  appGetVersion: 'app:get-version',
 } as const;
 
 const api = {
@@ -353,6 +354,9 @@ const api = {
     }>,
     requestMic: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsRequestMic) as Promise<boolean>,
     micStatus: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsMicStatus) as Promise<'granted' | 'denied' | 'not-determined' | 'unknown'>,
+  },
+  app: {
+    getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion) as Promise<string>,
   },
   on: (channel: string, handler: (...args: unknown[]) => void) => {
     const wrapped = (_e: unknown, ...args: unknown[]) => handler(...args);

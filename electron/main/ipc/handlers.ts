@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -87,6 +87,8 @@ function unidentifiedCount(rows: { rosterId: string | null }[]): number {
 }
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
+
   ipc.handle(IPC_CHANNELS.meetingsList, () => {
     // Batch joins/aggregates so this scales O(1) with meetings instead of
     // O(N) queries — LibraryView polls every 3s.
