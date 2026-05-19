@@ -99,6 +99,20 @@ app.whenReady().then(async () => {
   const actionItems = new ActionItemsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
 
+  // Collapse roster entries with matching display names (case + whitespace
+  // insensitive) that accumulated before confirmSpeaker started deduping.
+  // Idempotent — a no-op once the roster is clean.
+  {
+    const remap = speakers.dedupeByDisplayName();
+    if (remap.size > 0) {
+      const currentUser = settings.get('userSpeakerId');
+      if (currentUser && remap.has(currentUser)) {
+        settings.set('userSpeakerId', remap.get(currentUser)!);
+      }
+      logger.info('speakers.dedupe', { merged: remap.size });
+    }
+  }
+
   // The LLM URL follows the active provider so a `lmStudio.chat()` call
   // hits the right port even after the user switches provider in
   // Settings without restarting the app. 'external' falls back to the
