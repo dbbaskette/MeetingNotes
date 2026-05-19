@@ -27,9 +27,65 @@ export class SpeakersRepo {
     return r ? row(r) : null;
   }
 
+  /** Case-insensitive, whitespace-trimmed lookup. Used to prevent the roster
+   *  from accumulating duplicate entries when the user types a name that
+   *  already exists. */
+  findByDisplayName(displayName: string): SpeakerRow | null {
+    const needle = displayName.trim().toLowerCase();
+    if (!needle) return null;
+    const r = this.db.prepare(
+      "SELECT * FROM speakers WHERE LOWER(TRIM(display_name)) = ? ORDER BY created_at LIMIT 1"
+    ).get(needle) as Record<string, unknown> | undefined;
+    return r ? row(r) : null;
+  }
+
   list(): SpeakerRow[] {
     const rows = this.db.prepare('SELECT * FROM speakers ORDER BY display_name').all() as Record<string, unknown>[];
     return rows.map(row);
+  }
+
+  /** Consolidate roster entries whose display names match case-insensitively
+   *  after trimming. Earliest-created entry wins; later duplicates have their
+   *  meeting and action-item links re-pointed at the winner and are then
+   *  deleted. Returns a map of `loserId -> winnerId` so callers can update
+   *  references kept in other databases (e.g. the user-speaker pointer in
+   *  settings). Idempotent — running it twice with no new dups is a no-op. */
+  dedupeByDisplayName(): Map<string, string> {
+    const groups = this.db.prepare(`
+      SELECT id, created_at, LOWER(TRIM(display_name)) AS key
+      FROM speakers
+      WHERE TRIM(display_name) <> ''
+      ORDER BY key, created_at, id
+    `).all() as { id: string; created_at: string; key: string }[];
+
+    const winnerByKey = new Map<string, string>();
+    const remap = new Map<string, string>();
+    for (const g of groups) {
+      const winner = winnerByKey.get(g.key);
+      if (winner === undefined) {
+        winnerByKey.set(g.key, g.id);
+      } else if (winner !== g.id) {
+        remap.set(g.id, winner);
+      }
+    }
+    if (remap.size === 0) return remap;
+
+    const updateMeetingSpeakers = this.db.prepare(
+      'UPDATE meeting_speakers SET roster_speaker_id = ? WHERE roster_speaker_id = ?'
+    );
+    const updateActionItems = this.db.prepare(
+      'UPDATE action_items SET owner_speaker_id = ? WHERE owner_speaker_id = ?'
+    );
+    const deleteSpeaker = this.db.prepare('DELETE FROM speakers WHERE id = ?');
+
+    this.db.transaction(() => {
+      for (const [loser, winner] of remap) {
+        updateMeetingSpeakers.run(winner, loser);
+        updateActionItems.run(winner, loser);
+        deleteSpeaker.run(loser);
+      }
+    })();
+    return remap;
   }
 
   rename(id: string, displayName: string): void {

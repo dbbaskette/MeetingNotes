@@ -34,4 +34,15 @@ describe('RosterService', () => {
     expect(e[0]).toBeCloseTo(0.7, 6);
     expect(e[1]).toBeCloseTo(0.3, 6);
   });
+
+  it('confirmSpeaker reuses an existing entry when the name matches (case/whitespace-insensitive)', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] });
+    const again = svc.confirmSpeaker({ displayName: '  dan  ', embedding: [0, 1, 0] });
+    expect(again).toBe(id);
+    // No duplicate row was added.
+    const e = svc.loadEmbedding(id);
+    // Embedding was merged via running average, not overwritten.
+    expect(e[0]).toBeCloseTo(0.7, 6);
+    expect(e[1]).toBeCloseTo(0.3, 6);
+  });
 });

@@ -6,6 +6,16 @@ export class RosterService {
   constructor(private readonly repo: SpeakersRepo, private readonly libraryRoot: string) {}
 
   confirmSpeaker(input: { displayName: string; embedding: number[]; notes?: string }): string {
+    // If the user types a name that already exists on the roster (modulo
+    // whitespace + case), reuse that entry and merge this observation into
+    // its embedding rather than creating a duplicate row. Prevents the
+    // roster from filling up with near-duplicates as the same person shows
+    // up across many meetings.
+    const existing = this.repo.findByDisplayName(input.displayName);
+    if (existing) {
+      this.confirmSpeakerFor(existing.id, input.embedding);
+      return existing.id;
+    }
     const id = this.repo.create({ displayName: input.displayName, notes: input.notes });
     writeEmbedding(embeddingFilePath(this.libraryRoot, id), input.embedding);
     return id;
