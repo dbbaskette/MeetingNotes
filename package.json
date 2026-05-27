@@ -1,6 +1,6 @@
 {
   "name": "meeting-notes",
-  "version": "0.2.2",
+  "version": "1.0.0",
   "description": "Local-first meeting notes for macOS — Audio Hijack + LM Studio + pyannote",
   "main": "dist/electron/main/index.js",
   "type": "module",

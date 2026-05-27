@@ -128,8 +128,12 @@ export function MeetingDetailView({
     return <DetailSkeleton hint={hint} onBack={onBack} />;
 
   return (
-    <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+    // Detail card fills the available height inside App's flex column,
+    // then internally splits into [pinned header] / [scrollable grid] /
+    // [pinned audio]. Title bar, stage timeline, and parked-banner stay
+    // on screen while the user reads a long summary or transcript.
+    <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
+      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
           ← Library
         </button>
@@ -153,7 +157,9 @@ export function MeetingDetailView({
           one moment in the pipeline where the UI is waiting for a human
           decision; hiding it below 8 pipeline chips hurt the time-to-
           action. Returns null when not parked. */}
-      <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
+      <div className="shrink-0">
+        <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
+      </div>
 
       {/* The timeline is the canonical "where is this meeting in the pipeline"
           display. Always rendered — for never-processed meetings every stage
@@ -161,11 +167,15 @@ export function MeetingDetailView({
           completion it's a persistent point-in-time record, and after a
           rerun kick the stages downstream of the rerun point flip back to
           pending so the progress is visible as it happens again. */}
-      <StageTimeline meeting={m} />
+      <div className="shrink-0">
+        <StageTimeline meeting={m} />
+      </div>
 
       {/* Quiet pre-gate skip-toggle row. Returns null when parked — the
           parked banner above already exposes the same control. */}
-      <SpeakerIdControls meeting={m} onReload={reload} placement="below-timeline" />
+      <div className="shrink-0">
+        <SpeakerIdControls meeting={m} onReload={reload} placement="below-timeline" />
+      </div>
 
       {/* Responsive layout: stack single-column below lg (1024px) so the
           narrow rails don't clip center-pane content (transcript / audio
@@ -175,9 +185,17 @@ export function MeetingDetailView({
           On narrow, the CenterPane renders first (content first), then
           LeftRail and RightRail below, so users aren't scrolling past
           sidebar meta to reach the transcript. On lg+ the grid
-          columns-order lands them back in their natural visual order. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
-        <div className="order-1 lg:order-none min-w-0">
+          columns-order lands them back in their natural visual order.
+
+          Scroll model:
+            • lg+ (3 columns): each rail scrolls on its own — center
+              pane can show a 50-page summary while the speakers/export
+              rail stays visible.
+            • Below lg (stacked): the grid itself scrolls as one column
+              because per-section overflow would create awkward nested
+              scrollbars on narrow widths. */}
+      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
+        <div className="order-1 lg:order-none min-w-0 lg:overflow-y-auto">
           <CenterPane
             meeting={m}
             tab={tab}
@@ -187,15 +205,15 @@ export function MeetingDetailView({
             onReload={reload}
           />
         </div>
-        <div className="order-2 lg:order-first min-w-0"><LeftRail meeting={m} onReload={reload} /></div>
-        <div className="order-3 min-w-0"><RightRail meeting={m} onReload={reload} /></div>
+        <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
+        <div className="order-3 min-w-0 lg:overflow-y-auto"><RightRail meeting={m} onReload={reload} /></div>
       </div>
 
-      {/* Sticky audio player. Lives outside the CenterPane so it stays
-          visible while the user reads the summary OR transcript — no more
-          "switch tabs to play". Click-to-seek on transcript lines pipes
-          through `seekTo` to this element. */}
-      <div className="sticky bottom-0 bg-surface-sunken border-t border-surface-border px-5 py-3">
+      {/* Audio player pinned to the bottom of the card. Lives outside the
+          CenterPane so it stays visible while the user reads the summary
+          OR transcript — no more "switch tabs to play". Click-to-seek on
+          transcript lines pipes through `seekTo` to this element. */}
+      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3">
         <audio
           ref={audioRef}
           controls
@@ -635,8 +653,11 @@ function CenterPane({
       {/* Tab labels share the ALL-CAPS tracked treatment used by the
           Library/Inbox section headings, so section-level typography is
           consistent across views. Audio is now a sticky footer, not a
-          tab — keeps playback alive while reading either tab. */}
-      <div className="flex border-b border-surface-border px-4">
+          tab — keeps playback alive while reading either tab.
+          Sticky-pinned to the top of the center-pane scroll container
+          so SUMMARY/TRANSCRIPT/ACTIONS stay reachable while paging
+          through a long summary or transcript. */}
+      <div className="sticky top-0 z-10 bg-surface flex border-b border-surface-border px-4">
         {(['summary', 'transcript', 'actions'] as const).map((t) => (
           <button
             key={t}
@@ -807,7 +828,12 @@ function TranscriptPanel({
         />
       </div>
 
-      <div ref={panelRef} className="text-sm leading-relaxed font-sans max-h-[60vh] overflow-y-auto pr-1">
+      {/* Scrolling is delegated to the parent rail now that the detail
+          view caps its own height — a nested scroll container here would
+          give the user two scrollbars to fight. The wheel/touchmove
+          listeners below still fire on this element regardless of who
+          actually scrolls, so "don't fight manual scroll" keeps working. */}
+      <div ref={panelRef} className="text-sm leading-relaxed font-sans pr-1">
         {viewMode === 'lines' ? (
           parsed.lines.map((line, i) => {
             const active = i === activeIdx;

@@ -118,5 +118,17 @@ export const IPC_CHANNELS = {
   /** Push channel: main broadcasts a new PipelineStatus on every queue
    *  state change (enqueue, dequeue, pause, resume, clear). */
   pipelineStatusEvent: 'pipeline:status-change',
+  /** Push channel: main broadcasts {id} when the library watcher inserts
+   *  a brand-new meeting row (e.g. just after a recording stops and the
+   *  .m4a goes stable on disk). Renderer uses it to refresh the Library
+   *  immediately instead of waiting for the next 3s poll tick — which
+   *  doesn't fire when hasMotion is false, leaving the list visibly
+   *  stale until a remount. */
+  meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
+  /** Fire a synthetic meeting.completed payload at the configured
+   *  webhook URL. Used by the Settings "Send test payload" button so
+   *  the user can verify their endpoint before a real meeting runs.
+   *  Returns the delivery result so the UI can display status. (#79) */
+  webhookTestSend: 'webhook:test-send',
 } as const;

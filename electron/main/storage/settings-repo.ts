@@ -15,12 +15,51 @@ export interface Settings {
   sttLanguage: string;
   exporterApple: boolean;
   exporterMarkdown: boolean;
+  /** Push a meeting.completed JSON payload to a user-configured endpoint
+   *  when the pipeline finishes a meeting (#79). All fields below are
+   *  ignored unless this is true. */
+  exporterWebhook: boolean;
+  /** Destination endpoint. Must be HTTPS unless it's a localhost address. */
+  webhookUrl: string;
+  /** Optional bearer token. Sent as `Authorization: Bearer <secret>` if set.
+   *  Redacted from logs and the "Send test" preview. */
+  webhookSecret: string;
+  /** Built-in template selector. `compact` and `full` are JSON; the other
+   *  two flatten the payload for Telegram and Slack respectively. */
+  webhookTemplate: 'compact' | 'full' | 'telegram-markdown' | 'slack-blocks';
+  /** Action-item owner filter.
+   *   - `mine` = only items owned by the local user (settings.userSpeakerId)
+   *   - `all`  = every action item
+   *   - `none` = summary only, no action items */
+  webhookOwnerFilter: 'mine' | 'all' | 'none';
+  /** Last delivery attempt — null until the first send. The renderer
+   *  surfaces this in the Settings card so users can see what happened
+   *  without tailing the log. */
+  webhookLastResult: {
+    ts: string;
+    status: number | null;
+    error: string | null;
+  } | null;
   /** AAC bitrate the built-in helper records at, in kbps. UI offers 96/128/192. */
   recordingBitrateKbps: number;
-  /** When true, poll the frontmost browser tab for meeting URLs and prompt
-   *  to start recording. Opt-in because it requires AppleScript Automation
-   *  permission for each browser. */
-  autoDetectMeetings: boolean;
+  /** Meeting auto-detect configuration. `browserTabs` polls the frontmost
+   *  browser tab for known meeting URLs; `nativeApps` polls CoreAudio for
+   *  Zoom / Teams / FaceTime / Slack / Discord / WhatsApp producing audio.
+   *  `silenceMs` is the sustained-audio debounce for the native-app path
+   *  (filters out notification beeps). Backwards-compat: a legacy boolean
+   *  value flips both `browserTabs` and `nativeApps` to that boolean.
+   *  Issues #12, #78. */
+  autoDetectMeetings: {
+    browserTabs: boolean;
+    nativeApps: boolean;
+    silenceMs: number;
+  };
+  /** When the native-app detector fires for Zoom (`us.zoom.xos`), skip
+   *  the banner and start recording immediately. Trades the banner's
+   *  always-confirm posture for "I know I always want this" convenience.
+   *  Only Zoom for now — Teams / FaceTime / Slack / etc. still surface
+   *  the banner. */
+  autoRecordZoom: boolean;
   /** Display name used for the local user's voice in stem-aware transcripts.
    *  Empty → the literal "You" is used. (#13 Phase 3.) */
   userName: string;
@@ -57,8 +96,15 @@ export const DEFAULT_SETTINGS: Settings = {
   sttLanguage: 'en',
   exporterApple: true,
   exporterMarkdown: true,
+  exporterWebhook: false,
+  webhookUrl: '',
+  webhookSecret: '',
+  webhookTemplate: 'compact',
+  webhookOwnerFilter: 'mine',
+  webhookLastResult: null,
   recordingBitrateKbps: 128,
-  autoDetectMeetings: false,
+  autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
+  autoRecordZoom: false,
   userName: '',
   onboardedAt: null,
   userSpeakerId: null,
@@ -67,20 +113,44 @@ export const DEFAULT_SETTINGS: Settings = {
 
 type Key = keyof Settings;
 
+// Coerce legacy `autoDetectMeetings: boolean` rows into the current
+// object shape (#78). Also fills in missing fields if a future setting
+// gets added — callers always get a fully-populated object.
+export function normalizeAutoDetectMeetings(value: unknown): Settings['autoDetectMeetings'] {
+  const d = DEFAULT_SETTINGS.autoDetectMeetings;
+  if (value === true) return { browserTabs: true, nativeApps: true, silenceMs: d.silenceMs };
+  if (value === false || value == null) return { ...d };
+  if (typeof value !== 'object') return { ...d };
+  const v = value as Partial<Settings['autoDetectMeetings']>;
+  return {
+    browserTabs: typeof v.browserTabs === 'boolean' ? v.browserTabs : d.browserTabs,
+    nativeApps: typeof v.nativeApps === 'boolean' ? v.nativeApps : d.nativeApps,
+    silenceMs: typeof v.silenceMs === 'number' && Number.isFinite(v.silenceMs) && v.silenceMs >= 0
+      ? v.silenceMs : d.silenceMs,
+  };
+}
+
 export class SettingsRepo {
   constructor(private readonly db: Database.Database) {}
 
   get<K extends Key>(key: K): Settings[K] {
     const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     if (!r) return DEFAULT_SETTINGS[key];
-    return JSON.parse(r.value) as Settings[K];
+    const parsed = JSON.parse(r.value) as unknown;
+    if (key === 'autoDetectMeetings') {
+      return normalizeAutoDetectMeetings(parsed) as Settings[K];
+    }
+    return parsed as Settings[K];
   }
 
   set<K extends Key>(key: K, value: Settings[K]): void {
+    const toStore = key === 'autoDetectMeetings'
+      ? normalizeAutoDetectMeetings(value)
+      : value;
     this.db.prepare(`
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(key, JSON.stringify(value));
+    `).run(key, JSON.stringify(toStore));
   }
 
   getAll(): Settings {
@@ -88,7 +158,10 @@ export class SettingsRepo {
     const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
     for (const { key, value } of rows) {
       if (key in DEFAULT_SETTINGS) {
-        (out as Record<string, unknown>)[key] = JSON.parse(value);
+        const parsed = JSON.parse(value) as unknown;
+        (out as Record<string, unknown>)[key] = key === 'autoDetectMeetings'
+          ? normalizeAutoDetectMeetings(parsed)
+          : parsed;
       }
     }
     return out;

@@ -62,7 +62,9 @@ const IPC_CHANNELS = {
   pipelineClear: 'pipeline:clear',
   pipelineStatus: 'pipeline:status',
   pipelineStatusEvent: 'pipeline:status-change',
+  meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
+  webhookTestSend: 'webhook:test-send',
 } as const;
 
 const api = {
@@ -119,6 +121,16 @@ const api = {
     }) => ipcRenderer.invoke(IPC_CHANNELS.transcriptExport, input) as Promise<{
       path: string | null;
     }>,
+    /** Push channel: main fires {id} as soon as the library watcher
+     *  catalogs a freshly arrived recording (i.e. just after Stop, once
+     *  the .m4a goes stable on disk). Renderer uses it to refresh the
+     *  Library immediately so the new row appears without needing a
+     *  remount or the next 3s poll tick. */
+    onAdded: (cb: (e: { id: string }) => void) => {
+      const wrapped = (_e: unknown, payload: { id: string }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.meetingsAddedEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.meetingsAddedEvent, wrapped);
+    },
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
@@ -198,20 +210,26 @@ const api = {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),
   },
   meetingDetector: {
-    // Push channel: main sends { platform, url, title, browserPid, browserLabel }
-    // when a meeting URL is observed. Unsubscribe via the returned callback.
-    onDetected: (cb: (m: {
-      platform: string; url: string; title: string | null;
-      browserPid: number; browserLabel: string;
-    }) => void) => {
-      const wrapped = (_e: unknown, payload: {
-        platform: string; url: string; title: string | null;
-        browserPid: number; browserLabel: string;
-      }): void => cb(payload);
+    // Push channel: main sends either a browser-tab or native-app payload
+    // when a meeting is observed. Renderer switches on `source`.
+    //  • browser-tab — frontmost browser tab matches a known meeting URL (#12)
+    //  • native-app — Zoom/Teams/etc. started producing sustained audio (#78)
+    onDetected: (cb: (m:
+      | { source: 'browser-tab'; platform: string; url: string; title: string | null; browserPid: number; browserLabel: string }
+      | { source: 'native-app'; appName: string; bundleId: string; pid: number }
+    ) => void) => {
+      const wrapped = (_e: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.meetingDetectedEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.meetingDetectedEvent, wrapped);
     },
-    dismiss: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, url),
+    /** Suppress a detection trigger. Pass `{ kind: 'browser-tab', url }` to
+     *  silence a specific browser URL until the user navigates away and
+     *  back, or `{ kind: 'native-app', bundleId }` to silence that app
+     *  for 15 minutes. */
+    dismiss: (input:
+      | { kind: 'browser-tab'; url: string }
+      | { kind: 'native-app'; bundleId: string }
+    ) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, input),
   },
   onboarding: {
     /** List currently-installed Whisper models (by inspecting
@@ -358,6 +376,18 @@ const api = {
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion) as Promise<string>,
   },
+  webhook: {
+    /** POSTs a synthetic meeting.completed payload to the configured
+     *  endpoint using the active template + secret. Returns the same
+     *  delivery result shape that auto-fire writes to
+     *  settings.webhookLastResult, so the UI can show identical
+     *  feedback. (#79) */
+    testSend: () => ipcRenderer.invoke(IPC_CHANNELS.webhookTestSend) as Promise<{
+      ts: string;
+      status: number | null;
+      error: string | null;
+    }>,
+  },
   on: (channel: string, handler: (...args: unknown[]) => void) => {
     const wrapped = (_e: unknown, ...args: unknown[]) => handler(...args);
     ipcRenderer.on(channel, wrapped);
@@ -371,6 +401,24 @@ const api = {
     const wrapped = (_e: unknown, action: string): void => cb(action);
     ipcRenderer.on('mn:menu-action', wrapped);
     return () => ipcRenderer.off('mn:menu-action', wrapped);
+  },
+  /** Subscribe to meetingnotes://open?id=… events emitted by the
+   *  URL-scheme dispatcher (#77). The renderer is expected to navigate
+   *  to the detail view for the given meeting id. */
+  onOpenMeeting: (cb: (meetingId: string) => void) => {
+    const wrapped = (_e: unknown, id: string): void => cb(id);
+    ipcRenderer.on('mn:open-meeting', wrapped);
+    return () => ipcRenderer.off('mn:open-meeting', wrapped);
+  },
+  /** Subscribe to "main process auto-started a recording" events. Fired
+   *  when the native-app detector matches Zoom (or any future
+   *  auto-record bundle) and settings.autoRecordZoom is on. Renderer
+   *  routes the payload into its LiveRecording state so the in-progress
+   *  card appears without a manual click. (#78 follow-up) */
+  onAutoRecordingStarted: (cb: (info: { sessionId: string; label: string; startedAt: string }) => void) => {
+    const wrapped = (_e: unknown, payload: { sessionId: string; label: string; startedAt: string }): void => cb(payload);
+    ipcRenderer.on('mn:auto-recording-started', wrapped);
+    return () => ipcRenderer.off('mn:auto-recording-started', wrapped);
   },
 };
 

@@ -15,6 +15,7 @@ import type { LMStudioClient } from '../lm-studio/client.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
+import type { NativeAppDetector } from '../meeting-detector/native-app-detector.js';
 import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
@@ -51,6 +52,7 @@ export interface IpcServices {
   exporters: Record<string, Exporter>;
   libraryRoot: string;
   meetingDetector?: MeetingDetector;
+  nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
 }
 
@@ -301,9 +303,23 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.recordingManager.state(sessionId);
   });
 
-  ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, url: unknown) => {
-    if (typeof url !== 'string' || !s.meetingDetector) return;
-    s.meetingDetector.dismiss(url);
+  ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, input: unknown) => {
+    // Two banner sources (browser-tab URL, native-app bundle id) share one
+    // dismissal channel. The renderer sends an object discriminator so the
+    // main process knows which detector's suppression list to mutate.
+    // Legacy string form (a bare URL) routes to the browser detector for
+    // backwards compat with pre-#78 renderers in transient cache.
+    if (typeof input === 'string') {
+      s.meetingDetector?.dismiss(input);
+      return;
+    }
+    if (!input || typeof input !== 'object') return;
+    const obj = input as { kind?: string; url?: string; bundleId?: string };
+    if (obj.kind === 'browser-tab' && typeof obj.url === 'string') {
+      s.meetingDetector?.dismiss(obj.url);
+    } else if (obj.kind === 'native-app' && typeof obj.bundleId === 'string') {
+      s.nativeAppDetector?.dismiss(obj.bundleId);
+    }
   });
 
   ipc.handle(IPC_CHANNELS.permissionsAudioGet, () => probeAudioPermissions({ helperPath: s.helperPath }));
@@ -503,11 +519,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
-    // Toggle the meeting detector live when the user flips the setting —
-    // no need to restart the app.
-    if (key === 'autoDetectMeetings' && s.meetingDetector) {
-      if (value) s.meetingDetector.start();
-      else s.meetingDetector.stop();
+    // Toggle each meeting detector live when the user flips its switch —
+    // no need to restart the app. autoDetectMeetings is the object form
+    // post-#78 (browserTabs / nativeApps / silenceMs).
+    if (key === 'autoDetectMeetings') {
+      const cfg = s.settings.get('autoDetectMeetings');
+      if (s.meetingDetector) {
+        if (cfg.browserTabs) s.meetingDetector.start();
+        else s.meetingDetector.stop();
+      }
+      if (s.nativeAppDetector) {
+        if (cfg.nativeApps) s.nativeAppDetector.start();
+        else s.nativeAppDetector.stop();
+      }
     }
   });
 
@@ -767,6 +791,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // Pipeline queue controls. Pause/resume don't touch DB rows — they
   // just gate the runner. clear flips queued meetings back to 'pending'
   // so the user can see them and decide whether to re-process.
+  // Webhook test-send (#79). Builds a synthetic meeting.completed payload
+  // (same shape the auto-fire produces) and POSTs it via the registered
+  // webhook exporter. Surfaces the delivery result so the Settings card
+  // can show the same status the user would see for a real meeting.
+  ipc.handle(IPC_CHANNELS.webhookTestSend, async () => {
+    const webhook = s.exporters.webhook as {
+      deliverPayload?: (p: unknown) => Promise<{ ts: string; status: number | null; error: string | null }>;
+    } | undefined;
+    if (!webhook?.deliverPayload) {
+      return { ts: new Date().toISOString(), status: null, error: 'webhook exporter is not configured' };
+    }
+    const cfg = s.settings.getAll();
+    const samplePayload = {
+      event: 'meeting.completed' as const,
+      meeting: {
+        id: 'test-sample',
+        slug: '2026-01-01-test-sample',
+        title: 'Test payload from MeetingNotes',
+        started_at: new Date().toISOString(),
+        duration_s: 600,
+        attendees: cfg.userName ? [cfg.userName] : ['You'],
+      },
+      summary_markdown: 'This is a synthetic payload from the Settings test button. No real meeting data is included.',
+      transcript_markdown: null,
+      action_items: [
+        { text: 'Confirm your webhook endpoint received this payload', owner: cfg.userName || 'You', due_date: null },
+      ],
+      links: {
+        audio: null,
+        transcript_md: null,
+        summary_md: null,
+        open_in_app: 'meetingnotes://open?id=test-sample',
+      },
+    };
+    return webhook.deliverPayload(samplePayload);
+  });
+
   ipc.handle(IPC_CHANNELS.pipelineStatus, () => s.pipeline.getStatus());
   ipc.handle(IPC_CHANNELS.pipelinePause, () => { s.pipeline.pause(); });
   ipc.handle(IPC_CHANNELS.pipelineResume, () => { s.pipeline.resume(); });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -34,18 +34,46 @@ import { runSummarizing } from './pipeline/stages/summarizing.js';
 import { runExtracting } from './pipeline/stages/extracting.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
 import { MeetingDetector } from './meeting-detector/detector.js';
+import { NativeAppDetector } from './meeting-detector/native-app-detector.js';
 import { purgeTrashDir, UNDO_WINDOW_MS } from './storage/trash.js';
 import { buildExporterRegistry } from './exporters/registry.js';
+import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters/webhook.js';
 import { Logger } from './logging/logger.js';
-import { createMeetingFolder } from './storage/meeting-folder.js';
+import { createMeetingFolder, meetingFolderPath } from './storage/meeting-folder.js';
 import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
+import { SchemeDispatcher } from './url-scheme/dispatcher.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
+
+// Register meetingnotes:// as our protocol scheme. Doing this before
+// app.whenReady() — and before the single-instance lock — so:
+//   (a) macOS picks MeetingNotes as the handler from the first launch;
+//   (b) `open-url` events that fire during a cold-start (the user did
+//       `open meetingnotes://record` while the app wasn't running) are
+//       buffered into `pendingSchemeUrls` and replayed once the
+//       dispatcher is ready inside whenReady().
+// Issue #77.
+if (!app.isDefaultProtocolClient('meetingnotes')) {
+  app.setAsDefaultProtocolClient('meetingnotes');
+}
+const pendingSchemeUrls: string[] = [];
+let schemeDispatcher: SchemeDispatcher | null = null;
+function handleSchemeUrl(url: string): void {
+  if (schemeDispatcher) void schemeDispatcher.dispatch(url);
+  else pendingSchemeUrls.push(url);
+}
+// macOS delivers protocol-handler invocations via this Cocoa event. This
+// listener is the primary entry point on Mac; the second-instance fallback
+// below is a no-op on Mac but keeps the Windows/Linux argv path covered.
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleSchemeUrl(url);
+});
 
 async function createWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
@@ -279,6 +307,14 @@ app.whenReady().then(async () => {
       }
       if (!inserted) throw new Error('slug collision retry exhausted');
       logger.info('library:discovered', { id, slug, audioPath });
+      // Tell every open renderer window that a new meeting row exists.
+      // Without this, the Library view stays stale after a Stop because
+      // its post-stop refresh fires before chokidar's stability debounce
+      // — and with no live recording or pending meetings yet in state,
+      // the conditional 3s poll never starts.
+      for (const w of BrowserWindow.getAllWindows()) {
+        w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
+      }
     } catch (e) {
       logger.error('library:discover-fail', { audioPath, err: String(e) });
     }
@@ -312,20 +348,168 @@ app.whenReady().then(async () => {
   purgeExpiredTrash();
   const trashPurgeTimer = setInterval(purgeExpiredTrash, 60_000);
 
-  // Meeting auto-detect (#12). Opt-in per setting. Polls the frontmost
-  // browser tabs for known meeting URLs (Meet/Zoom/Teams/Whereby/etc.) and
-  // pushes a meetingDetectedEvent to renderers so they can prompt the user
-  // to start recording.
+  // Meeting auto-detect (#12 browser tabs, #78 native apps). Two detectors,
+  // each opt-in via its own toggle inside the autoDetectMeetings setting
+  // object. Both broadcast on the same renderer event channel so the
+  // banner can switch on `source` to pick its copy.
   const meetingDetector = new MeetingDetector({
     isSuppressed: () => recordingSessionsRepo.findOpen().length > 0,
   });
   meetingDetector.onDetected((m) => {
     BrowserWindow.getAllWindows().forEach((w) =>
+      w.webContents.send(IPC_CHANNELS.meetingDetectedEvent, { source: 'browser-tab', ...m }));
+  });
+  const nativeAppDetector = new NativeAppDetector({
+    appEnumerator,
+    silenceMs: s.autoDetectMeetings.silenceMs,
+    isSuppressed: () => recordingSessionsRepo.findOpen().length > 0,
+    log: (msg, data) => logger.info(msg, data),
+  });
+  nativeAppDetector.onDetected((m) => {
+    // Zoom auto-record path (#78 follow-up). When the user has opted into
+    // "always record Zoom", skip the banner and start a recording right
+    // away. Any other meeting app still surfaces the confirm-first banner.
+    // Existing recordings, dismissals, and the silenceMs debounce are
+    // already handled inside the detector — by the time we get here the
+    // detector has decided this is a fresh, undismissed call worth
+    // surfacing.
+    if (m.bundleId === 'us.zoom.xos' && settings.get('autoRecordZoom')) {
+      void (async () => {
+        try {
+          const { sessionId } = await recordingManager.start({
+            targetPid: m.pid,
+            targetLabel: m.appName,
+            mic: true,
+          });
+          const startedAt = new Date().toISOString();
+          logger.info('native-detector:auto-record-started', {
+            bundleId: m.bundleId, sessionId, label: m.appName,
+          });
+          for (const w of BrowserWindow.getAllWindows()) {
+            w.webContents.send('mn:auto-recording-started', {
+              sessionId, label: m.appName, startedAt,
+            });
+          }
+        } catch (err) {
+          // If auto-record fails (helper not running, mic perm denied),
+          // fall back to the banner so the user has a clear path forward
+          // instead of a silent failure.
+          logger.error('native-detector:auto-record-failed', {
+            bundleId: m.bundleId, err: String(err),
+          });
+          for (const w of BrowserWindow.getAllWindows()) {
+            w.webContents.send(IPC_CHANNELS.meetingDetectedEvent, m);
+          }
+        }
+      })();
+      return;
+    }
+    BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send(IPC_CHANNELS.meetingDetectedEvent, m));
   });
-  if (s.autoDetectMeetings) meetingDetector.start();
+  if (s.autoDetectMeetings.browserTabs) meetingDetector.start();
+  if (s.autoDetectMeetings.nativeApps) nativeAppDetector.start();
 
-  const exporters = buildExporterRegistry();
+  // meetingnotes:// URL scheme dispatcher (#77). Wires the protocol-handler
+  // verbs (record / stop / open) into the existing recording + window
+  // surfaces. Pending URLs that arrived before whenReady completes are
+  // flushed here.
+  schemeDispatcher = new SchemeDispatcher({
+    recordingManager,
+    appEnumerator,
+    recordingSessionsRepo,
+    meetings,
+    emitOpenMeeting: (meetingId) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        w.webContents.send('mn:open-meeting', meetingId);
+      }
+    },
+    notify: ({ title, body }) => {
+      try {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      } catch (err) {
+        logger.error('url-scheme:notify-failed', { err: String(err) });
+      }
+    },
+    focusMainWindow: () => {
+      const wins = BrowserWindow.getAllWindows();
+      if (wins.length === 0) return;
+      const target = wins[0]!;
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+    },
+    logger,
+  });
+  for (const url of pendingSchemeUrls.splice(0)) {
+    void schemeDispatcher.dispatch(url);
+  }
+
+  // Webhook exporter (#79). Implements the standard Exporter interface so
+  // the manual export path keeps working, and exposes an extra
+  // deliverPayload() entry point for the pipeline's auto-fire below.
+  const exporters = buildExporterRegistry({
+    webhook: {
+      getConfig: () => ({
+        url: settings.get('webhookUrl'),
+        secret: settings.get('webhookSecret'),
+        template: settings.get('webhookTemplate'),
+        ownerFilter: settings.get('webhookOwnerFilter'),
+      }),
+      setLastResult: (r: WebhookDeliveryResult) => settings.set('webhookLastResult', r),
+      fetchImpl: globalThis.fetch,
+      log: (msg, data) => logger.info(msg, data),
+    },
+  });
+  // Auto-fire: when a meeting reaches status='done', POST the payload
+  // to the configured endpoint. Settings gate controls whether anything
+  // actually happens; URL validation happens inside deliverPayload so
+  // a misconfigured endpoint surfaces in the Settings card without
+  // blocking the meeting's completion.
+  pipeline.onMeetingComplete(async (meetingId) => {
+    if (!settings.get('exporterWebhook')) return;
+    const webhook = exporters.webhook;
+    if (!webhook || typeof (webhook as { deliverPayload?: unknown }).deliverPayload !== 'function') return;
+    const meeting = meetings.findById(meetingId);
+    if (!meeting) return;
+    const folder = meetingFolderPath(libraryRoot, meeting.slug);
+    const summaryPath = path.join(folder, 'summary.md');
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
+    const transcriptMd = fs.existsSync(transcriptPath) ? fs.readFileSync(transcriptPath, 'utf8') : null;
+    const items = actionItems.listByMeeting(meetingId);
+    const attendees = speakers.listForMeeting(meetingId)
+      .map((sp) => sp.displayName ?? sp.localLabel);
+    const payload = buildPayloadFromMeeting({
+      meetingId: meeting.id,
+      slug: meeting.slug,
+      title: meeting.title,
+      startedAt: meeting.startedAt,
+      durationS: meeting.durationS,
+      audioPath: meeting.audioPath,
+      meetingFolder: folder,
+      summaryMd,
+      transcriptMd,
+      attendees,
+      actionItems: items.map((ai) => ({
+        text: ai.text,
+        ownerName: ai.ownerName,
+        ownerSpeakerId: ai.ownerSpeakerId,
+        dueDate: ai.dueDate,
+        status: ai.status,
+      })),
+      userSpeakerId: settings.get('userSpeakerId'),
+    }, {
+      url: settings.get('webhookUrl'),
+      secret: settings.get('webhookSecret'),
+      template: settings.get('webhookTemplate'),
+      ownerFilter: settings.get('webhookOwnerFilter'),
+    });
+    const result = await (webhook as unknown as { deliverPayload: (p: typeof payload) => Promise<WebhookDeliveryResult> }).deliverPayload(payload);
+    if (result.error) {
+      logger.error('webhook:auto-fire-failed', { meetingId, error: result.error });
+    }
+  });
   // Weekly summary aggregator (#weekly). Builds the per-week digest
   // from the existing meetings + action_items tables, with an LLM-
   // narrative cache backed by the weekly_summaries table.
@@ -357,6 +541,7 @@ app.whenReady().then(async () => {
     exporters,
     libraryRoot,
     meetingDetector,
+    nativeAppDetector,
     weeklyAggregator,
   });
 
@@ -395,6 +580,7 @@ app.whenReady().then(async () => {
       }
       try {
         meetingDetector.stop();
+        nativeAppDetector.stop();
         clearInterval(trashPurgeTimer);
         await Promise.all([
           diarSupervisor.stop(),

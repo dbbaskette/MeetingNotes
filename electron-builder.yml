@@ -62,6 +62,14 @@ mac:
     - zip
   category: public.app-category.productivity
   hardenedRuntime: true
+  # Register meetingnotes:// as a URL scheme so external callers (Shortcuts,
+  # CLI `open`, Alfred/Raycast actions) can trigger record / stop / open
+  # programmatically. Handled by electron/main/url-scheme/dispatcher.ts. (#77)
+  protocols:
+    - name: MeetingNotes
+      schemes:
+        - meetingnotes
+      role: Editor
   # Custom entitlements add com.apple.security.device.audio-input to both the
   # parent .app and every signed child binary (electron-builder uses the same
   # plist for both unless entitlementsInherit is overridden). The bundled

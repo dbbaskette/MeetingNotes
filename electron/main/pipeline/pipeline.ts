@@ -30,6 +30,10 @@ export interface PipelineStatus {
 }
 
 export type PipelineStatusListener = (s: PipelineStatus) => void;
+/** Fires when a meeting reaches status='done'. Async listeners are awaited
+ *  but their errors are isolated — webhook delivery failures must not
+ *  poison the next meeting's run. Issue #79. */
+export type MeetingCompleteListener = (meetingId: string) => void | Promise<void>;
 
 export class Pipeline {
   private queue: string[] = [];
@@ -38,6 +42,7 @@ export class Pipeline {
   private paused = false;
   private currentId: string | null = null;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
+  private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -107,6 +112,15 @@ export class Pipeline {
   onStatusChange(cb: PipelineStatusListener): () => void {
     this.statusListeners.add(cb);
     return () => { this.statusListeners.delete(cb); };
+  }
+
+  /** Subscribe to meeting completions. Fires after the meeting flips to
+   *  status='done'. Errors thrown by listeners are logged but don't roll
+   *  back the completion. Used by the webhook exporter to push the
+   *  meeting.completed payload (#79). */
+  onMeetingComplete(cb: MeetingCompleteListener): () => void {
+    this.completeListeners.add(cb);
+    return () => { this.completeListeners.delete(cb); };
   }
 
   private notify(): void {
@@ -200,5 +214,12 @@ export class Pipeline {
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
     this.deps.ctx.meetings.updateStatus(meetingId, 'done');
+    for (const cb of this.completeListeners) {
+      try {
+        await cb(meetingId);
+      } catch (e) {
+        this.deps.ctx.logger.error('pipeline:complete-listener-error', { id: meetingId, err: String(e) });
+      }
+    }
   }
 }
