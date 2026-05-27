@@ -672,7 +672,7 @@ function CenterPane({
         ))}
       </div>
       <div className="p-5">
-        {tab === 'summary' && <SummaryPanel meeting={meeting} />}
+        {tab === 'summary' && <SummaryPanel meeting={meeting} onReload={onReload} />}
         {tab === 'transcript' && (
           <TranscriptPanel
             meeting={meeting}
@@ -1329,32 +1329,51 @@ function Placeholder({ text }: { text: string }): JSX.Element {
 // happen via the meetings:save-summary IPC, NOT via re-running the pipeline.
 type SummaryMode = 'view' | 'edit';
 
-function SummaryPanel({ meeting }: { meeting: MeetingDetail }): JSX.Element {
+function SummaryPanel({
+  meeting, onReload,
+}: { meeting: MeetingDetail; onReload: () => Promise<void> }): JSX.Element {
   const original = meeting.summaryMd ?? '';
   const [mode, setMode] = useState<SummaryMode>('view');
+  // `savedValue` is the local baseline — what we believe is on disk. It
+  // advances on save, ahead of the parent's `meeting.summaryMd` prop, so
+  // `dirty` (and the view) reflect the just-saved content even while the
+  // parent prop is still catching up to the reload.
+  const [savedValue, setSavedValue] = useState(original);
   const [draft, setDraft] = useState(original);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Re-seed the draft when the underlying summary changes (e.g. summarize
-  // re-ran, or the user switched meetings without unmounting). We don't want
-  // to silently clobber unsaved edits, so we only re-seed when the user is
-  // currently in view mode.
+  // Re-seed when summary.md actually changes (summarize re-ran, or the user
+  // switched meetings without unmounting). We track the previous prop via
+  // ref so a mode flip alone doesn't trigger a reset — without this, saving
+  // would clobber `draft` back to the stale prop value the instant we drop
+  // into view mode, and the user would see their edit "disappear" even
+  // though the write succeeded. Edit-mode is still never clobbered.
+  const prevOriginalRef = useRef(original);
   useEffect(() => {
-    if (mode === 'view') setDraft(original);
+    if (prevOriginalRef.current === original) return;
+    prevOriginalRef.current = original;
+    if (mode === 'view') {
+      setDraft(original);
+      setSavedValue(original);
+    }
   }, [original, mode]);
 
-  const dirty = draft !== original;
+  const dirty = draft !== savedValue;
 
   async function save(): Promise<void> {
     if (!dirty || saving) return;
     setSaving(true); setError(null);
     try {
       await api.meetings.saveSummary(meeting.id, draft);
+      setSavedValue(draft);
       setSavedAt(new Date());
       // After a successful save, drop back into view so the rendered
       // markdown reflects what's now on disk.
       setMode('view');
+      // Refresh the parent so other panes keying off `meeting.summaryMd`
+      // (e.g. RightRail's "has summary" check) see the new content.
+      void onReload();
     } catch (e) {
       setError((e as Error).message);
     } finally {
