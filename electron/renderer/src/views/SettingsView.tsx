@@ -14,8 +14,19 @@ interface Settings {
   sttLanguage: string;
   exporterApple: boolean;
   exporterMarkdown: boolean;
+  exporterWebhook: boolean;
+  webhookUrl: string;
+  webhookSecret: string;
+  webhookTemplate: 'compact' | 'full' | 'telegram-markdown' | 'slack-blocks';
+  webhookOwnerFilter: 'mine' | 'all' | 'none';
+  webhookLastResult: { ts: string; status: number | null; error: string | null } | null;
   recordingBitrateKbps: number;
-  autoDetectMeetings: boolean;
+  autoDetectMeetings: {
+    browserTabs: boolean;
+    nativeApps: boolean;
+    silenceMs: number;
+  };
+  autoRecordZoom: boolean;
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
@@ -227,8 +238,8 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
-            checked={s.autoDetectMeetings}
-            onChange={(e) => update('autoDetectMeetings', e.target.checked)}
+            checked={s.autoDetectMeetings.browserTabs}
+            onChange={(e) => update('autoDetectMeetings', { ...s.autoDetectMeetings, browserTabs: e.target.checked })}
             className="mt-0.5"
           />
           <div className="flex-1">
@@ -242,13 +253,58 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
             </div>
             <div className="text-xs text-ink-muted mt-1">
               Note: the recorder captures the whole browser process, so audio
-              from other tabs (YouTube, etc.) will bleed in. Native Zoom/Teams
-              desktop meetings don&apos;t need this — they&apos;re picked in the
-              Record source picker directly.
+              from other tabs (YouTube, etc.) will bleed in.
+            </div>
+          </div>
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer mt-3">
+          <input
+            type="checkbox"
+            checked={s.autoDetectMeetings.nativeApps}
+            onChange={(e) => update('autoDetectMeetings', { ...s.autoDetectMeetings, nativeApps: e.target.checked })}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-sm text-ink">Watch native meeting apps (Zoom, Teams, FaceTime, Slack, Discord, WhatsApp)</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              Fires when one of those apps starts producing audio. A banner
+              offers to record the app directly — no need to pick the source
+              in the Record menu. Brief notification beeps are filtered out
+              by a {Math.round(s.autoDetectMeetings.silenceMs / 1000)}-second
+              sustained-audio threshold. Dismissing the banner suppresses
+              that app for 15 minutes.
+            </div>
+          </div>
+        </label>
+        {/* Per-app auto-record (#78 follow-up). Indented under the native
+            toggle because it's a no-op when the parent isn't on. Zoom-only
+            in v1; the wiring is parameterized in main so additional apps
+            can join later as separate toggles. */}
+        <label className={`flex items-start gap-3 cursor-pointer mt-3 ml-6 ${s.autoDetectMeetings.nativeApps ? '' : 'opacity-50'}`}>
+          <input
+            type="checkbox"
+            checked={s.autoRecordZoom}
+            disabled={!s.autoDetectMeetings.nativeApps}
+            onChange={(e) => update('autoRecordZoom', e.target.checked)}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-sm text-ink">Always record Zoom — skip the confirm banner</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              When Zoom starts producing audio, MeetingNotes begins
+              recording immediately. Other meeting apps still surface the
+              confirm-first banner. Requires the native-app detector
+              above to be on.
             </div>
           </div>
         </label>
       </section>
+
+      <WebhookExporterCard
+        settings={s}
+        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
+        onPersist={(key, value) => { void update(key, value); }}
+      />
 
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
@@ -388,3 +444,129 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
     </div>
   );
 }
+
+/** Webhook exporter card. Local state for the URL / secret / template /
+ *  filter, persisted via `onPersist`. The "Send test payload" button
+ *  POSTs a synthetic meeting.completed body via the same code path as
+ *  the pipeline's auto-fire, so what you see here matches what real
+ *  meetings would push. (#79) */
+function WebhookExporterCard({
+  settings,
+  onUpdate,
+  onPersist,
+}: {
+  settings: Settings;
+  onUpdate: (patch: Partial<Settings>) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}): JSX.Element {
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<Settings['webhookLastResult'] | null>(null);
+
+  function set<K extends keyof Settings>(key: K, value: Settings[K]): void {
+    onUpdate({ [key]: value } as Partial<Settings>);
+    onPersist(key, value);
+  }
+
+  async function runTest(): Promise<void> {
+    setTesting(true); setTestResult(null);
+    try {
+      const r = await api.webhook.testSend();
+      setTestResult(r);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const lastResult = testResult ?? settings.webhookLastResult;
+
+  return (
+    <section className="border-t border-surface-border pt-5">
+      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Webhook exporter</div>
+      <label className="flex items-start gap-3 cursor-pointer mb-3">
+        <input
+          type="checkbox"
+          checked={settings.exporterWebhook}
+          onChange={(e) => set('exporterWebhook', e.target.checked)}
+          className="mt-0.5"
+        />
+        <div className="flex-1">
+          <div className="text-sm text-ink">Push completed meetings to a webhook</div>
+          <div className="text-xs text-ink-muted mt-0.5">
+            When a meeting finishes (summary + action items done), POST the
+            payload to an HTTPS endpoint. Use it to forward results to
+            Telegram, Slack, or your own automation. Retries 3× on 5xx /
+            network errors with exponential backoff.
+          </div>
+        </div>
+      </label>
+      {settings.exporterWebhook && (
+        <div className="space-y-3 pl-7">
+          <Field label="Webhook URL (HTTPS)">
+            <input
+              value={settings.webhookUrl}
+              onChange={(e) => set('webhookUrl', e.target.value)}
+              placeholder="https://example.com/hooks/meetingnotes"
+              className="input"
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Bearer token (optional)">
+            <input
+              type="password"
+              value={settings.webhookSecret}
+              onChange={(e) => set('webhookSecret', e.target.value)}
+              placeholder="Sent as Authorization: Bearer …"
+              className="input"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Payload template">
+            <select
+              value={settings.webhookTemplate}
+              onChange={(e) => set('webhookTemplate', e.target.value as Settings['webhookTemplate'])}
+              className="input"
+            >
+              <option value="compact">Compact JSON (summary + action items, no transcript)</option>
+              <option value="full">Full JSON (includes transcript markdown)</option>
+              <option value="telegram-markdown">Telegram sendMessage (Markdown)</option>
+              <option value="slack-blocks">Slack Block Kit</option>
+            </select>
+          </Field>
+          <Field label="Include which action items">
+            <select
+              value={settings.webhookOwnerFilter}
+              onChange={(e) => set('webhookOwnerFilter', e.target.value as Settings['webhookOwnerFilter'])}
+              className="input"
+            >
+              <option value="mine">Only mine (assigned to my speaker)</option>
+              <option value="all">All items</option>
+              <option value="none">None (summary only)</option>
+            </select>
+          </Field>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void runTest()}
+              disabled={testing || !settings.webhookUrl}
+              className="text-xs font-semibold px-3 py-1.5 rounded-md border border-surface-border bg-surface hover:border-ink/30 hover:text-ink text-ink-muted disabled:opacity-50 disabled:cursor-not-allowed transition shrink-0"
+            >
+              {testing ? 'Sending…' : 'Send test payload'}
+            </button>
+            {lastResult && lastResult.error == null && (
+              <span className="text-xs text-status-ok font-medium">
+                ✓ HTTP {lastResult.status} at {new Date(lastResult.ts).toLocaleTimeString()}
+              </span>
+            )}
+            {lastResult && lastResult.error != null && (
+              <span className="text-xs text-rose-600 truncate max-w-[20rem]" title={lastResult.error}>
+                ✗ {lastResult.error}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+

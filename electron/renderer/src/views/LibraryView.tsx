@@ -72,6 +72,17 @@ export function LibraryView({
     return () => { off(); };
   }, [refresh]);
 
+  // Push-refresh when main catalogs a freshly arrived recording. Stop()
+  // resolves before chokidar's stability debounce fires, so the post-stop
+  // refresh in LiveRecordingRow happens too early to see the new row.
+  // Without this subscription the Library stayed stale until the user
+  // navigated into a meeting and back (which remounted the view and
+  // re-ran meetings:list). Now main pings us the instant the row exists.
+  useEffect(() => {
+    const off = api.meetings.onAdded(() => { void refresh(); });
+    return () => { off(); };
+  }, [refresh]);
+
   // Conditional polling. The list only changes when the user is recording
   // or the pipeline is moving something through processing/awaiting_user/
   // pending. With 47 done meetings sitting around, the old "poll every 3 s
@@ -185,9 +196,9 @@ export function LibraryView({
   }
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-24">
+    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 flex flex-col">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
-      <header className="flex items-center gap-4 mb-8">
+      <header className="shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
           <div
             className="w-6 h-6 rounded-md"
@@ -229,15 +240,17 @@ export function LibraryView({
       </header>
 
       {!liveRecording && (
-        <MeetingDetectedBanner
-          onStartRecording={({ sessionId, label }) => onStartRecording({
-            sessionId, label, startedAt: new Date().toISOString(),
-          })}
-        />
+        <div className="shrink-0">
+          <MeetingDetectedBanner
+            onStartRecording={({ sessionId, label }) => onStartRecording({
+              sessionId, label, startedAt: new Date().toISOString(),
+            })}
+          />
+        </div>
       )}
 
       {liveRecording && (
-        <div className="mb-6">
+        <div className="shrink-0 mb-6">
           <LiveRecordingRow
             sessionId={liveRecording.sessionId}
             label={liveRecording.label}
@@ -247,17 +260,23 @@ export function LibraryView({
         </div>
       )}
 
-      <QueueBanner
-        status={pipelineStatus}
-        meetings={meetings}
-        onChanged={() => void refresh()}
-        toast={toast}
-      />
+      <div className="shrink-0">
+        <QueueBanner
+          status={pipelineStatus}
+          meetings={meetings}
+          onChanged={() => void refresh()}
+          toast={toast}
+        />
+      </div>
 
 
       {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}
-      <section>
-        <div className="flex items-baseline gap-3 mb-3">
+      {/* Section becomes the height-bounded flex column. Header + filter
+          chips stay pinned via `shrink-0`; only the meeting rows below
+          scroll, so the user never loses the chips/search while paging
+          through hundreds of meetings. */}
+      <section className="flex-1 min-h-0 flex flex-col">
+        <div className="shrink-0 flex items-baseline gap-3 mb-3">
           <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
             Library
           </h2>
@@ -271,7 +290,7 @@ export function LibraryView({
             (greyed + non-clickable) rather than hidden, which keeps the
             row visually stable as state evolves. Search yields width
             first on narrow via flex-1. */}
-        <div className="flex items-center flex-wrap gap-2 mb-3">
+        <div className="shrink-0 flex items-center flex-wrap gap-2 mb-3">
           <FilterChip
             active={libFilter === 'all'}
             onClick={() => setLibFilter('all')}
@@ -322,7 +341,11 @@ export function LibraryView({
             query={query}
           />
         ) : (
-          <div className="space-y-2">
+          // The negative-margin/padding pair on the right pushes the
+          // scrollbar into the outer page margin so rows stay flush with
+          // the filter chips above them. Bottom pb-8 keeps the last row
+          // from sitting flush against the SelectionBar's overlay.
+          <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8 space-y-2">
             {library.map((m) => (
               <LibraryRow
                 key={m.id}

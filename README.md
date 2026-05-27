@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2014.2%2B-blue)](https://support.apple.com/en-us/HT201260)
 [![Architecture](https://img.shields.io/badge/arch-Apple%20Silicon-black)](https://support.apple.com/en-us/HT211814)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![Status: 1.0](https://img.shields.io/badge/status-1.0-brightgreen)](#status)
 [![Electron](https://img.shields.io/badge/electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/typescript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
@@ -26,19 +26,20 @@ Local-first meeting notes for macOS. Hit Record, pick which app's audio you want
 Most meeting-transcription tools either ship your audio to a SaaS, lock you into their recorder, or only do half the job. MeetingNotes runs the whole pipeline locally:
 
 - **Recording** via a bundled Swift CLI helper using macOS 14.2+ CoreAudio Process Tap (the API Apple introduced for exactly this) — captures any app's audio + mic into a mixed M4A, plus two sidecar stems (`.voice.m4a`, `.system.m4a`) written for future stem-aware processing
-- **Meeting auto-detect** (opt-in) watches your frontmost browser tab for known meeting URLs — Meet, Zoom web, Teams, Whereby, Jitsi, and others — and offers to record with one click
+- **Meeting auto-detect** (opt-in) covers both browsers and native apps. The browser watcher polls your frontmost tab for known meeting URLs (Meet, Zoom web, Teams, Whereby, Jitsi, and others). The native-app watcher detects when **Zoom**, **Teams**, **Webex**, or **FaceTime** is hosting a live call and offers a one-click record — or auto-records if you flip the Zoom auto-record toggle in Settings
+- **URL scheme** — `meetingnotes://record?source=zoom.us` and friends. Wire it into a Shortcut, an `osascript` line, a calendar hook, or Stream Deck to start recording from anywhere on the system
 - **Transcription** via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (Metal-accelerated on Apple Silicon), run against the mixed file with a hallucination filter on top
 - **Diarization** via [pyannote 3.1](https://github.com/pyannote/pyannote-audio) in a Python sidecar, on the same mixed file as transcription so timestamps align
 - **Speaker identification** by matching voice embeddings against a roster you build over time
 - **Summarisation + action items** via any chat LLM in [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), with a managed lifecycle: the app spawns the runtime, auto-loads the model, and shuts it down on idle. Reasoning models welcome — `<think>` blocks are stripped before rendering
 - **Weekly view** rolls Mon–Sun meetings into a cached LLM-generated narrative (past weeks only — the current week's narrative is skipped because it would go stale within hours) with grouped open action items and key decisions, exportable to Markdown
-- **Export** to Apple Reminders or Markdown (with a markdown editor + live preview built in)
+- **Export** to Apple Reminders, Markdown (with a markdown editor + live preview built in), or any **HTTPS webhook** — POST a JSON payload to your own automations (n8n, Zapier, a Slack incoming webhook, your team's internal API) with full meeting metadata, summary, and action items. Built-in templates: compact JSON / full JSON / Slack blocks / Telegram markdown
 
 You bring the models. MeetingNotes orchestrates everything else.
 
 ## Status
 
-Alpha. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built-in recording → transcribe → diarize → speaker-ID gate → summarise → extract → export. The packaged `.dmg` runs the same pipeline as `npm run dev` (Homebrew-installed `ffmpeg`/`ffprobe`/`whisper-server` are resolved by absolute path, not by the minimal Finder PATH). Rough edges remain in error-state polish and the "All system audio" capture path.
+**1.0** — first stable release. Tested on macOS 14.2+ / Apple Silicon. End-to-end pipeline working: built-in recording → transcribe → diarize → speaker-ID gate → summarise → extract → export. The packaged `.dmg` runs the same pipeline as `npm run dev` (Homebrew-installed `ffmpeg`/`ffprobe`/`whisper-server` are resolved by absolute path, not by the minimal Finder PATH). Library refreshes instantly after Stop, browser + native-app meeting detection ship enabled-but-off, and webhook + URL-scheme exporters are first-class. The "All system audio" capture path remains experimental.
 
 ## Requirements
 
@@ -68,10 +69,10 @@ brew install whisper-cpp ffmpeg
 
 ## Recording a meeting
 
-1. Click **⏺ Record** in the top right — or, with **Watch browser tabs for meeting URLs** enabled in Settings, wait for the in-library banner when a known meeting opens in Chrome / Safari / Arc / Edge / Brave and click **Record** from there.
+1. Click **⏺ Record** in the top right — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or, with the meeting-detector enabled in Settings, let MeetingNotes catch it for you: the browser watcher pops an in-library banner when a known meeting URL opens in Chrome / Safari / Arc / Edge / Brave, the native-app watcher does the same when Zoom / Teams / Webex / FaceTime starts a call, and the Zoom auto-record toggle skips the banner entirely.
 2. The source picker shows every app currently producing audio. Recognised meeting apps (Zoom, Teams, FaceTime, Slack, Discord, WhatsApp) appear first with a `MEETING` badge. Pick one — or `All system audio` as a catch-all.
 3. A live recording row appears at the top of the library with elapsed time, VU meter, and a Stop button.
-4. Click **■ Stop** when the meeting ends. The recording shows up in your Inbox within a second.
+4. Click **■ Stop** when the meeting ends. The new row appears in your library the instant the file lands — no refresh, no tab-switch needed.
 5. Click **▶ Process** to run it through the pipeline.
 
 Each recording writes three files to `~/Music/MeetingNotes/`:
@@ -152,6 +153,11 @@ Prev/next arrows step through weeks. The structured rollup (meetings list, actio
 
 To pin **your** open action items to a "You" group at the top, set Settings → "You are…" to the roster speaker that represents you. The dropdown is populated from speakers you've confirmed in any meeting's Speakers panel — confirm one as yourself first to make it appear.
 
+### Integrations
+
+- **[URL scheme](docs/url-scheme.md)** — `meetingnotes://record?source=zoom.us`, `…?source=ask`, `meetingnotes://stop`. Hook it up from a macOS Shortcut, an `osascript` line, a Stream Deck button, or a calendar-trigger like Hammerspoon to start / stop recordings from anywhere on the system without bringing the app forward.
+- **[Webhook exporter](docs/exporters.md)** — when a meeting finishes, MeetingNotes POSTs a JSON payload to the URL you configure in Settings (HTTPS or localhost). Built-in templates for raw JSON (compact / full), Slack blocks, and Telegram markdown — or roll your own downstream in n8n / Zapier / your team's internal API. There's a **Send test payload** button so you can verify the round-trip without waiting for a real meeting.
+
 ### Search
 
 `⌘K` (or `Ctrl+K`) anywhere opens a global search palette across titles, summaries, and transcript text. Click-through to the matching meeting.
@@ -219,10 +225,16 @@ Settings live in SQLite at `~/Documents/MeetingNotes/db.sqlite` (table `settings
 | `sttLanguage` | `en` | passed to Whisper |
 | `userName` | `""` | your name — substituted for `VOICE_YOU` in transcripts after speaker-ID (empty falls back to the literal "You") |
 | `userSpeakerId` | `null` | the roster speaker that represents you. When set, the Weekly view pins your own open action items to a "You" group at the top. Picker in Settings → "You are…" — populated by speakers you've confirmed in any meeting's Speakers panel. |
-| `autoDetectMeetings` | `false` | poll the frontmost browser tab for meeting URLs and offer to record. Requires granting Automation permission to each browser the first time |
+| `autoDetectMeetings` | `{browserTabs: false, nativeApps: false, silenceMs: 1500}` | Object. `browserTabs` polls your frontmost browser for known meeting URLs (Automation prompt per browser on first run). `nativeApps` polls CoreAudio for Zoom / Teams / Webex / FaceTime hosting a live call, with `silenceMs` debounce so notification beeps don't trip it |
+| `autoRecordZoom` | `false` | when the native-app detector fires for Zoom (`us.zoom.xos`), skip the banner and start recording immediately. Other apps still go through the banner |
 | `onboardedAt` | unset | timestamp the first-run wizard was completed or skipped |
 | `exporterApple` | `true` | enable Apple Reminders exporter |
 | `exporterMarkdown` | `true` | enable Markdown exporter |
+| `exporterWebhook` | `false` | enable the HTTPS webhook exporter — POST `meeting.completed` payloads to `webhookUrl` when the pipeline finishes |
+| `webhookUrl` | `""` | destination endpoint. Must be HTTPS unless it's a localhost address |
+| `webhookSecret` | `""` | optional bearer token. Sent as `Authorization: Bearer <secret>`. Redacted from logs and the "Send test" preview |
+| `webhookTemplate` | `compact` | payload shape — `compact` / `full` are JSON; `telegram-markdown` and `slack-blocks` flatten for those platforms |
+| `webhookOwnerFilter` | `all` | which action items to include — `mine` (filter by `userSpeakerId`), `all`, or `none` (summary only) |
 
 ### Hugging Face token
 
@@ -247,7 +259,7 @@ After that, the model is cached at `~/.cache/huggingface/hub/` and inference nee
 ./scripts/rebuild.sh --skip-audio-tap # skip the Swift helper
 ./scripts/rebuild.sh --app-only       # both flags above — just the Electron app + packaging (~9 min)
 
-open release/MeetingNotes-0.2.0-arm64.dmg   # install the result
+open release/MeetingNotes-1.0.0-arm64.dmg   # install the result
 ```
 
 Three artifacts get compiled:
@@ -286,7 +298,11 @@ audio-tap/            Swift CLI helper for CoreAudio Process Tap recording
 electron/main/        main process: pipeline, storage, IPC, watcher, services
   recording/          RecordingManager, AppEnumerator, orphan-recovery
   permissions/        mic state probe via systemPreferences API
-  meeting-detector/   browser-tab URL polling (Meet/Zoom/Teams/Whereby/etc.)
+  meeting-detector/   browser-tab URL polling + native-app detector
+                      (Zoom/Teams/Webex/FaceTime via CoreAudio probe)
+  url-scheme/         `meetingnotes://record` / `meetingnotes://stop` handler
+                      (registered via electron-builder protocols)
+  exporters/          apple reminders + markdown + webhook (#79) + templates
   llm/                managed lifecycle for LM Studio / Ollama runtimes
                       (spawn, model auto-load, idle shutdown)
   whisper/            whisper-server supervisor (lazy spawn, /health probe)

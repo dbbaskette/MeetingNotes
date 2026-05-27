@@ -168,6 +168,25 @@ function AppInner(): JSX.Element {
     return () => { off(); };
   }, []);
 
+  // meetingnotes://open?id=… — main process emits this when an external
+  // caller invokes the URL scheme (#77). Navigate to the detail view.
+  useEffect(() => {
+    const off = api.onOpenMeeting((id) => {
+      setView({ kind: 'detail', id });
+    });
+    return () => { off(); };
+  }, []);
+
+  // Auto-record-started — main process started a recording on its own
+  // (Zoom + autoRecordZoom). Route into LiveRecording so the in-progress
+  // card appears without a manual click. (#78 follow-up)
+  useEffect(() => {
+    const off = api.onAutoRecordingStarted(({ sessionId, label, startedAt }) => {
+      setLiveRecording({ sessionId, label, startedAt });
+    });
+    return () => { off(); };
+  }, []);
+
   // Window-level drag-and-drop. We listen on document so a drop anywhere
   // in the window works — not just over the library list. The dragCounter
   // ref handles the dragenter/dragleave fires from child elements, which
@@ -283,17 +302,26 @@ function AppInner(): JSX.Element {
   return (
     <>
       <div className="window-drag-strip" />
-      {showTopBanner && (
-        <div className="sticky top-0 z-[900] max-w-6xl mx-auto px-6 pt-2">
-          <LiveRecordingRow
-            sessionId={liveRecording!.sessionId}
-            label={liveRecording!.label}
-            startedAt={liveRecording!.startedAt}
-            onStopped={() => setLiveRecording(null)}
-          />
+      {/* The shell is a flex column that fills #root (height: 100% from
+          index.css). Views below render inside the flex-1 slot and own
+          their own scroll regions — the document itself doesn't scroll
+          anymore, which is what lets Library / Detail keep their
+          headers and filter chips pinned in place. */}
+      <div className="h-full flex flex-col">
+        {showTopBanner && (
+          <div className="shrink-0 z-[900] max-w-6xl mx-auto w-full px-6 pt-2">
+            <LiveRecordingRow
+              sessionId={liveRecording!.sessionId}
+              label={liveRecording!.label}
+              startedAt={liveRecording!.startedAt}
+              onStopped={() => setLiveRecording(null)}
+            />
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          {body}
         </div>
-      )}
-      {body}
+      </div>
       <SearchPalette
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
