@@ -271,7 +271,7 @@ function AppInner(): JSX.Element {
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
   ) : view.kind === 'library' ? (
     <LibraryView
-      onOpen={(id, hint) => setView({ kind: 'detail', id, hint })}
+      onOpen={(id, hint, opts) => setView({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
       onSettings={() => setView({ kind: 'settings' })}
       onWeekly={() => setView({ kind: 'weekly' })}
       liveRecording={liveRecording}
