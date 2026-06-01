@@ -36,6 +36,14 @@ files:
   # redistribution, and BSD/Apache-2 have an authors-attribution clause.)
   - "!**/node_modules/**/{README,README.md,README.markdown,readme,readme.md}"
   - "!**/node_modules/**/{CHANGELOG,CHANGELOG.md,HISTORY.md}"
+# @vscode/ripgrep ships a per-platform native binary (powers Cmd+K
+# search) via optionalDependencies — the real binary lives in
+# @vscode/ripgrep-${platform}-${arch}/bin/rg. Binaries can't be exec'd
+# from inside an asar archive, so unpack the bin/ folder into
+# app.asar.unpacked. The JS shim (@vscode/ripgrep itself, which
+# resolves the platform pkg at runtime) still rides inside the asar.
+asarUnpack:
+  - "node_modules/@vscode/ripgrep-*/bin/**"
 extraResources:
   # Ship only the PyInstaller bundle — the user does not need Python installed.
   # Dev runs out of the source tree where the .venv path is used instead.

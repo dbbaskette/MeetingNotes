@@ -37,6 +37,7 @@ import { remergeTranscript } from '../pipeline/stages/merging.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
+import { ripgrepSearch } from '../search/ripgrep-search.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -586,13 +587,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     await shell.openExternal(url);
   });
 
-  // Cmd+K global search (#45). File-based grep over the meeting library.
-  // Works up to a few thousand meetings without needing SQLite FTS5; past
-  // that, reach for FTS5 or a proper search index.
+  // Cmd+K global search (#45). Titles are matched in-memory off the DB;
+  // summary/transcript content is searched via the bundled ripgrep
+  // binary (@vscode/ripgrep) over the library's meetings/ tree. rg
+  // parallelizes the walk and matches with SIMD, so even a multi-
+  // thousand-meeting library answers each keystroke in tens of ms.
   ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown) => {
     if (typeof query !== 'string') return [];
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (q.length < 2) return [];
+    const qLower = q.toLowerCase();
     const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;
 
     interface Hit {
@@ -605,68 +609,68 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     const hits: Hit[] = [];
 
-    for (const m of s.meetings.listAll()) {
-      const folder = meetingFolderPath(s.libraryRoot, m.slug);
-      // Title hit — rank highest so an exact-title match surfaces first.
-      if (m.title.toLowerCase().includes(q)) {
+    const meetings = s.meetings.listAll();
+    const bySlug = new Map(meetings.map((m) => [m.slug, m]));
+
+    // Title hits — rank highest so an exact-title match surfaces first.
+    for (const m of meetings) {
+      if (m.title.toLowerCase().includes(qLower)) {
         hits.push({
           meetingId: m.id, title: m.title, source: 'title',
           snippet: m.title, score: 1000,
         });
       }
-      // Summary — one hit per meeting, showing the first match's line.
-      const summaryPath = path.join(folder, 'summary.md');
-      if (fs.existsSync(summaryPath)) {
-        try {
-          const text = fs.readFileSync(summaryPath, 'utf8');
-          const lower = text.toLowerCase();
-          const idx = lower.indexOf(q);
-          if (idx >= 0) {
-            const line = snippetAround(text, idx, 120);
-            hits.push({
-              meetingId: m.id, title: m.title, source: 'summary',
-              snippet: line, score: 500,
-            });
-          }
-        } catch { /* ignore unreadable summaries */ }
-      }
-      // Transcript — one hit per match (up to 3 per meeting so a single
-      // noisy word doesn't drown the result list).
-      const transcriptPath = path.join(folder, 'transcript.md');
-      if (fs.existsSync(transcriptPath)) {
-        try {
-          const text = fs.readFileSync(transcriptPath, 'utf8');
-          const lines = text.split('\n');
-          let perMeeting = 0;
-          for (const raw of lines) {
-            if (perMeeting >= 3) break;
-            if (!raw.toLowerCase().includes(q)) continue;
-            // Parse leading "[Speaker MM:SS]" to produce a seconds offset.
-            const m2 = raw.match(/^\[(.+?)\s+(?:(\d+):)?(\d+):(\d{2})\]\s?(.*)$/);
-            if (m2) {
-              const hh = m2[2] ? parseInt(m2[2], 10) : 0;
-              const seconds = hh * 3600 + parseInt(m2[3]!, 10) * 60 + parseInt(m2[4]!, 10);
-              hits.push({
-                meetingId: m.id, title: m.title, source: 'transcript',
-                snippet: `${m2[1]}: ${(m2[5] ?? '').trim()}`,
-                seconds,
-                score: 100,
-              });
-            } else {
-              hits.push({
-                meetingId: m.id, title: m.title, source: 'transcript',
-                snippet: raw.trim().slice(0, 160),
-                score: 100,
-              });
-            }
-            perMeeting += 1;
-          }
-        } catch { /* ignore unreadable transcripts */ }
+    }
+
+    // Content hits — one rg invocation across both file types. We pass
+    // --max-count 3 so transcript files cap cleanly; for summaries we
+    // additionally take only the first match below (one hit per
+    // meeting is plenty, since a summary is short).
+    const meetingsRoot = path.join(s.libraryRoot, 'meetings');
+    const rgHits = await ripgrepSearch(meetingsRoot, q, {
+      maxCountPerFile: 3,
+      globs: ['summary.md', 'transcript.md'],
+    });
+
+    const summarySeen = new Set<string>(); // slug — caps summary hits at 1/meeting
+    for (const r of rgHits) {
+      // Path shape: {libraryRoot}/meetings/{slug}/(summary|transcript).md
+      const rel = path.relative(meetingsRoot, r.file);
+      const segs = rel.split(path.sep);
+      if (segs.length !== 2) continue;
+      const [slug, basename] = segs;
+      const meeting = bySlug.get(slug!);
+      if (!meeting) continue;
+
+      if (basename === 'summary.md') {
+        if (summarySeen.has(slug!)) continue;
+        summarySeen.add(slug!);
+        hits.push({
+          meetingId: meeting.id,
+          title: meeting.title,
+          source: 'summary',
+          snippet: trimSnippet(r.lineText, qLower, 120),
+          score: 500,
+        });
+      } else if (basename === 'transcript.md') {
+        const seconds = parseTimestampSeconds(r.lineText);
+        const speakerLabel = parseSpeakerLabel(r.lineText);
+        hits.push({
+          meetingId: meeting.id,
+          title: meeting.title,
+          source: 'transcript',
+          snippet: speakerLabel
+            ? `${speakerLabel}: ${stripTimestampPrefix(r.lineText)}`.slice(0, 200)
+            : r.lineText.trim().slice(0, 160),
+          ...(seconds !== undefined ? { seconds } : {}),
+          score: 100,
+        });
       }
     }
 
-    // Sort by score, then meeting start desc so newer meetings surface
-    // first within the same source tier.
+    // Sort by score; ties resolve in rg's discovery order (which is
+    // already filesystem-driven, not date-sorted — close enough for a
+    // palette where the score gap between tiers dominates).
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, max).map((h) => ({
       meetingId: h.meetingId, title: h.title, source: h.source,
@@ -904,12 +908,38 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 }
 
-// Extract a ~n-char window around an index, expanded to word boundaries
-// and with ellipses on either side when truncated.
-function snippetAround(text: string, idx: number, window: number): string {
+// Trim a ripgrep-matched line down to a ~window-char snippet centered on
+// the match, with ellipses on either side when truncated. Used for
+// summary hits, where the matched line can be a whole paragraph.
+function trimSnippet(line: string, qLower: string, window: number): string {
+  const text = line.replace(/\s+/g, ' ').trim();
+  if (text.length <= window) return text;
+  const idx = text.toLowerCase().indexOf(qLower);
+  if (idx < 0) return text.slice(0, window) + '…';
   const start = Math.max(0, idx - Math.floor(window / 2));
-  const end = Math.min(text.length, idx + Math.ceil(window / 2));
-  const prefix = start > 0 ? '…' : '';
-  const suffix = end < text.length ? '…' : '';
-  return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
+  const end = Math.min(text.length, start + window);
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+}
+
+// Transcript lines begin with "[Speaker MM:SS]" or "[Speaker HH:MM:SS]"
+// (see pipeline/stages/merging.ts). Extract the seconds offset so
+// Cmd+Enter can seek the audio to the matched line. Returns undefined
+// for lines without a parseable prefix (e.g. an opening header line).
+const TIMESTAMP_LINE = /^\[(.+?)\s+(?:(\d+):)?(\d+):(\d{2})\]\s?(.*)$/;
+
+function parseTimestampSeconds(line: string): number | undefined {
+  const m = line.match(TIMESTAMP_LINE);
+  if (!m) return undefined;
+  const hh = m[2] ? parseInt(m[2], 10) : 0;
+  return hh * 3600 + parseInt(m[3]!, 10) * 60 + parseInt(m[4]!, 10);
+}
+
+function parseSpeakerLabel(line: string): string | undefined {
+  const m = line.match(TIMESTAMP_LINE);
+  return m ? m[1] : undefined;
+}
+
+function stripTimestampPrefix(line: string): string {
+  const m = line.match(TIMESTAMP_LINE);
+  return (m ? (m[5] ?? '') : line).trim();
 }
