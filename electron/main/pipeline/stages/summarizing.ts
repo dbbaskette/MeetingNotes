@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { StageHandler } from '../context.js';
 import { meetingFolderPath } from '../../storage/meeting-folder.js';
-import { SUMMARY_SYSTEM_PROMPT } from '../prompts.js';
+import { buildSummaryPrompt } from '../prompts.js';
 
 /** Filename-derived default title like `recording-20260421-163203-47c0c0f5`.
  *  Used to detect whether the meeting's title is still auto-generated (and
@@ -54,7 +54,7 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
     model: ctx.settings.get('llmModel'),
     temperature: 0.2,
     messages: [
-      { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+      { role: 'system', content: buildSummaryPrompt(ctx.settings.get('summaryDetail')) },
       { role: 'user', content: transcript },
     ],
   });

@@ -30,6 +30,7 @@ interface Settings {
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  summaryDetail: 'concise' | 'standard' | 'detailed';
 }
 
 interface SpeakerListEntry { id: string; displayName: string }
@@ -131,6 +132,21 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         </select>
         <div className="text-xs text-ink-muted mt-1">
           Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
+        </div>
+      </Field>
+      <Field label="Summary detail level">
+        <select
+          value={s.summaryDetail}
+          onChange={(e) => update('summaryDetail', e.target.value as Settings['summaryDetail'])}
+          className="input"
+        >
+          <option value="concise">Concise — tight, skimmable, one bullet per point</option>
+          <option value="standard">Standard — balanced detail vs. brevity</option>
+          <option value="detailed">Detailed — full context, trade-offs, reasoning</option>
+        </select>
+        <div className="text-xs text-ink-muted mt-1">
+          Steers how verbose the summary prompt asks the model to be, so the level
+          stays consistent across different local models. Applies to the next summary.
         </div>
       </Field>
       <Field label="STT URL (whisper.cpp server)">
