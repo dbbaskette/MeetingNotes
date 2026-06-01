@@ -7,12 +7,13 @@
 // makes the whole catalog searchable and removes the conceptual split
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMeetingsStore } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
+import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
 import type { LiveRecording } from '../App';
@@ -20,10 +21,13 @@ import type { LiveRecording } from '../App';
 interface Props {
   /** When opening a meeting, pass through hint data so the detail
    *  view's skeleton can paint with the right title + stage instantly,
-   *  before the full meetings:get IPC resolves. */
+   *  before the full meetings:get IPC resolves. The optional
+   *  `seekSeconds` is set when the user clicked a transcript snippet
+   *  in the search results — the detail view should jump there. */
   onOpen: (
     id: string,
     hint: { title?: string; pipelineStage?: string; status?: string },
+    opts?: { seekSeconds?: number },
   ) => void;
   onSettings: () => void;
   onWeekly: () => void;
@@ -35,6 +39,11 @@ interface Props {
 }
 
 type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+
+// From the user's perspective `awaiting_user` is just "still in flight" —
+// the pipeline hasn't reached `done`, it's just paused for input. So the
+// Processing filter and counter both bucket awaiting_user with processing.
+const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
 
 interface PipelineStatusSnapshot {
   paused: boolean;
@@ -111,26 +120,69 @@ export function LibraryView({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
-  // From the user's perspective `awaiting_user` is just "still in flight"
-  // — the pipeline hasn't reached `done`, it's just paused for input. So
-  // the Processing filter and counter both bucket awaiting_user with
-  // processing. Awaiting comes first in the sort because those rows
-  // actively need attention from the user, not just patience.
-  const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
+  // Full-content search. When the query is short we stay in the fast
+  // in-memory path (title contains); at 2+ chars we hit the same IPC the
+  // Cmd+K palette uses, which ripgreps summary.md + transcript.md across
+  // the library. Debounced so a fast typist doesn't fire one IPC per
+  // keystroke.
+  const isSearching = query.trim().length >= 2;
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searchPending, setSearchPending] = useState(false);
+  useEffect(() => {
+    if (!isSearching) { setHits([]); setSearchPending(false); return; }
+    let cancelled = false;
+    setSearchPending(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const r = (await api.search.query(query.trim(), 100)) as SearchHit[];
+        if (!cancelled) setHits(r);
+      } finally {
+        if (!cancelled) setSearchPending(false);
+      }
+    }, 150);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [query, isSearching]);
 
-  const library = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const searched = q ? meetings.filter((m) => m.title.toLowerCase().includes(q)) : meetings;
-    const filtered = libFilter === 'all'
-      ? searched
+  // Group hits by meetingId, preserving the server's score-ordering: the
+  // first time we see a meetingId fixes its position in the list, and
+  // every subsequent hit for the same meeting gets appended to that
+  // meeting's snippet stack.
+  const hitsByMeeting = useMemo(() => {
+    const m = new Map<string, SearchHit[]>();
+    for (const h of hits) {
+      const arr = m.get(h.meetingId);
+      if (arr) arr.push(h);
+      else m.set(h.meetingId, [h]);
+    }
+    return m;
+  }, [hits]);
+
+  // Sort order for the Content section. Reset to 'recent' whenever the
+  // query changes so a stale "Most matches" choice doesn't carry over
+  // to a different search.
+  const [contentSort, setContentSort] = useState<'recent' | 'count'>('recent');
+  useEffect(() => { setContentSort('recent'); }, [query]);
+
+  // Apply the filter chip to a candidate list. Lifted out so both the
+  // Title and Content buckets get the same treatment without duplication.
+  // Memoized on libFilter so the dependent memos below have a stable
+  // reference and don't recompute on every render.
+  const applyFilter = useCallback((list: typeof meetings): typeof meetings => (
+    libFilter === 'all'
+      ? list
       : libFilter === 'pending'
-        ? searched.filter((m) => m.status === 'pending')
+        ? list.filter((m) => m.status === 'pending')
         : libFilter === 'processing'
-          ? searched.filter((m) => isInFlight(m.status))
-          : searched.filter((m) => m.status === libFilter);
-    // Pending first (user can act), then awaiting_user (needs YOU mid-
-    // pipeline), processing (needs patience), failed (needs attention),
-    // done (chronological).
+          ? list.filter((m) => isInFlight(m.status))
+          : list.filter((m) => m.status === libFilter)
+  ), [libFilter]);
+
+  // Browse mode (no active query): the previous in-memory behavior —
+  // pending floats first, then awaiting, processing, failed, done by
+  // recency.
+  const browseList = useMemo(() => {
+    if (isSearching) return [];
+    const filtered = applyFilter(meetings);
     const rank: Record<string, number> = {
       pending: 0, awaiting_user: 1, processing: 2, failed: 3, done: 4,
     };
@@ -140,15 +192,85 @@ export function LibraryView({
       if (ra !== rb) return ra - rb;
       return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
     });
-  }, [meetings, query, libFilter]);
+  }, [meetings, isSearching, applyFilter]);
 
-  const libCounts = useMemo(() => ({
-    all: meetings.length,
-    pending: meetings.filter((m) => m.status === 'pending').length,
-    processing: meetings.filter((m) => isInFlight(m.status)).length,
-    done: meetings.filter((m) => m.status === 'done').length,
-    failed: meetings.filter((m) => m.status === 'failed').length,
-  }), [meetings]);
+  // Search mode buckets: a meeting with a title hit goes in the Title
+  // section ONLY (cleaner than showing it in both — the user can click
+  // through to find the specific snippet). Everything else with at least
+  // one summary/transcript hit goes in Content.
+  const { titleMatches, contentMatches } = useMemo(() => {
+    if (!isSearching) return { titleMatches: [], contentMatches: [] };
+    const byId = new Map(meetings.map((m) => [m.id, m]));
+    const titleIds = new Set<string>();
+    const contentIds = new Set<string>();
+    for (const h of hits) {
+      if (h.source === 'title') titleIds.add(h.meetingId);
+    }
+    for (const h of hits) {
+      if (h.source !== 'title' && !titleIds.has(h.meetingId)) {
+        contentIds.add(h.meetingId);
+      }
+    }
+    const titleMeetings: typeof meetings = [];
+    const contentMeetings: typeof meetings = [];
+    // Preserve server's discovery order for the title bucket — first
+    // appearance wins.
+    const seenTitle = new Set<string>();
+    const seenContent = new Set<string>();
+    for (const h of hits) {
+      const m = byId.get(h.meetingId);
+      if (!m) continue;
+      if (titleIds.has(h.meetingId) && !seenTitle.has(h.meetingId)) {
+        seenTitle.add(h.meetingId);
+        titleMeetings.push(m);
+      } else if (contentIds.has(h.meetingId) && !seenContent.has(h.meetingId)) {
+        seenContent.add(h.meetingId);
+        contentMeetings.push(m);
+      }
+    }
+    // Content section: sort by date (most recent first) with hit-count
+    // as tiebreaker, OR by hit-count alone when the user toggles.
+    const hitCount = (id: string): number => (hitsByMeeting.get(id) ?? []).filter((h) => h.source !== 'title').length;
+    const sortedContent = [...contentMeetings].sort((a, b) => {
+      if (contentSort === 'count') {
+        const diff = hitCount(b.id) - hitCount(a.id);
+        if (diff !== 0) return diff;
+        return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
+      }
+      const dateDiff = (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
+      if (dateDiff !== 0) return dateDiff;
+      return hitCount(b.id) - hitCount(a.id);
+    });
+    return {
+      titleMatches: applyFilter(titleMeetings),
+      contentMatches: applyFilter(sortedContent),
+    };
+  }, [meetings, hits, isSearching, applyFilter, contentSort, hitsByMeeting]);
+
+  // In search mode chip counts switch to "meetings with at least one
+  // hit in this status" — a chip that drops to zero is a visible signal
+  // that no matches exist in that bucket. Browse mode keeps raw totals.
+  const libCounts = useMemo(() => {
+    if (!isSearching) {
+      return {
+        all: meetings.length,
+        pending: meetings.filter((m) => m.status === 'pending').length,
+        processing: meetings.filter((m) => isInFlight(m.status)).length,
+        done: meetings.filter((m) => m.status === 'done').length,
+        failed: meetings.filter((m) => m.status === 'failed').length,
+      };
+    }
+    const matched = new Set<string>();
+    for (const h of hits) matched.add(h.meetingId);
+    const hitMeetings = meetings.filter((m) => matched.has(m.id));
+    return {
+      all: hitMeetings.length,
+      pending: hitMeetings.filter((m) => m.status === 'pending').length,
+      processing: hitMeetings.filter((m) => isInFlight(m.status)).length,
+      done: hitMeetings.filter((m) => m.status === 'done').length,
+      failed: hitMeetings.filter((m) => m.status === 'failed').length,
+    };
+  }, [meetings, hits, isSearching]);
 
   const pendingIds = useMemo(
     () => meetings.filter((m) => m.status === 'pending').map((m) => m.id),
@@ -325,43 +447,89 @@ export function LibraryView({
             n={libCounts.failed}
             dotClass="bg-rose-500"
           />
-          <input
-            placeholder="Search…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="flex-1 sm:flex-none sm:w-56 sm:ml-auto min-w-[8rem] py-1.5 px-3 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
-                       focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
-          />
+          <div className="relative flex-1 sm:flex-none sm:w-72 sm:ml-auto min-w-[8rem]">
+            <input
+              placeholder="Search titles, summaries, transcripts…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
+                         focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
+            />
+            {isSearching && searchPending && (
+              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-muted pointer-events-none">
+                searching…
+              </span>
+            )}
+          </div>
         </div>
 
-        {library.length === 0 ? (
-          <LibraryEmpty
-            hasAny={libCounts.all > 0}
-            filter={libFilter}
-            query={query}
-          />
-        ) : (
-          // The negative-margin/padding pair on the right pushes the
-          // scrollbar into the outer page margin so rows stay flush with
-          // the filter chips above them. Bottom pb-8 keeps the last row
-          // from sitting flush against the SelectionBar's overlay.
-          <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8 space-y-2">
-            {library.map((m) => (
-              <LibraryRow
-                key={m.id}
-                meeting={m}
-                onOpen={(id) => onOpen(id, {
-                  title: m.title,
-                  pipelineStage: m.pipelineStage,
-                  status: m.status,
-                })}
-                onChanged={() => void refresh()}
-                checked={m.status === 'pending' ? selected.has(m.id) : undefined}
-                onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
+        {(() => {
+          const totalShown = isSearching
+            ? titleMatches.length + contentMatches.length
+            : browseList.length;
+          if (totalShown === 0) {
+            return (
+              <LibraryEmpty
+                hasAny={libCounts.all > 0}
+                filter={libFilter}
+                query={query}
               />
-            ))}
-          </div>
-        )}
+            );
+          }
+          const renderRow = (m: typeof meetings[number], withMatches: boolean): JSX.Element => {
+            const hint = {
+              title: m.title,
+              pipelineStage: m.pipelineStage,
+              status: m.status,
+            };
+            const meetingHits = withMatches ? hitsByMeeting.get(m.id) ?? [] : [];
+            return (
+              <div key={m.id}>
+                <LibraryRow
+                  meeting={m}
+                  onOpen={(id) => onOpen(id, hint)}
+                  onChanged={() => void refresh()}
+                  checked={m.status === 'pending' ? selected.has(m.id) : undefined}
+                  onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
+                />
+                {meetingHits.length > 0 && (
+                  <SearchMatches
+                    hits={meetingHits}
+                    query={query}
+                    onOpen={() => onOpen(m.id, hint)}
+                    onJump={(seconds) => onOpen(m.id, hint, { seekSeconds: seconds })}
+                  />
+                )}
+              </div>
+            );
+          };
+          return (
+            <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8 space-y-2">
+              {isSearching ? (
+                <>
+                  {titleMatches.length > 0 && (
+                    <SearchSectionHeader
+                      label="Title matches"
+                      count={titleMatches.length}
+                    />
+                  )}
+                  {titleMatches.map((m) => renderRow(m, false))}
+                  {contentMatches.length > 0 && (
+                    <SearchSectionHeader
+                      label="Mentioned in"
+                      count={contentMatches.length}
+                      sort={contentSort}
+                      onSortChange={setContentSort}
+                    />
+                  )}
+                  {contentMatches.map((m) => renderRow(m, true))}
+                </>
+              ) : (
+                browseList.map((m) => renderRow(m, false))
+              )}
+            </div>
+          );
+        })()}
       </section>
 
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
@@ -375,6 +543,42 @@ export function LibraryView({
 }
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
+
+function SearchSectionHeader({
+  label, count, sort, onSortChange,
+}: {
+  label: string;
+  count: number;
+  /** Optional — only the Content section gets a sort toggle. */
+  sort?: 'recent' | 'count';
+  onSortChange?: (s: 'recent' | 'count') => void;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-3 pt-2 first:pt-0 pb-1">
+      <h3 className="font-mono text-[10px] tracking-[0.2em] uppercase text-ink-muted">
+        {label}
+      </h3>
+      <span className="text-[11px] text-ink-muted/80 tabular-nums">{count}</span>
+      <div className="flex-1 border-b border-surface-border" />
+      {sort && onSortChange && (
+        <div className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase">
+          <button
+            onClick={() => onSortChange('recent')}
+            className={`px-1.5 py-0.5 rounded ${sort === 'recent' ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink'}`}
+          >
+            Recent
+          </button>
+          <button
+            onClick={() => onSortChange('count')}
+            className={`px-1.5 py-0.5 rounded ${sort === 'count' ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink'}`}
+          >
+            Most matches
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FilterChip({
   active, onClick, label, n, dotClass,
