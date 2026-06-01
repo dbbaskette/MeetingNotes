@@ -78,6 +78,14 @@ export interface Settings {
    *    and shuts it down after idle.
    *  - 'ollama': MeetingNotes spawns `ollama serve` on demand. */
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  /** How verbose the generated summary should be. Drives which "Length &
+   *  depth" guidance gets baked into the summarization prompt (see
+   *  buildSummaryPrompt). Independent of the model — the prompt pins the
+   *  target so different local models land at a consistent level.
+   *   - 'concise'  = tight, skimmable, one bullet per point
+   *   - 'standard' = balanced detail vs. brevity
+   *   - 'detailed' = full context, trade-offs, reasoning (original behavior) */
+  summaryDetail: 'concise' | 'standard' | 'detailed';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -109,6 +117,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardedAt: null,
   userSpeakerId: null,
   summaryProvider: 'external',
+  summaryDetail: 'detailed',
 };
 
 type Key = keyof Settings;
