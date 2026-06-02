@@ -130,6 +130,11 @@ export const IPC_CHANNELS = {
    *  stale until a remount. */
   meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
+  /** Read the tail of the app log as parsed JSON-lines entries for the
+   *  in-app Diagnostics view. Bounded read — never loads the whole file. */
+  logsTail: 'logs:tail',
+  /** Reveal the app log file in Finder. */
+  logsReveal: 'logs:reveal',
   /** Fire a synthetic meeting.completed payload at the configured
    *  webhook URL. Used by the Settings "Send test payload" button so
    *  the user can verify their endpoint before a real meeting runs.

@@ -5,7 +5,11 @@ type Level = 'debug' | 'info' | 'warn' | 'error';
 
 export class Logger {
   private stream: fs.WriteStream;
+  /** Absolute path of the log file on disk. Exposed so the IPC layer can
+   *  tail it for the in-app Diagnostics view and reveal it in Finder. */
+  readonly filePath: string;
   constructor(filePath: string) {
+    this.filePath = filePath;
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     this.stream = fs.createWriteStream(filePath, { flags: 'a' });
   }

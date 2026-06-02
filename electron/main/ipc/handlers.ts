@@ -38,6 +38,8 @@ import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
 import { ripgrepSearch } from '../search/ripgrep-search.js';
+import type { Logger } from '../logging/logger.js';
+import { tailLogFile } from '../logging/log-tail.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -55,6 +57,7 @@ export interface IpcServices {
   meetingDetector?: MeetingDetector;
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
+  logger: Logger;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -91,6 +94,20 @@ function unidentifiedCount(rows: { rosterId: string | null }[]): number {
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
+
+  ipc.handle(IPC_CHANNELS.logsTail, (_e, maxEntries?: unknown) => {
+    const n = typeof maxEntries === 'number' && maxEntries > 0
+      ? Math.min(maxEntries, 2000)
+      : 500;
+    return {
+      path: s.logger.filePath,
+      entries: tailLogFile(s.logger.filePath, { maxEntries: n }),
+    };
+  });
+
+  ipc.handle(IPC_CHANNELS.logsReveal, () => {
+    shell.showItemInFolder(s.logger.filePath);
+  });
 
   ipc.handle(IPC_CHANNELS.meetingsList, () => {
     // Batch joins/aggregates so this scales O(1) with meetings instead of

@@ -345,6 +345,8 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         )}
       </section>
 
+      <DiagnosticsSection />
+
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2">
           <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">About</div>
@@ -353,6 +355,138 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+interface LogEntry {
+  ts: string | null;
+  level: string;
+  msg: string;
+  data?: Record<string, unknown>;
+}
+
+type LogFilter = 'all' | 'warn' | 'error';
+
+// In-app log viewer. Reads the tail of app.log (bounded in main) and shows
+// the most recent entries newest-first so the latest failure is at the top.
+// This is the surface that turns "a meeting failed, no idea why" into a
+// readable answer without hunting through ~/Library/Logs.
+function DiagnosticsSection(): JSX.Element {
+  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [logPath, setLogPath] = useState<string>('');
+  const [filter, setFilter] = useState<LogFilter>('warn');
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  async function refresh(): Promise<void> {
+    setLoading(true);
+    try {
+      const res = await api.logs.tail(500);
+      setEntries(res.entries);
+      setLogPath(res.path);
+      setLoaded(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const rank: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+  const minRank = filter === 'error' ? 3 : filter === 'warn' ? 2 : 0;
+  const shown = entries
+    .filter((e) => (rank[e.level] ?? 1) >= minRank)
+    .reverse(); // newest first
+
+  return (
+    <section className="border-t border-surface-border pt-5 space-y-3">
+      <div className="flex items-center gap-2">
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">
+          Diagnostics
+        </div>
+        <button
+          onClick={() => void refresh()}
+          disabled={loading}
+          className="text-xs font-semibold text-ink-muted hover:text-ink px-2 py-1 rounded-lg border border-surface-border hover:border-ink/30 disabled:opacity-50 transition"
+        >
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+        <button
+          onClick={() => void api.logs.reveal()}
+          className="text-xs font-semibold text-ink-muted hover:text-ink px-2 py-1 rounded-lg border border-surface-border hover:border-ink/30 transition"
+        >
+          Reveal in Finder
+        </button>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        {([
+          ['error', 'Errors'],
+          ['warn', 'Warnings+'],
+          ['all', 'All'],
+        ] as const).map(([val, label]) => (
+          <button
+            key={val}
+            onClick={() => setFilter(val)}
+            className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition ${
+              filter === val
+                ? 'bg-ink text-surface border-ink'
+                : 'text-ink-muted border-surface-border hover:border-ink/30'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <span className="text-[11px] text-ink-muted tabular-nums">
+          {loaded ? `${shown.length} shown` : ''}
+        </span>
+      </div>
+
+      <div className="rounded-lg border border-surface-border bg-surface-sunken/40 max-h-72 overflow-auto font-mono text-[11px] leading-relaxed">
+        {!loaded ? (
+          <div className="p-3 text-ink-muted">Loading logs…</div>
+        ) : shown.length === 0 ? (
+          <div className="p-3 text-ink-muted">No log entries at this level.</div>
+        ) : (
+          shown.map((e, i) => <LogRow key={i} entry={e} />)
+        )}
+      </div>
+
+      {logPath && (
+        <div className="text-[11px] text-ink-muted break-all">{logPath}</div>
+      )}
+    </section>
+  );
+}
+
+function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
+  const levelCls =
+    entry.level === 'error'
+      ? 'text-rose-600'
+      : entry.level === 'warn'
+        ? 'text-amber-600'
+        : entry.level === 'debug'
+          ? 'text-ink-muted/60'
+          : 'text-ink-muted';
+  const time = entry.ts ? entry.ts.slice(11, 19) : '—';
+  const dataStr =
+    entry.data && Object.keys(entry.data).length > 0
+      ? JSON.stringify(entry.data)
+      : '';
+  return (
+    <div className="px-3 py-1 border-b border-surface-border/50 last:border-b-0 flex gap-2">
+      <span className="text-ink-muted/70 tabular-nums shrink-0">{time}</span>
+      <span className={`font-semibold uppercase shrink-0 w-10 ${levelCls}`}>
+        {entry.level}
+      </span>
+      <span className="text-ink-soft break-all min-w-0">
+        {entry.msg}
+        {dataStr && <span className="text-ink-muted/70"> {dataStr}</span>}
+      </span>
     </div>
   );
 }
