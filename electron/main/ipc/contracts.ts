@@ -8,6 +8,10 @@ export const MeetingSummarySchema = z.object({
   durationS: z.number().nullable(),
   pipelineStage: z.string(),
   status: z.string(),
+  /** When status === 'failed', the error string from the stage that threw
+   *  (e.g. "whisper: not ready ..."). Null otherwise. Powers the failure
+   *  banner + Retry affordance in the detail view. */
+  errorMessage: z.string().nullable(),
   unidentifiedCount: z.number(),
   actionItemsCount: z.number(),
   skipSpeakerId: z.boolean(),
@@ -126,6 +130,11 @@ export const IPC_CHANNELS = {
    *  stale until a remount. */
   meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
+  /** Read the tail of the app log as parsed JSON-lines entries for the
+   *  in-app Diagnostics view. Bounded read — never loads the whole file. */
+  logsTail: 'logs:tail',
+  /** Reveal the app log file in Finder. */
+  logsReveal: 'logs:reveal',
   /** Fire a synthetic meeting.completed payload at the configured
    *  webhook URL. Used by the Settings "Send test payload" button so
    *  the user can verify their endpoint before a real meeting runs.

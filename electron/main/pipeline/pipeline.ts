@@ -148,7 +148,10 @@ export class Pipeline {
           if (m) {
             const safe = previousCompletedOnCrash(m.pipelineStage as Stage);
             if (safe !== m.pipelineStage) this.deps.ctx.meetings.updateStage(id, safe);
-            this.deps.ctx.meetings.updateStatus(id, 'failed');
+            // Record WHY it failed so the detail view can show it (and the
+            // user can retry) instead of a bare FAILED pill. The stage that
+            // threw is also captured by the rolled-back pipeline_stage.
+            this.deps.ctx.meetings.recordFailure(id, String(e));
           }
           this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
         } finally {

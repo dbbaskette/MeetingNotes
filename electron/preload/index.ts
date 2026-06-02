@@ -64,6 +64,8 @@ const IPC_CHANNELS = {
   pipelineStatusEvent: 'pipeline:status-change',
   meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
+  logsTail: 'logs:tail',
+  logsReveal: 'logs:reveal',
   webhookTestSend: 'webhook:test-send',
 } as const;
 
@@ -375,6 +377,22 @@ const api = {
   },
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion) as Promise<string>,
+  },
+  logs: {
+    /** Tail the app log as parsed JSON-lines entries (oldest-first) for the
+     *  Diagnostics view. `maxEntries` is clamped to 2000 in main. */
+    tail: (maxEntries?: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.logsTail, maxEntries) as Promise<{
+        path: string;
+        entries: Array<{
+          ts: string | null;
+          level: string;
+          msg: string;
+          data?: Record<string, unknown>;
+        }>;
+      }>,
+    /** Reveal the log file in Finder. */
+    reveal: () => ipcRenderer.invoke(IPC_CHANNELS.logsReveal) as Promise<void>,
   },
   webhook: {
     /** POSTs a synthetic meeting.completed payload to the configured

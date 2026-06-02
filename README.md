@@ -168,6 +168,12 @@ To pin **your** open action items to a "You" group at the top, set Settings → 
 
 Timestamps in the transcript are clickable — they seek the sticky audio player to that moment and start playback. The player survives tab switches inside the meeting, so you can keep listening while editing the summary.
 
+### Diagnostics & failure recovery
+
+When a run fails, the meeting's detail view shows a **failure banner** with the actual error (e.g. `whisper: not ready…`) and the stage it died in, plus a one-click **Retry** that re-runs from the last safe checkpoint. **Settings → Diagnostics** surfaces the app log (`~/Library/Logs/MeetingNotes/app.log`) in-app with an Errors / Warnings+ / All filter and a "Reveal in Finder" button — no more digging through `~/Library/Logs` to find out what happened.
+
+The managed services (whisper, the diarization sidecar, the LLM runtime) lazy-start on first use and idle-shut-down to free RAM. The whisper supervisor self-heals two cold-start failure modes that previously surfaced as `whisper: not ready within 120000ms`: a process that loads the model but never reports healthy is force-killed and respawned (two attempts), and a startup that races an in-flight idle shutdown now waits for the teardown to finish before respawning.
+
 ## Setup script
 
 `./scripts/setup.sh` is idempotent — re-run any time to repair an install, change Whisper models, swap the LLM, or rotate the HF token.

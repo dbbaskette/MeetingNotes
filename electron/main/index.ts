@@ -543,6 +543,7 @@ app.whenReady().then(async () => {
     meetingDetector,
     nativeAppDetector,
     weeklyAggregator,
+    logger,
   });
 
   const mainWin = await createWindow();

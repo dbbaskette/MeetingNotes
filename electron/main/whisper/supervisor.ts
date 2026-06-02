@@ -164,6 +164,8 @@ export interface WhisperSupervisorOpts {
   /** Default 10 min. Set to 0 to disable. */
   idleShutdownMs?: number;
   startupTimeoutMs?: number;
+  startupMaxAttempts?: number;
+  startupAttemptTimeoutMs?: number;
   startupPollIntervalMs?: number;
   onLog?: (line: string) => void;
 }
@@ -192,6 +194,13 @@ export function createWhisperSupervisor(
     // compilation on first launch after a macOS or whisper-cpp update.
     // 120s covers that worst case comfortably.
     startupTimeoutMs: opts.startupTimeoutMs ?? 120_000,
+    // Whisper occasionally loads the model but never reports /health
+    // healthy and never exits (observed on cold starts). A single poll
+    // window would just time out against the wedged process. Two attempts
+    // of 60s each keep the same ~120s total budget but kill-and-respawn a
+    // wedged process halfway instead of polling a corpse.
+    startupMaxAttempts: opts.startupMaxAttempts ?? 2,
+    startupAttemptTimeoutMs: opts.startupAttemptTimeoutMs ?? 60_000,
     startupPollIntervalMs: opts.startupPollIntervalMs ?? 250,
     resolveLaunch: (host, port): LaunchSpec => {
       const cmd = findBin();

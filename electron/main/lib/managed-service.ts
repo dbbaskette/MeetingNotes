@@ -74,6 +74,17 @@ export interface ManagedServiceDeps {
   idleShutdownMs?: number;
   /** Max time ensureReady() waits for /health to come up after spawn. */
   startupTimeoutMs?: number;
+  /** How many cold-start attempts to make before giving up. Each attempt
+   *  spawns (or reuses) a process and polls /health for up to
+   *  {@link startupAttemptTimeoutMs}. Between attempts a wedged
+   *  (alive-but-never-healthy) process is force-killed and respawned.
+   *  Default 1 — single attempt, the historical behavior. Services prone
+   *  to wedging on cold start (whisper) set this > 1. */
+  startupMaxAttempts?: number;
+  /** Per-attempt /health timeout. Defaults to {@link startupTimeoutMs} so
+   *  single-attempt services are unchanged. With N attempts the total
+   *  worst-case wait is N × this value. */
+  startupAttemptTimeoutMs?: number;
   /** Health-poll interval during ensureReady(). */
   startupPollIntervalMs?: number;
   /** Stderr lines matching this regex flag a port conflict. */
@@ -129,6 +140,13 @@ export class ManagedService {
   private portConflict = false;
   /** Currently in-flight start; concurrent ensureReady calls await this. */
   private startPromise: Promise<void> | null = null;
+  /** Currently in-flight stop; ensureReady awaits this so a (re)start never
+   *  races a teardown (e.g. an idle shutdown that just fired). */
+  private stopping: Promise<void> | null = null;
+  /** Set while we deliberately kill a wedged process between cold-start
+   *  attempts, so the exit handler doesn't trigger scheduleRestart and
+   *  spawn a competing process. */
+  private suppressRestart = false;
   private idleTimer: NodeJS.Timeout | null = null;
 
   private readonly spawnFn: typeof realSpawn;
@@ -138,6 +156,8 @@ export class ManagedService {
   private readonly stopGrace: number;
   private readonly idleShutdownMs: number;
   private readonly startupTimeoutMs: number;
+  private readonly startupMaxAttempts: number;
+  private readonly startupAttemptTimeoutMs: number;
   private readonly startupPollIntervalMs: number;
   private readonly probe: (host: string, port: number) => Promise<ProbeResult>;
   private readonly killPort: (port: number) => Promise<void>;
@@ -151,6 +171,9 @@ export class ManagedService {
     this.stopGrace = deps.stopGraceMs ?? 5000;
     this.idleShutdownMs = deps.idleShutdownMs ?? 0;
     this.startupTimeoutMs = deps.startupTimeoutMs ?? 30_000;
+    this.startupMaxAttempts = Math.max(1, deps.startupMaxAttempts ?? 1);
+    this.startupAttemptTimeoutMs =
+      deps.startupAttemptTimeoutMs ?? this.startupTimeoutMs;
     this.startupPollIntervalMs = deps.startupPollIntervalMs ?? 250;
     this.probe = deps.healthProbe ?? defaultHealthProbe;
     this.killPort = deps.killOnPort ?? defaultKillOnPort;
@@ -161,6 +184,11 @@ export class ManagedService {
    *  ok, and reset the idle timer. Idempotent: concurrent calls share
    *  the same start operation. */
   async ensureReady(): Promise<void> {
+    // If a stop is mid-flight (e.g. the idle timer just fired), let it
+    // finish before we decide whether to (re)start. Otherwise we'd probe a
+    // dying process, see this.proc still set, and poll a corpse until the
+    // startup timeout — the production "not ready within 120000ms" race.
+    if (this.stopping) await this.stopping;
     if (this.stopped) {
       // After explicit stop or idle shutdown, allow re-entry.
       this.stopped = false;
@@ -228,60 +256,117 @@ export class ManagedService {
       }
     }
 
-    if (!this.proc) {
-      const launch = this.deps.resolveLaunch(host, port);
-      let proc: ChildProcess;
-      try {
-        proc = this.spawnFn(launch.cmd, launch.args, {
-          cwd: launch.cwd,
-          env: launch.env ?? process.env,
-        });
-      } catch (e) {
-        this.deps.onLog?.(`${this.deps.name}: spawn failed: ${String(e)}`);
-        throw e;
-      }
-      this.proc = proc;
-      this.startedAt = Date.now();
-      proc.stdout?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
-      proc.stderr?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
-      proc.on('error', (err) => {
-        // ENOENT (binary not found) lands here — must be handled to
-        // prevent uncaught error events crashing the main process.
-        this.deps.onLog?.(`${this.deps.name}: error: ${String(err)}`);
-      });
-      proc.on('exit', (code, signal) => {
-        const uptime = Date.now() - this.startedAt;
-        this.proc = null;
-        this.deps.onLog?.(
-          `${this.deps.name}: exited code=${code} signal=${signal} uptime=${uptime}ms`,
-        );
-        if (this.stopped) return;
-        if (this.portConflict) return;
-        if (uptime >= this.healthyUptime) this.restarts = 0;
-        this.scheduleRestart();
-      });
-    }
+    // Cold-start attempt loop. Each attempt spawns (or reuses) a process
+    // and polls /health. A process that loads but never reports healthy
+    // does NOT exit on its own — so the exit-driven restart never fires.
+    // We detect that here (poll timeout with the process still alive),
+    // force-kill the wedged instance, and cold-start again.
+    for (let attempt = 1; attempt <= this.startupMaxAttempts; attempt += 1) {
+      if (!this.proc) this.spawnProc(host, port);
 
-    // Poll /health until ok or timeout. The child takes a beat to bind
-    // the socket and (for pyannote) load the model — we MUST wait or
-    // the first pipeline call will hit ECONNREFUSED.
-    const deadline = Date.now() + this.startupTimeoutMs;
-    while (Date.now() < deadline) {
-      if (!this.proc) {
+      const outcome = await this.pollHealth(host, port);
+      if (outcome === 'ok') return;
+      if (outcome === 'exited') {
         throw new Error(
           `${this.deps.name}: process exited before becoming healthy`,
         );
       }
-      if (this.portConflict) {
+      if (outcome === 'port-conflict') {
         throw new Error(`${this.deps.name}: port ${port} in use`);
       }
+
+      // outcome === 'timeout': the process is alive but never went healthy.
+      if (attempt < this.startupMaxAttempts) {
+        this.deps.onLog?.(
+          `${this.deps.name}: not healthy within ${this.startupAttemptTimeoutMs}ms — ` +
+            `killing wedged process and respawning (attempt ${attempt + 1}/${this.startupMaxAttempts})`,
+        );
+        await this.killAndAwaitExit();
+      }
+    }
+
+    const totalMs = this.startupMaxAttempts * this.startupAttemptTimeoutMs;
+    throw new Error(
+      `${this.deps.name}: not ready within ${totalMs}ms after ${this.startupMaxAttempts} attempt(s)`,
+    );
+  }
+
+  /** Spawn the child and wire up its output/exit handlers. Assumes
+   *  this.proc is null. */
+  private spawnProc(host: string, port: number): void {
+    const launch = this.deps.resolveLaunch(host, port);
+    let proc: ChildProcess;
+    try {
+      proc = this.spawnFn(launch.cmd, launch.args, {
+        cwd: launch.cwd,
+        env: launch.env ?? process.env,
+      });
+    } catch (e) {
+      this.deps.onLog?.(`${this.deps.name}: spawn failed: ${String(e)}`);
+      throw e;
+    }
+    this.proc = proc;
+    this.startedAt = Date.now();
+    proc.stdout?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
+    proc.stderr?.on('data', (d: Buffer) => this.onChildOutput(d, host, port));
+    proc.on('error', (err) => {
+      // ENOENT (binary not found) lands here — must be handled to
+      // prevent uncaught error events crashing the main process.
+      this.deps.onLog?.(`${this.deps.name}: error: ${String(err)}`);
+    });
+    proc.on('exit', (code, signal) => {
+      const uptime = Date.now() - this.startedAt;
+      this.proc = null;
+      this.deps.onLog?.(
+        `${this.deps.name}: exited code=${code} signal=${signal} uptime=${uptime}ms`,
+      );
+      if (this.stopped) return;
+      if (this.portConflict) return;
+      // A kill we issued deliberately to respawn a wedged process — the
+      // attempt loop will spawn the replacement, so don't double-spawn.
+      if (this.suppressRestart) return;
+      if (uptime >= this.healthyUptime) this.restarts = 0;
+      this.scheduleRestart();
+    });
+  }
+
+  /** Poll /health until ok, the process exits, a port conflict surfaces,
+   *  or the per-attempt timeout elapses. The child takes a beat to bind
+   *  the socket and (for pyannote) load the model — we MUST wait or the
+   *  first pipeline call will hit ECONNREFUSED. */
+  private async pollHealth(
+    host: string,
+    port: number,
+  ): Promise<'ok' | 'exited' | 'port-conflict' | 'timeout'> {
+    const deadline = Date.now() + this.startupAttemptTimeoutMs;
+    while (Date.now() < deadline) {
+      if (!this.proc) return 'exited';
+      if (this.portConflict) return 'port-conflict';
       const p = await this.probe(host, port);
-      if (p.ok) return;
+      if (p.ok) return 'ok';
       await new Promise((r) => setTimeout(r, this.startupPollIntervalMs));
     }
-    throw new Error(
-      `${this.deps.name}: not ready within ${this.startupTimeoutMs}ms`,
+    return 'timeout';
+  }
+
+  /** Force-kill the current process and wait for it to actually exit,
+   *  without tripping the auto-restart path. Used between cold-start
+   *  attempts to replace a wedged process. */
+  private async killAndAwaitExit(): Promise<void> {
+    const proc = this.proc;
+    if (!proc) return;
+    this.suppressRestart = true;
+    const exited = new Promise<void>((resolve) =>
+      proc.once('exit', () => resolve()),
     );
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+    await exited;
+    this.proc = null;
+    this.suppressRestart = false;
   }
 
   private onChildOutput(d: Buffer, host: string, port: number): void {
@@ -338,8 +423,17 @@ export class ManagedService {
   }
 
   /** Explicit shutdown. Idempotent. Does NOT kill an externally-owned
-   *  instance — we only stop processes we spawned. */
+   *  instance — we only stop processes we spawned. Concurrent calls (and
+   *  an ensureReady that arrives mid-teardown) share the same promise. */
   async stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.stopping = this.doStop().finally(() => {
+      this.stopping = null;
+    });
+    return this.stopping;
+  }
+
+  private async doStop(): Promise<void> {
     this.stopped = true;
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);

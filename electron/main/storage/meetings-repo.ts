@@ -5,6 +5,10 @@ export interface MeetingRow {
   startedAt: string | null; durationS: number | null;
   audioPath: string; status: string; pipelineStage: string;
   stageStartedAt: string | null;
+  /** Set when `status === 'failed'`: the error string from the stage that
+   *  threw (e.g. "whisper: not ready ..."). NULL otherwise. Cleared on any
+   *  transition back to a non-failed status. */
+  errorMessage: string | null;
   skipSpeakerId: boolean;
   /** ISO timestamp of soft-delete. NULL = live. Rows with a non-null
    *  `deletedAt` are hidden from `listAll()` but still accessible via
@@ -30,6 +34,7 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     status: r.status as string,
     pipelineStage: r.pipeline_stage as string,
     stageStartedAt: (r.stage_started_at as string) ?? null,
+    errorMessage: (r.error_message as string) ?? null,
     skipSpeakerId: Boolean((r.skip_speaker_id as number | undefined) ?? 0),
     deletedAt: (r.deleted_at as string) ?? null,
     createdAt: r.created_at as string,
@@ -132,8 +137,19 @@ export class MeetingsRepo {
   }
 
   updateStatus(id: string, status: string): void {
-    this.db.prepare('UPDATE meetings SET status = ?, updated_at = ? WHERE id = ?')
-      .run(status, new Date().toISOString(), id);
+    // Any move away from 'failed' clears the stale error so a retried or
+    // resumed meeting doesn't keep showing the old failure reason.
+    this.db.prepare(
+      'UPDATE meetings SET status = ?, error_message = NULL, updated_at = ? WHERE id = ?',
+    ).run(status, new Date().toISOString(), id);
+  }
+
+  /** Mark a meeting failed and record why. Keeps the error string the
+   *  pipeline caught so the detail view can explain the failure. */
+  recordFailure(id: string, message: string): void {
+    this.db.prepare(
+      "UPDATE meetings SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?",
+    ).run(message, new Date().toISOString(), id);
   }
 
   updateDuration(id: string, durationS: number): void {

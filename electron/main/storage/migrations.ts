@@ -194,6 +194,18 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 10,
+    // Capture WHY a run failed. Until now a failed pipeline stored only
+    // status='failed' + the last pipeline_stage; the actual error string
+    // (e.g. "whisper: not ready within 120000ms") went to app.log and was
+    // never shown to the user. error_message holds that string so the
+    // detail view can explain the failure and offer a retry. Cleared
+    // whenever a meeting transitions back to a non-failed state.
+    up: `
+      ALTER TABLE meetings ADD COLUMN error_message TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
