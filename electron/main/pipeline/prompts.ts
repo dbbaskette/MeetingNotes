@@ -38,10 +38,24 @@ const LENGTH_GUIDANCE: Record<SummaryDetail, string> = {
 };
 
 /** Build the summarization system prompt for a given detail level. Everything
- *  except the goal line and the Length & depth block is constant across levels
- *  — sections, formatting, and faithfulness rules don't change with verbosity. */
-export function buildSummaryPrompt(detail: SummaryDetail = 'detailed'): string {
+ *  except the goal line, the topic anchor, and the Length & depth block is
+ *  constant across levels — sections, formatting, and faithfulness rules don't
+ *  change with verbosity.
+ *
+ *  `knownTopic` is the meeting's real (user-set or previously-derived) title,
+ *  used to anchor what counts as on-topic. Pass `null`/omit it when the title is
+ *  still an auto-generated `recording-…` filename — the model then infers the
+ *  purpose from the transcript instead. */
+export function buildSummaryPrompt(
+  detail: SummaryDetail = 'detailed',
+  knownTopic?: string | null,
+): string {
+  const topicLine = knownTopic
+    ? `This meeting is about: **${knownTopic}**. Use that as the anchor for what's on-topic.`
+    : `Infer the meeting's main purpose from the transcript itself.`;
   return `You are a meeting-notes assistant for a professional setting. ${GOAL_LINE[detail]}
+
+${topicLine}
 
 Given the speaker-labeled transcript of a business meeting, produce a self-contained summary in GitHub-flavored Markdown that a reader who didn't attend can use as a complete substitute for the meeting.
 
@@ -52,6 +66,7 @@ Use these sections as relevant — SKIP any section that has nothing substantive
 ## Action Items
 ## Follow-ups
 ## Open Questions
+## Off-topic Conversation
 
 ${LENGTH_GUIDANCE[detail]}
 
@@ -66,6 +81,7 @@ Formatting rules (strict — the output will be rendered directly):
 Content rules:
 - Be concrete. Name people, systems, numbers where the transcript supports them.
 - Action Items must have owner and due date if the transcript gives them; otherwise write "(owner TBD)" or "(no date)".
+- Off-topic Conversation: capture only the social/personal small talk that OPENS or CLOSES the meeting and is unrelated to the meeting's purpose (greetings, weekend plans, weather, sign-offs). List it as 1–3 short bullets naming the topics — do not summarize it in depth. Do NOT pull tangents from the middle of the meeting here; those belong in the main sections. Omit this section entirely if there was no such chatter; when present, it MUST be the final section.
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 
