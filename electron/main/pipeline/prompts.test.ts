@@ -6,7 +6,8 @@ describe('buildSummaryPrompt', () => {
     const p = buildSummaryPrompt('detailed');
     expect(p).toContain('## Off-topic Conversation');
     expect(p).toContain('OPENS or CLOSES');
-    expect(p).toContain('Omit this section entirely if there was no such chatter.');
+    expect(p).toContain('Omit this section entirely if there was no such chatter;');
+    expect(p).toContain('it MUST be the final section');
   });
 
   it('anchors on the known topic when one is given', () => {

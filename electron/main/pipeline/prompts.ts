@@ -81,7 +81,7 @@ Formatting rules (strict — the output will be rendered directly):
 Content rules:
 - Be concrete. Name people, systems, numbers where the transcript supports them.
 - Action Items must have owner and due date if the transcript gives them; otherwise write "(owner TBD)" or "(no date)".
-- Off-topic Conversation: capture only the social/personal small talk that OPENS or CLOSES the meeting and is unrelated to the meeting's purpose (greetings, weekend plans, weather, sign-offs). List it as 1–3 short bullets naming the topics — do not summarize it in depth. Do NOT pull tangents from the middle of the meeting here; those belong in the main sections. Omit this section entirely if there was no such chatter.
+- Off-topic Conversation: capture only the social/personal small talk that OPENS or CLOSES the meeting and is unrelated to the meeting's purpose (greetings, weekend plans, weather, sign-offs). List it as 1–3 short bullets naming the topics — do not summarize it in depth. Do NOT pull tangents from the middle of the meeting here; those belong in the main sections. Omit this section entirely if there was no such chatter; when present, it MUST be the final section.
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 
