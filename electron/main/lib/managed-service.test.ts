@@ -246,6 +246,117 @@ describe('ManagedService restart logic', () => {
     await svc.stop();
   });
 
+  it('kills a wedged (alive-but-never-healthy) process and respawns within the attempt budget', async () => {
+    // Repro of the production failure: whisper loads the model but /health
+    // never greens, and the process does NOT exit — so the exit-driven
+    // restart never fires. With startupMaxAttempts > 1 we must kill the
+    // wedged process and cold-start again.
+    let spawnCount = 0;
+    const spawn = vi.fn(() => {
+      spawnCount += 1;
+      return fakeProc() as any; // stays alive until explicitly killed
+    });
+    const probe = async (): Promise<ProbeResult> => ({ ok: spawnCount >= 2 });
+    const svc = new ManagedService({
+      name: 'wedged',
+      port: 9100,
+      spawn,
+      resolveLaunch: baseLaunch,
+      healthProbe: probe,
+      startupMaxAttempts: 2,
+      startupAttemptTimeoutMs: 40,
+      startupPollIntervalMs: 5,
+    });
+    await svc.ensureReady();
+    expect(spawn).toHaveBeenCalledTimes(2); // wedged first, healthy respawn
+    expect(svc.isRunning()).toBe(true);
+    await svc.stop();
+  });
+
+  it('throws after exhausting the attempt budget when never healthy', async () => {
+    let spawnCount = 0;
+    const spawn = vi.fn(() => {
+      spawnCount += 1;
+      return fakeProc() as any;
+    });
+    const svc = new ManagedService({
+      name: 'never',
+      port: 9101,
+      spawn,
+      resolveLaunch: baseLaunch,
+      healthProbe: noProbe,
+      startupMaxAttempts: 3,
+      startupAttemptTimeoutMs: 20,
+      startupPollIntervalMs: 5,
+    });
+    await expect(svc.ensureReady()).rejects.toThrow(/not ready within .* 3 attempt/);
+    expect(spawn).toHaveBeenCalledTimes(3);
+    await svc.stop();
+  });
+
+  it('does not auto-restart the process it intentionally kills between attempts', async () => {
+    // The exit fired by the deliberate kill must NOT trip scheduleRestart,
+    // or we would spawn a third, racing process.
+    let spawnCount = 0;
+    const spawn = vi.fn(() => {
+      spawnCount += 1;
+      return fakeProc() as any;
+    });
+    const probe = async (): Promise<ProbeResult> => ({ ok: spawnCount >= 2 });
+    const svc = new ManagedService({
+      name: 'norace',
+      port: 9102,
+      spawn,
+      resolveLaunch: baseLaunch,
+      healthProbe: probe,
+      startupMaxAttempts: 2,
+      startupAttemptTimeoutMs: 40,
+      startupPollIntervalMs: 5,
+      maxRestarts: 5,
+      restartDelayMs: 0,
+    });
+    await svc.ensureReady();
+    // Give any spurious scheduled restart a chance to fire.
+    await new Promise((r) => setTimeout(r, 40));
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await svc.stop();
+  });
+
+  it('ensureReady awaits an in-flight stop, then respawns fresh (idle-shutdown race)', async () => {
+    // Repro of failure #3: the idle timer's stop() is mid-flight when a new
+    // ensureReady arrives. It must wait for the teardown to finish and then
+    // cold-start, not poll the dying process.
+    let serverUp = false;
+    let spawnCount = 0;
+    const spawn = vi.fn(() => {
+      spawnCount += 1;
+      const p = fakeProc();
+      serverUp = true;
+      p.on('exit', () => {
+        serverUp = false;
+      });
+      return p as any;
+    });
+    const probe = async (): Promise<ProbeResult> => ({ ok: serverUp });
+    const svc = new ManagedService({
+      name: 'race',
+      port: 9103,
+      spawn,
+      resolveLaunch: baseLaunch,
+      healthProbe: probe,
+      startupPollIntervalMs: 5,
+    });
+    await svc.ensureReady();
+    expect(spawnCount).toBe(1);
+    // Kick off a stop and an ensureReady in the same tick — the race.
+    const stopping = svc.stop();
+    const reready = svc.ensureReady();
+    await Promise.all([stopping, reready]);
+    expect(spawnCount).toBe(2); // respawned fresh rather than adopting a corpse
+    expect(svc.isRunning()).toBe(true);
+    await svc.stop();
+  });
+
   it('flags port conflict and stops restart loop on EADDRINUSE without an adoptable instance', async () => {
     let procs = 0;
     const spawn = vi.fn(() => {
