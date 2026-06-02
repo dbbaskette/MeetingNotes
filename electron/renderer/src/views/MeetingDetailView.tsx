@@ -28,6 +28,7 @@ interface MeetingDetail {
   durationS: number | null;
   pipelineStage: string;
   status: string;
+  errorMessage: string | null;
   stageStartedAt: string | null;
   skipSpeakerId: boolean;
   transcriptMd: string | null;
@@ -159,6 +160,14 @@ export function MeetingDetailView({
           action. Returns null when not parked. */}
       <div className="shrink-0">
         <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
+      </div>
+
+      {/* Failure banner: when a run failed, surface WHY (the error string the
+          pipeline caught, e.g. "whisper: not ready ...") with a one-click
+          Retry — instead of leaving the user with a bare red X on the
+          timeline and no explanation. Returns null when not failed. */}
+      <div className="shrink-0">
+        <FailureBanner meeting={m} onReload={reload} />
       </div>
 
       {/* The timeline is the canonical "where is this meeting in the pipeline"
@@ -449,6 +458,59 @@ function SpeakerIdControls({
         />
         Skip speaker ID step — don&apos;t pause pipeline for this meeting
       </label>
+    </div>
+  );
+}
+
+// Shown only when status==='failed'. The pipeline rolls the stage back to a
+// safe re-entry point on failure, so Retry === re-enqueue from there (the
+// same api.meetings.start path the Process button uses); updateStatus clears
+// the stored error so the banner disappears once the retry starts.
+function FailureBanner({
+  meeting, onReload,
+}: {
+  meeting: MeetingDetail;
+  onReload: () => Promise<void>;
+}): JSX.Element | null {
+  const [retrying, setRetrying] = useState(false);
+  if (meeting.status !== 'failed') return null;
+
+  const failedStep = USER_STEPS[stepIndexFor(meeting.pipelineStage)] ?? null;
+
+  async function retry(): Promise<void> {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.meetings.start(meeting.id);
+      await onReload(); // bumps the poll loop; status flips to 'processing'
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className="px-5 py-4 border-b border-surface-border bg-rose-50 flex items-start gap-4">
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-rose-800 text-sm">
+          Processing failed{failedStep ? ` during ${failedStep}` : ''}
+        </div>
+        {meeting.errorMessage ? (
+          <pre className="mt-1.5 text-xs text-rose-700/90 bg-rose-100/60 border border-rose-200 rounded-md px-2.5 py-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
+            {meeting.errorMessage}
+          </pre>
+        ) : (
+          <div className="text-xs text-rose-700/80 mt-0.5">
+            No error detail was recorded. Check the logs in Settings → Diagnostics.
+          </div>
+        )}
+      </div>
+      <button
+        onClick={() => void retry()}
+        disabled={retrying}
+        className="shrink-0 text-sm font-semibold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+      >
+        {retrying ? 'Retrying…' : 'Retry ↻'}
+      </button>
     </div>
   );
 }

@@ -108,6 +108,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         id: m.id, slug: m.slug, title: m.title,
         startedAt: m.startedAt, durationS: m.durationS,
         pipelineStage: m.pipelineStage, status: m.status,
+        errorMessage: m.errorMessage,
         stageStartedAt: m.stageStartedAt,
         skipSpeakerId: m.skipSpeakerId,
         unidentifiedCount: unidentifiedCount(speakers),

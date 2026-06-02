@@ -31,6 +31,24 @@ describe('MeetingsRepo', () => {
     expect(repo.findById('x')?.pipelineStage).toBe('transcribing');
   });
 
+  it('recordFailure stores the error message and flips status to failed', () => {
+    repo.insert({ id: 'f', slug: 'f', title: 'F', startedAt: null, durationS: null,
+      audioPath: '/a', status: 'processing', pipelineStage: 'transcribing' });
+    repo.recordFailure('f', 'Error: whisper: not ready within 120000ms');
+    const got = repo.findById('f');
+    expect(got?.status).toBe('failed');
+    expect(got?.errorMessage).toBe('Error: whisper: not ready within 120000ms');
+  });
+
+  it('updateStatus clears a stale error_message on transition away from failed', () => {
+    repo.insert({ id: 'r', slug: 'r', title: 'R', startedAt: null, durationS: null,
+      audioPath: '/a', status: 'processing', pipelineStage: 'transcribing' });
+    repo.recordFailure('r', 'boom');
+    expect(repo.findById('r')?.errorMessage).toBe('boom');
+    repo.updateStatus('r', 'processing'); // e.g. a retry
+    expect(repo.findById('r')?.errorMessage).toBeNull();
+  });
+
   it('listAll returns newest first', () => {
     repo.insert({ id: 'a', slug: 'a', title: 'A', startedAt: '2026-04-16', durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
     repo.insert({ id: 'b', slug: 'b', title: 'B', startedAt: '2026-04-17', durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });

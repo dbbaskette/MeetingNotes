@@ -8,6 +8,10 @@ export const MeetingSummarySchema = z.object({
   durationS: z.number().nullable(),
   pipelineStage: z.string(),
   status: z.string(),
+  /** When status === 'failed', the error string from the stage that threw
+   *  (e.g. "whisper: not ready ..."). Null otherwise. Powers the failure
+   *  banner + Retry affordance in the detail view. */
+  errorMessage: z.string().nullable(),
   unidentifiedCount: z.number(),
   actionItemsCount: z.number(),
   skipSpeakerId: z.boolean(),
