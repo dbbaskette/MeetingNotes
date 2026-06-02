@@ -10,6 +10,12 @@ describe('buildSummaryPrompt', () => {
     expect(p).toContain('it MUST be the final section');
   });
 
+  it('forbids duplicating off-topic chatter in the main sections', () => {
+    const p = buildSummaryPrompt('detailed');
+    expect(p).toContain('MOVES off-topic chatter out of the outline');
+    expect(p).toContain('must NOT also appear in Overview, Key Discussion Points');
+  });
+
   it('anchors on the known topic when one is given', () => {
     const p = buildSummaryPrompt('detailed', 'Q3 roadmap planning');
     expect(p).toContain('This meeting is about: **Q3 roadmap planning**');
