@@ -50,11 +50,15 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   // Wake the LLM provider on demand (managed mode) or no-op
   // (external mode). See ctx.llmSupervisor docs.
   await ctx.llmSupervisor.ensureReady();
+  // Anchor off-topic detection on the meeting's real title. A still-default
+  // `recording-…` filename tells us nothing, so fall back to letting the model
+  // infer the purpose from the transcript.
+  const knownTopic = DEFAULT_TITLE_PATTERN.test(meeting.title) ? null : meeting.title;
   const content = await ctx.lmStudio.chat({
     model: ctx.settings.get('llmModel'),
     temperature: 0.2,
     messages: [
-      { role: 'system', content: buildSummaryPrompt(ctx.settings.get('summaryDetail')) },
+      { role: 'system', content: buildSummaryPrompt(ctx.settings.get('summaryDetail'), knownTopic) },
       { role: 'user', content: transcript },
     ],
   });
@@ -67,7 +71,7 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   //  - collapse "*" bullets to "-" so the preview renders consistently
   const cleaned = content
     .trim()
-    .replace(/^# (Overview|Key Discussion Points|Decisions|Action Items|Follow-ups|Open Questions)\b/gm, '## $1')
+    .replace(/^# (Overview|Key Discussion Points|Decisions|Action Items|Follow-ups|Open Questions|Off-topic Conversation)\b/gm, '## $1')
     .replace(/^(\s*)\* /gm, '$1- ');
   fs.writeFileSync(path.join(folder, 'summary.md'), cleaned);
   ctx.logger.info('summarize:done', { meetingId, chars: cleaned.length });
