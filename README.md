@@ -143,6 +143,8 @@ Don't care for this meeting? Toggle **Skip speaker ID** at the top of the detail
 
 The Summary tab has three modes — **Preview** (rendered markdown), **Split** (textarea + live preview), **Edit** (full-width textarea). LLM hallucination, formatting tweaks, redactions — fix in place and Save. Edits write to `summary.md` on disk. Re-running summarize from the rerun buttons will overwrite, so don't re-summarize work you've hand-edited.
 
+Summaries are structured into Overview, Key Discussion Points, Decisions, Action Items, Follow-ups, and Open Questions, with any sections that have nothing substantive skipped. The opening/closing social small talk (greetings, weekend plans, stock-market chatter, sign-offs) is pulled out of the main outline into a dedicated **Off-topic Conversation** section pinned to the end — it's moved there, not duplicated, so the business sections stay focused on the meeting itself. Summary verbosity is set once in Settings via a **detail level** (concise / standard / detailed) that pins the target length in the prompt rather than letting each local model drift.
+
 ### Weekly view
 
 Switch to the **Week** tab for a Mon–Sun rollup: every meeting in the selected week, an LLM-generated narrative summarising what happened (past weeks only), all open action items grouped by owner, and key decisions extracted across the week. The narrative is cached in SQLite (`weekly_summaries` table, keyed by content hash) so re-opening the same week is instant — adding/editing/deleting any meeting in the week invalidates the cache automatically. **Export to Markdown** ships the whole rollup as one file (cancel = copies to clipboard).
