@@ -7,6 +7,9 @@ build/*
 !build/entitlements.mac.plist
 # Keep the electron-builder afterPack hook even though build/ is ignored.
 !build/trim-electron-framework.cjs
+# Keep the macOS app icon (+ its regeneration source) even though build/ is ignored.
+!build/icon.icns
+!build/icon-1024.png
 .DS_Store
 *.log
 .env
