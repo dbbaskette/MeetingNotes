@@ -16,16 +16,28 @@ import type { SettingsRepo } from '../storage/settings-repo.js';
 import type { WeeklySummariesRepo } from '../storage/weekly-summaries-repo.js';
 import { isoWeekRange } from '../lib/iso-week.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
+import { extractOverviewRecap } from './recap.js';
 
 // ──────── Public types ────────
+
+/** A topic thread synthesized across the week's meetings. The recall
+ *  payload of the weekly view — connects discussions that span multiple
+ *  meetings, which clicking into a single meeting can't surface. */
+export interface WeeklyTheme {
+  title: string;
+  /** 2-4 sentences: what was discussed, where it landed, what's open. */
+  detail: string;
+  /** Source meeting titles this thread draws from, for traceability. */
+  meetings: string[];
+}
 
 export interface WeeklyMeeting {
   id: string;
   title: string;
   startedAt: string;
   durationS: number | null;
-  /** First sentence of the meeting's existing summary (Overview), if
-   *  available. Used as the in-list highlight. */
+  /** Multi-sentence recap pulled from the meeting's summary Overview, if
+   *  available. Used as the in-list recap for catching up. */
   highlight: string | null;
   /** Number of distinct speakers identified in diarization. Null if
    *  the meeting hasn't been diarized yet. */
@@ -75,6 +87,8 @@ export interface WeeklyData {
   /** LLM-generated 2-3 paragraph narrative. Empty string when the
    *  week has no meetings. */
   narrative: string;
+  /** LLM-synthesized topic threads across the week. */
+  themes: WeeklyTheme[];
   /** LLM-extracted decisions list. */
   decisions: string[];
   /** When the cached narrative + decisions were generated. Empty
@@ -112,6 +126,7 @@ export interface NarrativeInput {
 
 export interface NarrativeOutput {
   narrative: string;
+  themes: WeeklyTheme[];
   decisions: string[];
 }
 
@@ -137,6 +152,7 @@ export interface WeeklyStructured {
 /** What `getOrGenerateNarrative` returns. */
 export interface WeeklyNarrative {
   narrative: string;
+  themes: WeeklyTheme[];
   decisions: string[];
   generatedAt: string;
   /** True when the result came from the cache (no LLM call made). */
@@ -227,7 +243,7 @@ export class WeeklyAggregator {
     // would be obsolete by the time the user reads it.
     const inProgress = end.getTime() > Date.now();
     if (inProgress) {
-      return { narrative: '', decisions: [], generatedAt: '', fromCache: false };
+      return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
     const meetings = this.deps.meetings.listInRange(
       start.toISOString(),
@@ -238,13 +254,14 @@ export class WeeklyAggregator {
     if (!opts.force && cached && cached.inputHash === inputHash) {
       return {
         narrative: cached.narrative,
+        themes: cached.themes,
         decisions: cached.decisions,
         generatedAt: cached.generatedAt,
         fromCache: true,
       };
     }
     if (meetings.length === 0) {
-      return { narrative: '', decisions: [], generatedAt: '', fromCache: false };
+      return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
     if (opts.force) {
       this.deps.weeklySummaries.clear(isoYear, isoWeek);
@@ -256,6 +273,7 @@ export class WeeklyAggregator {
     );
     return {
       narrative: out.narrative,
+      themes: out.themes,
       decisions: out.decisions,
       generatedAt: out.generatedAt,
       fromCache: false,
@@ -278,6 +296,7 @@ export class WeeklyAggregator {
     return {
       ...structuredOut,
       narrative: narrative.narrative,
+      themes: narrative.themes,
       decisions: narrative.decisions,
       generatedAt: narrative.generatedAt,
     };
@@ -299,13 +318,9 @@ export class WeeklyAggregator {
     if (fs.existsSync(summaryPath)) {
       try {
         const md = fs.readFileSync(summaryPath, 'utf8');
-        // First non-heading sentence from the summary. The existing
-        // summarizing.ts produces an "Overview" section first; pull
-        // its opening sentence as the highlight.
-        const overview = md.split(/^##\s+/m).slice(1).find((s) => /^Overview/i.test(s));
-        const body = (overview ?? md).replace(/^Overview\s*\n+/i, '').trim();
-        const firstSentence = body.split(/(?<=[.!?])\s+/)[0];
-        highlight = (firstSentence ?? '').slice(0, 200) || null;
+        // A multi-sentence recap from the summary's Overview section — enough
+        // to recall what the meeting was about without opening it.
+        highlight = extractOverviewRecap(md);
       } catch { /* best-effort */ }
     }
     let speakerCount: number | null = null;
@@ -396,7 +411,7 @@ export class WeeklyAggregator {
     weeklyMeetings: readonly WeeklyMeeting[],
     openActionGroups: readonly WeeklyOwnerGroup[],
     inputHash: string,
-  ): Promise<{ narrative: string; decisions: string[]; generatedAt: string }> {
+  ): Promise<{ narrative: string; themes: WeeklyTheme[]; decisions: string[]; generatedAt: string }> {
     if (this.deps.ensureLLMReady) await this.deps.ensureLLMReady();
 
     // Build the structured input for the prompt. Each meeting
@@ -440,6 +455,7 @@ export class WeeklyAggregator {
       isoYear,
       isoWeek,
       narrative: out.narrative,
+      themes: out.themes,
       decisions: out.decisions,
       inputHash,
     });
@@ -447,6 +463,7 @@ export class WeeklyAggregator {
     const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
     return {
       narrative: out.narrative,
+      themes: out.themes,
       decisions: out.decisions,
       generatedAt: cached?.generatedAt ?? new Date().toISOString(),
     };

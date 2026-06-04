@@ -206,6 +206,17 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE meetings ADD COLUMN error_message TEXT;
     `,
   },
+  {
+    version: 11,
+    // Weekly summary themes (richer-weekly-summary). The narrative LLM call
+    // now also returns synthesized topic threads across the week; cache them
+    // alongside narrative/decisions. NOT NULL with a default so existing
+    // cached rows upgrade cleanly — they show no themes until the next
+    // regeneration repopulates the column.
+    up: `
+      ALTER TABLE weekly_summaries ADD COLUMN themes_json TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

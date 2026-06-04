@@ -60,7 +60,7 @@ describe('WeeklyAggregator', () => {
 
   it('returns empty data with no LLM call when the week has no meetings', async () => {
     const { meetings, actionItems, speakers, settings, weekly } = setupDb();
-    const generate = vi.fn(async () => ({ narrative: 'unused', decisions: [] }));
+    const generate = vi.fn(async () => ({ narrative: 'unused', themes: [], decisions: [] }));
     const agg = new WeeklyAggregator({
       meetings, actionItems, speakers, settings, weeklySummaries: weekly,
       libraryRoot: lib, generateNarrative: generate,
@@ -80,6 +80,7 @@ describe('WeeklyAggregator', () => {
     });
     const generate = vi.fn(async () => ({
       narrative: 'Focus was Q2.',
+      themes: [{ title: 'Q2 OKRs', detail: 'Set the quarter goals.', meetings: ['Q2 planning'] }],
       decisions: ['Locked OKRs — Q2 planning'],
     }));
     const agg = new WeeklyAggregator({
@@ -106,6 +107,7 @@ describe('WeeklyAggregator', () => {
       callCount += 1;
       return {
         narrative: callCount === 1 ? 'first' : 'second',
+        themes: [],
         decisions: [],
       };
     });
@@ -130,7 +132,7 @@ describe('WeeklyAggregator', () => {
     insertMeeting(meetings, undefined as never, {
       id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
     });
-    const generate = vi.fn(async () => ({ narrative: 'paragraph', decisions: [] }));
+    const generate = vi.fn(async () => ({ narrative: 'paragraph', themes: [], decisions: [] }));
     const agg = new WeeklyAggregator({
       meetings, actionItems, speakers, settings, weeklySummaries: weekly,
       libraryRoot: lib, generateNarrative: generate,
@@ -164,7 +166,7 @@ describe('WeeklyAggregator', () => {
       (target.getTime() - week1Thu.getTime()) / (7 * 24 * 60 * 60 * 1000),
     );
 
-    const generate = vi.fn(async () => ({ narrative: 'should not happen', decisions: [] }));
+    const generate = vi.fn(async () => ({ narrative: 'should not happen', themes: [], decisions: [] }));
     const agg = new WeeklyAggregator({
       meetings, actionItems, speakers, settings, weeklySummaries: weekly,
       libraryRoot: lib, generateNarrative: generate,
@@ -179,6 +181,50 @@ describe('WeeklyAggregator', () => {
     // would be obsolete by the time the user reads it.
     await agg.regenerateWeek(isoYear, isoWeek);
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('generates, caches, and reuses themes across calls', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
+    });
+    const themes = [
+      { title: 'Migration', detail: 'Discussed fixtures and timeline.', meetings: ['Q2 planning'] },
+    ];
+    const generate = vi.fn(async () => ({ narrative: 'n', themes, decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const first = await agg.getWeek(2026, 17);
+    expect(first.themes).toEqual(themes);
+    // Second call is a cache hit and must return the themes from storage,
+    // proving the themes_json round-trip through the repo.
+    const second = await agg.getWeek(2026, 17);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(second.themes).toEqual(themes);
+  });
+
+  it('uses the summary Overview paragraph as each meeting recap', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z', slug: 'q2',
+    });
+    const folder = path.join(lib, 'meetings', 'q2');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(
+      path.join(folder, 'summary.md'),
+      '## Overview\n\nSet the Q2 OKRs. Agreed to ship the migration in May. Deferred the pricing decision.\n\n## Key Discussion Points\n- x',
+    );
+    const generate = vi.fn(async () => ({ narrative: 'n', themes: [], decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const structured = await agg.getStructuredWeek(2026, 17);
+    expect(structured.meetings[0]!.highlight).toBe(
+      'Set the Q2 OKRs. Agreed to ship the migration in May. Deferred the pricing decision.',
+    );
   });
 
   it('groups open action items by owner, with the user pinned first', async () => {
@@ -200,7 +246,7 @@ describe('WeeklyAggregator', () => {
     insAi.run('ai3', 'm1', 'Closed item', null, null, null, 'done', now);
     insAi.run('ai4', 'm1', 'Unowned action', null, null, null, 'open', now);
 
-    const generate = vi.fn(async () => ({ narrative: 'x', decisions: [] }));
+    const generate = vi.fn(async () => ({ narrative: 'x', themes: [], decisions: [] }));
     const agg = new WeeklyAggregator({
       meetings, actionItems, speakers, settings, weeklySummaries: weekly,
       libraryRoot: lib, generateNarrative: generate,
