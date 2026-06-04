@@ -65,6 +65,11 @@ extraResources:
   - from: audio-tap/build/meeting-notes-tap
     to: bin/meeting-notes-tap
 mac:
+  # App/dock/Finder icon. Built from build/icon-1024.png (the logo on a dark
+  # rounded-square card) via iconutil — keep that PNG to regenerate the icns.
+  # electron-builder would auto-detect build/icon.icns, but we name it
+  # explicitly so the bundle icon's source is unambiguous.
+  icon: build/icon.icns
   target:
     - dmg
     - zip
