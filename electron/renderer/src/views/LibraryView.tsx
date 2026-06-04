@@ -16,6 +16,7 @@ import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
 import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
+import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
 
 interface Props {
@@ -322,10 +323,7 @@ export function LibraryView({
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-6 h-6 rounded-md"
-            style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-          />
+          <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
         <nav className="flex items-center gap-1 ml-4 text-sm">

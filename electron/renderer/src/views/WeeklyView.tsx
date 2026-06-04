@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
+import logoUrl from '../assets/logo.png';
 
 interface Props {
   /** Open the meeting detail view for the given id when a meeting
@@ -286,10 +287,7 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
       {/* Header */}
       <header className="flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-6 h-6 rounded-md"
-            style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-          />
+          <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
         <nav className="flex items-center gap-1 ml-4 text-sm">
