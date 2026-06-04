@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { extractJsonBlock, parseNarrativeResponse, buildUserPrompt } from './prompt.js';
+import { describe, it, expect, vi } from 'vitest';
+import { extractJsonBlock, parseNarrativeResponse, buildUserPrompt, createNarrativeGenerator } from './prompt.js';
 
 describe('extractJsonBlock', () => {
   it('returns the input unchanged when it is already a clean JSON object', () => {
@@ -134,5 +134,21 @@ describe('buildUserPrompt', () => {
     });
     expect(out).toContain('(no meetings this week)');
     expect(out).toContain('(none)'); // for actions
+  });
+});
+
+describe('createNarrativeGenerator', () => {
+  it('does not impose a small max_tokens cap (reasoning models need room to think)', async () => {
+    // Regression guard for the 1.5.0 bug: a 2000-token cap was consumed
+    // entirely by a reasoning model's reasoning_content, leaving content
+    // empty (finish_reason="length"). The narrative call must leave the
+    // token budget effectively uncapped so the model can finish.
+    const chat = vi.fn(async () => '{"narrative":"x","themes":[],"decisions":[]}');
+    const gen = createNarrativeGenerator({ chat } as never, () => 'some-model');
+    await gen({ weekLabel: 'W', meetings: [], openActions: [] });
+    expect(chat).toHaveBeenCalledTimes(1);
+    const arg = chat.mock.calls[0]![0] as { maxTokens?: number };
+    // Either unset (preferred) or generously high — never a small cap.
+    expect(arg.maxTokens === undefined || arg.maxTokens >= 8000).toBe(true);
   });
 });

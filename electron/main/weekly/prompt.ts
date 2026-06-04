@@ -143,10 +143,13 @@ export function createNarrativeGenerator(
     const raw = await lmStudio.chat({
       model: getModelId(),
       temperature: 0.3,
-      // The response now carries narrative + 3-6 themes + decisions as JSON;
-      // give the decoder generous headroom so the object isn't truncated
-      // mid-array (which would make the JSON unparseable).
-      maxTokens: 2000,
+      // No max_tokens cap. A reasoning model (Qwen3, gemma-*-a4b, etc.) spends
+      // its budget in reasoning_content FIRST and only then emits the answer in
+      // content. A small cap (we shipped 2000 in 1.5.0) gets consumed entirely
+      // by thinking — finish_reason="length" with reasoning_tokens≈cap and
+      // content="" — so the client sees empty content and errors. Leaving it
+      // unset matches the summarize/extract calls and lets the model finish;
+      // the 10-minute request timeout is the runaway backstop.
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },
