@@ -10,16 +10,17 @@
 // regressions surface fast.
 
 import type { LMStudioClient } from '../lm-studio/client.js';
-import type { NarrativeInput, NarrativeOutput } from './aggregator.js';
+import type { NarrativeInput, NarrativeOutput, WeeklyTheme } from './aggregator.js';
 
-const SYSTEM_PROMPT = `You synthesize a person's week of meeting notes into a short shareable summary.
+const SYSTEM_PROMPT = `You synthesize a person's week of meeting notes into a detailed summary they can use to catch up on and recall what actually happened.
 
-Return JSON with exactly two fields:
-- narrative: 2-3 short paragraphs (200-350 words total) covering, in order:
-  1. What was the focus / theme of the week.
-  2. The key follow-ups owed and to whom.
-  3. What's heading into next week.
-  Plain prose. No bullet points, no markdown headings, no emoji. Use the user's voice ("you" / "your") naturally.
+Return JSON with exactly three fields:
+- narrative: 2-3 short paragraphs (200-350 words total) giving the high-level shape of the week: the overall focus, the key follow-ups owed and to whom, and what's heading into next week. Plain prose. No bullet points, no markdown headings, no emoji. Use the user's voice ("you" / "your") naturally.
+- themes: array of 3-6 topic threads that run through the week — this is the most important field for recall. Each theme is an object:
+    - title: a short noun phrase naming the thread (e.g. "Q3 Postgres migration", "Hiring", "Pricing rework").
+    - detail: 2-4 sentences on what was actually discussed across the week, where it landed, and what's still open. Be concrete — name the substance, not just that it "was discussed".
+    - meetings: array of the source meeting TITLES (verbatim, as given below) this thread draws from.
+  Group related discussions even when they span multiple meetings. Only build threads from what's in the summaries; don't invent. Cover the substantive topics — don't collapse the week into one vague theme.
 - decisions: array of 3-6 strings, each one explicit decision made during the week. Format each as "<decision> — <source meeting title>". Only include decisions actually stated in the meeting summaries; don't invent.
 
 Output ONLY the JSON object. No prose before or after, no code fences, no comments.`;
@@ -105,7 +106,31 @@ export function parseNarrativeResponse(raw: string): NarrativeOutput {
   if (!narrative) {
     throw new Error('weekly narrative: model returned an empty narrative');
   }
-  return { narrative, decisions };
+  return { narrative, themes: parseThemes(obj.themes), decisions };
+}
+
+/** Coerce the model's `themes` field into well-formed WeeklyTheme objects.
+ *  Tolerant by design: a model that omits the field, or emits a malformed
+ *  entry, degrades to fewer/no themes rather than failing the whole call.
+ *  Drops entries missing a title or detail; normalizes `meetings` to a
+ *  string array; caps detail length defensively. */
+function parseThemes(raw: unknown): WeeklyTheme[] {
+  if (!Array.isArray(raw)) return [];
+  const themes: WeeklyTheme[] = [];
+  for (const t of raw) {
+    if (!t || typeof t !== 'object') continue;
+    const o = t as Record<string, unknown>;
+    const title = typeof o.title === 'string' ? o.title.trim() : '';
+    const detail = typeof o.detail === 'string' ? o.detail.trim() : '';
+    if (!title || !detail) continue;
+    const meetings = Array.isArray(o.meetings)
+      ? o.meetings
+          .filter((m): m is string => typeof m === 'string' && m.trim().length > 0)
+          .map((m) => m.trim())
+      : [];
+    themes.push({ title, detail: detail.slice(0, 1200), meetings });
+  }
+  return themes;
 }
 
 /** Wires the prompt + parser to an LMStudioClient. Returned function
@@ -118,6 +143,10 @@ export function createNarrativeGenerator(
     const raw = await lmStudio.chat({
       model: getModelId(),
       temperature: 0.3,
+      // The response now carries narrative + 3-6 themes + decisions as JSON;
+      // give the decoder generous headroom so the object isn't truncated
+      // mid-array (which would make the JSON unparseable).
+      maxTokens: 2000,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },

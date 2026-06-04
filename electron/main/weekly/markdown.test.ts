@@ -13,6 +13,7 @@ function baseData(over: Partial<WeeklyData> = {}): WeeklyData {
     openActionGroups: [],
     openActionCount: 0,
     narrative: '',
+    themes: [],
     decisions: [],
     generatedAt: '',
     inProgress: false,
@@ -31,22 +32,37 @@ describe('renderWeeklyMarkdown', () => {
     expect(md).toContain('*No meetings captured this week.*');
   });
 
-  it('renders meetings as a table with day + duration', () => {
+  it('renders meetings as a list with day, duration, and recap', () => {
     const md = renderWeeklyMarkdown(baseData({
       meetings: [
-        { id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00Z', durationS: 2700, highlight: null, speakerCount: 3 },
+        { id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00Z', durationS: 2700, highlight: 'Set the Q2 OKRs. Agreed to ship the migration in May.', speakerCount: 3 },
         { id: 'm2', title: 'Vendor sync — Acme', startedAt: '2026-04-22T15:00:00Z', durationS: 1800, highlight: null, speakerCount: 2 },
       ],
     }));
     expect(md).toContain('## Meetings');
-    expect(md).toContain('| Day | Meeting');
-    expect(md).toContain('| Q2 planning |');
-    expect(md).toContain('45m');
-    // Pipe in title is escaped so the table doesn't break.
-    const md2 = renderWeeklyMarkdown(baseData({
-      meetings: [{ id: 'm', title: 'A | B', startedAt: '2026-04-20T10:00:00Z', durationS: 60, highlight: null, speakerCount: null }],
+    expect(md).toContain('**Mon · Q2 planning** · 45m');
+    // The per-meeting recap rides along under the title.
+    expect(md).toContain('Set the Q2 OKRs. Agreed to ship the migration in May.');
+    expect(md).toContain('**Wed · Vendor sync — Acme** · 30m');
+  });
+
+  it('renders a Themes section with source meetings', () => {
+    const md = renderWeeklyMarkdown(baseData({
+      narrative: 'A week about the migration.',
+      themes: [
+        { title: 'Q3 Postgres migration', detail: 'Discussed fixtures and timeline. Landed on a May target.', meetings: ['Q2 planning', 'Eng sync'] },
+      ],
+      meetings: [{ id: 'm', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00Z', durationS: 60, highlight: null, speakerCount: null }],
     }));
-    expect(md2).toContain('A \\| B');
+    expect(md).toContain('## Themes');
+    expect(md).toContain('### Q3 Postgres migration');
+    expect(md).toContain('Discussed fixtures and timeline. Landed on a May target.');
+    expect(md).toContain('*From: Q2 planning, Eng sync*');
+  });
+
+  it('omits the Themes section when there are no themes', () => {
+    const md = renderWeeklyMarkdown(baseData({ narrative: 'x', meetings: [{ id: 'm', title: 'T', startedAt: '2026-04-20T10:00:00Z', durationS: 60, highlight: null, speakerCount: null }] }));
+    expect(md).not.toContain('## Themes');
   });
 
   it('groups action items by owner with checkboxes', () => {

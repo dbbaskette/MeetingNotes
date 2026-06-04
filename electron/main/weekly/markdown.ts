@@ -56,18 +56,33 @@ export function renderWeeklyMarkdown(data: WeeklyData): string {
     lines.push('');
   }
 
-  // Meetings
+  // Themes / threads — the recall payload.
+  if (data.themes.length > 0) {
+    lines.push('## Themes');
+    lines.push('');
+    for (const t of data.themes) {
+      lines.push(`### ${t.title}`);
+      lines.push('');
+      lines.push(t.detail);
+      if (t.meetings.length > 0) {
+        lines.push('');
+        lines.push(`*From: ${t.meetings.join(', ')}*`);
+      }
+      lines.push('');
+    }
+  }
+
+  // Meetings — rendered as a list (not a table) so each meeting's recap
+  // can ride along under its title.
   if (data.meetings.length > 0) {
     lines.push('## Meetings');
     lines.push('');
-    lines.push('| Day | Meeting                          | Duration |');
-    lines.push('| --- | -------------------------------- | -------: |');
     for (const m of data.meetings) {
       const day = dayLabel(m.startedAt);
-      const title = m.title.replaceAll('|', '\\|');
-      lines.push(`| ${day} | ${title} | ${fmtMeetingDuration(m.durationS)} |`);
+      lines.push(`**${day} · ${m.title}** · ${fmtMeetingDuration(m.durationS)}`);
+      if (m.highlight) lines.push(m.highlight);
+      lines.push('');
     }
-    lines.push('');
   }
 
   // Open action items, grouped by owner

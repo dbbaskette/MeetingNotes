@@ -7,11 +7,13 @@
 // because it's already indexed and cheap.
 
 import type Database from 'better-sqlite3';
+import type { WeeklyTheme } from '../weekly/aggregator.js';
 
 export interface WeeklySummaryRow {
   isoYear: number;
   isoWeek: number;
   narrative: string;
+  themes: WeeklyTheme[];
   decisions: string[];
   inputHash: string;
   generatedAt: string;
@@ -22,16 +24,30 @@ function row(r: Record<string, unknown>): WeeklySummaryRow {
     isoYear: r.iso_year as number,
     isoWeek: r.iso_week as number,
     narrative: r.narrative as string,
+    themes: parseThemes(r.themes_json as string | undefined),
     decisions: JSON.parse((r.decisions_json as string) || '[]') as string[],
     inputHash: r.input_hash as string,
     generatedAt: r.generated_at as string,
   };
 }
 
+/** Tolerant parse of the cached themes_json blob — a malformed or absent
+ *  value degrades to no themes rather than throwing on read. */
+function parseThemes(json: string | undefined): WeeklyTheme[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? (parsed as WeeklyTheme[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface WeeklySummaryUpsert {
   isoYear: number;
   isoWeek: number;
   narrative: string;
+  themes: readonly WeeklyTheme[];
   decisions: readonly string[];
   inputHash: string;
 }
@@ -52,10 +68,11 @@ export class WeeklySummariesRepo {
     const generatedAt = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO weekly_summaries
-        (iso_year, iso_week, narrative, decisions_json, input_hash, generated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (iso_year, iso_week, narrative, themes_json, decisions_json, input_hash, generated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (iso_year, iso_week) DO UPDATE SET
         narrative = excluded.narrative,
+        themes_json = excluded.themes_json,
         decisions_json = excluded.decisions_json,
         input_hash = excluded.input_hash,
         generated_at = excluded.generated_at
@@ -63,6 +80,7 @@ export class WeeklySummariesRepo {
       input.isoYear,
       input.isoWeek,
       input.narrative,
+      JSON.stringify(input.themes),
       JSON.stringify(input.decisions),
       input.inputHash,
       generatedAt,

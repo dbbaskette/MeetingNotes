@@ -63,6 +63,50 @@ describe('parseNarrativeResponse', () => {
     expect(() => parseNarrativeResponse('"just a string"'))
       .toThrow();
   });
+
+  it('parses well-formed themes with source meetings', () => {
+    const out = parseNarrativeResponse(JSON.stringify({
+      narrative: 'x',
+      themes: [
+        { title: 'Migration', detail: 'Discussed fixtures.', meetings: ['Eng sync', 'Q2 planning'] },
+      ],
+      decisions: [],
+    }));
+    expect(out.themes).toEqual([
+      { title: 'Migration', detail: 'Discussed fixtures.', meetings: ['Eng sync', 'Q2 planning'] },
+    ]);
+  });
+
+  it('defaults themes to [] when the field is missing', () => {
+    const out = parseNarrativeResponse('{"narrative":"x","decisions":[]}');
+    expect(out.themes).toEqual([]);
+  });
+
+  it('drops themes missing a title or detail and coerces meetings', () => {
+    const out = parseNarrativeResponse(JSON.stringify({
+      narrative: 'x',
+      themes: [
+        { title: 'Good', detail: 'has both', meetings: ['A', '', 3, 'B'] },
+        { title: '', detail: 'no title' },
+        { title: 'no detail' },
+        { detail: 'no title either' },
+        'not an object',
+      ],
+      decisions: [],
+    }));
+    expect(out.themes).toEqual([
+      { title: 'Good', detail: 'has both', meetings: ['A', 'B'] },
+    ]);
+  });
+
+  it('defaults a theme with no meetings array to an empty list', () => {
+    const out = parseNarrativeResponse(JSON.stringify({
+      narrative: 'x',
+      themes: [{ title: 'T', detail: 'D' }],
+      decisions: [],
+    }));
+    expect(out.themes[0]!.meetings).toEqual([]);
+  });
 });
 
 describe('buildUserPrompt', () => {

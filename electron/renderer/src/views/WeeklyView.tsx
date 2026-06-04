@@ -67,9 +67,16 @@ interface WeeklyStructured {
   hasFreshCache: boolean;
 }
 
+interface WeeklyTheme {
+  title: string;
+  detail: string;
+  meetings: string[];
+}
+
 /** Slow-path payload from the LLM. */
 interface WeeklyNarrativeResult {
   narrative: string;
+  themes: WeeklyTheme[];
   decisions: string[];
   generatedAt: string;
   fromCache: boolean;
@@ -429,6 +436,57 @@ function WeeklyBody({
             />
           </section>
 
+          {/* Themes / threads — the recall payload. Lives in the narrative
+              (LLM) payload, so it appears once the narrative resolves. */}
+          {narrState === 'ready' && narrative && narrative.themes.length > 0 && (
+            <section className="mb-10">
+              <div className="flex items-baseline gap-3 mb-3">
+                <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+                  Themes
+                </h3>
+                <span className="text-[11px] text-ink-muted">
+                  {narrative.themes.length} thread{narrative.themes.length === 1 ? '' : 's'} this week
+                </span>
+              </div>
+              <div className="flex flex-col gap-4">
+                {narrative.themes.map((t, ti) => (
+                  <div
+                    key={ti}
+                    className="bg-surface rounded-xl shadow-card border border-surface-border p-5"
+                  >
+                    <div className="font-semibold text-ink mb-1.5">{t.title}</div>
+                    <div className="text-sm text-ink-soft leading-relaxed">{t.detail}</div>
+                    {t.meetings.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                        <span className="text-[11px] text-ink-muted">From:</span>
+                        {t.meetings.map((title, mi) => {
+                          const match = data.meetings.find((m) => m.title === title);
+                          return match ? (
+                            <button
+                              key={mi}
+                              type="button"
+                              onClick={() => onOpenMeeting(match.id)}
+                              className="text-[11px] font-medium text-brand-indigo bg-brand-indigo/5 hover:bg-brand-indigo/10 border border-brand-indigo/20 rounded-full px-2 py-0.5 transition"
+                            >
+                              {title}
+                            </button>
+                          ) : (
+                            <span
+                              key={mi}
+                              className="text-[11px] text-ink-muted bg-surface-sunken border border-surface-border rounded-full px-2 py-0.5"
+                            >
+                              {title}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Meetings */}
           <section className="mb-10">
             <div className="flex items-baseline gap-3 mb-3">
@@ -450,12 +508,16 @@ function WeeklyBody({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-ink truncate">{m.title}</div>
-                    <div className="text-xs text-ink-muted truncate">
+                    <div className="text-xs text-ink-muted">
                       {m.speakerCount != null
                         ? `${m.speakerCount} speaker${m.speakerCount === 1 ? '' : 's'}`
                         : 'Not yet diarized'}
-                      {m.highlight ? ` · "${m.highlight}"` : ''}
                     </div>
+                    {m.highlight && (
+                      <div className="text-xs text-ink-soft mt-1 line-clamp-3">
+                        {m.highlight}
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-ink-muted font-mono shrink-0">
                     {fmtMeetingDuration(m.durationS)}
