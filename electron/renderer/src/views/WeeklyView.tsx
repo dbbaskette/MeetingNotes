@@ -283,9 +283,10 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
   };
 
   return (
-    <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 pb-24">
-      {/* Header */}
-      <header className="flex items-center gap-4 mb-8">
+    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 flex flex-col">
+      {/* Header — pinned via shrink-0; only the content region below scrolls,
+          matching the Library page's top bar. */}
+      <header className="shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
@@ -343,6 +344,10 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
         </button>
       </header>
 
+      {/* Scroll region — content scrolls under the pinned header. The
+          negative right margin + right padding insets the scrollbar so it
+          doesn't crowd the cards (same trick as the Library list). */}
+      <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8">
       {structState === 'error' && (
         <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-xl p-4 mb-6 text-sm">
           Couldn't load this week: {errorMsg ?? 'unknown error'}
@@ -364,6 +369,7 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
           onOpenMeeting={onOpenMeeting}
         />
       )}
+      </div>
     </div>
   );
 }
