@@ -1,6 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { ManagedService, type ProbeResult } from './managed-service.js';
+import { ManagedService, killPortCommand, type ProbeResult } from './managed-service.js';
+
+describe('killPortCommand', () => {
+  it('targets only the LISTENER on the port, never client connections', () => {
+    // Regression for the self-SIGKILL crash: `lsof -i :PORT` matches both
+    // ends of every socket, so it also returned the Electron main process
+    // (which holds a keep-alive client connection to the sidecar /health
+    // endpoint) — and `kill -9` took down the whole app. The command must
+    // restrict to listening sockets.
+    const cmd = killPortCommand(8765);
+    expect(cmd).toContain('8765');
+    expect(cmd).toContain('-sTCP:LISTEN');
+    // Must NOT use the broad both-ends selector that matched clients.
+    expect(cmd).not.toMatch(/-ti?\s*:8765/);
+    expect(cmd).not.toMatch(/-i\s+:8765/);
+  });
+});
 
 function fakeProc(): EventEmitter & {
   kill: (sig?: string) => void;
