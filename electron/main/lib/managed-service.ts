@@ -114,13 +114,27 @@ async function defaultHealthProbe(
   }
 }
 
+/** Shell command to free a TCP port by killing whatever is LISTENING on it.
+ *
+ *  CRITICAL: this must select listeners only (`-sTCP:LISTEN`). The naive
+ *  `lsof -ti :PORT` matches BOTH ends of every socket on the port — so it
+ *  also returns our own Electron main process, which holds a keep-alive
+ *  client connection to the sidecar/whisper `/health` endpoint from the
+ *  adoption probe we just made. Piping that into `kill -9` SIGKILLs the app
+ *  itself (no crash report — it's a signal, not a fault), which is exactly
+ *  what "the app crashes when I click Process" was. Restricting to LISTEN
+ *  kills the stale server we meant to replace and nothing else. */
+export function killPortCommand(port: number): string {
+  return `lsof -t -nP -iTCP:${port} -sTCP:LISTEN | xargs kill -9 2>/dev/null || true`;
+}
+
 async function defaultKillOnPort(port: number): Promise<void> {
   // Best-effort: free the port so we can respawn. Only invoked when
   // we've decided the current owner is a stale instance of ours
   // (build_id mismatch).
   const { spawn } = await import('node:child_process');
   await new Promise<void>((resolve) => {
-    const p = spawn('sh', ['-c', `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`]);
+    const p = spawn('sh', ['-c', killPortCommand(port)]);
     p.on('exit', () => resolve());
     p.on('error', () => resolve());
   });
@@ -386,7 +400,7 @@ export class ManagedService {
         } else {
           this.deps.onLog?.(
             `${this.deps.name}: port ${port} held by foreign process. ` +
-            `Free with: lsof -ti :${port} | xargs kill -9`,
+            `Free with: ${killPortCommand(port)}`,
           );
         }
       });
