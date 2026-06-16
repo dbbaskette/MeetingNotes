@@ -42,6 +42,28 @@ export function extractTitleFromSummary(summary: string): string | null {
   return title;
 }
 
+/** Strip a leading reasoning/preamble leak before the real summary.
+ *
+ *  The prompt requires the output to begin with "## Overview". Reasoning
+ *  models that emit chain-of-thought WITHOUT <think> tags (e.g. gemma-*-a4b)
+ *  slip past {@link stripThinking} and prepend their planning — which also
+ *  *mentions* the section names — before the actual summary. Since reasoning
+ *  always precedes the answer, the genuine summary is the LAST "## Overview"
+ *  heading; when the output doesn't already start cleanly with an Overview
+ *  heading, slice from there (which also drops any prefix glued onto that
+ *  line, like "*(Proceed to generate output)*"). Clean output is returned
+ *  untouched, so a well-behaved model is never over-trimmed. */
+export function stripSummaryPreamble(md: string): string {
+  const text = md.trimStart();
+  // Already clean — starts with an Overview heading (any heading level; the
+  // H1→H2 demotion runs afterwards).
+  if (/^#{1,6}\s+Overview\b/i.test(text)) return text;
+  const matches = [...md.matchAll(/#{1,6}\s+Overview\b/gi)];
+  if (matches.length === 0) return md; // no heading to anchor on — leave as-is
+  const lastIdx = matches[matches.length - 1]!.index ?? -1;
+  return lastIdx > 0 ? md.slice(lastIdx) : md;
+}
+
 export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
@@ -63,13 +85,15 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
     ],
   });
   // Post-process LLM output to survive formatting drift:
+  //  - drop a leading reasoning/preamble leak (reasoning models that don't
+  //    use <think> tags prepend their chain-of-thought before "## Overview")
   //  - strip leading / trailing whitespace (models love to open with a
   //    couple of blank lines)
   //  - demote accidental "# Overview" H1s to "## Overview" — the prompt
   //    asks for H2 but smaller models occasionally ignore that, and H1
   //    inside the app looks like a page title
   //  - collapse "*" bullets to "-" so the preview renders consistently
-  const cleaned = content
+  const cleaned = stripSummaryPreamble(content)
     .trim()
     .replace(/^# (Overview|Key Discussion Points|Decisions|Action Items|Follow-ups|Open Questions|Off-topic Conversation)\b/gm, '## $1')
     .replace(/^(\s*)\* /gm, '$1- ');
