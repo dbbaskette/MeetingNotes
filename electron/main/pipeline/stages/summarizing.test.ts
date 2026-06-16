@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runSummarizing, extractTitleFromSummary } from './summarizing.js';
+import { runSummarizing, extractTitleFromSummary, stripSummaryPreamble } from './summarizing.js';
 
 describe('runSummarizing', () => {
   it('reads transcript.md, calls LLM, writes summary.md', async () => {
@@ -140,5 +140,46 @@ describe('extractTitleFromSummary', () => {
   });
   it('returns null when there is no Overview heading', () => {
     expect(extractTitleFromSummary('# Notes\nblah blah blah')).toBeNull();
+  });
+});
+
+describe('stripSummaryPreamble', () => {
+  it('leaves a clean summary (starting with ## Overview) untouched', () => {
+    const md = '## Overview\nA real summary.\n\n## Decisions\n- ship it';
+    expect(stripSummaryPreamble(md)).toBe(md);
+  });
+
+  it('trims only leading whitespace for an otherwise-clean summary', () => {
+    expect(stripSummaryPreamble('\n\n## Overview\nbody')).toBe('## Overview\nbody');
+  });
+
+  it('strips a reasoning leak, slicing to the real (last) ## Overview', () => {
+    // Mirrors the gemma-a4b leak: a mangled marker, the restated prompt that
+    // *mentions* the section names as bullets, planning, then the real summary
+    // glued to a "(Proceed to generate output)" marker.
+    const leaked = [
+      's/thought',
+      'Meeting-notes assistant for a professional setting.',
+      '',
+      '        -   ## Overview',
+      '        -   ## Key Discussion Points',
+      '',
+      '    -   **Section 1: Financials**',
+      '*(Proceed to generate output)*## Overview This meeting reviewed Q2 results.',
+      '',
+      '## Decisions',
+      '- none',
+    ].join('\n');
+    const out = stripSummaryPreamble(leaked);
+    expect(out.startsWith('## Overview This meeting reviewed Q2 results.')).toBe(true);
+    expect(out).not.toContain('s/thought');
+    expect(out).not.toContain('Proceed to generate output');
+    expect(out).not.toContain('Section 1: Financials');
+    expect(out).toContain('## Decisions');
+  });
+
+  it('returns the input unchanged when there is no Overview heading at all', () => {
+    const md = 'Some preamble with no headings at all.';
+    expect(stripSummaryPreamble(md)).toBe(md);
   });
 });
