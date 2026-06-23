@@ -547,11 +547,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }));
     const summaryPath = path.join(folder, 'summary.md');
     const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
-    // Markdown exports the summary + a checklist. With no items it's still
-    // a valid "save this meeting as one file" — don't block it. Other
-    // exporters only push action items to external systems, so an empty set
-    // there would be a no-op at best and confusing at worst.
-    if (items.length === 0 && input.exporter !== 'markdown') {
+    // Document exporters (Markdown, Google Doc) render the summary + a
+    // checklist, so they're valid with zero items. Task/integration
+    // exporters only push action items, so an empty set there is a no-op.
+    const DOCUMENT_EXPORTERS = new Set(['markdown', 'google-doc']);
+    if (items.length === 0 && !DOCUMENT_EXPORTERS.has(input.exporter)) {
       throw new Error('No action items selected');
     }
     if (items.length === 0 && !summaryMd) {

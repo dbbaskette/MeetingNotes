@@ -1588,6 +1588,14 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
   // human label so the modal knows where it's sending.
   const [exporting, setExporting] = useState<{ id: string; label: string } | null>(null);
   const [markdownError, setMarkdownError] = useState<string | null>(null);
+  // Google exporters are enabled once the user has signed in (Settings →
+  // Google account). Fetched once when the rail mounts.
+  const [googleSignedIn, setGoogleSignedIn] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void api.google.authStatus().then((s) => { if (alive) setGoogleSignedIn(s.signedIn); });
+    return () => { alive = false; };
+  }, []);
   const hasItems = meeting.actionItems.length > 0;
   // Markdown export includes the summary + a checklist of action items,
   // so it's useful whenever there's something on disk to export — even a
@@ -1669,10 +1677,20 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
           <div className="text-[11px] text-rose-600">{markdownError}</div>
         )}
         <button
-          disabled
-          className="w-full bg-surface-sunken text-ink-muted/70 text-xs font-semibold rounded-lg py-2 cursor-not-allowed border border-transparent"
+          disabled={!googleSignedIn || !canTaskExport}
+          onClick={() => setExporting({ id: 'google-tasks', label: 'Google Tasks' })}
+          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          title={!googleSignedIn ? 'Connect a Google account in Settings' : taskDisabledReason}
         >
-          → Google Tasks (soon)
+          → Google Tasks{googleSignedIn ? '' : ' (connect in Settings)'}
+        </button>
+        <button
+          disabled={!googleSignedIn || !canMarkdown}
+          onClick={() => setExporting({ id: 'google-doc', label: 'Google Doc' })}
+          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          title={!googleSignedIn ? 'Connect a Google account in Settings' : (canMarkdown ? undefined : 'Needs a summary — run Summarize first')}
+        >
+          → Google Doc{googleSignedIn ? '' : ' (connect in Settings)'}
         </button>
         {/* Persistent reminder: task-app exports are scoped to the user's own
             items, so this is never a surprise. */}
@@ -1719,6 +1737,9 @@ function ExportPickerModal({
   // only those (the rest of the meeting's items aren't relevant to a personal
   // to-do list). Document exporters list everything.
   const isTaskApp = exporter.id === 'reminders' || exporter.id === 'google-tasks';
+  // Document exporters (Markdown, Google Doc) render the full meeting and are
+  // valid even with no items selected (the summary still exports).
+  const isDocumentExport = exporter.id === 'markdown' || exporter.id === 'google-doc';
   const visibleItems = isTaskApp
     ? meeting.actionItems.filter((it) => it.isMine)
     : meeting.actionItems;
@@ -1742,7 +1763,7 @@ function ExportPickerModal({
   function selectNone(): void { setSelected(new Set()); }
 
   async function run(): Promise<void> {
-    if (selected.size === 0) return;
+    if (selected.size === 0 && !isDocumentExport) return;
     setBusy(true); setError(null);
     try {
       let outputPath: string | undefined;
@@ -1760,6 +1781,10 @@ function ExportPickerModal({
         outputPath = picked;
       }
       const message = (await api.export.run(exporter.id, meeting.id, [...selected], outputPath)) as string;
+      // Google Doc returns the Doc URL — copy it so the user can paste/open it.
+      if (exporter.id === 'google-doc' && /^https?:\/\//.test(message)) {
+        try { await navigator.clipboard.writeText(message); } catch { /* clipboard blocked */ }
+      }
       setResult(message);
       await onReload();
       // Auto-close after a beat so the ✓ message is visible but the user
@@ -1846,7 +1871,15 @@ function ExportPickerModal({
 
         <div className="px-5 py-3 border-t border-surface-border flex items-center gap-3">
           {error && <div className="text-xs text-rose-600 flex-1 truncate" title={error}>{error}</div>}
-          {result && <div className="text-xs text-status-ok flex-1 truncate" title={result}>✓ {result}</div>}
+          {result && /^https?:\/\//.test(result) ? (
+            <div className="text-xs text-status-ok flex-1 truncate" title={result}>
+              ✓ Google Doc created —{' '}
+              <a href={result} target="_blank" rel="noreferrer" className="underline">open</a>
+              {' '}(link copied)
+            </div>
+          ) : result ? (
+            <div className="text-xs text-status-ok flex-1 truncate" title={result}>✓ {result}</div>
+          ) : null}
           {!error && !result && <div className="flex-1" />}
           <button
             onClick={onClose}
@@ -1856,11 +1889,13 @@ function ExportPickerModal({
           </button>
           {!result && (
             <button
-              disabled={busy || selected.size === 0}
+              disabled={busy || (selected.size === 0 && !isDocumentExport)}
               onClick={run}
               className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
-              {busy ? 'Sending…' : `Send ${selected.size}`}
+              {exporter.id === 'google-doc'
+                ? (busy ? 'Creating…' : 'Create Doc')
+                : (busy ? 'Sending…' : `Send ${selected.size}`)}
             </button>
           )}
         </div>
