@@ -31,6 +31,8 @@ interface Settings {
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  googleClientId: string;
+  googleClientSecret: string;
 }
 
 interface SpeakerListEntry { id: string; displayName: string }
@@ -322,6 +324,12 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         onPersist={(key, value) => { void update(key, value); }}
       />
 
+      <GoogleAccountCard
+        settings={s}
+        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
+        onPersist={(key, value) => { void update(key, value); }}
+      />
+
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
           <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">Permissions</div>
@@ -592,6 +600,127 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         </span>
       )}
     </div>
+  );
+}
+
+/** Google account card. BYO OAuth credentials (Client ID + Secret from a
+ *  Google Cloud "Desktop" client) + sign-in, which enables the Google Tasks
+ *  and Google Doc exporters. The refresh token is stored encrypted in the
+ *  main process (safeStorage); this card only holds the non-secret client
+ *  id/secret and shows the connected account. */
+function GoogleAccountCard({
+  settings,
+  onUpdate,
+  onPersist,
+}: {
+  settings: Settings;
+  onUpdate: (patch: Partial<Settings>) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}): JSX.Element {
+  const [status, setStatus] = useState<{ email: string | null; hasCredentials: boolean; signedIn: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  async function refresh(): Promise<void> {
+    setStatus(await api.google.authStatus());
+  }
+  useEffect(() => { void refresh(); }, []);
+
+  function set<K extends keyof Settings>(key: K, value: Settings[K]): void {
+    onUpdate({ [key]: value } as Partial<Settings>);
+    onPersist(key, value);
+  }
+
+  const hasCreds = settings.googleClientId.trim().length > 0 && settings.googleClientSecret.trim().length > 0;
+
+  async function signIn(): Promise<void> {
+    setBusy(true); setError(null);
+    try {
+      await api.google.authStart();
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function signOut(): Promise<void> {
+    setBusy(true); setError(null);
+    try { await api.google.signOut(); await refresh(); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <section className="border-t border-surface-border pt-5">
+      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Google account</div>
+      <p className="text-xs text-ink-muted mb-3">
+        Connect a Google account to export action items to <strong>Google Tasks</strong> and meetings to a <strong>Google Doc</strong>.
+      </p>
+
+      {status?.signedIn ? (
+        <div className="flex items-center gap-3 bg-status-okBg/40 border border-status-ok/30 rounded-lg px-3 py-2.5">
+          <span className="text-status-ok">✓</span>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm text-ink">Connected</div>
+            <div className="text-xs text-ink-muted truncate">{status.email ?? 'Google account'}</div>
+          </div>
+          <button
+            onClick={() => void signOut()}
+            disabled={busy}
+            className="text-xs font-semibold text-ink-muted hover:text-rose-700 px-3 py-1.5 rounded-lg border border-surface-border hover:border-rose-300 disabled:opacity-50 transition"
+          >
+            Sign out
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <Field label="OAuth Client ID">
+            <input
+              value={settings.googleClientId}
+              onChange={(e) => set('googleClientId', e.target.value)}
+              placeholder="xxxxxxxx.apps.googleusercontent.com"
+              className="input font-mono text-xs"
+            />
+          </Field>
+          <Field label="OAuth Client Secret">
+            <input
+              type="password"
+              value={settings.googleClientSecret}
+              onChange={(e) => set('googleClientSecret', e.target.value)}
+              placeholder="GOCSPX-…"
+              className="input font-mono text-xs"
+            />
+          </Field>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => void signIn()}
+              disabled={!hasCreds || busy}
+              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              title={hasCreds ? undefined : 'Enter your Client ID and Secret first'}
+            >
+              {busy ? 'Connecting…' : 'Sign in with Google'}
+            </button>
+            <button
+              onClick={() => setShowHelp((v) => !v)}
+              className="text-xs text-brand-indigo hover:underline"
+            >
+              How to get these
+            </button>
+          </div>
+          {showHelp && (
+            <ol className="text-[11px] text-ink-muted list-decimal pl-4 space-y-1 bg-surface-sunken/50 rounded-lg p-3">
+              <li>Open <span className="font-mono">console.cloud.google.com</span> → create a project.</li>
+              <li>Enable the <strong>Google Tasks API</strong> and <strong>Google Drive API</strong>.</li>
+              <li>Configure the OAuth consent screen (External); add the Tasks &amp; drive.file scopes; publish to <strong>Production</strong> so the sign-in lasts (testing mode expires weekly).</li>
+              <li>Create credentials → <strong>OAuth client ID</strong> → application type <strong>Desktop app</strong>.</li>
+              <li>Copy the Client ID + Client Secret here and Sign in. (Full guide: docs/google-setup.md)</li>
+            </ol>
+          )}
+        </div>
+      )}
+      {error && <div className="text-[11px] text-rose-600 mt-2">{error}</div>}
+    </section>
   );
 }
 

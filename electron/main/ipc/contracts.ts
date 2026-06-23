@@ -28,6 +28,9 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
   transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
+  /** True when the user has set Settings → "You are…" (userSpeakerId).
+   *  Task-app exports (Reminders, Google Tasks) require it. */
+  userIdentified: z.boolean(),
   actionItems: z.array(z.object({
     id: z.string(),
     text: z.string(),
@@ -35,6 +38,9 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
     dueDate: z.string().nullable(),
     status: z.string(),
     exportedTo: z.array(z.string()),
+    /** True when this item is owned by the user (by roster id or owner
+     *  name). Drives the task-app export modal, which lists only my items. */
+    isMine: z.boolean(),
   })),
   models: z.object({ stt: z.string().optional(), llm: z.string().optional() }),
 });
@@ -135,6 +141,13 @@ export const IPC_CHANNELS = {
   logsTail: 'logs:tail',
   /** Reveal the app log file in Finder. */
   logsReveal: 'logs:reveal',
+  /** Begin the Google OAuth sign-in flow (opens the system browser). Resolves
+   *  with the connected account email. */
+  googleAuthStart: 'google:auth-start',
+  /** { email, hasCredentials, signedIn } snapshot for the Settings card. */
+  googleAuthStatus: 'google:auth-status',
+  /** Disconnect the Google account (clears stored tokens). */
+  googleSignOut: 'google:sign-out',
   /** Fire a synthetic meeting.completed payload at the configured
    *  webhook URL. Used by the Settings "Send test payload" button so
    *  the user can verify their endpoint before a real meeting runs.

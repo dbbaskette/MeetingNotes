@@ -66,6 +66,9 @@ const IPC_CHANNELS = {
   appGetVersion: 'app:get-version',
   logsTail: 'logs:tail',
   logsReveal: 'logs:reveal',
+  googleAuthStart: 'google:auth-start',
+  googleAuthStatus: 'google:auth-status',
+  googleSignOut: 'google:sign-out',
   webhookTestSend: 'webhook:test-send',
 } as const;
 
@@ -377,6 +380,16 @@ const api = {
   },
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion) as Promise<string>,
+  },
+  google: {
+    /** Start interactive sign-in (opens the system browser). Resolves with
+     *  the connected account email. */
+    authStart: () => ipcRenderer.invoke(IPC_CHANNELS.googleAuthStart) as Promise<{ email: string | null }>,
+    /** Snapshot for the Settings card. */
+    authStatus: () => ipcRenderer.invoke(IPC_CHANNELS.googleAuthStatus) as Promise<{
+      email: string | null; hasCredentials: boolean; signedIn: boolean;
+    }>,
+    signOut: () => ipcRenderer.invoke(IPC_CHANNELS.googleSignOut) as Promise<void>,
   },
   logs: {
     /** Tail the app log as parsed JSON-lines entries (oldest-first) for the

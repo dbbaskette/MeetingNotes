@@ -38,7 +38,9 @@ import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
 import { ripgrepSearch } from '../search/ripgrep-search.js';
+import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/owner-filter.js';
 import type { Logger } from '../logging/logger.js';
+import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 
 export interface IpcServices {
@@ -58,6 +60,7 @@ export interface IpcServices {
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
+  googleAuth: GoogleAuth;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -109,6 +112,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     shell.showItemInFolder(s.logger.filePath);
   });
 
+  ipc.handle(IPC_CHANNELS.googleAuthStart, async () => {
+    return s.googleAuth.startSignIn();
+  });
+
+  ipc.handle(IPC_CHANNELS.googleAuthStatus, () => ({
+    email: s.googleAuth.getConnectedEmail(),
+    hasCredentials: s.googleAuth.hasCredentials(),
+    signedIn: s.googleAuth.isSignedIn(),
+  }));
+
+  ipc.handle(IPC_CHANNELS.googleSignOut, () => {
+    s.googleAuth.signOut();
+  });
+
   ipc.handle(IPC_CHANNELS.meetingsList, () => {
     // Batch joins/aggregates so this scales O(1) with meetings instead of
     // O(N) queries — LibraryView polls every 3s.
@@ -143,6 +160,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const speakers = listMeetingSpeakers(s.speakers, id);
     const settingsSnapshot = s.settings.getAll();
     const items = s.actionItems.listByMeeting(id);
+    // Owner identity for the per-item `isMine` flag — drives the task-app
+    // export modal (which lists only the user's own items) and the "set who
+    // you are" gate.
+    const userSpeakerId = settingsSnapshot.userSpeakerId;
+    const me = {
+      userSpeakerId,
+      userDisplayName: userSpeakerId
+        ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
+        : null,
+    };
     // Show a raw (speaker-less) preview as soon as the whisper step completes,
     // before merge produces transcript.md. Gives the user something to read
     // while diarization is still running.
@@ -163,6 +190,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       unidentifiedCount: unidentifiedCount(speakers),
       actionItemsCount: items.length,
       speakers,
+      // Whether the user has set "You are…" — task-app export is gated on this.
+      userIdentified: userIsIdentified(me),
       transcriptMd: read(path.join(folder, 'transcript.md')),
       rawTranscriptText,
       summaryMd: read(path.join(folder, 'summary.md')),
@@ -170,6 +199,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
         dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
+        isMine: isMyItem(ai, me),
       })),
       models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
     };
@@ -486,22 +516,42 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const meeting = s.meetings.findById(input.meetingId);
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-    const allItems = s.actionItems.listByMeeting(input.meetingId).map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
-    }));
-    const items = Array.isArray(input.itemIds)
-      ? allItems.filter((ai) => input.itemIds!.includes(ai.id))
-      : allItems;
     const exporter = s.exporters[input.exporter];
     if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
+    const rows = s.actionItems.listByMeeting(input.meetingId);
+    let selectedRows = Array.isArray(input.itemIds)
+      ? rows.filter((r) => input.itemIds!.includes(r.id))
+      : rows;
+    // Task-app exporters (Reminders, Google Tasks) push into the user's
+    // personal to-do list, so they ONLY ever send items assigned to the
+    // user — never the whole meeting's action items. Enforced here as
+    // defense-in-depth even though the renderer also pre-filters the modal.
+    if (TASK_APP_EXPORTERS.has(input.exporter)) {
+      const userSpeakerId = s.settings.get('userSpeakerId');
+      const me = {
+        userSpeakerId,
+        userDisplayName: userSpeakerId
+          ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
+          : null,
+      };
+      if (!userIsIdentified(me)) {
+        throw new Error('Set who you are in Settings → "You are…" to export your action items.');
+      }
+      selectedRows = selectedRows.filter((r) => r.status !== 'done' && isMyItem(r, me));
+      if (selectedRows.length === 0) {
+        throw new Error("None of this meeting's open action items are assigned to you.");
+      }
+    }
+    const items = selectedRows.map((ai) => ({
+      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
+    }));
     const summaryPath = path.join(folder, 'summary.md');
     const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
-    // Markdown exports the summary + a checklist. With no items it's still
-    // a valid "save this meeting as one file" — don't block it. Other
-    // exporters (Apple Reminders, future Google Tasks) only push action
-    // items to external systems, so an empty set there would be a no-op
-    // at best and confusing at worst.
-    if (items.length === 0 && input.exporter !== 'markdown') {
+    // Document exporters (Markdown, Google Doc) render the summary + a
+    // checklist, so they're valid with zero items. Task/integration
+    // exporters only push action items, so an empty set there is a no-op.
+    const DOCUMENT_EXPORTERS = new Set(['markdown', 'google-doc']);
+    if (items.length === 0 && !DOCUMENT_EXPORTERS.has(input.exporter)) {
       throw new Error('No action items selected');
     }
     if (items.length === 0 && !summaryMd) {
