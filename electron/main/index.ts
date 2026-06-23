@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -37,6 +37,7 @@ import { MeetingDetector } from './meeting-detector/detector.js';
 import { NativeAppDetector } from './meeting-detector/native-app-detector.js';
 import { purgeTrashDir, UNDO_WINDOW_MS } from './storage/trash.js';
 import { buildExporterRegistry } from './exporters/registry.js';
+import { GoogleAuth } from './google/auth.js';
 import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters/webhook.js';
 import { Logger } from './logging/logger.js';
 import { createMeetingFolder, meetingFolderPath } from './storage/meeting-folder.js';
@@ -445,10 +446,43 @@ app.whenReady().then(async () => {
     void schemeDispatcher.dispatch(url);
   }
 
+  // Google account auth (BYO OAuth desktop client). The refresh token is
+  // encrypted via the OS keychain (safeStorage); credentials + email live in
+  // settings. Powers the Google Tasks + Google Doc exporters and the
+  // Settings "Sign in with Google" flow.
+  const googleAuth = new GoogleAuth({
+    getCredentials: () => {
+      const clientId = settings.get('googleClientId').trim();
+      const clientSecret = settings.get('googleClientSecret').trim();
+      return clientId && clientSecret ? { clientId, clientSecret } : null;
+    },
+    getRefreshToken: () => {
+      const enc = settings.get('googleRefreshTokenEnc');
+      if (!enc || !safeStorage.isEncryptionAvailable()) return null;
+      try { return safeStorage.decryptString(Buffer.from(enc, 'base64')); } catch { return null; }
+    },
+    setRefreshToken: (token) => {
+      if (token == null) { settings.set('googleRefreshTokenEnc', null); return; }
+      if (!safeStorage.isEncryptionAvailable()) {
+        logger.warn('google:safeStorage-unavailable — refusing to store refresh token in plaintext');
+        settings.set('googleRefreshTokenEnc', null);
+        return;
+      }
+      settings.set('googleRefreshTokenEnc', safeStorage.encryptString(token).toString('base64'));
+    },
+    getAccountEmail: () => settings.get('googleAccountEmail'),
+    setAccountEmail: (email) => settings.set('googleAccountEmail', email),
+    openExternal: (url) => shell.openExternal(url),
+    fetchImpl: globalThis.fetch,
+    log: (msg, data) => logger.info(msg, data),
+  });
+
   // Webhook exporter (#79). Implements the standard Exporter interface so
   // the manual export path keeps working, and exposes an extra
   // deliverPayload() entry point for the pipeline's auto-fire below.
   const exporters = buildExporterRegistry({
+    google: googleAuth,
+    fetchImpl: globalThis.fetch,
     webhook: {
       getConfig: () => ({
         url: settings.get('webhookUrl'),
@@ -544,6 +578,7 @@ app.whenReady().then(async () => {
     nativeAppDetector,
     weeklyAggregator,
     logger,
+    googleAuth,
   });
 
   const mainWin = await createWindow();

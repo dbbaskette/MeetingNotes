@@ -141,6 +141,13 @@ export const IPC_CHANNELS = {
   logsTail: 'logs:tail',
   /** Reveal the app log file in Finder. */
   logsReveal: 'logs:reveal',
+  /** Begin the Google OAuth sign-in flow (opens the system browser). Resolves
+   *  with the connected account email. */
+  googleAuthStart: 'google:auth-start',
+  /** { email, hasCredentials, signedIn } snapshot for the Settings card. */
+  googleAuthStatus: 'google:auth-status',
+  /** Disconnect the Google account (clears stored tokens). */
+  googleSignOut: 'google:sign-out',
   /** Fire a synthetic meeting.completed payload at the configured
    *  webhook URL. Used by the Settings "Send test payload" button so
    *  the user can verify their endpoint before a real meeting runs.

@@ -40,6 +40,7 @@ import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js
 import { ripgrepSearch } from '../search/ripgrep-search.js';
 import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/owner-filter.js';
 import type { Logger } from '../logging/logger.js';
+import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 
 export interface IpcServices {
@@ -59,6 +60,7 @@ export interface IpcServices {
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
+  googleAuth: GoogleAuth;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -108,6 +110,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.logsReveal, () => {
     shell.showItemInFolder(s.logger.filePath);
+  });
+
+  ipc.handle(IPC_CHANNELS.googleAuthStart, async () => {
+    return s.googleAuth.startSignIn();
+  });
+
+  ipc.handle(IPC_CHANNELS.googleAuthStatus, () => ({
+    email: s.googleAuth.getConnectedEmail(),
+    hasCredentials: s.googleAuth.hasCredentials(),
+    signedIn: s.googleAuth.isSignedIn(),
+  }));
+
+  ipc.handle(IPC_CHANNELS.googleSignOut, () => {
+    s.googleAuth.signOut();
   });
 
   ipc.handle(IPC_CHANNELS.meetingsList, () => {

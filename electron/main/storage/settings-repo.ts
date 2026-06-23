@@ -86,6 +86,17 @@ export interface Settings {
    *   - 'standard' = balanced detail vs. brevity
    *   - 'detailed' = full context, trade-offs, reasoning (original behavior) */
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  /** Google OAuth client credentials (BYO). The user creates a "Desktop"
+   *  OAuth client in Google Cloud and pastes these in. Empty = not configured
+   *  (Google export unavailable). The client secret for a desktop client is
+   *  non-confidential per Google's model. */
+  googleClientId: string;
+  googleClientSecret: string;
+  /** Connected Google account email (display only). Null = not signed in. */
+  googleAccountEmail: string | null;
+  /** Refresh token, encrypted via Electron safeStorage and base64-encoded.
+   *  Null = not signed in. Never logged. */
+  googleRefreshTokenEnc: string | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -118,6 +129,10 @@ export const DEFAULT_SETTINGS: Settings = {
   userSpeakerId: null,
   summaryProvider: 'external',
   summaryDetail: 'detailed',
+  googleClientId: '',
+  googleClientSecret: '',
+  googleAccountEmail: null,
+  googleRefreshTokenEnc: null,
 };
 
 type Key = keyof Settings;
