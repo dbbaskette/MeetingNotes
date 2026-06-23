@@ -35,6 +35,7 @@ interface MeetingDetail {
   rawTranscriptText: string | null;
   summaryMd: string | null;
   audioPath: string;
+  userIdentified: boolean;
   speakers: { localLabel: string; rosterId: string | null; displayName: string | null }[];
   actionItems: {
     id: string;
@@ -43,6 +44,7 @@ interface MeetingDetail {
     dueDate: string | null;
     status: string;
     exportedTo: string[];
+    isMine: boolean;
   }[];
   models: { stt?: string; llm?: string };
 }
@@ -1594,6 +1596,16 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
   // gated on hasItems.
   const hasSummary = Boolean(meeting.summaryMd && meeting.summaryMd.trim().length > 0);
   const canMarkdown = hasItems || hasSummary;
+  // Task-app exports (Reminders, Google Tasks) only send items assigned to
+  // the user, so they're gated on the user having identified themselves AND
+  // actually owning at least one open item.
+  const myOpenItemCount = meeting.actionItems.filter((it) => it.isMine && it.status !== 'done').length;
+  const canTaskExport = meeting.userIdentified && myOpenItemCount > 0;
+  const taskDisabledReason = !meeting.userIdentified
+    ? 'Set who you are in Settings → "You are…" to export your action items'
+    : myOpenItemCount === 0
+      ? 'No open action items are assigned to you'
+      : undefined;
 
   // When there are action items the user probably wants to pick which ones
   // to include, so open the item-picker modal. When there aren't (summary-
@@ -1638,10 +1650,10 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
             choose without the UI nudging. Disabled exporters keep the
             muted treatment so it's clear which options are live. */}
         <button
-          disabled={!hasItems}
+          disabled={!canTaskExport}
           onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
           className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
-          title={hasItems ? undefined : 'Needs action items — run Extract first'}
+          title={taskDisabledReason ?? (hasItems ? undefined : 'Needs action items — run Extract first')}
         >
           → Apple Reminders
         </button>
@@ -1662,6 +1674,15 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
         >
           → Google Tasks (soon)
         </button>
+        {/* Persistent reminder: task-app exports are scoped to the user's own
+            items, so this is never a surprise. */}
+        <div className="text-[11px] text-ink-muted flex items-start gap-1.5 pt-0.5">
+          <span aria-hidden>🔒</span>
+          <span>
+            Reminders &amp; Google Tasks send <strong className="font-semibold">only items assigned to you</strong>
+            {meeting.userIdentified ? '.' : ' — set "You are…" in Settings first.'}
+          </span>
+        </div>
         {!hasItems && hasSummary && (
           <div className="text-[11px] text-ink-muted italic mt-1">
             Summary ready — no action items extracted. Markdown download
@@ -1694,10 +1715,17 @@ function ExportPickerModal({
   onClose: () => void;
   onReload: () => Promise<void>;
 }): JSX.Element {
-  // Default: every open item pre-selected. Done items (already checked off in
-  // the app) start unchecked because you rarely want to export them again.
+  // Task-app exporters only send the user's own items, so the picker lists
+  // only those (the rest of the meeting's items aren't relevant to a personal
+  // to-do list). Document exporters list everything.
+  const isTaskApp = exporter.id === 'reminders' || exporter.id === 'google-tasks';
+  const visibleItems = isTaskApp
+    ? meeting.actionItems.filter((it) => it.isMine)
+    : meeting.actionItems;
+  // Default: every open visible item pre-selected. Done items (already checked
+  // off in the app) start unchecked because you rarely want to re-export them.
   const [selected, setSelected] = useState<Set<string>>(() => {
-    return new Set(meeting.actionItems.filter((it) => it.status !== 'done').map((it) => it.id));
+    return new Set(visibleItems.filter((it) => it.status !== 'done').map((it) => it.id));
   });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
@@ -1710,7 +1738,7 @@ function ExportPickerModal({
       return next;
     });
   }
-  function selectAll(): void { setSelected(new Set(meeting.actionItems.map((it) => it.id))); }
+  function selectAll(): void { setSelected(new Set(visibleItems.map((it) => it.id))); }
   function selectNone(): void { setSelected(new Set()); }
 
   async function run(): Promise<void> {
@@ -1756,7 +1784,7 @@ function ExportPickerModal({
         <div className="px-5 py-4 border-b border-surface-border flex items-baseline gap-3">
           <h3 className="font-semibold text-sm">Send to {exporter.label}</h3>
           <span className="text-xs text-ink-muted tabular-nums">
-            {selected.size}/{meeting.actionItems.length} selected
+            {selected.size}/{visibleItems.length} selected
           </span>
           <div className="flex-1" />
           <button
@@ -1769,8 +1797,19 @@ function ExportPickerModal({
           >None</button>
         </div>
 
+        {isTaskApp && (
+          <div className="mx-3 mt-2 text-[11px] text-ink-soft bg-brand-indigo/5 border border-brand-indigo/20 rounded-lg px-3 py-2 flex items-start gap-1.5">
+            <span aria-hidden>🔒</span>
+            <span>Only action items assigned to <strong className="font-semibold">you</strong> are sent to {exporter.label}.</span>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-          {meeting.actionItems.map((it) => {
+          {visibleItems.length === 0 && (
+            <div className="text-sm text-ink-muted italic p-3">
+              None of this meeting&apos;s action items are assigned to you.
+            </div>
+          )}
+          {visibleItems.map((it) => {
             const checked = selected.has(it.id);
             return (
               <label

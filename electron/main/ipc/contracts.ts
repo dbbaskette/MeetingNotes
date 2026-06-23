@@ -28,6 +28,9 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
   transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
+  /** True when the user has set Settings → "You are…" (userSpeakerId).
+   *  Task-app exports (Reminders, Google Tasks) require it. */
+  userIdentified: z.boolean(),
   actionItems: z.array(z.object({
     id: z.string(),
     text: z.string(),
@@ -35,6 +38,9 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
     dueDate: z.string().nullable(),
     status: z.string(),
     exportedTo: z.array(z.string()),
+    /** True when this item is owned by the user (by roster id or owner
+     *  name). Drives the task-app export modal, which lists only my items. */
+    isMine: z.boolean(),
   })),
   models: z.object({ stt: z.string().optional(), llm: z.string().optional() }),
 });
