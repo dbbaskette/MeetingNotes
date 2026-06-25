@@ -143,13 +143,14 @@ export function createNarrativeGenerator(
     const raw = await lmStudio.chat({
       model: getModelId(),
       temperature: 0.3,
-      // No max_tokens cap. A reasoning model (Qwen3, gemma-*-a4b, etc.) spends
-      // its budget in reasoning_content FIRST and only then emits the answer in
-      // content. A small cap (we shipped 2000 in 1.5.0) gets consumed entirely
-      // by thinking — finish_reason="length" with reasoning_tokens≈cap and
-      // content="" — so the client sees empty content and errors. Leaving it
-      // unset matches the summarize/extract calls and lets the model finish;
-      // the 10-minute request timeout is the runaway backstop.
+      // Generous cap (NOT the 2000 we shipped in 1.5.0). A reasoning model
+      // (Qwen3, gemma-*-a4b, etc.) spends its budget in reasoning_content FIRST
+      // and only then emits the answer — a small cap got fully consumed by
+      // thinking (finish_reason="length", content="") and surfaced as an empty-
+      // content error. 8000 leaves ample room for reasoning + a week's narrative
+      // while still bounding a runaway repetition loop to a few minutes instead
+      // of the full 10-minute timeout. The client also rejects looping output.
+      maxTokens: 8000,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },
