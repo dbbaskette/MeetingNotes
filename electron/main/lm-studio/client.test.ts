@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { LMStudioClient, stripThinking } from './client.js';
+import { LMStudioClient, stripThinking, looksDegenerate } from './client.js';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -95,6 +95,49 @@ describe('LMStudioClient.chat', () => {
     });
     expect(result).not.toMatch(/<think>/);
     expect(result).toContain('## Overview');
+  });
+});
+
+describe('LMStudioClient.chat — timeout & runaway handling', () => {
+  it('fails FAST on an AbortSignal timeout (DOMException "TimeoutError") without retrying', async () => {
+    // AbortSignal.timeout() rejects with a TimeoutError, NOT an AbortError. The
+    // client must treat that as a hard timeout (fail fast), not a transient
+    // network blip to retry — retrying just doubles a 10-minute wait.
+    const timeoutErr = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    fetchMock.mockRejectedValue(timeoutErr);
+    const c = new LMStudioClient('http://localhost:1234');
+    await expect(
+      c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/timed out/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no retry on a timeout
+  });
+
+  it('rejects degenerate / looping output with an actionable error', async () => {
+    const loop = '## Overview\n' + 'much more detailed and '.repeat(900);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: loop } }] }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    await expect(
+      c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/repetit|looping/i);
+  });
+});
+
+describe('looksDegenerate', () => {
+  it('flags a low-variety repetition loop', () => {
+    expect(looksDegenerate('own-the-cluster-as-a-service. '.repeat(700))).toBe(true);
+    expect(looksDegenerate('much more detailed and '.repeat(900))).toBe(true);
+  });
+  it('passes a long, lexically varied summary', () => {
+    const varied = Array.from({ length: 600 }, (_, i) => `topic${i}`).join(' ');
+    expect(looksDegenerate(varied)).toBe(false);
+  });
+  it('does not judge short outputs (e.g. a small JSON action-item list)', () => {
+    expect(looksDegenerate('[{"text":"File the spec","owner":"Me","due_date":null}]')).toBe(false);
   });
 });
 

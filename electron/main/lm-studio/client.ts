@@ -209,10 +209,19 @@ export class LMStudioClient {
     try {
       resp = await attempt();
     } catch (e) {
-      const isAbort = e instanceof Error && e.name === 'AbortError';
-      if (isAbort) {
+      // `AbortSignal.timeout()` rejects with a DOMException named "TimeoutError"
+      // (NOT "AbortError"), so checking only AbortError let a genuine 10-minute
+      // timeout fall through to the network-retry branch below — doubling the
+      // wait to ~20 minutes and surfacing a misleading "is LM Studio running?"
+      // message. Treat both names as a hard timeout and fail fast.
+      const isTimeout =
+        e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
+      if (isTimeout) {
         throw new LMStudioError(
-          'LM Studio chat timed out after 10 minutes — model may be too large for this transcript',
+          'LM Studio chat timed out after 10 minutes. The model stalled or ran away ' +
+            '(repetitive/looping output) — usually a sign of memory pressure or too-long ' +
+            "a context. Free memory, lower the model's context length, or pick a smaller " +
+            'model in Settings.',
           e,
         );
       }
@@ -251,8 +260,36 @@ export class LMStudioClient {
           (partial ? `Partial output: "${partial.slice(0, 80)}…"` : ''),
       );
     }
-    return stripThinking(content);
+    const cleaned = stripThinking(content);
+    // A local model under memory pressure (or on a messy transcript) can
+    // degenerate into a repetition loop — emitting the same phrase thousands of
+    // times until the request times out. With no max_tokens cap that runs for
+    // the full 10-minute ceiling; even with one it produces unusable garbage.
+    // Catch it here and fail with an actionable message instead of writing a
+    // looping "summary" to disk.
+    if (looksDegenerate(cleaned)) {
+      const words = cleaned.trim().split(/\s+/).length;
+      throw new LMStudioError(
+        `LM Studio returned repetitive, looping output (${words} words, almost no ` +
+          `lexical variety) — the model degenerated mid-generation. This is usually ` +
+          `memory pressure or too-long a context. Free memory, lower the model's ` +
+          `context length, or switch to a smaller model in Settings.`,
+      );
+    }
+    return cleaned;
   }
+}
+
+// Detect degenerate "stuck in a loop" model output — the same short phrase
+// repeated until the token budget (or request timeout) runs out. Such loops
+// collapse lexical variety to near zero, so a low unique-word ratio over a long
+// output is a reliable signal. Short outputs (a one-line answer, a small JSON
+// action-item array) are left unjudged so we never false-positive on them.
+export function looksDegenerate(text: string): boolean {
+  const words = text.trim().split(/\s+/);
+  if (words.length < 400) return false;
+  const uniqueRatio = new Set(words).size / words.length;
+  return uniqueRatio < 0.18;
 }
 
 // Reasoning models (Qwen3, DeepSeek-R1, gpt-oss, etc.) emit their chain of

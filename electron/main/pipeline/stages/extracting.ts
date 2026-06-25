@@ -18,6 +18,10 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   const raw = await ctx.lmStudio.chat({
     model: ctx.settings.get('llmModel'),
     temperature: 0,
+    // Bound a runaway/looping generation. The JSON action-item list is short,
+    // but a reasoning model spends most of its budget thinking first, so keep
+    // generous headroom; the client also rejects degenerate looping output.
+    maxTokens: 6000,
     messages: [
       { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
       { role: 'user', content: transcript },

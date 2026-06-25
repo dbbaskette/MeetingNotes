@@ -79,6 +79,11 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   const content = await ctx.lmStudio.chat({
     model: ctx.settings.get('llmModel'),
     temperature: 0.2,
+    // Generous cap: large enough for a reasoning model's <think> budget plus a
+    // detailed summary (observed worst case ≈ 5k tokens), but small enough that
+    // a runaway repetition loop is bounded to a few minutes instead of running
+    // out the 10-minute request timeout. The client also rejects looping output.
+    maxTokens: 8000,
     messages: [
       { role: 'system', content: buildSummaryPrompt(ctx.settings.get('summaryDetail'), knownTopic) },
       { role: 'user', content: transcript },
