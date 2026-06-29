@@ -82,17 +82,129 @@ export function extractJsonBlock(raw: string): string {
   return s;
 }
 
-/** Robust parse: extracts JSON, validates shape, normalizes. */
+/** Actionable message for the case where the model's JSON was cut off. The
+ *  usual cause is a reasoning model spending most of its token budget
+ *  "thinking" before it writes the answer, so the JSON never finishes. */
+const TRUNCATED_MSG =
+  `weekly narrative: the model's output was cut off before it finished — it hit ` +
+  `the token limit. A reasoning model often spends most of its budget "thinking" ` +
+  `before it writes the answer. In LM Studio, switch to a non-reasoning model (or ` +
+  `turn off the model's thinking), then regenerate.`;
+
+/** Recover the largest valid JSON prefix from a string that was cut off
+ *  mid-generation. Walks the JSON grammar tracking complete values; on a cut,
+ *  returns the substring up to the last fully-emitted value with the still-open
+ *  containers closed. Returns `{ json: null }` when nothing completed (e.g. the
+ *  cut landed inside the very first value). `truncated` reports whether the
+ *  input was structurally incomplete at all — so the caller can tell a genuine
+ *  cut-off apart from balanced-but-malformed garbage. */
+export function recoverTruncatedJson(s: string): { json: string | null; truncated: boolean } {
+  type Frame = { type: 'obj' | 'arr'; expect: 'key' | 'colon' | 'value' | 'comma' };
+  const stack: Frame[] = [];
+  // The best (latest) point we can safely cut at: the byte length to keep, plus
+  // the closing brackets that re-balance the containers open at that point.
+  let best: { len: number; closers: string } | null = null;
+
+  const checkpoint = (offset: number) => {
+    let closers = '';
+    for (let k = stack.length - 1; k >= 0; k--) closers += stack[k]!.type === 'obj' ? '}' : ']';
+    best = { len: offset, closers };
+  };
+  // A value finished at `offset`. Advance the enclosing container and record a
+  // cut point. A root-level primitive has no enclosing container — ignore it
+  // (our schema is always a root object, so this never feeds a real salvage).
+  const onValueComplete = (offset: number) => {
+    const top = stack[stack.length - 1];
+    if (!top) return;
+    top.expect = 'comma';
+    checkpoint(offset);
+  };
+  const bail = (truncated: boolean) =>
+    ({ json: best ? s.slice(0, best.len) + best.closers : null, truncated });
+
+  let i = 0;
+  const n = s.length;
+  while (i < n) {
+    const c = s[i]!;
+    if (c === ' ' || c === '\n' || c === '\r' || c === '\t') { i++; continue; }
+    const top = stack[stack.length - 1];
+
+    if (c === '{' || c === '[') {
+      const type = c === '{' ? 'obj' : 'arr';
+      stack.push({ type, expect: type === 'obj' ? 'key' : 'value' });
+      i++;
+      continue;
+    }
+    if (c === '}' || c === ']') {
+      if (!top) break;
+      stack.pop();
+      i++;
+      onValueComplete(i); // the closed container is a completed value for its parent
+      continue;
+    }
+    if (c === ':') {
+      if (top && top.type === 'obj' && top.expect === 'colon') top.expect = 'value';
+      i++;
+      continue;
+    }
+    if (c === ',') {
+      if (top) top.expect = top.type === 'obj' ? 'key' : 'value';
+      i++;
+      continue;
+    }
+    if (c === '"') {
+      i++;
+      let closed = false;
+      while (i < n) {
+        const ch = s[i]!;
+        if (ch === '\\') { i += 2; continue; }
+        if (ch === '"') { closed = true; i++; break; }
+        i++;
+      }
+      if (!closed) return bail(true); // cut off inside a string
+      // An object key (expecting 'key') just names the next field; only a value
+      // string advances the container and counts as a cut point.
+      if (top && top.type === 'obj' && top.expect === 'key') top.expect = 'colon';
+      else onValueComplete(i);
+      continue;
+    }
+    // number / true / false / null
+    if (c === '-' || (c >= '0' && c <= '9') || c === 't' || c === 'f' || c === 'n') {
+      const start = i;
+      while (i < n && /[A-Za-z0-9.+-]/.test(s[i]!)) i++;
+      if (i >= n) return bail(true); // possibly-truncated literal at EOF — drop it
+      void start;
+      onValueComplete(i);
+      continue;
+    }
+    break; // unrecognized char
+  }
+  return bail(stack.length > 0);
+}
+
+/** Robust parse: extracts JSON, validates shape, normalizes. Tolerates a
+ *  response cut off mid-generation by salvaging the fields that fully emitted
+ *  before the cut (the narrative is first, so it usually survives); if not even
+ *  the narrative made it, surfaces an actionable "output was cut off" error
+ *  rather than a confusing "invalid JSON". */
 export function parseNarrativeResponse(raw: string): NarrativeOutput {
   const block = extractJsonBlock(raw);
   let parsed: unknown;
+  let salvaged = false;
   try {
     parsed = JSON.parse(block);
-  } catch (e) {
-    throw new Error(
-      `weekly narrative: model returned invalid JSON.\n` +
-      `Snippet: ${block.slice(0, 200)}…`,
-    );
+  } catch {
+    const rec = recoverTruncatedJson(block);
+    if (rec.json !== null) {
+      try { parsed = JSON.parse(rec.json); salvaged = true; } catch { /* fall through */ }
+    }
+    if (!salvaged) {
+      if (rec.truncated) throw new Error(TRUNCATED_MSG);
+      throw new Error(
+        `weekly narrative: model returned invalid JSON.\n` +
+        `Snippet: ${block.slice(0, 200)}…`,
+      );
+    }
   }
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('weekly narrative: response was not an object');
@@ -104,6 +216,9 @@ export function parseNarrativeResponse(raw: string): NarrativeOutput {
     .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
     .map((x) => x.trim());
   if (!narrative) {
+    // A salvage that didn't even recover the narrative is a cut-off, not an
+    // intentionally-empty answer — point the user at the real cause.
+    if (salvaged) throw new Error(TRUNCATED_MSG);
     throw new Error('weekly narrative: model returned an empty narrative');
   }
   return { narrative, themes: parseThemes(obj.themes), decisions };
@@ -147,10 +262,13 @@ export function createNarrativeGenerator(
       // (Qwen3, gemma-*-a4b, etc.) spends its budget in reasoning_content FIRST
       // and only then emits the answer — a small cap got fully consumed by
       // thinking (finish_reason="length", content="") and surfaced as an empty-
-      // content error. 8000 leaves ample room for reasoning + a week's narrative
-      // while still bounding a runaway repetition loop to a few minutes instead
-      // of the full 10-minute timeout. The client also rejects looping output.
-      maxTokens: 8000,
+      // content error. The weekly narrative is the largest legitimate output in
+      // the app (a whole week + 3-6 detailed themes), so 8000 still left the
+      // JSON truncated mid-stream on busy weeks → "invalid JSON". 16000 leaves
+      // room for heavy reasoning + the full narrative; parseNarrativeResponse
+      // salvages anyway if even this is exceeded. Runaway loops stay bounded by
+      // looksDegenerate() and the 10-minute request timeout, not this cap.
+      maxTokens: 16000,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },
