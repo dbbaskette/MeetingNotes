@@ -41,6 +41,14 @@ export default {
           processing: cssVar('status-processing'),
           processingBg: cssVar('status-processing-bg'),
         },
+        danger: {
+          DEFAULT: cssVar('danger'),
+          bg: cssVar('danger-bg'),
+          text: cssVar('danger-text'),
+          border: cssVar('danger-border'),
+          solid: cssVar('danger-solid'),
+        },
+        skeleton: cssVar('skeleton'),
       },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif'],
