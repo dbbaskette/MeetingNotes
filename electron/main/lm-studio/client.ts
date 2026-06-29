@@ -86,6 +86,15 @@ export interface ChatInput {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Turn the model's "thinking" / chain-of-thought OFF. Reasoning-capable
+   *  local models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss, …) otherwise burn
+   *  their whole token budget in `reasoning_content` and return empty
+   *  `content` — looking like an out-of-memory failure when it isn't. When
+   *  true we pass `chat_template_kwargs: { enable_thinking: false }`, which
+   *  LM Studio's OpenAI-compatible API forwards to the model's chat template
+   *  (the only reliable lever — Gemma 4 has no LM Studio UI toggle). Models
+   *  whose template doesn't reference the kwarg simply ignore it. */
+  disableThinking?: boolean;
 }
 
 export class LMStudioClient {
@@ -199,6 +208,11 @@ export class LMStudioClient {
           messages: input.messages,
           temperature: input.temperature ?? 0.2,
           max_tokens: input.maxTokens,
+          // Only emit the key when we actually want thinking off, so a
+          // request to a non-reasoning model stays byte-for-byte unchanged.
+          ...(input.disableThinking
+            ? { chat_template_kwargs: { enable_thinking: false } }
+            : {}),
         }),
         signal: AbortSignal.timeout(10 * 60 * 1000),
         dispatcher: getSlowLLMAgent(),
@@ -264,8 +278,10 @@ export class LMStudioClient {
         throw new LMStudioError(
           `LM Studio produced no answer — the model spent its entire token budget ` +
             `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
-            `This reasoning model is looping on this transcript. In LM Studio, switch to a ` +
-            `non-reasoning model or turn off the model's thinking/reasoning, then retry.` +
+            `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
+            `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +
+            `to skip its chain-of-thought, then retry. (If it's already on, this model ` +
+            `ignores the thinking toggle — switch to a non-reasoning model in LM Studio.)` +
             (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
         );
       }

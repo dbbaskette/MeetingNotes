@@ -558,6 +558,7 @@ app.whenReady().then(async () => {
     generateNarrative: createNarrativeGenerator(
       lmStudio,
       () => settings.get('llmModel'),
+      () => settings.get('disableThinking'),
     ),
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });

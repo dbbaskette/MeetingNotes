@@ -74,6 +74,40 @@ describe('LMStudioClient.chat', () => {
     expect(result).toBe('Summary text');
   });
 
+  it('sends chat_template_kwargs.enable_thinking=false when disableThinking is set', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    await c.chat({
+      model: 'google/gemma-4-12b',
+      messages: [{ role: 'user', content: 'hi' }],
+      disableThinking: true,
+    });
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      chat_template_kwargs?: { enable_thinking?: boolean };
+    };
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it('omits chat_template_kwargs entirely when disableThinking is not set', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    await c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('chat_template_kwargs');
+  });
+
   it('strips <think>…</think> blocks from reasoning-model output', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(

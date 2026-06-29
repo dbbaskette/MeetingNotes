@@ -31,6 +31,7 @@ interface Settings {
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  disableThinking: boolean;
   theme: 'system' | 'light' | 'dark';
   googleClientId: string;
   googleClientSecret: string;
@@ -151,6 +152,26 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           Steers how verbose the summary prompt asks the model to be, so the level
           stays consistent across different local models. Applies to the next summary.
         </div>
+      </Field>
+      <Field label="Disable model &lsquo;thinking&rsquo;">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={s.disableThinking}
+            onChange={(e) => update('disableThinking', e.target.checked)}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-sm text-ink">Tell the model to skip its chain-of-thought (recommended)</div>
+            <div className="text-xs text-ink-muted mt-1">
+              Reasoning-capable models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss) can burn
+              their whole token budget &ldquo;thinking&rdquo; and return no summary — which
+              looks like an out-of-memory error but isn&rsquo;t. Leaving this on sends
+              <code className="mx-1">enable_thinking: false</code> so even small models
+              answer directly. Turn off only if a model misbehaves with it.
+            </div>
+          </div>
+        </label>
       </Field>
       <Field label="Appearance">
         <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
