@@ -112,6 +112,48 @@ describe('LMStudioClient.chat — timeout & runaway handling', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // no retry on a timeout
   });
 
+  it('reports a REASONING runaway (empty content, budget spent thinking) — not a GPU-memory error', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'length',
+              message: {
+                role: 'assistant',
+                content: '',
+                reasoning_content: 'Goal: extract action items from the transcript. '.repeat(300),
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    const err: Error = await c
+      .chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] })
+      .catch((e) => e);
+    expect(err.message).toMatch(/reasoning|thinking|no answer/i);
+    expect(err.message).not.toMatch(/GPU memory/i);
+  });
+
+  it('still reports a true OOM when BOTH content and reasoning come back empty', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '', reasoning_content: '' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    const err: Error = await c
+      .chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] })
+      .catch((e) => e);
+    expect(err.message).toMatch(/GPU memory/i);
+  });
+
   it('rejects degenerate / looping output with an actionable error', async () => {
     const loop = '## Overview\n' + 'much more detailed and '.repeat(900);
     fetchMock.mockResolvedValueOnce(
