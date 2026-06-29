@@ -152,6 +152,29 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           stays consistent across different local models. Applies to the next summary.
         </div>
       </Field>
+      <Field label="Appearance">
+        <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
+          {(['system', 'light', 'dark'] as const).map((opt) => (
+            <button
+              key={opt}
+              onClick={() => {
+                void update('theme', opt);
+                window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));
+              }}
+              className={`px-4 py-1.5 text-sm capitalize transition border-l border-surface-border first:border-l-0 ${
+                s.theme === opt
+                  ? 'bg-surface-sunken text-ink font-medium'
+                  : 'text-ink-muted hover:text-ink hover:bg-surface-sunken'
+              }`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-ink-muted mt-1">
+          System follows macOS appearance. Light and Dark override it.
+        </div>
+      </Field>
       <Field label="STT URL (whisper.cpp server)">
         <div className="flex gap-2">
           <input
