@@ -56,7 +56,7 @@ export function RecordButton({
         )}
       </button>
       {pickerOpen && <SourcePicker onPick={pick} onCancel={() => setPickerOpen(false)} />}
-      {error && <div className="text-xs text-red-600 mt-1">{error}</div>}
+      {error && <div className="text-xs text-danger mt-1">{error}</div>}
     </div>
   );
 }

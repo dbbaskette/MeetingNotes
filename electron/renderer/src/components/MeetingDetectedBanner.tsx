@@ -97,7 +97,7 @@ export function MeetingDetectedBanner({
         <div className="text-xs text-ink-muted truncate">
           {subline}
         </div>
-        {error && <div className="text-xs text-red-600 mt-1">{error}</div>}
+        {error && <div className="text-xs text-danger mt-1">{error}</div>}
         {!error && (
           <div className="text-[11px] text-ink-muted mt-1">
             {captureHint}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -76,7 +76,7 @@ app.on('open-url', (event, url) => {
   handleSchemeUrl(url);
 });
 
-async function createWindow(): Promise<BrowserWindow> {
+async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -88,7 +88,7 @@ async function createWindow(): Promise<BrowserWindow> {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#fafaf9',
+    backgroundColor,
     // Don't show until the renderer has painted — paired with the splash
     // window, the user sees the loading card the whole time and then the
     // fully-rendered library, never an empty white frame.
@@ -582,7 +582,10 @@ app.whenReady().then(async () => {
     googleAuth,
   });
 
-  const mainWin = await createWindow();
+  const themeChoice = settings.get('theme');
+  nativeTheme.themeSource = themeChoice;
+  const winBg = nativeTheme.shouldUseDarkColors ? '#171615' : '#fafaf9';
+  const mainWin = await createWindow(winBg);
   // Hand off from splash → main as soon as the renderer has painted.
   // ready-to-show fires AFTER the first paint, so the user never sees
   // a blank window. If the renderer fails to load, fall back to a
@@ -639,5 +642,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+  // Re-open in the active theme's background so a dark-mode user doesn't get a
+  // light flash when re-launching the window from the dock. nativeTheme.themeSource
+  // was already set at startup, so shouldUseDarkColors is correct here.
+  if (BrowserWindow.getAllWindows().length === 0)
+    void createWindow(nativeTheme.shouldUseDarkColors ? '#171615' : '#fafaf9');
 });

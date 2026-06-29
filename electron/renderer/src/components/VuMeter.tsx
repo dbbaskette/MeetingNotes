@@ -12,7 +12,7 @@ export function VuMeter({ peakDb }: { peakDb: number }): JSX.Element {
           key={i}
           className={`w-[3px] h-3 rounded-sm ${
             i < lit
-              ? i < 7 ? 'bg-status-ok' : i < 9 ? 'bg-status-warn' : 'bg-rose-500'
+              ? i < 7 ? 'bg-status-ok' : i < 9 ? 'bg-status-warn' : 'bg-danger-solid'
               : 'bg-surface-border'
           }`}
         />

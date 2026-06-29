@@ -94,6 +94,9 @@ export interface Settings {
    *  off only if a particular model misbehaves with the kwarg or you actually
    *  want its reasoning. See LMStudioClient.chat / ChatInput.disableThinking. */
   disableThinking: boolean;
+  /** UI appearance. 'system' follows the OS; 'light'/'dark' force a mode.
+   *  Applied in the renderer (App.tsx) and mirrored to nativeTheme in main. */
+  theme: 'system' | 'light' | 'dark';
   /** Google OAuth client credentials (BYO). The user creates a "Desktop"
    *  OAuth client in Google Cloud and pastes these in. Empty = not configured
    *  (Google export unavailable). The client secret for a desktop client is
@@ -138,6 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
   summaryProvider: 'external',
   summaryDetail: 'detailed',
   disableThinking: true,
+  theme: 'system',
   googleClientId: '',
   googleClientSecret: '',
   googleAccountEmail: null,

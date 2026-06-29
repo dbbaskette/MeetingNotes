@@ -610,7 +610,7 @@ function WeeklyBody({
                                   {due.label}
                                 </span>
                               ) : due.tier === 'later' ? (
-                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-stone-100 text-ink-muted font-medium shrink-0">
+                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-skeleton text-ink-muted font-medium shrink-0">
                                   {due.label}
                                 </span>
                               ) : (
@@ -718,15 +718,15 @@ function NarrativeCard({
         <div aria-busy="true" aria-live="polite" className="space-y-2.5 animate-pulse">
           {/* Skeleton — 3 paragraphs of varying-length pulsing bars
               that approximate the LLM's typical 200-350 word output. */}
-          <div className="h-3 bg-stone-200/80 rounded w-[96%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[88%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[92%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[40%] mb-3" />
-          <div className="h-3 bg-stone-200/80 rounded w-[94%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[85%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[60%] mb-3" />
-          <div className="h-3 bg-stone-200/80 rounded w-[90%]" />
-          <div className="h-3 bg-stone-200/80 rounded w-[55%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[96%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[88%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[92%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[40%] mb-3" />
+          <div className="h-3 bg-skeleton/80 rounded w-[94%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[85%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[60%] mb-3" />
+          <div className="h-3 bg-skeleton/80 rounded w-[90%]" />
+          <div className="h-3 bg-skeleton/80 rounded w-[55%]" />
           {elapsedSec >= 30 && (
             <div className="text-[11px] text-status-warnText pt-3 not-prose">
               Still working… large meetings can take 30–90 s on local LLMs. The

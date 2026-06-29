@@ -19,6 +19,13 @@
   --surface-sunken: 250 250 249;
   --surface-border: 231 229 228;
 
+  --danger: 220 38 38;
+  --danger-bg: 254 226 226;
+  --danger-text: 185 28 28;
+  --danger-border: 254 202 202;
+  --danger-solid: 220 38 38;
+  --skeleton: 231 229 228;
+
   --brand-indigo: 99 102 241;
   --brand-violet: 139 92 246;
 
@@ -41,9 +48,16 @@
   --ink-soft: 214 211 209;
   --ink-muted: 168 162 158;
 
-  --surface: 24 24 28;
-  --surface-sunken: 17 17 21;
-  --surface-border: 51 51 56;
+  --surface: 33 31 30;
+  --surface-sunken: 23 22 21;
+  --surface-border: 56 53 51;
+
+  --danger: 248 113 113;
+  --danger-bg: 58 20 23;
+  --danger-text: 253 164 176;
+  --danger-border: 90 35 40;
+  --danger-solid: 225 29 72;
+  --skeleton: 45 43 41;
 
   --brand-indigo: 129 140 248;
   --brand-violet: 167 139 250;
