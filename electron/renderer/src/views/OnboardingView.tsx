@@ -188,7 +188,7 @@ function PermRow({
   action?: React.ReactNode;
 }): JSX.Element {
   const cls = state === 'granted' ? 'text-status-ok'
-    : state === 'denied' ? 'text-rose-600'
+    : state === 'denied' ? 'text-danger'
       : 'text-ink-muted';
   const txt = state === 'granted' ? '✓ Granted'
     : state === 'denied' ? '✗ Denied'
@@ -273,7 +273,7 @@ function WhisperStep(): JSX.Element {
       >
         {installing ? 'Downloading… (this can take a few minutes)' : `Download ${picked}`}
       </button>
-      {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
+      {err && <div className="text-xs text-danger mt-2">{err}</div>}
       <div className="text-xs text-ink-muted mt-3">
         Requires <code className="bg-surface-sunken px-1 py-0.5 rounded">whisper-cpp</code> installed via Homebrew. If the install button errors, run{' '}
         <code className="bg-surface-sunken px-1 py-0.5 rounded">brew install whisper-cpp</code> in Terminal and retry.
@@ -361,7 +361,7 @@ function HfStep(): JSX.Element {
           <code className="bg-surface-sunken px-1 py-0.5 rounded">~/.cache/huggingface/token</code>.
         </div>
       )}
-      {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
+      {err && <div className="text-xs text-danger mt-2">{err}</div>}
       <div className="text-xs text-ink-muted mt-3">
         Create a token at{' '}
         <a
@@ -419,7 +419,7 @@ function LlmStep(): JSX.Element {
       </p>
       {checking && <div className="text-sm text-ink-muted italic">Checking LM Studio…</div>}
       {!checking && (loaded?.length ?? 0) === 0 && (
-        <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-3">
+        <div className="text-sm text-danger bg-danger-bg border border-danger-border rounded-lg p-3">
           LM Studio isn&apos;t reachable at its default URL. Make sure
           LM Studio is running, the local-server toggle is on, and a
           chat model is loaded. Then click Re-check.
@@ -448,7 +448,7 @@ function LlmStep(): JSX.Element {
       >
         Re-check
       </button>
-      {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
+      {err && <div className="text-xs text-danger mt-2">{err}</div>}
     </div>
   );
 }

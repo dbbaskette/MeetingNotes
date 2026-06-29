@@ -10,6 +10,7 @@ import { LiveRecordingRow } from './components/LiveRecordingRow';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
+import { resolveDark, type ThemeChoice } from './lib/theme';
 
 type View =
   | { kind: 'library' }
@@ -59,19 +60,38 @@ function AppInner(): JSX.Element {
   const dragCounter = useRef(0);
   const toast = useToast();
 
-  // Track the OS dark-mode preference and toggle the `dark` class on
-  // <html> so the CSS-variable palette in index.css swaps the whole UI.
-  // Class-based (not pure media-query) so a future Settings toggle can
-  // override the OS preference without re-architecting.
+  // Theme: read the persisted choice, apply it, and keep it live. 'system'
+  // follows the OS; 'light'/'dark' override. We mirror the resolved choice to
+  // localStorage so the inline script in index.html can paint flash-free on
+  // the next launch. SettingsView dispatches 'mn:theme-changed' when the user
+  // picks a different option.
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const apply = (dark: boolean): void => {
+    let choice: ThemeChoice = 'system';
+
+    const apply = (): void => {
+      const dark = resolveDark(choice, mq.matches);
       document.documentElement.classList.toggle('dark', dark);
+      try { localStorage.setItem('mn-theme', choice); } catch { /* ignore */ }
     };
-    apply(mq.matches);
-    const onChange = (e: MediaQueryListEvent): void => apply(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+
+    void (async () => {
+      const all = (await api.settings.getAll()) as { theme?: ThemeChoice };
+      choice = all.theme ?? 'system';
+      apply();
+    })();
+
+    const onSystemChange = (): void => { if (choice === 'system') apply(); };
+    const onThemeChanged = (e: Event): void => {
+      choice = (e as CustomEvent<ThemeChoice>).detail ?? 'system';
+      apply();
+    };
+    mq.addEventListener('change', onSystemChange);
+    window.addEventListener('mn:theme-changed', onThemeChanged as EventListener);
+    return () => {
+      mq.removeEventListener('change', onSystemChange);
+      window.removeEventListener('mn:theme-changed', onThemeChanged as EventListener);
+    };
   }, []);
 
   // Global keyboard shortcuts. Cmd+K opens search palette; Cmd+R is

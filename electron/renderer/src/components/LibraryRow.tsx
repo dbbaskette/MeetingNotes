@@ -57,7 +57,7 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
   const status = meeting.status;
   const isPending = status === 'pending';
   const edge =
-    status === 'failed' ? 'before:bg-rose-500' :
+    status === 'failed' ? 'before:bg-danger-solid' :
     status === 'processing' ? 'before:bg-brand-indigo' :
     status === 'awaiting_user' ? 'before:bg-status-warn' :
     'before:bg-transparent';
@@ -157,7 +157,7 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
 function AvatarStack({ meeting }: { meeting: Meeting }): JSX.Element {
   if (meeting.status === 'failed') {
     return (
-      <div className="w-7 h-7 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center text-xs font-bold border-2 border-surface shrink-0">
+      <div className="w-7 h-7 rounded-full bg-danger-bg text-danger flex items-center justify-center text-xs font-bold border-2 border-surface shrink-0">
         !
       </div>
     );
@@ -233,7 +233,7 @@ function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
 
   if (status === 'failed') {
     return (
-      <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 shrink-0">
+      <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-danger-bg text-danger-text shrink-0">
         FAILED
       </span>
     );

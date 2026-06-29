@@ -264,7 +264,7 @@ function DetailSkeleton({
         </button>
         <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
           {hint?.title ?? (
-            <span className="inline-block h-4 w-48 bg-stone-200/80 rounded animate-pulse align-middle" />
+            <span className="inline-block h-4 w-48 bg-skeleton/80 rounded animate-pulse align-middle" />
           )}
         </div>
         <div className="w-[68px]" />
@@ -304,48 +304,48 @@ function DetailSkeleton({
         {/* Left rail */}
         <div className="order-2 lg:order-first border-r border-surface-border p-4 space-y-4 animate-pulse">
           <div className="space-y-1.5">
-            <div className="h-2 w-12 bg-stone-200/70 rounded" />
-            <div className="h-4 w-32 bg-stone-200/80 rounded" />
+            <div className="h-2 w-12 bg-skeleton/70 rounded" />
+            <div className="h-4 w-32 bg-skeleton/80 rounded" />
           </div>
           <div className="space-y-1.5">
-            <div className="h-2 w-10 bg-stone-200/70 rounded" />
-            <div className="h-3 w-24 bg-stone-200/80 rounded" />
+            <div className="h-2 w-10 bg-skeleton/70 rounded" />
+            <div className="h-3 w-24 bg-skeleton/80 rounded" />
           </div>
           <div className="space-y-1.5">
-            <div className="h-2 w-14 bg-stone-200/70 rounded" />
-            <div className="h-3 w-28 bg-stone-200/80 rounded" />
-            <div className="h-3 w-20 bg-stone-200/80 rounded" />
+            <div className="h-2 w-14 bg-skeleton/70 rounded" />
+            <div className="h-3 w-28 bg-skeleton/80 rounded" />
+            <div className="h-3 w-20 bg-skeleton/80 rounded" />
           </div>
         </div>
         {/* Center pane */}
         <div className="order-1 lg:order-none p-6">
           <div className="flex gap-4 mb-6">
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
           </div>
           <div className="space-y-2.5 animate-pulse">
-            <div className="h-3 bg-stone-200/80 rounded w-[96%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[90%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[94%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[40%] mb-3" />
-            <div className="h-3 bg-stone-200/80 rounded w-[88%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[92%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[55%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[96%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[90%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[94%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[40%] mb-3" />
+            <div className="h-3 bg-skeleton/80 rounded w-[88%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[92%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[55%]" />
           </div>
         </div>
         {/* Right rail */}
         <div className="order-3 border-l border-surface-border p-4 space-y-3 animate-pulse">
-          <div className="h-2 w-16 bg-stone-200/70 rounded" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
+          <div className="h-2 w-16 bg-skeleton/70 rounded" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
         </div>
       </div>
 
       {/* Audio player placeholder */}
       <div className="sticky bottom-0 bg-surface-sunken border-t border-surface-border px-5 py-4">
-        <div className="h-8 bg-stone-200/60 rounded-md animate-pulse" />
+        <div className="h-8 bg-skeleton/60 rounded-md animate-pulse" />
       </div>
     </div>
   );
@@ -491,17 +491,17 @@ function FailureBanner({
   }
 
   return (
-    <div className="px-5 py-4 border-b border-surface-border bg-rose-50 flex items-start gap-4">
+    <div className="px-5 py-4 border-b border-surface-border bg-danger-bg flex items-start gap-4">
       <div className="flex-1 min-w-0">
-        <div className="font-semibold text-rose-800 text-sm">
+        <div className="font-semibold text-danger-text text-sm">
           Processing failed{failedStep ? ` during ${failedStep}` : ''}
         </div>
         {meeting.errorMessage ? (
-          <pre className="mt-1.5 text-xs text-rose-700/90 bg-rose-100/60 border border-rose-200 rounded-md px-2.5 py-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
+          <pre className="mt-1.5 text-xs text-danger-text/90 bg-danger-bg/60 border border-danger-border rounded-md px-2.5 py-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
             {meeting.errorMessage}
           </pre>
         ) : (
-          <div className="text-xs text-rose-700/80 mt-0.5">
+          <div className="text-xs text-danger-text/80 mt-0.5">
             No error detail was recorded. Check the logs in Settings → Diagnostics.
           </div>
         )}
@@ -509,7 +509,7 @@ function FailureBanner({
       <button
         onClick={() => void retry()}
         disabled={retrying}
-        className="shrink-0 text-sm font-semibold bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+        className="shrink-0 text-sm font-semibold bg-danger-solid hover:bg-danger-solid disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
       >
         {retrying ? 'Retrying…' : 'Retry ↻'}
       </button>
@@ -550,8 +550,8 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
                 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums
                 ${isDone ? 'bg-status-okBg/70 text-status-ok' : ''}
                 ${isCurrent && isProcessing ? 'bg-brand-indigo text-white shadow-sm' : ''}
-                ${isFailedHere ? 'bg-rose-100 text-rose-700' : ''}
-                ${isAwaitingHere ? 'bg-amber-200 text-amber-900 shadow-sm' : ''}
+                ${isFailedHere ? 'bg-danger-bg text-danger-text' : ''}
+                ${isAwaitingHere ? 'bg-status-warnBg text-status-warnText shadow-sm' : ''}
                 ${isPending ? 'bg-transparent text-ink-muted' : ''}
               `}
             >
@@ -1334,14 +1334,14 @@ function ActionItemEditor({
                      focus:outline-none focus:border-brand-indigo"
         />
       </div>
-      {err && <div className="text-xs text-rose-600">{err}</div>}
+      {err && <div className="text-xs text-danger">{err}</div>}
       <div className="flex items-center gap-2">
         {initial && onDeleted && (
           <button
             onClick={() => void deleteItem()}
             disabled={busy}
-            className="text-xs font-semibold text-rose-600 hover:text-rose-700 px-2 py-1
-                       rounded hover:bg-rose-50 disabled:opacity-50"
+            className="text-xs font-semibold text-danger hover:text-danger-text px-2 py-1
+                       rounded hover:bg-danger-bg disabled:opacity-50"
           >
             Delete
           </button>
@@ -1502,7 +1502,7 @@ function SummaryToolbar({
         ))}
       </div>
       <div className="flex-1 min-w-0">
-        {error && <span className="text-xs text-rose-600 truncate" title={error}>{error}</span>}
+        {error && <span className="text-xs text-danger truncate" title={error}>{error}</span>}
         {!error && dirty && <span className="text-xs text-ink-muted">Unsaved changes</span>}
         {!error && !dirty && savedAt && (
           <span className="text-xs text-status-ok">
@@ -1674,7 +1674,7 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
           ↓ Markdown
         </button>
         {markdownError && (
-          <div className="text-[11px] text-rose-600">{markdownError}</div>
+          <div className="text-[11px] text-danger">{markdownError}</div>
         )}
         <button
           disabled={!googleSignedIn || !canTaskExport}
@@ -1870,7 +1870,7 @@ function ExportPickerModal({
         </div>
 
         <div className="px-5 py-3 border-t border-surface-border flex items-center gap-3">
-          {error && <div className="text-xs text-rose-600 flex-1 truncate" title={error}>{error}</div>}
+          {error && <div className="text-xs text-danger flex-1 truncate" title={error}>{error}</div>}
           {result && /^https?:\/\//.test(result) ? (
             <div className="text-xs text-status-ok flex-1 truncate" title={result}>
               ✓ Google Doc created —{' '}
@@ -2189,13 +2189,13 @@ function SpeakerEditor({
         <button
           disabled={busy}
           onClick={unlink}
-          className="text-[11px] text-ink-muted hover:text-rose-600 transition underline decoration-dotted"
+          className="text-[11px] text-ink-muted hover:text-danger transition underline decoration-dotted"
         >
           Unassign
         </button>
       )}
 
-      {error && <div className="text-[11px] text-rose-600">{error}</div>}
+      {error && <div className="text-[11px] text-danger">{error}</div>}
     </div>
   );
 }

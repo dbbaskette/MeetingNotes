@@ -5,8 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MeetingNotes</title>
   </head>
-  <body class="bg-stone-50">
+  <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('mn-theme');
+          var dark = t === 'dark' || (t !== 'light' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {}
+      })();
+    </script>
     <!-- Dev-only shim: when running under `vite` (browser preview) the Electron
          preload hasn't set window.api, so every IPC call throws and the whole
          tree unmounts. Install an inert stub so designers can inspect the UI
@@ -34,9 +44,11 @@
             list: async () => window.__mnDevMeetings || [],
             get: async () => null,
             rename: asyncNoop, delete: asyncNoop,
+            undoDelete: async () => false,
             start: asyncNoop, startMany: async () => 0, rerun: asyncNoop,
             setSkipSpeakerId: asyncNoop, continueFromSpeakerId: asyncNoop,
             saveSummary: async () => '',
+            onAdded: () => noop,
           },
           recording: {
             listSources: async () => [],
@@ -61,11 +73,12 @@
           },
           search: { query: async () => [] },
           exports: { run: async () => ({}) },
+          export: { run: async () => ({}) },
           dialog: { save: async () => null },
           settings: {
             // onboardedAt truthy so the preview opens straight to Library.
             // For previewing the wizard itself, edit this line to `null`.
-            getAll: async () => ({ userName: '', autoDetectMeetings: false, onboardedAt: '2026-01-01T00:00:00Z' }),
+            getAll: async () => ({ userName: '', autoDetectMeetings: false, onboardedAt: '2026-01-01T00:00:00Z', theme: 'system' }),
             set: asyncNoop,
           },
           models: { list: async () => [] },
@@ -105,8 +118,21 @@
             exportMarkdown: async () => ({ path: null, markdown: '' }),
           },
           // Drag-and-drop import + transcript export.
+          app: { getVersion: async () => '0.0.0-dev' },
+          google: {
+            authStart: async () => ({ email: null }),
+            authStatus: async () => ({ email: null, hasCredentials: false, signedIn: false }),
+            signOut: asyncNoop,
+          },
+          logs: {
+            tail: async () => ({ path: '', entries: [] }),
+            reveal: asyncNoop,
+          },
+          webhook: { testSend: async () => ({ ts: new Date().toISOString(), status: null, error: 'dev-shim' }) },
           on: () => noop,
           onMenuAction: () => noop,
+          onOpenMeeting: () => noop,
+          onAutoRecordingStarted: () => noop,
         };
         // Top-level extras that don't fit cleanly into a sub-namespace.
         window.api.meetings.importDropped = async () => ({ imported: 0, skipped: [] });

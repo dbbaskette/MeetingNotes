@@ -443,7 +443,7 @@ export function LibraryView({
             onClick={() => setLibFilter('failed')}
             label="Failed"
             n={libCounts.failed}
-            dotClass="bg-rose-500"
+            dotClass="bg-danger-solid"
           />
           <div className="relative flex-1 sm:flex-none sm:w-72 sm:ml-auto min-w-[8rem]">
             <input
@@ -700,10 +700,10 @@ function QueueBanner({
 
   const queuedCount = status.queueLength;
   const tone = status.paused
-    ? 'bg-amber-50 border-amber-200 text-amber-900'
+    ? 'bg-status-warnBg border-status-warn text-status-warnText'
     : 'bg-brand-indigo/5 border-brand-indigo/30 text-ink';
   const dotTone = status.paused
-    ? 'bg-amber-500'
+    ? 'bg-status-warn'
     : 'bg-brand-indigo animate-pulse';
 
   return (
@@ -745,7 +745,7 @@ function QueueBanner({
       {queuedCount > 0 && (
         <button
           onClick={() => void clear()}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg text-ink-muted hover:text-rose-700 hover:bg-rose-50 transition shrink-0"
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg text-ink-muted hover:text-danger-text hover:bg-danger-bg transition shrink-0"
           title="Drop queued meetings (current one keeps running)"
         >
           Clear queue

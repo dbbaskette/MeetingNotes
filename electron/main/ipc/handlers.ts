@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron';
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -588,6 +588,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
+    if (key === 'theme') {
+      nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
+    }
     // Toggle each meeting detector live when the user flips its switch —
     // no need to restart the app. autoDetectMeetings is the object form
     // post-#78 (browserTabs / nativeApps / silenceMs).

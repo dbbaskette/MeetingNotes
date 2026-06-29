@@ -31,6 +31,7 @@ interface Settings {
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  theme: 'system' | 'light' | 'dark';
   googleClientId: string;
   googleClientSecret: string;
 }
@@ -149,6 +150,29 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
         <div className="text-xs text-ink-muted mt-1">
           Steers how verbose the summary prompt asks the model to be, so the level
           stays consistent across different local models. Applies to the next summary.
+        </div>
+      </Field>
+      <Field label="Appearance">
+        <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
+          {(['system', 'light', 'dark'] as const).map((opt) => (
+            <button
+              key={opt}
+              onClick={() => {
+                void update('theme', opt);
+                window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));
+              }}
+              className={`px-4 py-1.5 text-sm capitalize transition border-l border-surface-border first:border-l-0 ${
+                s.theme === opt
+                  ? 'bg-surface-sunken text-ink font-medium'
+                  : 'text-ink-muted hover:text-ink hover:bg-surface-sunken'
+              }`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-ink-muted mt-1">
+          System follows macOS appearance. Light and Dark override it.
         </div>
       </Field>
       <Field label="STT URL (whisper.cpp server)">
@@ -474,9 +498,9 @@ function DiagnosticsSection(): JSX.Element {
 function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
   const levelCls =
     entry.level === 'error'
-      ? 'text-rose-600'
+      ? 'text-danger'
       : entry.level === 'warn'
-        ? 'text-amber-600'
+        ? 'text-status-warn'
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
@@ -503,7 +527,7 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
   const cls = state === 'granted'
     ? 'text-status-ok'
     : state === 'denied'
-      ? 'text-rose-600'
+      ? 'text-danger'
       : 'text-ink-muted';
   const txt = state === 'granted' ? '✓ Granted'
     : state === 'denied' ? '✗ Denied'
@@ -595,7 +619,7 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         </span>
       )}
       {result && !result.ok && (
-        <span className="text-xs text-rose-600 truncate max-w-[16rem]" title={result.error}>
+        <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
           ✗ {result.error}
         </span>
       )}
@@ -668,7 +692,7 @@ function GoogleAccountCard({
           <button
             onClick={() => void signOut()}
             disabled={busy}
-            className="text-xs font-semibold text-ink-muted hover:text-rose-700 px-3 py-1.5 rounded-lg border border-surface-border hover:border-rose-300 disabled:opacity-50 transition"
+            className="text-xs font-semibold text-ink-muted hover:text-danger-text px-3 py-1.5 rounded-lg border border-surface-border hover:border-danger-border disabled:opacity-50 transition"
           >
             Sign out
           </button>
@@ -719,7 +743,7 @@ function GoogleAccountCard({
           )}
         </div>
       )}
-      {error && <div className="text-[11px] text-rose-600 mt-2">{error}</div>}
+      {error && <div className="text-[11px] text-danger mt-2">{error}</div>}
     </section>
   );
 }
@@ -838,7 +862,7 @@ function WebhookExporterCard({
               </span>
             )}
             {lastResult && lastResult.error != null && (
-              <span className="text-xs text-rose-600 truncate max-w-[20rem]" title={lastResult.error}>
+              <span className="text-xs text-danger truncate max-w-[20rem]" title={lastResult.error}>
                 ✗ {lastResult.error}
               </span>
             )}

@@ -202,7 +202,7 @@ function highlight(snippet: string, query: string): React.ReactNode[] {
     if (idx < 0) { out.push(snippet.slice(cursor)); break; }
     if (idx > cursor) out.push(snippet.slice(cursor, idx));
     out.push(
-      <mark key={idx} className="bg-amber-200 text-ink rounded px-0.5">
+      <mark key={idx} className="bg-status-warnBg text-ink rounded px-0.5">
         {snippet.slice(idx, idx + q.length)}
       </mark>,
     );

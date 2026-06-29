@@ -40,6 +40,13 @@ describe('SettingsRepo', () => {
       browserTabs: false, nativeApps: true, silenceMs: 7000,
     });
   });
+  it('theme defaults to system', () => {
+    expect(repo.get('theme')).toBe('system');
+  });
+  it('theme set + get round-trips', () => {
+    repo.set('theme', 'dark');
+    expect(repo.get('theme')).toBe('dark');
+  });
 });
 
 describe('normalizeAutoDetectMeetings', () => {

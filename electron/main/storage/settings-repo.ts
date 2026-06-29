@@ -86,6 +86,9 @@ export interface Settings {
    *   - 'standard' = balanced detail vs. brevity
    *   - 'detailed' = full context, trade-offs, reasoning (original behavior) */
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  /** UI appearance. 'system' follows the OS; 'light'/'dark' force a mode.
+   *  Applied in the renderer (App.tsx) and mirrored to nativeTheme in main. */
+  theme: 'system' | 'light' | 'dark';
   /** Google OAuth client credentials (BYO). The user creates a "Desktop"
    *  OAuth client in Google Cloud and pastes these in. Empty = not configured
    *  (Google export unavailable). The client secret for a desktop client is
@@ -129,6 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
   userSpeakerId: null,
   summaryProvider: 'external',
   summaryDetail: 'detailed',
+  theme: 'system',
   googleClientId: '',
   googleClientSecret: '',
   googleAccountEmail: null,

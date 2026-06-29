@@ -103,7 +103,7 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           </button>
           <button
             onClick={() => { setOpen(false); setModal('delete'); }}
-            className="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50"
+            className="w-full text-left px-3 py-1.5 text-danger hover:bg-danger-bg"
           >
             Delete…
           </button>
@@ -179,7 +179,7 @@ function RenameDialog({
         className="input"
         maxLength={500}
       />
-      {err && <div className="text-xs text-rose-600 mt-2">{err}</div>}
+      {err && <div className="text-xs text-danger mt-2">{err}</div>}
       <div className="flex justify-end gap-2 mt-4">
         <button
           onClick={onClose}
@@ -255,7 +255,7 @@ function DeleteDialog({
         the trash. You&apos;ll have a short window to <strong>Undo</strong>;
         after that the files are permanently removed.
       </div>
-      {err && <div className="text-xs text-rose-600 mb-2">{err}</div>}
+      {err && <div className="text-xs text-danger mb-2">{err}</div>}
       <div className="flex justify-end gap-2">
         <button
           onClick={onClose}
@@ -266,7 +266,7 @@ function DeleteDialog({
         <button
           onClick={() => void confirm()}
           disabled={busy}
-          className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-danger-solid hover:bg-danger-solid disabled:opacity-50"
         >
           {busy ? 'Deleting…' : 'Delete'}
         </button>
