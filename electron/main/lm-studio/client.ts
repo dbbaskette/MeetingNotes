@@ -242,22 +242,36 @@ export class LMStudioClient {
     }
     if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
     const body = (await resp.json()) as {
-      choices: { message: { content: string; reasoning_content?: string } }[];
+      choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
     };
-    const content = body.choices?.[0]?.message?.content ?? '';
-    // Empty content with a populated reasoning_content usually means the model
-    // crashed mid-generation — on Apple Silicon this is almost always the
-    // Metal OOM path, where LM Studio returns a 200 with a truncated response
-    // because the GPU command buffer died. Gemma-31b on a 13k-token transcript
-    // is the canonical trigger. Surface a specific error so the user knows to
-    // switch to a smaller model (qwen3.5-9b, nemotron-3-nano-4b) rather than
-    // chasing a "network" red herring.
+    const choice = body.choices?.[0];
+    const content = choice?.message?.content ?? '';
+    // An empty answer has two very different causes, and conflating them sent
+    // users chasing the wrong fix ("out of GPU memory" when memory was fine):
+    //
+    //  1. Reasoning runaway. A reasoning model burns its whole token budget in
+    //     reasoning_content ("thinking") and never emits an answer — looping on
+    //     a messy transcript. Observed as finish_reason="length" (when capped)
+    //     or a huge reasoning_content with finish_reason="stop" (30k+ thinking
+    //     tokens, zero content). The fix is a non-reasoning model / disabling
+    //     the model's thinking — NOT a smaller model.
+    //  2. Genuine mid-generation crash (Metal GPU OOM), where BOTH content and
+    //     reasoning come back empty. Here a smaller model genuinely helps.
     if (content.trim() === '') {
-      const partial = body.choices?.[0]?.message?.reasoning_content ?? '';
+      const reasoning = (choice?.message?.reasoning_content ?? '').trim();
+      const reasoningWords = reasoning ? reasoning.split(/\s+/).length : 0;
+      if (choice?.finish_reason === 'length' || reasoningWords > 200) {
+        throw new LMStudioError(
+          `LM Studio produced no answer — the model spent its entire token budget ` +
+            `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
+            `This reasoning model is looping on this transcript. In LM Studio, switch to a ` +
+            `non-reasoning model or turn off the model's thinking/reasoning, then retry.` +
+            (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
+        );
+      }
       throw new LMStudioError(
         `LM Studio returned empty content — the model likely ran out of GPU memory ` +
-          `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b). ` +
-          (partial ? `Partial output: "${partial.slice(0, 80)}…"` : ''),
+          `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b).`,
       );
     }
     const cleaned = stripThinking(content);
