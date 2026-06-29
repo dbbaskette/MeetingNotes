@@ -64,7 +64,7 @@ export function SourcePicker({
         Recording from
       </div>
       {loading && <div className="px-2 py-3 text-sm text-ink-muted">Looking…</div>}
-      {error && <div className="px-2 py-3 text-sm text-rose-600">{error}</div>}
+      {error && <div className="px-2 py-3 text-sm text-danger">{error}</div>}
       {!loading && audible.length === 0 && (
         <div className="px-2 py-2 text-[11px] text-ink-muted italic">
           Nothing is currently playing audio. Start a meeting or play a sound,

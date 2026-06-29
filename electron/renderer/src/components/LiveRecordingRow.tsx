@@ -33,8 +33,8 @@ export function LiveRecordingRow({
   }
 
   return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50/40 px-4 py-3 flex items-center gap-4">
-      <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+    <div className="rounded-xl border border-danger-border bg-danger-bg/40 px-4 py-3 flex items-center gap-4">
+      <span className="w-2 h-2 rounded-full bg-danger-solid animate-pulse shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-ink truncate">Recording: {label}</div>
         <div className="text-xs text-ink-muted tabular-nums">{elapsed !== null ? fmtElapsed(elapsed) : '0s'}</div>
@@ -43,7 +43,7 @@ export function LiveRecordingRow({
       <button
         onClick={stop}
         disabled={stopping}
-        className="text-xs font-semibold bg-rose-500 text-white px-3 py-1.5 rounded-md hover:bg-rose-600 disabled:opacity-40"
+        className="text-xs font-semibold bg-danger-solid text-white px-3 py-1.5 rounded-md hover:bg-danger-solid disabled:opacity-40"
       >
         {stopping ? 'Stopping…' : '■ Stop'}
       </button>

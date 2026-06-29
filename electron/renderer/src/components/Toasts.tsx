@@ -102,7 +102,7 @@ function ToastItem({
 }): JSX.Element {
   const variantClass =
     toast.variant === 'error'
-      ? 'bg-rose-600 text-white border-rose-700'
+      ? 'bg-danger-solid text-white border-danger-border'
       : 'bg-ink text-surface border-ink';
   return (
     <div
