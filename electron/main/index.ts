@@ -641,5 +641,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+  // Re-open in the active theme's background so a dark-mode user doesn't get a
+  // light flash when re-launching the window from the dock. nativeTheme.themeSource
+  // was already set at startup, so shouldUseDarkColors is correct here.
+  if (BrowserWindow.getAllWindows().length === 0)
+    void createWindow(nativeTheme.shouldUseDarkColors ? '#171615' : '#fafaf9');
 });
