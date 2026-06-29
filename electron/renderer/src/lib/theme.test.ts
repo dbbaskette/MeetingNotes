@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveDark, type ThemeChoice } from './theme';
+import { resolveDark } from './theme';
 
 describe('resolveDark', () => {
   it('forces dark regardless of system', () => {
