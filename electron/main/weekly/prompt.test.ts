@@ -109,6 +109,40 @@ describe('parseNarrativeResponse', () => {
   });
 });
 
+describe('parseNarrativeResponse — truncated output (salvage + clear error)', () => {
+  it('salvages the narrative and complete themes when cut off mid-theme', () => {
+    // The model hit the token cap partway through the SECOND theme's detail.
+    // narrative + the first (complete) theme fully emitted before the cut.
+    const truncated =
+      '{"narrative":"Full narrative for the week.","themes":[' +
+      '{"title":"T1","detail":"D1","meetings":["A"]},' +
+      '{"title":"T2","detail":"par';
+    const out = parseNarrativeResponse(truncated);
+    expect(out.narrative).toBe('Full narrative for the week.');
+    expect(out.themes).toEqual([
+      { title: 'T1', detail: 'D1', meetings: ['A'] },
+    ]);
+  });
+
+  it('salvages the narrative when cut off right after it, before themes', () => {
+    const truncated = '{"narrative":"Done for the week.","themes":[';
+    const out = parseNarrativeResponse(truncated);
+    expect(out.narrative).toBe('Done for the week.');
+    expect(out.themes).toEqual([]);
+  });
+
+  it('throws an actionable "cut off" error when truncated mid-narrative', () => {
+    const truncated = '{"narrative":"This week was focused on the infra';
+    expect(() => parseNarrativeResponse(truncated)).toThrow(/cut off/i);
+  });
+
+  it('still throws the generic invalid-JSON error for non-truncated garbage', () => {
+    // Balanced/complete-but-malformed input is NOT truncation — keep the
+    // original message so we don't mislabel a genuine parse failure.
+    expect(() => parseNarrativeResponse('not json at all')).toThrow(/invalid JSON/);
+  });
+});
+
 describe('buildUserPrompt', () => {
   it('lays out meetings and actions in a stable readable shape', () => {
     const out = buildUserPrompt({
