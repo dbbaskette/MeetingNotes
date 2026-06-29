@@ -31,6 +31,7 @@ interface Settings {
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  theme: 'system' | 'light' | 'dark';
   googleClientId: string;
   googleClientSecret: string;
 }
