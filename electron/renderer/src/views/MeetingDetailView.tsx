@@ -264,7 +264,7 @@ function DetailSkeleton({
         </button>
         <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
           {hint?.title ?? (
-            <span className="inline-block h-4 w-48 bg-stone-200/80 rounded animate-pulse align-middle" />
+            <span className="inline-block h-4 w-48 bg-skeleton/80 rounded animate-pulse align-middle" />
           )}
         </div>
         <div className="w-[68px]" />
@@ -304,48 +304,48 @@ function DetailSkeleton({
         {/* Left rail */}
         <div className="order-2 lg:order-first border-r border-surface-border p-4 space-y-4 animate-pulse">
           <div className="space-y-1.5">
-            <div className="h-2 w-12 bg-stone-200/70 rounded" />
-            <div className="h-4 w-32 bg-stone-200/80 rounded" />
+            <div className="h-2 w-12 bg-skeleton/70 rounded" />
+            <div className="h-4 w-32 bg-skeleton/80 rounded" />
           </div>
           <div className="space-y-1.5">
-            <div className="h-2 w-10 bg-stone-200/70 rounded" />
-            <div className="h-3 w-24 bg-stone-200/80 rounded" />
+            <div className="h-2 w-10 bg-skeleton/70 rounded" />
+            <div className="h-3 w-24 bg-skeleton/80 rounded" />
           </div>
           <div className="space-y-1.5">
-            <div className="h-2 w-14 bg-stone-200/70 rounded" />
-            <div className="h-3 w-28 bg-stone-200/80 rounded" />
-            <div className="h-3 w-20 bg-stone-200/80 rounded" />
+            <div className="h-2 w-14 bg-skeleton/70 rounded" />
+            <div className="h-3 w-28 bg-skeleton/80 rounded" />
+            <div className="h-3 w-20 bg-skeleton/80 rounded" />
           </div>
         </div>
         {/* Center pane */}
         <div className="order-1 lg:order-none p-6">
           <div className="flex gap-4 mb-6">
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
-            <div className="h-3 w-16 bg-stone-200/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
+            <div className="h-3 w-16 bg-skeleton/70 rounded animate-pulse" />
           </div>
           <div className="space-y-2.5 animate-pulse">
-            <div className="h-3 bg-stone-200/80 rounded w-[96%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[90%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[94%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[40%] mb-3" />
-            <div className="h-3 bg-stone-200/80 rounded w-[88%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[92%]" />
-            <div className="h-3 bg-stone-200/80 rounded w-[55%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[96%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[90%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[94%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[40%] mb-3" />
+            <div className="h-3 bg-skeleton/80 rounded w-[88%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[92%]" />
+            <div className="h-3 bg-skeleton/80 rounded w-[55%]" />
           </div>
         </div>
         {/* Right rail */}
         <div className="order-3 border-l border-surface-border p-4 space-y-3 animate-pulse">
-          <div className="h-2 w-16 bg-stone-200/70 rounded" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
-          <div className="h-9 w-full bg-stone-200/60 rounded-lg" />
+          <div className="h-2 w-16 bg-skeleton/70 rounded" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
+          <div className="h-9 w-full bg-skeleton/60 rounded-lg" />
         </div>
       </div>
 
       {/* Audio player placeholder */}
       <div className="sticky bottom-0 bg-surface-sunken border-t border-surface-border px-5 py-4">
-        <div className="h-8 bg-stone-200/60 rounded-md animate-pulse" />
+        <div className="h-8 bg-skeleton/60 rounded-md animate-pulse" />
       </div>
     </div>
   );
