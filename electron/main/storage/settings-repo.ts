@@ -86,6 +86,14 @@ export interface Settings {
    *   - 'standard' = balanced detail vs. brevity
    *   - 'detailed' = full context, trade-offs, reasoning (original behavior) */
   summaryDetail: 'concise' | 'standard' | 'detailed';
+  /** Tell the LLM to skip its "thinking" / chain-of-thought. On by default.
+   *  Reasoning-capable local models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss)
+   *  otherwise spend their whole token budget reasoning and return no answer
+   *  — which reads as an out-of-memory failure but isn't. When true, chat
+   *  requests carry `chat_template_kwargs: { enable_thinking: false }`. Turn
+   *  off only if a particular model misbehaves with the kwarg or you actually
+   *  want its reasoning. See LMStudioClient.chat / ChatInput.disableThinking. */
+  disableThinking: boolean;
   /** Google OAuth client credentials (BYO). The user creates a "Desktop"
    *  OAuth client in Google Cloud and pastes these in. Empty = not configured
    *  (Google export unavailable). The client secret for a desktop client is
@@ -129,6 +137,7 @@ export const DEFAULT_SETTINGS: Settings = {
   userSpeakerId: null,
   summaryProvider: 'external',
   summaryDetail: 'detailed',
+  disableThinking: true,
   googleClientId: '',
   googleClientSecret: '',
   googleAccountEmail: null,
