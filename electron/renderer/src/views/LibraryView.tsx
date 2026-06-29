@@ -700,10 +700,10 @@ function QueueBanner({
 
   const queuedCount = status.queueLength;
   const tone = status.paused
-    ? 'bg-amber-50 border-amber-200 text-amber-900'
+    ? 'bg-status-warnBg border-status-warn text-status-warnText'
     : 'bg-brand-indigo/5 border-brand-indigo/30 text-ink';
   const dotTone = status.paused
-    ? 'bg-amber-500'
+    ? 'bg-status-warn'
     : 'bg-brand-indigo animate-pulse';
 
   return (

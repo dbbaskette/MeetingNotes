@@ -551,7 +551,7 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
                 ${isDone ? 'bg-status-okBg/70 text-status-ok' : ''}
                 ${isCurrent && isProcessing ? 'bg-brand-indigo text-white shadow-sm' : ''}
                 ${isFailedHere ? 'bg-danger-bg text-danger-text' : ''}
-                ${isAwaitingHere ? 'bg-amber-200 text-amber-900 shadow-sm' : ''}
+                ${isAwaitingHere ? 'bg-status-warnBg text-status-warnText shadow-sm' : ''}
                 ${isPending ? 'bg-transparent text-ink-muted' : ''}
               `}
             >

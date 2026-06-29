@@ -500,7 +500,7 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
     entry.level === 'error'
       ? 'text-danger'
       : entry.level === 'warn'
-        ? 'text-amber-600'
+        ? 'text-status-warn'
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
