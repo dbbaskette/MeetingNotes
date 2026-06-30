@@ -21,8 +21,10 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
     disableThinking: ctx.settings.get('disableThinking'),
     // Bound a runaway/looping generation. The JSON action-item list is short,
     // but a reasoning model spends most of its budget thinking first, so keep
-    // generous headroom; the client also rejects degenerate looping output.
-    maxTokens: 6000,
+    // generous headroom (matched to summarize's 8000) — a verbose-but-finishing
+    // model needs room to get past any preamble to the JSON; the client also
+    // rejects degenerate looping output.
+    maxTokens: 8000,
     messages: [
       { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
       { role: 'user', content: transcript },
