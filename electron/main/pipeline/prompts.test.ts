@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { buildSummaryPrompt } from './prompts.js';
+import { buildSummaryPrompt, ACTION_ITEM_SYSTEM_PROMPT } from './prompts.js';
+
+describe('ACTION_ITEM_SYSTEM_PROMPT', () => {
+  it('forbids reasoning preamble so reasoning models emit the JSON directly', () => {
+    // Regression guard: Gemma-class models ignore enable_thinking and otherwise
+    // burn their whole budget restating the transcript before any JSON. The
+    // prompt must hard-mandate an immediate answer (parity with the summary
+    // prompt's "No preamble" contract).
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('FIRST character you output must be "["');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('Do NOT think out loud');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('skip your chain-of-thought');
+  });
+
+  it('still requires a bare JSON array with no fences', () => {
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('Return ONLY the JSON array');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('no code fences');
+  });
+});
 
 describe('buildSummaryPrompt', () => {
   it('includes the Off-topic Conversation section and its content rule', () => {

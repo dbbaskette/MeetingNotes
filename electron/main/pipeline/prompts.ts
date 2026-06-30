@@ -86,7 +86,9 @@ Content rules:
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 
-export const ACTION_ITEM_SYSTEM_PROMPT = `Extract ONLY genuine action items from the meeting transcript as a JSON array.
+export const ACTION_ITEM_SYSTEM_PROMPT = `Output ONLY genuine action items from the meeting transcript as a JSON array.
+
+Answer immediately with the JSON array and nothing else: the FIRST character you output must be "[" and the LAST must be "]". Do NOT think out loud, plan, restate the transcript, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the array directly.
 
 An action item is a specific, committed task someone agreed to do after the meeting. It MUST have:
 - A clear future-tense action (a verb describing work that hasn't happened yet).
