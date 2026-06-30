@@ -50,6 +50,36 @@ export default {
         },
         skeleton: cssVar('skeleton'),
       },
+      // Drive the `prose` (Tailwind Typography) colors off the same --ink /
+      // --surface CSS variables as the rest of the app. The plugin's stock
+      // palette is hardcoded for light backgrounds (body = gray-700, headings
+      // = gray-900), so in dark mode the summary preview rendered as dark text
+      // on the dark surface — unreadable. Mapping every prose color token to a
+      // CSS var means it follows the theme automatically: the variables swap
+      // on `.dark`, so we never need `dark:prose-invert`, and the same fix
+      // covers WeeklyView's narrative prose too.
+      typography: {
+        DEFAULT: {
+          css: {
+            '--tw-prose-body': 'rgb(var(--ink-soft))',
+            '--tw-prose-headings': 'rgb(var(--ink))',
+            '--tw-prose-lead': 'rgb(var(--ink-soft))',
+            '--tw-prose-links': 'rgb(var(--brand-indigo))',
+            '--tw-prose-bold': 'rgb(var(--ink))',
+            '--tw-prose-counters': 'rgb(var(--ink-muted))',
+            '--tw-prose-bullets': 'rgb(var(--ink-muted))',
+            '--tw-prose-hr': 'rgb(var(--surface-border))',
+            '--tw-prose-quotes': 'rgb(var(--ink-soft))',
+            '--tw-prose-quote-borders': 'rgb(var(--surface-border))',
+            '--tw-prose-captions': 'rgb(var(--ink-muted))',
+            '--tw-prose-code': 'rgb(var(--ink))',
+            '--tw-prose-pre-code': 'rgb(var(--ink-soft))',
+            '--tw-prose-pre-bg': 'rgb(var(--surface-sunken))',
+            '--tw-prose-th-borders': 'rgb(var(--surface-border))',
+            '--tw-prose-td-borders': 'rgb(var(--surface-border))',
+          },
+        },
+      },
       fontFamily: {
         sans: ['-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif'],
       },
