@@ -230,6 +230,32 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE action_items ADD COLUMN source_quote TEXT;
     `,
   },
+  {
+    version: 13,
+    // Learned per-stage ETA (per-stage-progress-eta). Store one duration
+    // sample per stage run, keyed by stage + a coarse transcript-size bucket,
+    // so the UI can show "usually ~3m for a meeting this long on your machine"
+    // next to elapsed time. Per-sample rows (not a rolling aggregate) because
+    // the estimate is a median over the recent samples — that needs the raw
+    // values and is what makes it robust to a single stage that limped to the
+    // request timeout. The runner prunes each (stage, size_bucket) to the most
+    // recent N (see StageDurationsRepo), so the table stays bounded. Lives in
+    // the meetings/library DB alongside the pipeline state it describes.
+    //
+    // NOTE: version 13, not 12 as originally specced — v12 was taken by the
+    // action_items.source_quote provenance migration that landed first.
+    up: `
+      CREATE TABLE IF NOT EXISTS stage_durations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stage TEXT NOT NULL,
+        size_bucket INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        recorded_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_stage_durations_lookup
+        ON stage_durations(stage, size_bucket, recorded_at);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
