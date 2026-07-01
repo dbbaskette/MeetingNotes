@@ -6,6 +6,7 @@ import type { MeetingsRepo } from '../storage/meetings-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
+import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Logger } from '../logging/logger.js';
 
@@ -35,6 +36,10 @@ export interface PipelineContext {
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
   settings: SettingsRepo;
+  /** Per-stage duration samples for the learned ETA. The runner records one
+   *  sample per successful stage; the IPC layer reads recent samples to
+   *  compute the estimate shown next to elapsed time. */
+  stageDurations: StageDurationsRepo;
   roster: RosterService;
   logger: Logger;
 }

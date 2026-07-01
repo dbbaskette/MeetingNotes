@@ -1,6 +1,8 @@
 // electron/main/pipeline/pipeline.ts
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
+import { bucketForChars } from '../lib/stage-eta.js';
+import { transcriptChars } from './transcript-chars.js';
 
 const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('merging'),
@@ -180,8 +182,8 @@ export class Pipeline {
     if (stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing') {
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
       await Promise.all([
-        this.deps.stages.transcribing(input, this.deps.ctx),
-        this.deps.stages.diarizing(input, this.deps.ctx),
+        this.timeStage('transcribing', input, m.slug),
+        this.timeStage('diarizing', input, m.slug),
       ]);
       stage = 'merging';
     }
@@ -212,7 +214,7 @@ export class Pipeline {
           continue;
         }
         this.deps.ctx.meetings.updateStage(meetingId, s);
-        await this.deps.stages[s as WorkStage](input, this.deps.ctx);
+        await this.timeStage(s as WorkStage, input, m.slug);
       }
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
@@ -223,6 +225,22 @@ export class Pipeline {
       } catch (e) {
         this.deps.ctx.logger.error('pipeline:complete-listener-error', { id: meetingId, err: String(e) });
       }
+    }
+  }
+
+  /** Run a stage handler and record its wall-clock duration as an ETA sample,
+   *  bucketed by the meeting's transcript size. Timing must never break a real
+   *  run: a failing stage records nothing (its time isn't representative), and
+   *  a failing telemetry write is logged and swallowed. */
+  private async timeStage(stage: WorkStage, input: StageInput, slug: string): Promise<void> {
+    const start = performance.now();
+    await this.deps.stages[stage](input, this.deps.ctx);
+    const durationMs = performance.now() - start;
+    try {
+      const bucket = bucketForChars(transcriptChars(this.deps.ctx.libraryRoot, slug));
+      this.deps.ctx.stageDurations.record(stage, bucket, durationMs);
+    } catch (e) {
+      this.deps.ctx.logger.error('pipeline:eta-record-failed', { stage, err: String(e) });
     }
   }
 }

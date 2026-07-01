@@ -5,6 +5,7 @@ import path from 'node:path';
 import { openDb } from '../storage/db.js';
 import { MeetingsRepo } from '../storage/meetings-repo.js';
 import { Pipeline } from './pipeline.js';
+import type { StageHandler } from './context.js';
 
 describe('Pipeline', () => {
   it('advances a meeting through all stages, running transcribe + diarize in parallel', async () => {
@@ -113,5 +114,51 @@ describe('Pipeline', () => {
     const m = meetings.findById('m')!;
     expect(m.status).toBe('failed');
     expect(m.pipelineStage).toBe('discovered');
+  });
+
+  describe('stage timing (learned ETA)', () => {
+    function timingDeps(summarizing: StageHandler) {
+      const recorded: Array<{ stage: string; bucket: number; ms: number }> = [];
+      const ctx: any = {
+        libraryRoot: '/nowhere',
+        meetings: {
+          findById: () => ({ id: 'm', slug: 's', pipelineStage: 'summarizing', status: 'processing' }),
+          updateStage: () => {},
+          updateStatus: () => {},
+        },
+        stageDurations: {
+          record: (stage: string, bucket: number, ms: number) => recorded.push({ stage, bucket, ms }),
+          recentSamples: () => [],
+        },
+        logger: { error: () => {}, info: () => {} },
+      };
+      const noop: StageHandler = async () => {};
+      const deps: any = {
+        ctx,
+        stages: {
+          transcribing: noop, diarizing: noop, merging: noop, identifying: noop,
+          summarizing, extracting: noop,
+        },
+      };
+      return { deps, recorded };
+    }
+
+    it('records a positive duration sample for a stage that completes', async () => {
+      const { deps, recorded } = timingDeps(async () => {});
+      const pipeline = new Pipeline(deps);
+      await pipeline.run('m');
+      // transcript.md is absent at /nowhere → bucket 0. summarizing must be recorded.
+      const s = recorded.find((r) => r.stage === 'summarizing');
+      expect(s).toBeDefined();
+      expect(s!.bucket).toBe(0);
+      expect(s!.ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('records nothing for a stage that throws', async () => {
+      const { deps, recorded } = timingDeps(async () => { throw new Error('boom'); });
+      const pipeline = new Pipeline(deps);
+      await expect(pipeline.run('m')).rejects.toThrow();
+      expect(recorded.find((r) => r.stage === 'summarizing')).toBeUndefined();
+    });
   });
 });

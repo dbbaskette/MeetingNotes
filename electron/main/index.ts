@@ -7,6 +7,7 @@ import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
+import { StageDurationsRepo } from './storage/stage-durations-repo.js';
 import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
@@ -126,6 +127,7 @@ app.whenReady().then(async () => {
   const meetings = new MeetingsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
+  const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
 
   // Collapse roster entries with matching display names (case + whitespace
@@ -249,6 +251,7 @@ app.whenReady().then(async () => {
     speakers,
     actionItems,
     settings,
+    stageDurations,
     roster,
     logger,
   };
