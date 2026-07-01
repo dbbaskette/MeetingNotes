@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../ipc/client';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
+import { fmtEta, isRunningLong } from '../lib/fmtEta';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import {
@@ -31,6 +32,7 @@ interface MeetingDetail {
   status: string;
   errorMessage: string | null;
   stageStartedAt: string | null;
+  stageEtaMs: number | null;
   skipSpeakerId: boolean;
   transcriptMd: string | null;
   rawTranscriptText: string | null;
@@ -659,7 +661,14 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
               {isPending && <EmptyDot />}
               <span>{step}</span>
               {isCurrent && isProcessing && elapsed !== null && (
-                <span className="font-normal opacity-80">{fmtElapsed(elapsed)}</span>
+                <span className="font-normal opacity-80">
+                  {fmtElapsed(elapsed)}
+                  {' · '}
+                  <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnText font-semibold' : ''}>
+                    {fmtEta(meeting.stageEtaMs)}
+                    {isRunningLong(elapsed, meeting.stageEtaMs) ? ' · running long' : ''}
+                  </span>
+                </span>
               )}
               {/* No "waiting" word — the pause icon + amber color already say it.
                   Adding the word made the chip wrap to two lines on narrow widths. */}
