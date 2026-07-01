@@ -13,6 +13,7 @@ import {
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
+import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
@@ -481,6 +482,13 @@ function FailureBanner({
 
   const failedStep = USER_STEPS[stepIndexFor(meeting.pipelineStage)] ?? null;
 
+  // The exact substring LMStudioClient.chat() throws when a reasoning model
+  // burns its whole token budget "thinking" instead of answering (see the
+  // empty-content guard in electron/main/lm-studio/client.ts). Gate the
+  // inline recovery controls on it so they only appear for the failure they
+  // actually fix, not every unrelated error.
+  const isReasoningLoopFailure = (meeting.errorMessage ?? '').includes('spent its entire token budget');
+
   async function retry(): Promise<void> {
     if (retrying) return;
     setRetrying(true);
@@ -514,6 +522,7 @@ function FailureBanner({
             No error detail was recorded. Check the logs in Settings → Diagnostics.
           </div>
         )}
+        {isReasoningLoopFailure && <ReasoningRecoveryControls />}
       </div>
       <button
         onClick={() => void retry()}
@@ -522,6 +531,72 @@ function FailureBanner({
       >
         {retrying ? 'Retrying…' : 'Retry ↻'}
       </button>
+    </div>
+  );
+}
+
+/** Lets the user fix a reasoning-model loop failure without leaving the
+ *  meeting to visit Settings. Changing either field here updates the same
+ *  global settings Settings would — this is a shortcut to that existing
+ *  state, not a new per-run override concept — so the change also applies
+ *  to future meetings until changed again. */
+function ReasoningRecoveryControls(): JSX.Element {
+  const [models, setModels] = useState<string[]>([]);
+  const [llmModel, setLlmModel] = useState('');
+  const [disableThinking, setDisableThinking] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([api.models.list(), api.settings.getAll()]).then(([m, settings]) => {
+      if (!alive) return;
+      const modelList = m as string[];
+      const current = settings as { llmModel: string; disableThinking: boolean };
+      setModels(modelList);
+      setLlmModel(current.llmModel);
+      setDisableThinking(current.disableThinking);
+      setLoaded(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  async function changeModel(next: string): Promise<void> {
+    setLlmModel(next);
+    await api.settings.set('llmModel', next);
+  }
+
+  async function changeDisableThinking(next: boolean): Promise<void> {
+    setDisableThinking(next);
+    await api.settings.set('disableThinking', next);
+  }
+
+  if (!loaded) {
+    return <div className="text-xs text-danger-text/70 mt-2 italic">Loading recovery options…</div>;
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-danger-border/60 space-y-2">
+      <div className="text-xs font-semibold text-danger-text">
+        This looks like a reasoning-model loop. Fix it here, then hit Retry:
+      </div>
+      <select
+        value={llmModel}
+        onChange={(e) => void changeModel(e.target.value)}
+        className="input text-xs"
+      >
+        <option value="">(choose)</option>
+        {models.map((m) => (
+          <option key={m} value={m}>{isKnownReasoningModel(m) ? `🧠 ${m}` : m}</option>
+        ))}
+      </select>
+      <label className="flex items-center gap-2 text-xs text-danger-text cursor-pointer">
+        <input
+          type="checkbox"
+          checked={disableThinking}
+          onChange={(e) => void changeDisableThinking(e.target.checked)}
+        />
+        Disable model thinking
+      </label>
     </div>
   );
 }
