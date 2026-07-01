@@ -13,6 +13,8 @@ import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { LMStudioError, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
+import { parseActionItemsLoose } from '../lib/action-item-schema.js';
+import { matchSourceQuotes } from '../lib/action-item-source.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
@@ -50,6 +52,10 @@ export interface IpcServices {
   actionItems: ActionItemsRepo;
   settings: SettingsRepo;
   lmStudio: LMStudioClient;
+  /** Lazy-spawn supervisor for the summary LLM. reextract calls
+   *  ensureReady() before its chat() call, exactly as the extract stage
+   *  does — a no-op when provider='external' (user-managed LM Studio). */
+  llmSupervisor: { ensureReady: () => Promise<void> };
   recordingManager: RecordingManager;
   appEnumerator: AppEnumerator;
   helperPath: string;
@@ -519,6 +525,47 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       ownerName: typeof ownerName === 'string' && ownerName.trim() ? ownerName.trim().slice(0, 200) : null,
       dueDate: typeof dueDate === 'string' && dueDate ? dueDate : null,
     });
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsReextract, async (_e, meetingId: unknown) => {
+    if (typeof meetingId !== 'string' || meetingId.length === 0) throw new Error('invalid args');
+    const meeting = s.meetings.findById(meetingId);
+    if (!meeting) throw new Error('meeting not found');
+    // Re-run ONLY the extract step against the current on-disk summary.md.
+    // Same file, prompt, and token budget as the extract stage
+    // (electron/main/pipeline/stages/extracting.ts) — keep them in lockstep.
+    // Deliberately state-neutral: we never touch pipelineStage/status, so a
+    // 'done' meeting stays 'done' and can't be dragged back into the queue.
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const summaryPath = path.join(folder, 'summary.md');
+    const summary = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8').trim() : '';
+    if (!summary) {
+      throw new Error(
+        'summary.md is missing or empty — save a summary (with an Action Items section) before re-extracting.',
+      );
+    }
+    await s.llmSupervisor.ensureReady();
+    const raw = await s.lmStudio.chat({
+      model: s.settings.get('llmModel'),
+      temperature: 0,
+      disableThinking: s.settings.get('disableThinking'),
+      // Small input, short JSON answer: 2000 is generous while bounding a
+      // still-looping reasoning model to seconds. Matches the extract stage.
+      maxTokens: 2000,
+      messages: [
+        { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
+        { role: 'user', content: summary },
+      ],
+    });
+    // Attach provenance the same way the extract stage does: match each item
+    // back to its verbatim "## Action Items" bullet so re-extracted items keep
+    // their click-to-source affordance. Pure/LLM-free; the summary is already
+    // in memory. Unmatched items get sourceQuote: null.
+    const items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+    fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
+    s.actionItems.replaceForMeeting(meetingId, items);
+    s.logger.info('action-items:reextract', { meetingId, items: items.length });
+    return { count: items.length };
   });
 
   ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {

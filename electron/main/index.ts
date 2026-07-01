@@ -568,6 +568,7 @@ app.whenReady().then(async () => {
     actionItems,
     settings,
     lmStudio,
+    llmSupervisor,
     recordingManager,
     appEnumerator,
     helperPath,
