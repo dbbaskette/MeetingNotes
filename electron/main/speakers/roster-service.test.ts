@@ -45,4 +45,17 @@ describe('RosterService', () => {
     expect(e[0]).toBeCloseTo(0.7, 6);
     expect(e[1]).toBeCloseTo(0.3, 6);
   });
+
+  it('suggestionsFor ranks roster entries by similarity with display names attached', () => {
+    const aliceId = svc.confirmSpeaker({ displayName: 'Alice', embedding: [1, 0, 0] });
+    const bobId = svc.confirmSpeaker({ displayName: 'Bob', embedding: [0, 1, 0] });
+    const out = svc.suggestionsFor({ label: 'Speaker 1', embedding: [0.9, 0.1, 0] });
+    expect(out[0]).toEqual({ id: aliceId, displayName: 'Alice', confidence: expect.any(Number) });
+    expect(out[0]!.confidence).toBeGreaterThan(out[1]!.confidence);
+    expect(out[1]!.id).toBe(bobId);
+  });
+
+  it('suggestionsFor returns an empty array for an empty roster', () => {
+    expect(svc.suggestionsFor({ label: 'Speaker 1', embedding: [1, 0, 0] })).toEqual([]);
+  });
 });

@@ -72,6 +72,7 @@ export const IPC_CHANNELS = {
   speakersRename: 'speakers:rename',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
   actionItemsUpdate: 'action-items:update',

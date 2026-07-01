@@ -457,6 +457,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return id;
   });
 
+  ipc.handle(IPC_CHANNELS.speakersSuggestions, (_e, meetingId: unknown, localLabel: unknown) => {
+    if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
+    const m = s.meetings.findById(meetingId);
+    if (!m) throw new Error('meeting not found');
+    const folder = meetingFolderPath(s.libraryRoot, m.slug);
+    const diarPath = path.join(folder, 'diarization.json');
+    if (!fs.existsSync(diarPath)) return [];
+    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as { segments: DiarizationSegment[] };
+    const embedding = averageEmbeddingForLabel(diar.segments, localLabel);
+    if (!embedding) return [];
+    return s.roster.suggestionsFor({ label: localLabel, embedding });
+  });
+
   ipc.handle(IPC_CHANNELS.speakersUnlink, (_e, meetingId: unknown, localLabel: unknown) => {
     if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
     // "Unlink" removes the roster_speaker_id but keeps the meeting_speakers
