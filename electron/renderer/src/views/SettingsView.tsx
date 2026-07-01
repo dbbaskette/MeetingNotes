@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../ipc/client';
+import { isKnownReasoningModel } from '../lib/reasoning-models';
 
 interface Settings {
   lmStudioUrl: string;
@@ -130,10 +131,17 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           <option value="">(choose)</option>
           {models.map((m) => (
             <option key={m} value={m}>
-              {m}
+              {isKnownReasoningModel(m) ? `🧠 ${m}` : m}
             </option>
           ))}
         </select>
+        {s.llmModel && isKnownReasoningModel(s.llmModel) && (
+          <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5">
+            🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below
+            and burn its token budget on chain-of-thought instead of answering — watch for
+            extract/summarize failures that mention a large &ldquo;reasoning&rdquo; word count.
+          </div>
+        )}
         <div className="text-xs text-ink-muted mt-1">
           Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
         </div>
