@@ -462,17 +462,23 @@ export function LibraryView({
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-muted pointer-events-none">
                 searching…
               </span>
-            ) : (
+            ) : query.trim() === '' ? (
+              // Only surface the palette hint while the box is idle — once the
+              // user is typing/reading inline results, a shortcut to a separate
+              // search overlay is noise, not help.
               <button
                 type="button"
                 onClick={onOpenSearch}
+                aria-label="Open quick search"
                 title="Open quick search (jump to any meeting, keyboard-navigable)"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-ink-muted
-                           border border-surface-border rounded px-1.5 py-0.5 hover:border-brand-indigo hover:text-brand-indigo transition"
+                className="group absolute right-2 top-1/2 -translate-y-1/2"
               >
-                {shortcutMod()}K
+                <kbd className="text-[10px] font-mono text-ink-muted border border-surface-border rounded px-1.5 py-0.5
+                               group-hover:border-brand-indigo group-hover:text-brand-indigo transition">
+                  {shortcutMod()}K
+                </kbd>
               </button>
-            )}
+            ) : null}
           </div>
         </div>
 
