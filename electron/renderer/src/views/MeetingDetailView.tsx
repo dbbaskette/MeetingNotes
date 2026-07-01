@@ -1261,7 +1261,27 @@ function ActionItemsPanel({
 }): JSX.Element {
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [reextracting, setReextracting] = useState(false);
+  const [reextractError, setReextractError] = useState<string | null>(null);
   const items = meeting.actionItems;
+
+  // Re-run ONLY the extract step over the current SAVED summary.md and swap in
+  // the fresh items. The meeting's pipeline state is untouched (a 'done'
+  // meeting stays 'done'); the whole thing is one short LLM call. onReload()
+  // re-fetches the meeting so the regenerated items render.
+  async function reextract(): Promise<void> {
+    if (reextracting) return;
+    setReextracting(true);
+    setReextractError(null);
+    try {
+      await api.actionItems.reextract(meeting.id);
+      await onReload();
+    } catch (e) {
+      setReextractError((e as Error).message);
+    } finally {
+      setReextracting(false);
+    }
+  }
 
   return (
     <div>
@@ -1306,12 +1326,32 @@ function ActionItemsPanel({
         )}
       </div>
       {!adding && (
-        <button
-          onClick={() => setAdding(true)}
-          className="mt-3 text-xs font-semibold text-brand-indigo hover:underline"
-        >
-          + Add item
-        </button>
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setAdding(true)}
+              className="text-xs font-semibold text-brand-indigo hover:underline"
+            >
+              + Add item
+            </button>
+            <button
+              onClick={() => void reextract()}
+              disabled={reextracting}
+              className="text-xs font-semibold text-brand-indigo hover:underline disabled:opacity-50 disabled:no-underline"
+            >
+              {reextracting ? 'Re-extracting…' : '↻ Re-extract from summary'}
+            </button>
+          </div>
+          <div className="text-[11px] text-ink-muted">
+            Re-extract reads the <span className="font-semibold">saved</span> summary. Edit the
+            summary&rsquo;s Action Items section and Save first, then re-extract to pick up your changes.
+          </div>
+          {reextractError && (
+            <div className="text-xs text-danger-text bg-danger-bg border border-danger-border rounded-md px-2.5 py-1.5 whitespace-pre-wrap font-mono">
+              {reextractError}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
