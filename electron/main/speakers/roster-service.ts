@@ -1,6 +1,6 @@
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import { embeddingFilePath, writeEmbedding, readEmbedding } from './embeddings.js';
-import { matchSpeakers, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher.js';
+import { matchSpeakers, rankCandidates, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher.js';
 
 export class RosterService {
   constructor(private readonly repo: SpeakersRepo, private readonly libraryRoot: string) {}
@@ -36,6 +36,23 @@ export class RosterService {
       .map((s) => ({ id: s.id, embedding: this.safeLoad(s.id) }))
       .filter((r): r is { id: string; embedding: number[] } => r.embedding !== null);
     return matchSpeakers(detected, rosterEntries);
+  }
+
+  /** Ranked "might be X" suggestions for one specific unidentified speaker —
+   *  used by the Speakers panel so the user can confirm a guess instead of
+   *  typing a name from scratch. Unlike identifyUnknowns, this has no
+   *  MATCH_THRESHOLD gate: it's for a human to eyeball, not to auto-link. */
+  suggestionsFor(detected: DetectedSpeaker, topN = 3): { id: string; displayName: string; confidence: number }[] {
+    const roster = this.repo.list();
+    const nameById = new Map(roster.map((r) => [r.id, r.displayName]));
+    const candidates = roster
+      .map((r) => ({ id: r.id, embedding: this.safeLoad(r.id) }))
+      .filter((r): r is { id: string; embedding: number[] } => r.embedding !== null);
+    return rankCandidates(detected, candidates, topN).map((c) => ({
+      id: c.id,
+      displayName: nameById.get(c.id) ?? '(unknown)',
+      confidence: c.confidence,
+    }));
   }
 
   private safeLoad(id: string): number[] | null {
