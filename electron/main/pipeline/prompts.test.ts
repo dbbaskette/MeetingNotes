@@ -57,6 +57,21 @@ describe('buildSummaryPrompt', () => {
     expect(p).not.toContain('This meeting is about:');
   });
 
+  it('makes the Action Items section recall-oriented at every detail level', () => {
+    // Action-item extraction now reads the summary instead of the transcript,
+    // so a commitment the summary drops is lost for good. The Action Items
+    // rule must demand a full sweep and exempt itself from brevity guidance —
+    // at all three detail levels, since the rule lives in the shared content
+    // rules, not the per-level length block.
+    for (const detail of ['concise', 'standard', 'detailed'] as const) {
+      const p = buildSummaryPrompt(detail);
+      expect(p).toContain('sweep the ENTIRE transcript for commitments');
+      expect(p).toContain('exempt from the brevity guidance');
+      expect(p).toContain('"(owner TBD)"');
+      expect(p).toContain('"(no date)"');
+    }
+  });
+
   it('treats null knownTopic the same as omitted (infer)', () => {
     const p = buildSummaryPrompt('detailed', null);
     expect(p).toContain("Infer the meeting's main purpose from the transcript itself.");
