@@ -464,10 +464,12 @@ function SpeakerIdControls({
   );
 }
 
-// Shown only when status==='failed'. The pipeline rolls the stage back to a
-// safe re-entry point on failure, so Retry === re-enqueue from there (the
-// same api.meetings.start path the Process button uses); updateStatus clears
-// the stored error so the banner disappears once the retry starts.
+// Shown only when status==='failed'. On failure the pipeline leaves the stage
+// at a safe re-entry point (the failed stage itself for sequential stages, or
+// a rollback to 'discovered' for the parallel transcribe/diarize block), so
+// Retry re-runs from there via api.meetings.rerun — which clears stale
+// artifacts before re-enqueuing; updateStatus clears the stored error so the
+// banner disappears once the retry starts.
 function FailureBanner({
   meeting, onReload,
 }: {
@@ -483,12 +485,13 @@ function FailureBanner({
     if (retrying) return;
     setRetrying(true);
     try {
-      // Retry the exact stage that failed via the same primitive the left
-      // rail's "Re-run pipeline from…" buttons use — meeting.pipelineStage
-      // still holds the failed stage (the pipeline never advances it past a
-      // throw), and unlike api.meetings.start(), rerun() clears any stale
-      // artifacts/action-items/speaker-links left behind by the failed
-      // attempt before re-enqueuing.
+      // Retry from wherever the pipeline left us on failure, via the same
+      // primitive the left rail's "Re-run pipeline from…" buttons use.
+      // meeting.pipelineStage is the failed stage for sequential stages, or
+      // the rolled-back re-entry point ('discovered') for the parallel
+      // transcribe/diarize block. Unlike api.meetings.start(), rerun() clears
+      // any stale artifacts/action-items/speaker-links left behind by the
+      // failed attempt before re-enqueuing.
       await api.meetings.rerun(meeting.id, meeting.pipelineStage);
       await onReload(); // bumps the poll loop; status flips to 'processing'
     } finally {
