@@ -56,6 +56,7 @@ const IPC_CHANNELS = {
   llmDetectProviders: 'llm:detect-providers',
   sttProbe: 'stt:probe',
   llmProbe: 'llm:probe',
+  llmHealthCheckModel: 'llm:health-check-model',
   meetingsImportDropped: 'meetings:import-dropped',
   transcriptExport: 'transcript:export',
   pipelinePause: 'pipeline:pause',
@@ -369,6 +370,15 @@ const api = {
         | { ok: true; models: string[] }
         | { ok: false; error: string }
       >,
+    /** Fire one cheap canary extraction prompt through the real LM Studio
+     *  chat path and report whether the model answered normally or hit the
+     *  "burned its whole token budget thinking" failure — lets a user learn
+     *  this at model-selection time instead of on a real meeting. */
+    healthCheckModel: (modelId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.llmHealthCheckModel, modelId) as Promise<{
+        verdict: 'ok' | 'loops';
+        checkedAt: string;
+      }>,
   },
   stt: {
     /** Probe a whisper-server endpoint by parsing /health JSON. */

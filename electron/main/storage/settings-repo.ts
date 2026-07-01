@@ -94,6 +94,13 @@ export interface Settings {
    *  off only if a particular model misbehaves with the kwarg or you actually
    *  want its reasoning. See LMStudioClient.chat / ChatInput.disableThinking. */
   disableThinking: boolean;
+  /** Cache of on-demand model health-check verdicts, keyed by model id, so
+   *  a model already confirmed "ok" or "loops" isn't re-checked every time
+   *  Settings re-renders. Populated by the llm:health-check-model IPC
+   *  handler; the renderer only reads the immediate call result, but this
+   *  cache lets a future "show past checks" UI reuse the data without a
+   *  new schema migration. */
+  modelHealthChecks: Record<string, { verdict: 'ok' | 'loops'; checkedAt: string }>;
   /** UI appearance. 'system' follows the OS; 'light'/'dark' force a mode.
    *  Applied in the renderer (App.tsx) and mirrored to nativeTheme in main. */
   theme: 'system' | 'light' | 'dark';
@@ -141,6 +148,7 @@ export const DEFAULT_SETTINGS: Settings = {
   summaryProvider: 'external',
   summaryDetail: 'detailed',
   disableThinking: true,
+  modelHealthChecks: {},
   theme: 'system',
   googleClientId: '',
   googleClientSecret: '',
