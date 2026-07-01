@@ -2077,6 +2077,7 @@ function SpeakerEditor({
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<{ id: string; displayName: string; confidence: number }[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Lazy-load the sample the first time the row expands; keeps Library scroll
@@ -2098,6 +2099,17 @@ function SpeakerEditor({
         if (alive) setLoading(false);
       }
     })();
+    return () => { alive = false; };
+  }, [meetingId, localLabel]);
+
+  // Ranked "might be X" guesses, fetched alongside the audio sample. Best-
+  // effort: if it fails, the panel just falls back to the plain dropdown —
+  // this is a convenience, not a required capability.
+  useEffect(() => {
+    let alive = true;
+    api.speakers.suggestions(meetingId, localLabel)
+      .then((list) => { if (alive) setSuggestions(list); })
+      .catch(() => { /* fall back silently to the manual dropdown */ });
     return () => { alive = false; };
   }, [meetingId, localLabel]);
 
@@ -2160,6 +2172,28 @@ function SpeakerEditor({
       {sample && (
         <div className="text-[10px] text-ink-muted tabular-nums">
           Clip from {fmtSec(sample.startS)} – {fmtSec(sample.endS)} ({(sample.endS - sample.startS).toFixed(1)}s)
+        </div>
+      )}
+
+      {/* Confidence-ranked guesses computed from the same voice-embedding
+          match the auto-linker uses — tap one to confirm instead of typing
+          a name from scratch. Excludes whichever entry is already linked. */}
+      {suggestions.filter((sug) => sug.id !== rosterId).length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold text-ink-muted uppercase mb-1">Might be</div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.filter((sug) => sug.id !== rosterId).map((sug) => (
+              <button
+                key={sug.id}
+                disabled={busy}
+                onClick={() => void assignExisting(sug.id)}
+                className="text-[11px] font-medium px-2 py-1 rounded-full bg-brand-indigo/10 text-brand-indigo
+                           hover:bg-brand-indigo/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {sug.displayName} ({Math.round(sug.confidence * 100)}%)
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
