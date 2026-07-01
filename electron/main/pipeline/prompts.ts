@@ -80,15 +80,17 @@ Formatting rules (strict — the output will be rendered directly):
 
 Content rules:
 - Be concrete. Name people, systems, numbers where the transcript supports them.
-- Action Items must have owner and due date if the transcript gives them; otherwise write "(owner TBD)" or "(no date)".
+- Action Items: sweep the ENTIRE transcript for commitments — they are often stated mid-discussion or in the closing minutes, not only in a wrap-up recap. One bullet per item, naming the task, the owner (or "(owner TBD)" if unstated), and the due date (or "(no date)"). This section is exempt from the brevity guidance above: include every genuine commitment, however small — missing a real action item is worse than an extra bullet here.
 - Off-topic Conversation: capture only the social/personal small talk that OPENS or CLOSES the meeting and is unrelated to the meeting's purpose (greetings, weekend plans, weather, sign-offs, stock-market chatter, and similar). List it as 1–3 short bullets naming the topics — do not summarize it in depth. Do NOT pull tangents from the middle of the meeting here; those belong in the main sections. Omit this section entirely if there was no such chatter; when present, it MUST be the final section.
 - This section MOVES off-topic chatter out of the outline — it does not duplicate it. Anything you put in Off-topic Conversation must NOT also appear in Overview, Key Discussion Points, or any other section. The main sections cover only on-topic business; do not add a "small talk" or "(off-topic)" entry to Key Discussion Points, and do not narrate the opening chatter in the Overview.
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 
-export const ACTION_ITEM_SYSTEM_PROMPT = `Output ONLY genuine action items from the meeting transcript as a JSON array.
+export const ACTION_ITEM_SYSTEM_PROMPT = `Output ONLY genuine action items from the meeting notes below as a JSON array.
 
-Answer immediately with the JSON array and nothing else: the FIRST character you output must be "[" and the LAST must be "]". Do NOT think out loud, plan, restate the transcript, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the array directly.
+Answer immediately with the JSON array and nothing else: the FIRST character you output must be "[" and the LAST must be "]". Do NOT think out loud, plan, restate the notes, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the array directly.
+
+The notes are a structured meeting summary. If they contain an "## Action Items" section, treat it as the primary source, but also include committed tasks that appear only under other sections (such as Decisions or Follow-ups). Where the notes write "(owner TBD)", output owner: null; where they write "(no date)", output due_date: null.
 
 An action item is a specific, committed task someone agreed to do after the meeting. It MUST have:
 - A clear future-tense action (a verb describing work that hasn't happened yet).

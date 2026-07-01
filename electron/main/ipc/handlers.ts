@@ -880,13 +880,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.llmHealthCheckModel, async (_e, modelId: unknown) => {
     if (typeof modelId !== 'string' || modelId.length === 0) throw new Error('invalid model id');
     const checkedAt = new Date().toISOString();
-    // Short, representative canary — the exact task shape (structured JSON
-    // extraction) that surfaced the original reasoning-loop bug. Small
-    // enough that a looping model hits the failure fast rather than after
-    // several minutes.
-    const canaryTranscript =
-      '[00:00:00] Dan: We will ship the v2 API by Friday.\n' +
-      '[00:00:05] Priya: I will write the migration guide by Wednesday.';
+    // Short, representative canary — the exact task shape extract really
+    // runs (JSON extraction over a summary, not a raw transcript — see the
+    // 2026-07-01-extract-from-summary spec). Small enough that a looping
+    // model hits the failure fast rather than after several minutes.
+    const canarySummary =
+      '## Action Items\n' +
+      '- Ship the v2 API — Dan — 2026-07-03\n' +
+      '- Write the migration guide — Priya — (no date)';
     let verdict: 'ok' | 'loops';
     try {
       await s.lmStudio.chat({
@@ -896,7 +897,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         maxTokens: 1500,
         messages: [
           { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
-          { role: 'user', content: canaryTranscript },
+          { role: 'user', content: canarySummary },
         ],
       });
       verdict = 'ok';

@@ -16,6 +16,18 @@ describe('ACTION_ITEM_SYSTEM_PROMPT', () => {
     expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('Return ONLY the JSON array');
     expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('no code fences');
   });
+
+  it('targets the meeting notes and maps the summary conventions to nulls', () => {
+    // Extract now runs over summary.md, not the transcript (see the
+    // 2026-07-01-extract-from-summary spec). The prompt must name the notes
+    // as the input, point at the Action Items section as the primary source,
+    // and translate the summary's "(owner TBD)"/"(no date)" markers to null.
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('meeting notes');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).not.toContain('meeting transcript');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"## Action Items" section');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"(owner TBD)"');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"(no date)"');
+  });
 });
 
 describe('buildSummaryPrompt', () => {
@@ -43,6 +55,21 @@ describe('buildSummaryPrompt', () => {
     const p = buildSummaryPrompt('detailed');
     expect(p).toContain("Infer the meeting's main purpose from the transcript itself.");
     expect(p).not.toContain('This meeting is about:');
+  });
+
+  it('makes the Action Items section recall-oriented at every detail level', () => {
+    // Action-item extraction now reads the summary instead of the transcript,
+    // so a commitment the summary drops is lost for good. The Action Items
+    // rule must demand a full sweep and exempt itself from brevity guidance —
+    // at all three detail levels, since the rule lives in the shared content
+    // rules, not the per-level length block.
+    for (const detail of ['concise', 'standard', 'detailed'] as const) {
+      const p = buildSummaryPrompt(detail);
+      expect(p).toContain('sweep the ENTIRE transcript for commitments');
+      expect(p).toContain('exempt from the brevity guidance');
+      expect(p).toContain('"(owner TBD)"');
+      expect(p).toContain('"(no date)"');
+    }
   });
 
   it('treats null knownTopic the same as omitted (infer)', () => {
