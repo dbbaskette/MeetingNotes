@@ -14,6 +14,11 @@ export const MeetingSummarySchema = z.object({
   errorMessage: z.string().nullable(),
   unidentifiedCount: z.number(),
   actionItemsCount: z.number(),
+  /** Learned estimate (ms) for the meeting's CURRENT stage, or null on a cold
+   *  start / non-work stage. The renderer shows it next to elapsed time
+   *  ("summarize — 1m 40s · ~3m"). Median of recent same-size samples on this
+   *  machine; see stage-eta.ts. */
+  stageEtaMs: z.number().nullable(),
   skipSpeakerId: z.boolean(),
   speakers: z.array(z.object({
     localLabel: z.string(),

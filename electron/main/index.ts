@@ -569,6 +569,7 @@ app.whenReady().then(async () => {
     meetings,
     speakers,
     actionItems,
+    stageDurations,
     settings,
     lmStudio,
     llmSupervisor,

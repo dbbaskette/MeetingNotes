@@ -25,6 +25,9 @@ import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
+import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
+import { transcriptChars } from '../pipeline/transcript-chars.js';
+import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import {
   clearArtifactsFromStage,
   shouldClearActionItems,
@@ -50,6 +53,7 @@ export interface IpcServices {
   meetings: MeetingsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
+  stageDurations: StageDurationsRepo;
   settings: SettingsRepo;
   lmStudio: LMStudioClient;
   /** Lazy-spawn supervisor for the summary LLM. reextract calls
@@ -145,6 +149,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         displayName: sp.displayName,
         confidence: sp.confidence,
       }));
+      const stageEtaMs = stageEtaForMeeting(
+        s.stageDurations,
+        m.pipelineStage,
+        transcriptChars(s.libraryRoot, m.slug),
+      );
       return {
         id: m.id, slug: m.slug, title: m.title,
         startedAt: m.startedAt, durationS: m.durationS,
@@ -154,6 +163,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         skipSpeakerId: m.skipSpeakerId,
         unidentifiedCount: unidentifiedCount(speakers),
         actionItemsCount: counts.get(m.id) ?? 0,
+        stageEtaMs,
         speakers,
       };
     });
@@ -190,12 +200,18 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         }
       } catch { /* ignore */ }
     }
+    const stageEtaMs = stageEtaForMeeting(
+      s.stageDurations,
+      m.pipelineStage,
+      transcriptChars(s.libraryRoot, m.slug),
+    );
     return {
       ...m, slug: m.slug,
       stageStartedAt: m.stageStartedAt,
       skipSpeakerId: m.skipSpeakerId,
       unidentifiedCount: unidentifiedCount(speakers),
       actionItemsCount: items.length,
+      stageEtaMs,
       speakers,
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
