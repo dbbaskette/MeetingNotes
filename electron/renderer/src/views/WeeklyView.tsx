@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
+import { fmtDueLabel } from '../lib/due-date';
 import logoUrl from '../assets/logo.png';
 
 interface Props {
@@ -136,15 +137,6 @@ function fmtRange(rangeStart: string, rangeEnd: string, year: number): string {
     month: 'short', day: 'numeric', timeZone: 'UTC',
   });
   return `Week of ${fmt(rangeStart)} – ${fmt(rangeEnd)}, ${year}`;
-}
-
-function fmtDueLabel(due: string | null, rangeEnd: string): { label: string; tier: 'this-week' | 'later' | 'none' } {
-  if (!due) return { label: 'No due date', tier: 'none' };
-  const dueT = new Date(due).getTime();
-  const endT = new Date(rangeEnd).getTime();
-  const tier: 'this-week' | 'later' = dueT <= endT ? 'this-week' : 'later';
-  const label = `Due ${new Date(due).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`;
-  return { label, tier };
 }
 
 export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
@@ -605,7 +597,11 @@ function WeeklyBody({
                                   From {it.meetingTitle} · {fmtDay(it.meetingStartedAt)}
                                 </div>
                               </div>
-                              {due.tier === 'this-week' ? (
+                              {due.tier === 'overdue' ? (
+                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger-bg text-danger-text font-semibold shrink-0">
+                                  {due.label}
+                                </span>
+                              ) : due.tier === 'this-week' ? (
                                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-status-warnBg text-status-warnText font-medium shrink-0">
                                   {due.label}
                                 </span>
