@@ -294,6 +294,7 @@ function AppInner(): JSX.Element {
       onOpen={(id, hint, opts) => setView({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
       onSettings={() => setView({ kind: 'settings' })}
       onWeekly={() => setView({ kind: 'weekly' })}
+      onOpenSearch={() => setSearchOpen(true)}
       liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
       onRecordingStopped={() => setLiveRecording(null)}
