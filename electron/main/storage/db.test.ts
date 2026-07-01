@@ -19,6 +19,13 @@ describe('openDb', () => {
     ]));
   });
 
+  it('adds the action_items.source_quote column', () => {
+    const dir = tmp(); dirs.push(dir);
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const cols = db.prepare("PRAGMA table_info(action_items)").all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain('source_quote');
+  });
+
   it('is idempotent (running twice keeps version)', () => {
     const dir = tmp(); dirs.push(dir);
     const dbPath = path.join(dir, 'db.sqlite');

@@ -217,6 +217,19 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE weekly_summaries ADD COLUMN themes_json TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 12,
+    // Action-item provenance (#provenance). Each extracted action item is a
+    // reworded version of one "## Action Items" bullet in summary.md. Store
+    // the verbatim source bullet so the UI can jump from an item to the
+    // summary text it came from. Nullable with no default: existing rows and
+    // hand-added items (which have no source) read back NULL, exactly the
+    // "unknown provenance" state the UI already handles. Populated only by
+    // the extract stage's post-hoc fuzzy matcher — no LLM/schema change.
+    up: `
+      ALTER TABLE action_items ADD COLUMN source_quote TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
