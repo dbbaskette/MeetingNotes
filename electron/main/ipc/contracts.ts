@@ -78,6 +78,11 @@ export const IPC_CHANNELS = {
   actionItemsUpdate: 'action-items:update',
   actionItemsDelete: 'action-items:delete',
   actionItemsCreate: 'action-items:create',
+  /** Re-run ONLY the extract step against the current on-disk summary.md and
+   *  replace the meeting's action items. Does NOT touch pipeline state — a
+   *  'done' meeting stays 'done'. Used by the Action Items panel's Re-extract
+   *  button after the user edits + saves the summary. Returns { count }. */
+  actionItemsReextract: 'action-items:reextract',
   exportRun: 'export:run',
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',

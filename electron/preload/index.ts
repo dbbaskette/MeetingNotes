@@ -36,6 +36,7 @@ const IPC_CHANNELS = {
   actionItemsUpdate: 'action-items:update',
   actionItemsDelete: 'action-items:delete',
   actionItemsCreate: 'action-items:create',
+  actionItemsReextract: 'action-items:reextract',
   exportRun: 'export:run',
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
@@ -203,6 +204,10 @@ const api = {
     /** Create a single action item for the "Add item" button. */
     create: (meetingId: string, patch: { text: string; ownerName?: string | null; dueDate?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.actionItemsCreate, meetingId, patch) as Promise<void>,
+    /** Re-run only the extract step over the current saved summary.md and
+     *  replace this meeting's action items. Resolves with the new count. */
+    reextract: (meetingId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsReextract, meetingId) as Promise<{ count: number }>,
   },
   export: {
     // `itemIds` is optional — omitting it falls back to exporting every
