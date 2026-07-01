@@ -30,6 +30,7 @@ const IPC_CHANNELS = {
   speakersRename: 'speakers:rename',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
   actionItemsUpdate: 'action-items:update',
@@ -178,6 +179,13 @@ const api = {
       rosterId?: string;
       displayName?: string;
     }) => ipcRenderer.invoke(IPC_CHANNELS.speakersAssign, input) as Promise<string>,
+    // Ranked "might be X" guesses for one unidentified speaker, computed
+    // from the same voice embeddings the auto-matcher uses — just without
+    // its MATCH_THRESHOLD gate, since this is for a human to confirm.
+    suggestions: (meetingId: string, localLabel: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersSuggestions, meetingId, localLabel) as Promise<
+        { id: string; displayName: string; confidence: number }[]
+      >,
     unlink: (meetingId: string, localLabel: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersUnlink, meetingId, localLabel),
   },
