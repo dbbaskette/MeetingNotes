@@ -23,6 +23,8 @@ Return JSON with exactly three fields:
   Group related discussions even when they span multiple meetings. Only build threads from what's in the summaries; don't invent. Cover the substantive topics — don't collapse the week into one vague theme.
 - decisions: array of 3-6 strings, each one explicit decision made during the week. Format each as "<decision> — <source meeting title>". Only include decisions actually stated in the meeting summaries; don't invent.
 
+Answer immediately with the JSON object and nothing else: the FIRST character you output must be "{" and the LAST must be "}". Do NOT think out loud, plan, restate the input, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the object directly.
+
 Output ONLY the JSON object. No prose before or after, no code fences, no comments.`;
 
 export function buildUserPrompt(input: NarrativeInput): string {

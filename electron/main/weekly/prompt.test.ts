@@ -185,4 +185,22 @@ describe('createNarrativeGenerator', () => {
     // Either unset (preferred) or generously high — never a small cap.
     expect(arg.maxTokens === undefined || arg.maxTokens >= 8000).toBe(true);
   });
+
+  it('forbids reasoning preamble so reasoning models emit the JSON directly', async () => {
+    // Regression guard: extracting.ts hit this exact failure — a reasoning
+    // model (Gemma 4-class) restates the input and burns its whole token
+    // budget before ever emitting the answer. maxTokens and disableThinking
+    // are already generous here; the missing piece was the system prompt
+    // never forbidding the preamble outright the way ACTION_ITEM_SYSTEM_PROMPT
+    // does. Guard both the "no preamble" instruction and that the JSON-only
+    // contract survives it.
+    const chat = vi.fn(async () => '{"narrative":"x","themes":[],"decisions":[]}');
+    const gen = createNarrativeGenerator({ chat } as never, () => 'some-model');
+    await gen({ weekLabel: 'W', meetings: [], openActions: [] });
+    const arg = chat.mock.calls[0]![0] as { messages: { content: string }[] };
+    const systemPrompt = arg.messages[0]!.content;
+    expect(systemPrompt).toContain('Do NOT think out loud');
+    expect(systemPrompt).toContain('skip your chain-of-thought');
+    expect(systemPrompt).toContain('Output ONLY the JSON object');
+  });
 });
