@@ -23,6 +23,26 @@ export function matchSpeakers(detected: readonly DetectedSpeaker[], roster: read
   });
 }
 
+export interface RankedCandidate { id: string; confidence: number; }
+
+/** Rank every roster entry by cosine similarity to a detected speaker's
+ *  embedding, with NO threshold gating — unlike matchSpeakers (which only
+ *  auto-links when the best match clears MATCH_THRESHOLD), this is meant to
+ *  drive a manual "might be X" suggestion UI, where even a below-threshold
+ *  guess is more useful than a blank field. matchSpeakers remains the sole
+ *  source of truth for auto-linking; this never changes that behavior. */
+export function rankCandidates(
+  detected: DetectedSpeaker,
+  roster: readonly RosterEntry[],
+  topN = 3,
+): RankedCandidate[] {
+  return roster
+    .filter((r) => r.embedding.length === detected.embedding.length)
+    .map((r) => ({ id: r.id, confidence: cosineSimilarity(detected.embedding, r.embedding) }))
+    .sort((a, b) => b.confidence - a.confidence)
+    .slice(0, topN);
+}
+
 export function updateRunningAverage(old: readonly number[], observed: readonly number[]): number[] {
   if (old.length !== observed.length) throw new Error('length mismatch');
   const out = new Array<number>(old.length);
