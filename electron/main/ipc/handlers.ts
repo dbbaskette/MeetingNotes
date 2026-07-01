@@ -200,6 +200,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
         dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
+        sourceQuote: ai.sourceQuote,
         isMine: isMyItem(ai, me),
       })),
       models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
