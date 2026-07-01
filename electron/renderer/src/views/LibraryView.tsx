@@ -16,6 +16,7 @@ import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
 import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
+import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
 
@@ -32,6 +33,10 @@ interface Props {
   ) => void;
   onSettings: () => void;
   onWeekly: () => void;
+  /** Opens the global ⌘K search palette. Surfaced as a hint inside this
+   *  view's own inline search box so users discover the faster overlay
+   *  instead of assuming this box is the only way to search. */
+  onOpenSearch: () => void;
   /** Recording state is owned by App (so it survives view navigation).
    *  LibraryView just reads + notifies on start/stop. */
   liveRecording: LiveRecording | null;
@@ -54,7 +59,7 @@ interface PipelineStatusSnapshot {
 }
 
 export function LibraryView({
-  onOpen, onSettings, onWeekly, liveRecording, onStartRecording, onRecordingStopped,
+  onOpen, onSettings, onWeekly, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [query, setQuery] = useState('');
@@ -453,10 +458,20 @@ export function LibraryView({
               className="w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
                          focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
             />
-            {isSearching && searchPending && (
+            {isSearching && searchPending ? (
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-muted pointer-events-none">
                 searching…
               </span>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenSearch}
+                title="Open quick search (jump to any meeting, keyboard-navigable)"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-ink-muted
+                           border border-surface-border rounded px-1.5 py-0.5 hover:border-brand-indigo hover:text-brand-indigo transition"
+              >
+                {shortcutMod()}K
+              </button>
             )}
           </div>
         </div>
