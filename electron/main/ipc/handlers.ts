@@ -11,7 +11,8 @@ import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
-import type { LMStudioClient } from '../lm-studio/client.js';
+import { LMStudioError, type LMStudioClient } from '../lm-studio/client.js';
+import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
@@ -874,6 +875,45 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       const msg = e instanceof Error ? e.message : String(e);
       return { ok: false, error: msg.includes('ECONNREFUSED') ? 'connection refused' : msg };
     }
+  });
+
+  ipc.handle(IPC_CHANNELS.llmHealthCheckModel, async (_e, modelId: unknown) => {
+    if (typeof modelId !== 'string' || modelId.length === 0) throw new Error('invalid model id');
+    const checkedAt = new Date().toISOString();
+    // Short, representative canary — the exact task shape (structured JSON
+    // extraction) that surfaced the original reasoning-loop bug. Small
+    // enough that a looping model hits the failure fast rather than after
+    // several minutes.
+    const canaryTranscript =
+      '[00:00:00] Dan: We will ship the v2 API by Friday.\n' +
+      '[00:00:05] Priya: I will write the migration guide by Wednesday.';
+    let verdict: 'ok' | 'loops';
+    try {
+      await s.lmStudio.chat({
+        model: modelId,
+        temperature: 0,
+        disableThinking: true,
+        maxTokens: 1500,
+        messages: [
+          { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
+          { role: 'user', content: canaryTranscript },
+        ],
+      });
+      verdict = 'ok';
+    } catch (e) {
+      // Only the specific reasoning-loop failure counts as "loops" — a
+      // network error or an unloaded model shouldn't be mislabeled as a
+      // reasoning problem.
+      if (e instanceof LMStudioError && e.message.includes('spent its entire token budget')) {
+        verdict = 'loops';
+      } else {
+        throw e;
+      }
+    }
+    const result = { verdict, checkedAt };
+    const cache = s.settings.get('modelHealthChecks');
+    s.settings.set('modelHealthChecks', { ...cache, [modelId]: result });
+    return result;
   });
 
   // Pipeline queue controls. Pause/resume don't touch DB rows — they

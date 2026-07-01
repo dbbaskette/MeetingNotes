@@ -53,6 +53,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   const [perms, setPerms] = useState<AudioPerms | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
+  const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
   const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
@@ -71,6 +72,18 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
   async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
     setS((prev) => (prev ? { ...prev, [key]: value } : prev));
     await api.settings.set(key, value);
+  }
+
+  async function changeLlmModel(modelId: string): Promise<void> {
+    await update('llmModel', modelId);
+    if (!modelId) { setHealthCheck(null); return; }
+    setHealthCheck({ modelId, state: 'checking' });
+    try {
+      const result = await api.llm.healthCheckModel(modelId);
+      setHealthCheck({ modelId, state: result.verdict });
+    } catch {
+      setHealthCheck(null); // best-effort canary; don't block the UI on a failed check
+    }
   }
 
   async function recheckPerms(): Promise<void> {
@@ -125,7 +138,7 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
       <Field label="LLM Model (loaded in LM Studio)">
         <select
           value={s.llmModel}
-          onChange={(e) => update('llmModel', e.target.value)}
+          onChange={(e) => void changeLlmModel(e.target.value)}
           className="input"
         >
           <option value="">(choose)</option>
@@ -135,6 +148,21 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
             </option>
           ))}
         </select>
+        {healthCheck && healthCheck.modelId === s.llmModel && (
+          <div className={`text-xs mt-1.5 px-2.5 py-1 rounded-lg border ${
+            healthCheck.state === 'checking'
+              ? 'text-ink-muted border-surface-border bg-surface-sunken'
+              : healthCheck.state === 'loops'
+                ? 'text-status-warnText border-status-warn/30 bg-status-warnBg'
+                : 'text-status-ok border-status-ok/30 bg-status-okBg/40'
+          }`}>
+            {healthCheck.state === 'checking'
+              ? 'Checking whether this model tends to loop on structured tasks…'
+              : healthCheck.state === 'loops'
+                ? '⚠ This model looped on a quick extraction test — expect it to fail on real meetings too.'
+                : '✓ Passed a quick extraction canary.'}
+          </div>
+        )}
         {s.llmModel && isKnownReasoningModel(s.llmModel) && (
           <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5">
             🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below

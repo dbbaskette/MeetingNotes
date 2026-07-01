@@ -104,6 +104,10 @@ export const IPC_CHANNELS = {
   /** Probe a custom LLM URL for /v1/models. Returns the loaded
    *  model ids, or an error string. Same Settings "Test" button. */
   llmProbe: 'llm:probe',
+  /** Fire one cheap canary extraction prompt at a model through the real
+   *  chat path and report whether it answered ('ok') or looped without
+   *  output ('loops'). Lets Settings warn at model-selection time. */
+  llmHealthCheckModel: 'llm:health-check-model',
   /** Drag-and-drop import: copies the given absolute file paths
    *  into audioWatchPath (the chokidar-watched folder), where the
    *  existing watcher picks them up as new pending meetings.
