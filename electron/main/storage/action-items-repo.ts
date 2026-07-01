@@ -2,10 +2,16 @@ import type Database from 'better-sqlite3';
 import { shortId } from '../lib/slug.js';
 import type { ActionItem } from '../lib/action-item-schema.js';
 
+/** An action item as produced by the extract stage after provenance
+ *  matching: the model's { text, owner, due_date } plus the verbatim
+ *  summary bullet it was matched to (null when nothing matched). */
+export type ActionItemWithSource = ActionItem & { sourceQuote?: string | null };
+
 export interface ActionItemRow {
   id: string; meetingId: string; text: string;
   ownerSpeakerId: string | null; ownerName: string | null;
   dueDate: string | null;
+  sourceQuote: string | null;
   status: string; exportedTo: string[]; createdAt: string;
 }
 
@@ -17,6 +23,7 @@ function row(r: Record<string, unknown>): ActionItemRow {
     ownerSpeakerId: (r.owner_speaker_id as string) ?? null,
     ownerName: (r.owner_name as string) ?? null,
     dueDate: (r.due_date as string) ?? null,
+    sourceQuote: (r.source_quote as string) ?? null,
     status: r.status as string,
     exportedTo: JSON.parse((r.exported_to as string) || '[]'),
     createdAt: r.created_at as string,
@@ -26,16 +33,16 @@ function row(r: Record<string, unknown>): ActionItemRow {
 export class ActionItemsRepo {
   constructor(private readonly db: Database.Database) {}
 
-  replaceForMeeting(meetingId: string, items: readonly ActionItem[]): void {
+  replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {
     const del = this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?');
     const ins = this.db.prepare(`
-      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, due_date, status, exported_to, created_at)
-      VALUES (?, ?, ?, NULL, ?, 'open', '[]', ?)
+      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, due_date, source_quote, status, exported_to, created_at)
+      VALUES (?, ?, ?, NULL, ?, ?, 'open', '[]', ?)
     `);
     const tx = this.db.transaction(() => {
       del.run(meetingId);
       const now = new Date().toISOString();
-      for (const it of items) ins.run(`ai_${shortId()}`, meetingId, it.text, it.due_date, now);
+      for (const it of items) ins.run(`ai_${shortId()}`, meetingId, it.text, it.due_date, it.sourceQuote ?? null, now);
     });
     tx();
   }
