@@ -483,7 +483,13 @@ function FailureBanner({
     if (retrying) return;
     setRetrying(true);
     try {
-      await api.meetings.start(meeting.id);
+      // Retry the exact stage that failed via the same primitive the left
+      // rail's "Re-run pipeline from…" buttons use — meeting.pipelineStage
+      // still holds the failed stage (the pipeline never advances it past a
+      // throw), and unlike api.meetings.start(), rerun() clears any stale
+      // artifacts/action-items/speaker-links left behind by the failed
+      // attempt before re-enqueuing.
+      await api.meetings.rerun(meeting.id, meeting.pipelineStage);
       await onReload(); // bumps the poll loop; status flips to 'processing'
     } finally {
       setRetrying(false);
