@@ -124,3 +124,16 @@ textarea:focus-visible,
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* Provenance jump: brief highlight on the summary bullet an action item
+   was extracted from. Fades out so it draws the eye then gets out of the way.
+   Uses --brand-indigo (the token that already drives focus rings) so it
+   tracks light/dark theme rather than hardcoding the light-mode indigo. */
+.provenance-flash {
+  border-radius: 0.375rem;
+  animation: provenance-flash 2.6s ease-out;
+}
+@keyframes provenance-flash {
+  0%, 40% { background-color: rgb(var(--brand-indigo) / 0.16); box-shadow: 0 0 0 2px rgb(var(--brand-indigo) / 0.30); }
+  100%    { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+}

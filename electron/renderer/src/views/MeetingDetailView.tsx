@@ -45,6 +45,7 @@ interface MeetingDetail {
     dueDate: string | null;
     status: string;
     exportedTo: string[];
+    sourceQuote: string | null;
     isMine: boolean;
   }[];
   models: { stt?: string; llm?: string };
@@ -72,6 +73,16 @@ export function MeetingDetailView({
 }): JSX.Element {
   const [m, setM] = useState<MeetingDetail | null>(null);
   const [tab, setTab] = useState<Tab>('summary');
+  // Provenance jump (#provenance): when the user clicks "Show source" on an
+  // action item, we switch to the Summary tab and ask SummaryPanel to
+  // highlight the bullet whose text matches `quote`. `nonce` lets re-clicking
+  // the same item re-trigger the scroll/highlight even though `quote` is
+  // unchanged. Mirrors how `seekSeconds` drives the transcript jump.
+  const [provenance, setProvenance] = useState<{ quote: string; nonce: number } | null>(null);
+  const showSource = (quote: string): void => {
+    setTab('summary');
+    setProvenance((p) => ({ quote, nonce: (p?.nonce ?? 0) + 1 }));
+  };
   // Lifted audio state so the transcript's click-to-seek + current-line
   // highlight can reach the <audio> element in the sticky footer. The
   // ref survives tab switches; tab switches alone never unmount the
@@ -215,6 +226,8 @@ export function MeetingDetailView({
             currentTime={currentTime}
             onSeek={seekTo}
             onReload={reload}
+            onShowSource={showSource}
+            provenance={provenance}
           />
         </div>
         <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
@@ -786,7 +799,7 @@ function LeftRail({
 }
 
 function CenterPane({
-  meeting, tab, onTab, currentTime, onSeek, onReload,
+  meeting, tab, onTab, currentTime, onSeek, onReload, onShowSource, provenance,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
@@ -794,6 +807,8 @@ function CenterPane({
   currentTime: number;
   onSeek: (seconds: number) => void;
   onReload: () => Promise<void>;
+  onShowSource: (quote: string) => void;
+  provenance: { quote: string; nonce: number } | null;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
@@ -820,7 +835,7 @@ function CenterPane({
         ))}
       </div>
       <div className="p-5">
-        {tab === 'summary' && <SummaryPanel meeting={meeting} onReload={onReload} />}
+        {tab === 'summary' && <SummaryPanel meeting={meeting} onReload={onReload} provenance={provenance} />}
         {tab === 'transcript' && (
           <TranscriptPanel
             meeting={meeting}
@@ -829,7 +844,7 @@ function CenterPane({
             onSeek={onSeek}
           />
         )}
-        {tab === 'actions' && <ActionItemsPanel meeting={meeting} onReload={onReload} />}
+        {tab === 'actions' && <ActionItemsPanel meeting={meeting} onReload={onReload} onShowSource={onShowSource} />}
       </div>
     </div>
   );
@@ -1238,10 +1253,11 @@ function TranscriptGroupRow({ group }: { group: TranscriptGroup }): JSX.Element 
 // text / owner / due-date inputs. Add-item row at the bottom. Delete is
 // hard-delete (no undo — users can retype if they change their mind).
 function ActionItemsPanel({
-  meeting, onReload,
+  meeting, onReload, onShowSource,
 }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
+  onShowSource: (quote: string) => void;
 }): JSX.Element {
   const [editing, setEditing] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -1276,6 +1292,7 @@ function ActionItemsPanel({
               key={it.id}
               item={it}
               onOpen={() => setEditing(it.id)}
+              onShowSource={onShowSource}
             />
           )
         ))}
@@ -1301,31 +1318,47 @@ function ActionItemsPanel({
 }
 
 function ActionItemDisplay({
-  item, onOpen,
+  item, onOpen, onShowSource,
 }: {
   item: MeetingDetail['actionItems'][number];
   onOpen: () => void;
+  onShowSource: (quote: string) => void;
 }): JSX.Element {
   return (
-    <button
-      onClick={onOpen}
-      className="w-full text-left rounded-lg border border-surface-border bg-surface
-                 hover:border-brand-indigo/60 hover:shadow-pop px-3 py-2 transition"
-    >
-      <div className="text-sm text-ink">{item.text}</div>
-      <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
-        {item.ownerName && <span>👤 {item.ownerName}</span>}
-        {item.dueDate && <span>📅 {item.dueDate}</span>}
-        {item.status === 'done' && (
-          <span className="bg-status-okBg text-status-ok font-semibold px-1.5 rounded">DONE</span>
-        )}
-        {item.exportedTo.length > 0 && (
-          <span className="text-ink-muted/70">
-            exported to {item.exportedTo.join(', ')}
-          </span>
-        )}
-      </div>
-    </button>
+    <div className="relative">
+      <button
+        onClick={onOpen}
+        className="w-full text-left rounded-lg border border-surface-border bg-surface
+                   hover:border-brand-indigo/60 hover:shadow-pop px-3 py-2 transition"
+      >
+        <div className="text-sm text-ink">{item.text}</div>
+        <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
+          {item.ownerName && <span>👤 {item.ownerName}</span>}
+          {item.dueDate && <span>📅 {item.dueDate}</span>}
+          {item.status === 'done' && (
+            <span className="bg-status-okBg text-status-ok font-semibold px-1.5 rounded">DONE</span>
+          )}
+          {item.exportedTo.length > 0 && (
+            <span className="text-ink-muted/70">
+              exported to {item.exportedTo.join(', ')}
+            </span>
+          )}
+        </div>
+      </button>
+      {item.sourceQuote && (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={() => onShowSource(item.sourceQuote!)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowSource(item.sourceQuote!); } }}
+          title="Show the summary bullet this came from"
+          className="absolute top-2 right-2 text-[11px] font-semibold text-brand-indigo/80
+                     hover:text-brand-indigo hover:underline cursor-pointer select-none"
+        >
+          ↦ source
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1478,8 +1511,8 @@ function Placeholder({ text }: { text: string }): JSX.Element {
 type SummaryMode = 'view' | 'edit';
 
 function SummaryPanel({
-  meeting, onReload,
-}: { meeting: MeetingDetail; onReload: () => Promise<void> }): JSX.Element {
+  meeting, onReload, provenance,
+}: { meeting: MeetingDetail; onReload: () => Promise<void>; provenance: { quote: string; nonce: number } | null }): JSX.Element {
   const original = meeting.summaryMd ?? '';
   const [mode, setMode] = useState<SummaryMode>('view');
   // `savedValue` is the local baseline — what we believe is on disk. It
@@ -1545,7 +1578,7 @@ function SummaryPanel({
         onSave={save}
         onRevert={() => { setDraft(original); setError(null); }}
       />
-      {mode === 'view' && <MarkdownPreview source={draft} />}
+      {mode === 'view' && <MarkdownPreview source={draft} highlight={provenance} />}
       {mode === 'edit' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MarkdownEditor value={draft} onChange={setDraft} />
@@ -1614,13 +1647,42 @@ function SummaryToolbar({
   );
 }
 
-function MarkdownPreview({ source }: { source: string }): JSX.Element {
+function MarkdownPreview({
+  source, highlight,
+}: {
+  source: string;
+  highlight?: { quote: string; nonce: number } | null;
+}): JSX.Element {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Normalize the way we compare item-source text to rendered markdown text:
+  // markdown may render "—" / smart quotes differently than the on-disk
+  // bullet, and whitespace collapses. Lowercase + strip non-alphanumerics so
+  // "Ship the v2 API — Dan" matches the rendered "Ship the v2 API — Dan".
+  const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !highlight?.quote) return;
+    const target = norm(highlight.quote);
+    if (!target) return;
+    // Search list items first (action items are bullets), then paragraphs.
+    const nodes = Array.from(root.querySelectorAll('li, p')) as HTMLElement[];
+    const hit = nodes.find((n) => norm(n.textContent ?? '').includes(target));
+    if (!hit) return;
+    hit.classList.add('provenance-flash');
+    hit.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const t = setTimeout(() => hit.classList.remove('provenance-flash'), 2600);
+    return () => clearTimeout(t);
+    // `nonce` in the dep list re-runs this when the same item is clicked twice.
+  }, [highlight?.quote, highlight?.nonce]);
+
   // `prose` gives us reasonable defaults for headings, lists, code blocks,
   // tables (via remark-gfm), and links — without us having to hand-style
   // every element. `whitespace-pre-wrap` is intentionally absent: the
   // markdown renderer handles its own line breaks via paragraph splitting.
   return (
-    <div className="prose prose-sm max-w-none prose-headings:mt-3 prose-p:my-2">
+    <div ref={rootRef} className="prose prose-sm max-w-none prose-headings:mt-3 prose-p:my-2">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
     </div>
   );
