@@ -86,9 +86,11 @@ Content rules:
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 
-export const ACTION_ITEM_SYSTEM_PROMPT = `Output ONLY genuine action items from the meeting transcript as a JSON array.
+export const ACTION_ITEM_SYSTEM_PROMPT = `Output ONLY genuine action items from the meeting notes below as a JSON array.
 
-Answer immediately with the JSON array and nothing else: the FIRST character you output must be "[" and the LAST must be "]". Do NOT think out loud, plan, restate the transcript, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the array directly.
+Answer immediately with the JSON array and nothing else: the FIRST character you output must be "[" and the LAST must be "]". Do NOT think out loud, plan, restate the notes, or explain your reasoning before answering — no preamble, no commentary, no code fences. Reasoning-capable models: skip your chain-of-thought entirely and emit the array directly.
+
+The notes are a structured meeting summary. If they contain an "## Action Items" section, treat it as the primary source, but also include committed tasks that appear only under other sections (such as Decisions or Follow-ups). Where the notes write "(owner TBD)", output owner: null; where they write "(no date)", output due_date: null.
 
 An action item is a specific, committed task someone agreed to do after the meeting. It MUST have:
 - A clear future-tense action (a verb describing work that hasn't happened yet).

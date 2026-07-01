@@ -16,6 +16,18 @@ describe('ACTION_ITEM_SYSTEM_PROMPT', () => {
     expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('Return ONLY the JSON array');
     expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('no code fences');
   });
+
+  it('targets the meeting notes and maps the summary conventions to nulls', () => {
+    // Extract now runs over summary.md, not the transcript (see the
+    // 2026-07-01-extract-from-summary spec). The prompt must name the notes
+    // as the input, point at the Action Items section as the primary source,
+    // and translate the summary's "(owner TBD)"/"(no date)" markers to null.
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('meeting notes');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).not.toContain('meeting transcript');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"## Action Items" section');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"(owner TBD)"');
+    expect(ACTION_ITEM_SYSTEM_PROMPT).toContain('"(no date)"');
+  });
 });
 
 describe('buildSummaryPrompt', () => {
