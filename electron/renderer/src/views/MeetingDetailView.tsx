@@ -1589,13 +1589,17 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
   const [exporting, setExporting] = useState<{ id: string; label: string } | null>(null);
   const [markdownError, setMarkdownError] = useState<string | null>(null);
   // Google exporters are enabled once the user has signed in (Settings →
-  // Google account). Fetched once when the rail mounts.
-  const [googleSignedIn, setGoogleSignedIn] = useState(false);
+  // Google account). Fetched once when the rail mounts. We keep the full
+  // status (not just the boolean) so the panel can show which account is
+  // connected instead of making the user discover connection state only by
+  // trying to click a disabled button.
+  const [googleStatus, setGoogleStatus] = useState<{ email: string | null; signedIn: boolean } | null>(null);
   useEffect(() => {
     let alive = true;
-    void api.google.authStatus().then((s) => { if (alive) setGoogleSignedIn(s.signedIn); });
+    void api.google.authStatus().then((s) => { if (alive) setGoogleStatus(s); });
     return () => { alive = false; };
   }, []);
+  const googleSignedIn = googleStatus?.signedIn ?? false;
   const hasItems = meeting.actionItems.length > 0;
   // Markdown export includes the summary + a checklist of action items,
   // so it's useful whenever there's something on disk to export — even a
@@ -1675,6 +1679,17 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
         </button>
         {markdownError && (
           <div className="text-[11px] text-danger">{markdownError}</div>
+        )}
+        {googleStatus && (
+          <div className="flex items-center gap-1.5 text-[11px] text-ink-muted px-0.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${googleSignedIn ? 'bg-status-ok' : 'bg-ink-muted/40'}`}
+              aria-hidden
+            />
+            <span className="truncate">
+              {googleSignedIn ? `Google: ${googleStatus.email ?? 'connected'}` : 'Google: not connected'}
+            </span>
+          </div>
         )}
         <button
           disabled={!googleSignedIn || !canTaskExport}
