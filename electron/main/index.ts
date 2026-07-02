@@ -24,6 +24,7 @@ import { recoverOrphans } from './recording/orphan-recovery.js';
 import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
+import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
 import { recoverPendingMeetings } from './pipeline/recovery.js';
@@ -194,7 +195,10 @@ app.whenReady().then(async () => {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
   });
-  const recordingsDir = path.join(os.homedir(), 'Music', 'MeetingNotes');
+  // Recordings live inside the library root now (Option B). Derived from
+  // libraryPath, so relocating the library moves recordings with it — no
+  // separate setting.
+  const recordingsDir = recordingsDirFor(libraryRoot);
   fs.mkdirSync(recordingsDir, { recursive: true });
   const recordingSessionsRepo = new RecordingSessionsRepo(db);
   const recordingManager = new RecordingManager({
@@ -273,12 +277,14 @@ app.whenReady().then(async () => {
   // unblocked — see the IPC handlers.
   const gateNotified = new Set<string>();
 
-  // Dual-watch: the new built-in recorder writes .m4a into ~/Music/MeetingNotes,
-  // and legacy users still have Audio Hijack writing .mp3 into the configured
-  // path. Watching both keeps the Library a single source of truth across the
-  // transition and afterwards.
+  // Multi-watch (Option B): the built-in recorder now writes .m4a into
+  // <library>/recordings, so that's watched first. We also always watch the
+  // legacy ~/Music/MeetingNotes (old recorder location) and ~/Music/Audio Hijack
+  // (Audio Hijack drops) so files that land there during/after the transition
+  // are still cataloged. The optional user-configured audioWatchPath is appended
+  // last (deduped). Watching all keeps the Library a single source of truth.
   const watcher = new LibraryWatcher({
-    paths: [s.audioWatchPath, recordingsDir, path.join(os.homedir(), 'Music', 'Audio Hijack')],
+    paths: libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
   });
   watcher.onStableFile(async (audioPath) => {
     try {
