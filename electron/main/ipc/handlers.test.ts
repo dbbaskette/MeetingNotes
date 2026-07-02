@@ -24,6 +24,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     libraryRoot: '/tmp',
     llmSupervisor: { ensureReady: async () => {} },
     logger: { info: () => {}, error: () => {} },
+    gateNotified: new Set<string>(),
     ...overrides,
   };
 }
@@ -144,6 +145,30 @@ describe('registerIpcHandlers', () => {
     expect(result.count).toBe(1);
     // Persisted the JSON snapshot alongside the summary.
     expect(fs.existsSync(path.join(folder, 'action-items.json'))).toBe(true);
+  });
+
+  it('clearing the speaker-ID gate flag lets a re-entry notify again', () => {
+    const gateNotified = new Set<string>(['m1']); // already notified this visit
+    const handle = vi.fn();
+    const fakeIpc = { handle } as any;
+    const services = baseServices({
+      gateNotified,
+      libraryRoot: '/tmp/mn-gate-clear',
+      settings: { getAll: () => ({}), get: () => '', set: () => {} },
+      speakers: { list: () => [], listForMeeting: () => [] },
+      meetings: {
+        listAll: () => [],
+        findById: () => ({ id: 'm1', slug: 'm1', pipelineStage: 'awaiting_speaker_id', status: 'awaiting_user' }),
+        updateStage: () => {},
+        updateStatus: () => {},
+      },
+    });
+    registerIpcHandlers(fakeIpc, services);
+    const call = handle.mock.calls.find((c) => c[0] === 'meetings:continue-from-speaker-id');
+    expect(call).toBeDefined();
+    const handler = call![1] as (e: unknown, id: unknown) => void;
+    handler(null, 'm1');
+    expect(gateNotified.has('m1')).toBe(false);
   });
 
   it('action-items:reextract throws (without calling the LLM) when summary.md is missing', async () => {

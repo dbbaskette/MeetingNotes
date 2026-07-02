@@ -40,6 +40,7 @@ import {
 } from '../speakers/sample-extractor.js';
 import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import { clearGateNotified } from '../pipeline/gate-alert.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
@@ -72,6 +73,10 @@ export interface IpcServices {
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
   googleAuth: GoogleAuth;
+  /** Process-lifetime set of meetings we've already alerted about entering the
+   *  speaker-ID gate (see pipeline/gate-alert.ts). Cleared here on the three
+   *  unblock paths so a genuine re-entry into the gate notifies again. */
+  gateNotified: Set<string>;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -272,6 +277,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
     if (shouldClearSpeakerLinks(parsed.fromStage)) s.speakers.unlinkMeeting(parsed.id);
     s.meetings.updateStage(parsed.id, parsed.fromStage);
+    // A re-run may drive the meeting back into the gate — clear so it re-alerts.
+    clearGateNotified(parsed.id, s.gateNotified);
     s.meetings.updateStatus(parsed.id, 'processing');
     s.pipeline.enqueue(parsed.id);
   });
@@ -304,6 +311,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         try {
           remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
+        // Leaving the gate — forget the notified flag so a future re-entry alerts.
+        clearGateNotified(id, s.gateNotified);
         s.meetings.updateStatus(id, 'processing');
         s.pipeline.enqueue(id);
       }
@@ -317,6 +326,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Only meaningful when parked at the gate — guard so an accidental double-
     // click or stale UI state can't re-kick a meeting that's already running.
     if (m.pipelineStage !== 'awaiting_speaker_id') return;
+    // Leaving the gate — forget the notified flag so a future re-entry alerts.
+    clearGateNotified(id, s.gateNotified);
     // Rewrite transcript.md with the user's roster assignments BEFORE
     // summarize runs on it. This is why we re-merge here instead of just
     // bumping the stage — the whole point of the gate is giving the user a
