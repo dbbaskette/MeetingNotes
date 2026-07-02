@@ -188,6 +188,75 @@ describe('LMStudioClient.chat — timeout & runaway handling', () => {
     expect(err.message).toMatch(/GPU memory/i);
   });
 
+  // Gemma 4's reasoning length is intermittent/heavy-tailed: most samples
+  // reason a few hundred words and answer fine, but one occasionally spirals
+  // past the token budget and returns empty content. It can't be suppressed
+  // (Gemma ignores enable_thinking and has no thinking-budget knob), so the
+  // fix is to re-sample the rare spiral rather than hard-fail.
+  const reasoningRunaway = () =>
+    new Response(
+      JSON.stringify({
+        choices: [{
+          finish_reason: 'length',
+          message: { role: 'assistant', content: '', reasoning_content: 'thinking about the meeting. '.repeat(300) },
+        }],
+      }),
+      { status: 200 },
+    );
+  const goodSummary = () =>
+    new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '## Overview\nAll good.' } }],
+      }),
+      { status: 200 },
+    );
+
+  it('re-samples past an intermittent reasoning runaway when resampleRetries > 0', async () => {
+    fetchMock.mockResolvedValueOnce(reasoningRunaway()).mockResolvedValueOnce(goodSummary());
+    const c = new LMStudioClient('http://localhost:1234');
+    const result = await c.chat({
+      model: 'm', messages: [{ role: 'user', content: 'hi' }], resampleRetries: 2,
+    });
+    expect(result).toContain('## Overview');
+    expect(fetchMock).toHaveBeenCalledTimes(2); // spiral, then a clean re-sample
+  });
+
+  it('surfaces the reasoning error only after exhausting resampleRetries', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(reasoningRunaway())); // fresh response per call; every sample spirals
+    const c = new LMStudioClient('http://localhost:1234');
+    const onResample = vi.fn();
+    const err: Error = await c
+      .chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }], resampleRetries: 2, onResample })
+      .catch((e) => e);
+    expect(err.message).toMatch(/no answer|thinking/i);
+    expect(fetchMock).toHaveBeenCalledTimes(3); // initial + 2 retries
+    expect(onResample).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry by default so the health-check canary still detects a loop', async () => {
+    fetchMock.mockResolvedValueOnce(reasoningRunaway());
+    const c = new LMStudioClient('http://localhost:1234');
+    await expect(
+      c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/no answer|thinking/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // no resample without the opt-in
+  });
+
+  it('does NOT re-sample a true OOM even with resampleRetries set', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '', reasoning_content: '' } }] }),
+        { status: 200 },
+      ),
+    ));
+    const c = new LMStudioClient('http://localhost:1234');
+    const err: Error = await c
+      .chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }], resampleRetries: 2 })
+      .catch((e) => e);
+    expect(err.message).toMatch(/GPU memory/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // OOM isn't a re-sampleable condition
+  });
+
   it('rejects degenerate / looping output with an actionable error', async () => {
     const loop = '## Overview\n' + 'much more detailed and '.repeat(900);
     fetchMock.mockResolvedValueOnce(
