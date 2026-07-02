@@ -245,28 +245,42 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
   const [picked, setPicked] = useState<string>('medium.en');
   const [installing, setInstalling] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The model that just finished downloading this session — drives the
+  // explicit "✓ downloaded and ready" confirmation.
+  const [justDownloaded, setJustDownloaded] = useState<string | null>(null);
 
-  async function refresh(): Promise<void> {
+  async function refresh(): Promise<string[]> {
     try {
       const models = (await api.onboarding.listWhisperModels()) as string[];
       setInstalled(models);
       onStatus((models?.length ?? 0) > 0 ? 'ok' : 'pending');
+      return models ?? [];
     }
-    catch (e) { setErr((e as Error).message); }
+    catch (e) { setErr((e as Error).message); return []; }
   }
   useEffect(() => { void refresh(); }, []);
 
   async function install(): Promise<void> {
-    setInstalling(true); setErr(null);
+    setInstalling(true); setErr(null); setJustDownloaded(null);
+    const target = picked;
     try {
-      await api.onboarding.installWhisperModel(picked);
-      await refresh();
+      await api.onboarding.installWhisperModel(target);
+      // Verify the model the user actually picked is now on disk, rather than
+      // trusting the call resolved — a partial/interrupted download would leave
+      // it absent, and the user deserves to know either way.
+      const models = await refresh();
+      if (models.includes(target)) {
+        setJustDownloaded(target);
+      } else {
+        setErr(`Download finished but ${target} isn't showing as installed. Check free disk space and that whisper-cpp is installed, then retry.`);
+      }
     } catch (e) {
       setErr((e as Error).message);
     } finally { setInstalling(false); }
   }
 
   const hasAny = (installed?.length ?? 0) > 0;
+  const pickedInstalled = installed?.includes(picked) ?? false;
   return (
     <div>
       <StepHeader title="Download a Whisper model" />
@@ -285,23 +299,33 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
       )}
       <select
         value={picked}
-        onChange={(e) => setPicked(e.target.value)}
+        onChange={(e) => { setPicked(e.target.value); setErr(null); setJustDownloaded(null); }}
         disabled={installing}
-        className="input mb-2"
+        className="input mb-1"
       >
         {WHISPER_MODELS.map((m) => (
           <option key={m.name} value={m.name}>
-            {m.name} · {m.size} · {m.desc}
+            {m.name} · {m.size} · {m.desc}{installed?.includes(m.name) ? ' · installed' : ''}
           </option>
         ))}
       </select>
+      <div className="text-xs text-ink-muted mb-2 h-4">
+        {pickedInstalled && `${picked} is already installed — you're set.`}
+      </div>
       <button
         onClick={() => void install()}
         disabled={installing}
         className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2 disabled:opacity-50"
       >
-        {installing ? 'Downloading… (this can take a few minutes)' : `Download ${picked}`}
+        {installing ? 'Downloading… (this can take a few minutes)'
+          : pickedInstalled ? `Re-download ${picked}`
+            : `Download ${picked}`}
       </button>
+      {justDownloaded && (
+        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1.5 mt-2">
+          ✓ {justDownloaded} downloaded and ready to transcribe.
+        </div>
+      )}
       {err && <div className="text-xs text-danger mt-2">{err}</div>}
       <div className="text-xs text-ink-muted mt-3">
         Requires <code className="bg-surface-sunken px-1 py-0.5 rounded">whisper-cpp</code> installed via Homebrew. If the install button errors, run{' '}
@@ -319,6 +343,22 @@ function HfStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Elemen
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid' | 'error'>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [savedUser, setSavedUser] = useState<string | null>(null);
+  const [alreadySaved, setAlreadySaved] = useState(false);
+
+  // Steps unmount when you navigate away, so this component re-mounts blank on
+  // "Back". The token itself lives on disk — reflect that instead of showing an
+  // empty field that looks like the token was lost. (We never read the secret
+  // back into the UI; replacing it just means typing a new one.)
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { saved } = await api.onboarding.hfTokenStatus();
+        if (saved) { setAlreadySaved(true); onStatus('ok'); }
+      } catch { /* best-effort */ }
+    })();
+    // onStatus is stable enough for a mount-only effect here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function validateAndSave(): Promise<void> {
     const trimmed = token.trim();
@@ -372,11 +412,17 @@ function HfStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Elemen
           </li>
         ))}
       </ul>
+      {alreadySaved && status !== 'valid' && (
+        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1.5 mb-2">
+          ✓ A Hugging Face token is already saved on this Mac — you&apos;re set.
+          Enter a new one below only if you want to replace it.
+        </div>
+      )}
       <input
         type="password"
         value={token}
         onChange={(e) => setToken(e.target.value)}
-        placeholder="hf_..."
+        placeholder={alreadySaved ? 'hf_… (replace the saved token)' : 'hf_...'}
         disabled={validating || status === 'valid'}
         className="input mb-2"
       />
@@ -385,7 +431,9 @@ function HfStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Elemen
         disabled={validating || status === 'valid'}
         className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2 disabled:opacity-50"
       >
-        {validating ? 'Checking…' : status === 'valid' ? '✓ Saved' : 'Validate & save'}
+        {validating ? 'Checking…'
+          : status === 'valid' ? '✓ Saved'
+            : alreadySaved ? 'Replace token' : 'Validate & save'}
       </button>
       {status === 'valid' && savedUser && (
         <div className="text-xs text-status-ok mt-2">
