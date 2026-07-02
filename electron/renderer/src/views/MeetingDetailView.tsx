@@ -33,6 +33,7 @@ interface MeetingDetail {
   errorMessage: string | null;
   stageStartedAt: string | null;
   stageEtaMs: number | null;
+  stageEtaRough: boolean;
   skipSpeakerId: boolean;
   transcriptMd: string | null;
   rawTranscriptText: string | null;
@@ -665,7 +666,7 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
                   {fmtElapsed(elapsed)}
                   {' · '}
                   <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnText font-semibold' : ''}>
-                    {fmtEta(meeting.stageEtaMs)}
+                    {fmtEta(meeting.stageEtaMs, meeting.stageEtaRough)}
                     {isRunningLong(elapsed, meeting.stageEtaMs) ? ' · running long' : ''}
                   </span>
                 </span>
