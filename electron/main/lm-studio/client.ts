@@ -45,6 +45,13 @@ function mimeFromExt(filePath: string): string {
   }
 }
 
+/** Substring of the reasoning-runaway error thrown by chat() below. The
+ *  health-check IPC handler gates its "loops" verdict on it, and the renderer
+ *  keeps a hand-copied twin (electron/renderer/src/lib/reasoning-loop.ts —
+ *  renderer code can't import main-process modules) to gate the failure
+ *  banner's recovery controls. A parity test keeps the copies in sync. */
+export const REASONING_LOOP_MARKER = 'spent its entire token budget';
+
 export class LMStudioError extends Error {
   constructor(message: string, public cause?: unknown) {
     super(message);
@@ -276,7 +283,7 @@ export class LMStudioClient {
       const reasoningWords = reasoning ? reasoning.split(/\s+/).length : 0;
       if (choice?.finish_reason === 'length' || reasoningWords > 200) {
         throw new LMStudioError(
-          `LM Studio produced no answer — the model spent its entire token budget ` +
+          `LM Studio produced no answer — the model ${REASONING_LOOP_MARKER} ` +
             `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
             `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
             `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +

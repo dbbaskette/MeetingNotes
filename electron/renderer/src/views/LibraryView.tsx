@@ -17,6 +17,7 @@ import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
 import { awaitingGateMeetings } from '../lib/awaiting-gate';
+import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
@@ -51,13 +52,6 @@ type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 // the pipeline hasn't reached `done`, it's just paused for input. So the
 // Processing filter and counter both bucket awaiting_user with processing.
 const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
-
-interface PipelineStatusSnapshot {
-  paused: boolean;
-  currentId: string | null;
-  queueLength: number;
-  queueIds: string[];
-}
 
 export function LibraryView({
   onOpen, onSettings, onWeekly, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,

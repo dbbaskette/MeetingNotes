@@ -11,7 +11,7 @@ import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
-import { LMStudioError, type LMStudioClient } from '../lm-studio/client.js';
+import { LMStudioError, REASONING_LOOP_MARKER, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { parseActionItemsLoose } from '../lib/action-item-schema.js';
 import { matchSourceQuotes } from '../lib/action-item-source.js';
@@ -982,7 +982,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       // Only the specific reasoning-loop failure counts as "loops" — a
       // network error or an unloaded model shouldn't be mislabeled as a
       // reasoning problem.
-      if (e instanceof LMStudioError && e.message.includes('spent its entire token budget')) {
+      if (e instanceof LMStudioError && e.message.includes(REASONING_LOOP_MARKER)) {
         verdict = 'loops';
       } else {
         throw e;
