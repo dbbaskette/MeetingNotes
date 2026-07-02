@@ -1,5 +1,5 @@
 // electron/main/ipc/stage-eta-for-meeting.ts
-import { bucketForChars, estimateMs, MAX_SAMPLES_PER_BUCKET } from '../lib/stage-eta.js';
+import { bucketForChars, estimateStage, MAX_SAMPLES_PER_BUCKET, type StageEstimate } from '../lib/stage-eta.js';
 
 interface SampleSource {
   recentSamples(stage: string, sizeBucket: number, limit: number): number[];
@@ -11,27 +11,33 @@ const WORK_STAGES = new Set([
   'transcribing', 'diarizing', 'merging', 'identifying', 'summarizing', 'extracting',
 ]);
 
-function estimateForStage(repo: SampleSource, stage: string, bucket: number): number | null {
-  return estimateMs(repo.recentSamples(stage, bucket, MAX_SAMPLES_PER_BUCKET));
+function estimateForStage(repo: SampleSource, stage: string, bucket: number): StageEstimate | null {
+  return estimateStage(repo.recentSamples(stage, bucket, MAX_SAMPLES_PER_BUCKET));
 }
 
-/** Learned estimate (ms) for a meeting's CURRENT pipeline stage, or null on a
+/** Learned estimate for a meeting's CURRENT pipeline stage, or null on a true
  *  cold start / non-work stage. `transcribing` and `diarizing` run in parallel
  *  and collapse to one user "transcribe" step, so their estimate is the max of
- *  the two (wall-clock is bounded by the slower branch); max ignores a null
- *  sibling so a single warm branch still yields a number. */
+ *  the two (wall-clock is bounded by the slower branch); a null sibling is
+ *  ignored so a single warm branch still yields a number. The combined estimate
+ *  is `rough` if any contributing (non-null) branch is rough. */
 export function stageEtaForMeeting(
   repo: SampleSource,
   pipelineStage: string,
   transcriptCharCount: number,
-): number | null {
+): StageEstimate | null {
   if (!WORK_STAGES.has(pipelineStage)) return null;
   const bucket = bucketForChars(transcriptCharCount);
   if (pipelineStage === 'transcribing' || pipelineStage === 'diarizing') {
-    const t = estimateForStage(repo, 'transcribing', bucket);
-    const d = estimateForStage(repo, 'diarizing', bucket);
-    if (t === null && d === null) return null;
-    return Math.max(t ?? 0, d ?? 0);
+    const branches = [
+      estimateForStage(repo, 'transcribing', bucket),
+      estimateForStage(repo, 'diarizing', bucket),
+    ].filter((b): b is StageEstimate => b !== null);
+    if (branches.length === 0) return null;
+    return {
+      etaMs: Math.max(...branches.map((b) => b.etaMs)),
+      rough: branches.some((b) => b.rough),
+    };
   }
   return estimateForStage(repo, pipelineStage, bucket);
 }
