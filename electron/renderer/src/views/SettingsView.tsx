@@ -47,7 +47,13 @@ interface ProviderAvailability {
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
 
-export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
+export function SettingsView({
+  onBack,
+  onRunSetupAgain,
+}: {
+  onBack: () => void;
+  onRunSetupAgain?: () => void;
+}): JSX.Element {
   const [s, setS] = useState<Settings | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [perms, setPerms] = useState<AudioPerms | null>(null);
@@ -97,6 +103,14 @@ export function SettingsView({ onBack }: { onBack: () => void }): JSX.Element {
           ← Back
         </button>
         <h1 className="font-semibold">Settings</h1>
+        {onRunSetupAgain && (
+          <button
+            onClick={onRunSetupAgain}
+            className="ml-auto text-sm text-brand-indigo hover:underline"
+          >
+            Run setup again
+          </button>
+        )}
       </div>
 
       <Field label="Summary provider (LLM lifecycle)">

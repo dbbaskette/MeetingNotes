@@ -13,6 +13,8 @@ import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { LMStudioError, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
+import { parseActionItemsLoose } from '../lib/action-item-schema.js';
+import { matchSourceQuotes } from '../lib/action-item-source.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
@@ -23,6 +25,9 @@ import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
+import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
+import { transcriptChars } from '../pipeline/transcript-chars.js';
+import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import {
   clearArtifactsFromStage,
   shouldClearActionItems,
@@ -35,6 +40,7 @@ import {
 } from '../speakers/sample-extractor.js';
 import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import { clearGateNotified } from '../pipeline/gate-alert.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
@@ -48,8 +54,13 @@ export interface IpcServices {
   meetings: MeetingsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
+  stageDurations: StageDurationsRepo;
   settings: SettingsRepo;
   lmStudio: LMStudioClient;
+  /** Lazy-spawn supervisor for the summary LLM. reextract calls
+   *  ensureReady() before its chat() call, exactly as the extract stage
+   *  does — a no-op when provider='external' (user-managed LM Studio). */
+  llmSupervisor: { ensureReady: () => Promise<void> };
   recordingManager: RecordingManager;
   appEnumerator: AppEnumerator;
   helperPath: string;
@@ -62,6 +73,10 @@ export interface IpcServices {
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
   googleAuth: GoogleAuth;
+  /** Process-lifetime set of meetings we've already alerted about entering the
+   *  speaker-ID gate (see pipeline/gate-alert.ts). Cleared here on the three
+   *  unblock paths so a genuine re-entry into the gate notifies again. */
+  gateNotified: Set<string>;
 }
 
 const MAX_EMBEDDING_DIMS = 8192;
@@ -139,6 +154,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         displayName: sp.displayName,
         confidence: sp.confidence,
       }));
+      const stageEtaMs = stageEtaForMeeting(
+        s.stageDurations,
+        m.pipelineStage,
+        transcriptChars(s.libraryRoot, m.slug),
+      );
       return {
         id: m.id, slug: m.slug, title: m.title,
         startedAt: m.startedAt, durationS: m.durationS,
@@ -148,6 +168,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         skipSpeakerId: m.skipSpeakerId,
         unidentifiedCount: unidentifiedCount(speakers),
         actionItemsCount: counts.get(m.id) ?? 0,
+        stageEtaMs,
         speakers,
       };
     });
@@ -184,12 +205,18 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         }
       } catch { /* ignore */ }
     }
+    const stageEtaMs = stageEtaForMeeting(
+      s.stageDurations,
+      m.pipelineStage,
+      transcriptChars(s.libraryRoot, m.slug),
+    );
     return {
       ...m, slug: m.slug,
       stageStartedAt: m.stageStartedAt,
       skipSpeakerId: m.skipSpeakerId,
       unidentifiedCount: unidentifiedCount(speakers),
       actionItemsCount: items.length,
+      stageEtaMs,
       speakers,
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
@@ -200,6 +227,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
         dueDate: ai.dueDate, status: ai.status, exportedTo: ai.exportedTo,
+        sourceQuote: ai.sourceQuote,
         isMine: isMyItem(ai, me),
       })),
       models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
@@ -249,6 +277,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
     if (shouldClearSpeakerLinks(parsed.fromStage)) s.speakers.unlinkMeeting(parsed.id);
     s.meetings.updateStage(parsed.id, parsed.fromStage);
+    // A re-run may drive the meeting back into the gate — clear so it re-alerts.
+    clearGateNotified(parsed.id, s.gateNotified);
     s.meetings.updateStatus(parsed.id, 'processing');
     s.pipeline.enqueue(parsed.id);
   });
@@ -281,6 +311,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         try {
           remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
+        // Leaving the gate — forget the notified flag so a future re-entry alerts.
+        clearGateNotified(id, s.gateNotified);
         s.meetings.updateStatus(id, 'processing');
         s.pipeline.enqueue(id);
       }
@@ -294,6 +326,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Only meaningful when parked at the gate — guard so an accidental double-
     // click or stale UI state can't re-kick a meeting that's already running.
     if (m.pipelineStage !== 'awaiting_speaker_id') return;
+    // Leaving the gate — forget the notified flag so a future re-entry alerts.
+    clearGateNotified(id, s.gateNotified);
     // Rewrite transcript.md with the user's roster assignments BEFORE
     // summarize runs on it. This is why we re-merge here instead of just
     // bumping the stage — the whole point of the gate is giving the user a
@@ -518,6 +552,47 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       ownerName: typeof ownerName === 'string' && ownerName.trim() ? ownerName.trim().slice(0, 200) : null,
       dueDate: typeof dueDate === 'string' && dueDate ? dueDate : null,
     });
+  });
+
+  ipc.handle(IPC_CHANNELS.actionItemsReextract, async (_e, meetingId: unknown) => {
+    if (typeof meetingId !== 'string' || meetingId.length === 0) throw new Error('invalid args');
+    const meeting = s.meetings.findById(meetingId);
+    if (!meeting) throw new Error('meeting not found');
+    // Re-run ONLY the extract step against the current on-disk summary.md.
+    // Same file, prompt, and token budget as the extract stage
+    // (electron/main/pipeline/stages/extracting.ts) — keep them in lockstep.
+    // Deliberately state-neutral: we never touch pipelineStage/status, so a
+    // 'done' meeting stays 'done' and can't be dragged back into the queue.
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const summaryPath = path.join(folder, 'summary.md');
+    const summary = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8').trim() : '';
+    if (!summary) {
+      throw new Error(
+        'summary.md is missing or empty — save a summary (with an Action Items section) before re-extracting.',
+      );
+    }
+    await s.llmSupervisor.ensureReady();
+    const raw = await s.lmStudio.chat({
+      model: s.settings.get('llmModel'),
+      temperature: 0,
+      disableThinking: s.settings.get('disableThinking'),
+      // Small input, short JSON answer: 2000 is generous while bounding a
+      // still-looping reasoning model to seconds. Matches the extract stage.
+      maxTokens: 2000,
+      messages: [
+        { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
+        { role: 'user', content: summary },
+      ],
+    });
+    // Attach provenance the same way the extract stage does: match each item
+    // back to its verbatim "## Action Items" bullet so re-extracted items keep
+    // their click-to-source affordance. Pure/LLM-free; the summary is already
+    // in memory. Unmatched items get sourceQuote: null.
+    const items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+    fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
+    s.actionItems.replaceForMeeting(meetingId, items);
+    s.logger.info('action-items:reextract', { meetingId, items: items.length });
+    return { count: items.length };
   });
 
   ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {

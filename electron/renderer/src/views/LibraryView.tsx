@@ -16,6 +16,7 @@ import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
 import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
+import { awaitingGateMeetings } from '../lib/awaiting-gate';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
@@ -283,6 +284,11 @@ export function LibraryView({
     [meetings],
   );
 
+  // Meetings parked at the speaker-ID gate (status='awaiting_user'). Drives the
+  // app-wide "needs you to name voices" badge below — the per-row amber
+  // treatment already lives in LibraryRow, this is the summary signal.
+  const awaiting = useMemo(() => awaitingGateMeetings(meetings), [meetings]);
+
   // Drop stale selections — a meeting that just transitioned out of pending
   // (e.g. user clicked Process and it's now 'processing') shouldn't stay
   // checked. Keeps the "N selected" pill honest.
@@ -393,6 +399,28 @@ export function LibraryView({
           toast={toast}
         />
       </div>
+
+      {/* App-wide speaker-ID gate summary. Appears whenever ≥1 meeting is
+          parked at the gate; clicking it opens the first one so the user can
+          name voices and unblock the pipeline. The per-row amber edge / "?"
+          avatar already lives in LibraryRow — this is the catalog-level nudge. */}
+      {awaiting.length > 0 && (
+        <div className="shrink-0">
+          <button
+            type="button"
+            onClick={() => onOpen(awaiting[0]!.id, {
+              title: awaiting[0]!.title,
+              pipelineStage: awaiting[0]!.pipelineStage,
+              status: awaiting[0]!.status,
+            })}
+            className="w-full mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-status-warnBg text-status-warnText border border-status-warn/30 text-sm font-medium hover:border-status-warn/60 transition text-left"
+          >
+            <span className="w-2 h-2 rounded-full bg-status-warn shrink-0" />
+            {awaiting.length} meeting{awaiting.length === 1 ? '' : 's'} need you to name voices
+            <span className="ml-auto text-xs text-status-warnText/70">Open →</span>
+          </button>
+        </div>
+      )}
 
 
       {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}

@@ -1,6 +1,8 @@
 // electron/main/pipeline/pipeline.ts
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
+import { bucketForChars } from '../lib/stage-eta.js';
+import { transcriptChars } from './transcript-chars.js';
 
 const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('merging'),
@@ -34,6 +36,11 @@ export type PipelineStatusListener = (s: PipelineStatus) => void;
  *  but their errors are isolated — webhook delivery failures must not
  *  poison the next meeting's run. Issue #79. */
 export type MeetingCompleteListener = (meetingId: string) => void | Promise<void>;
+/** Fires the instant a meeting enters the `awaiting_speaker_id` gate — the one
+ *  place the pipeline stops and waits on the user. The wiring in index.ts uses
+ *  it to raise a native notification. Errors thrown by listeners are isolated
+ *  so a bad listener can't wedge the pipeline. */
+export type SpeakerGateListener = (meetingId: string) => void;
 
 export class Pipeline {
   private queue: string[] = [];
@@ -43,6 +50,7 @@ export class Pipeline {
   private currentId: string | null = null;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
   private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
+  private readonly gateListeners: Set<SpeakerGateListener> = new Set();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -123,6 +131,13 @@ export class Pipeline {
     return () => { this.completeListeners.delete(cb); };
   }
 
+  /** Subscribe to gate entries. Fires once each time a meeting reaches
+   *  `awaiting_speaker_id`. Returns an unsubscribe fn. */
+  onAwaitingSpeakerId(cb: SpeakerGateListener): () => void {
+    this.gateListeners.add(cb);
+    return () => { this.gateListeners.delete(cb); };
+  }
+
   private notify(): void {
     const status = this.getStatus();
     for (const cb of this.statusListeners) {
@@ -180,8 +195,8 @@ export class Pipeline {
     if (stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing') {
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
       await Promise.all([
-        this.deps.stages.transcribing(input, this.deps.ctx),
-        this.deps.stages.diarizing(input, this.deps.ctx),
+        this.timeStage('transcribing', input, m.slug),
+        this.timeStage('diarizing', input, m.slug),
       ]);
       stage = 'merging';
     }
@@ -201,6 +216,12 @@ export class Pipeline {
           if (!fresh?.skipSpeakerId) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
+            // Notify subscribers that this meeting is now blocked on the user.
+            // Per-listener isolation matches notify()/complete-listener loops:
+            // a throwing listener must not stop us returning to park the gate.
+            for (const cb of this.gateListeners) {
+              try { cb(meetingId); } catch { /* listener errors must not break the pipeline */ }
+            }
             return; // stop; user action re-enqueues
           }
           // Skip flag is set — don't stop. But before summarize reads
@@ -212,7 +233,7 @@ export class Pipeline {
           continue;
         }
         this.deps.ctx.meetings.updateStage(meetingId, s);
-        await this.deps.stages[s as WorkStage](input, this.deps.ctx);
+        await this.timeStage(s as WorkStage, input, m.slug);
       }
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
@@ -223,6 +244,22 @@ export class Pipeline {
       } catch (e) {
         this.deps.ctx.logger.error('pipeline:complete-listener-error', { id: meetingId, err: String(e) });
       }
+    }
+  }
+
+  /** Run a stage handler and record its wall-clock duration as an ETA sample,
+   *  bucketed by the meeting's transcript size. Timing must never break a real
+   *  run: a failing stage records nothing (its time isn't representative), and
+   *  a failing telemetry write is logged and swallowed. */
+  private async timeStage(stage: WorkStage, input: StageInput, slug: string): Promise<void> {
+    const start = performance.now();
+    await this.deps.stages[stage](input, this.deps.ctx);
+    const durationMs = performance.now() - start;
+    try {
+      const bucket = bucketForChars(transcriptChars(this.deps.ctx.libraryRoot, slug));
+      this.deps.ctx.stageDurations.record(stage, bucket, durationMs);
+    } catch (e) {
+      this.deps.ctx.logger.error('pipeline:eta-record-failed', { stage, err: String(e) });
     }
   }
 }

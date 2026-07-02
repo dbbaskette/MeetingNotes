@@ -57,6 +57,31 @@ describe('runExtracting', () => {
     expect(empty.ctx.lmStudio.chat).not.toHaveBeenCalled();
   });
 
+  it('attaches source_quote by matching items to the summary bullets', async () => {
+    const summary =
+      '## Action Items\n' +
+      '- Ship the v2 API by Friday — Dan — 2026-07-03\n' +
+      '- Buy more coffee — (owner TBD) — (no date)';
+    const { ctx, folder } = makeCtx(
+      // Model returns a reworded item plus one that matches nothing in the summary.
+      async () =>
+        '[{"text":"Ship v2 API","owner":"Dan","due_date":"2026-07-03"},' +
+        '{"text":"Rewrite the auth service from scratch","owner":null,"due_date":null}]',
+    );
+    fs.writeFileSync(path.join(folder, 'summary.md'), summary);
+    await runExtracting({ meetingId: 'm' }, ctx);
+
+    const persisted = ctx.actionItems.replaceForMeeting.mock.calls[0]![1] as {
+      text: string; sourceQuote: string | null;
+    }[];
+    expect(persisted[0]!.sourceQuote).toBe('Ship the v2 API by Friday — Dan — 2026-07-03');
+    expect(persisted[1]!.sourceQuote).toBeNull();
+
+    // action-items.json carries the same enriched shape.
+    const written = JSON.parse(fs.readFileSync(path.join(folder, 'action-items.json'), 'utf8'));
+    expect(written[0].sourceQuote).toContain('v2 API');
+  });
+
   it('caps the budget at 2000 tokens and keeps the preamble-forbidding prompt', async () => {
     // The summary input is 1–3k tokens, so 2000 output tokens is generous for
     // the short JSON answer while bounding a still-looping reasoning model to

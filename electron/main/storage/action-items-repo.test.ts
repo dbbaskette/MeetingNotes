@@ -43,4 +43,21 @@ describe('ActionItemsRepo', () => {
     repo.markExported(item!.id, 'reminders');
     expect(repo.listByMeeting(meetingId)[0]!.exportedTo).toEqual(['reminders']);
   });
+
+  it('round-trips source_quote through replaceForMeeting + listByMeeting', () => {
+    repo.replaceForMeeting(meetingId, [
+      { text: 'Ship v2', owner: 'Dan', due_date: null, sourceQuote: '- Ship the v2 API — Dan' },
+      { text: 'No source', owner: null, due_date: null },
+    ]);
+    const all = repo.listByMeeting(meetingId);
+    expect(all[0]!.sourceQuote).toBe('- Ship the v2 API — Dan');
+    // An item with no sourceQuote (hand-added shape) reads back null.
+    expect(all[1]!.sourceQuote).toBeNull();
+  });
+
+  it('create() leaves source_quote null', () => {
+    const created = repo.create(meetingId, { text: 'hand-added' });
+    expect(created.sourceQuote).toBeNull();
+    expect(repo.listByMeeting(meetingId)[0]!.sourceQuote).toBeNull();
+  });
 });

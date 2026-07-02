@@ -7,6 +7,7 @@ import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
+import { StageDurationsRepo } from './storage/stage-durations-repo.js';
 import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
@@ -47,6 +48,7 @@ import { probeAudio } from './library/ffprobe.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
+import { shouldNotifyGate } from './pipeline/gate-alert.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -126,6 +128,7 @@ app.whenReady().then(async () => {
   const meetings = new MeetingsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
+  const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
 
   // Collapse roster entries with matching display names (case + whitespace
@@ -249,6 +252,7 @@ app.whenReady().then(async () => {
     speakers,
     actionItems,
     settings,
+    stageDurations,
     roster,
     logger,
   };
@@ -263,6 +267,11 @@ app.whenReady().then(async () => {
       extracting: runExtracting,
     },
   });
+
+  // Meetings we've already alerted about entering the speaker-ID gate, so we
+  // notify once per entry (spec: no nagging). Cleared when a meeting is
+  // unblocked — see the IPC handlers.
+  const gateNotified = new Set<string>();
 
   // Dual-watch: the new built-in recorder writes .m4a into ~/Music/MeetingNotes,
   // and legacy users still have Audio Hijack writing .mp3 into the configured
@@ -415,16 +424,29 @@ app.whenReady().then(async () => {
   // verbs (record / stop / open) into the existing recording + window
   // surfaces. Pending URLs that arrived before whenReady completes are
   // flushed here.
+  // Shared window helpers — used by both the URL-scheme dispatcher and the
+  // speaker-gate notification below. Kept identical so a notification click
+  // routes exactly like a meetingnotes://open?id=… deeplink.
+  const emitOpenMeeting = (meetingId: string): void => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send('mn:open-meeting', meetingId);
+    }
+  };
+  const focusMainWindow = (): void => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length === 0) return;
+    const target = wins[0]!;
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+  };
+
   schemeDispatcher = new SchemeDispatcher({
     recordingManager,
     appEnumerator,
     recordingSessionsRepo,
     meetings,
-    emitOpenMeeting: (meetingId) => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        w.webContents.send('mn:open-meeting', meetingId);
-      }
-    },
+    emitOpenMeeting,
     notify: ({ title, body }) => {
       try {
         if (Notification.isSupported()) new Notification({ title, body }).show();
@@ -432,19 +454,36 @@ app.whenReady().then(async () => {
         logger.error('url-scheme:notify-failed', { err: String(err) });
       }
     },
-    focusMainWindow: () => {
-      const wins = BrowserWindow.getAllWindows();
-      if (wins.length === 0) return;
-      const target = wins[0]!;
-      if (target.isMinimized()) target.restore();
-      target.show();
-      target.focus();
-    },
+    focusMainWindow,
     logger,
   });
   for (const url of pendingSchemeUrls.splice(0)) {
     void schemeDispatcher.dispatch(url);
   }
+
+  // Native nudge when a meeting parks at the speaker-ID gate. The pipeline
+  // otherwise sits blocked on the user with no proactive signal if they've
+  // navigated away. Clicking the notification raises the window and lands on
+  // the meeting via the same route a meetingnotes://open deeplink uses.
+  pipeline.onAwaitingSpeakerId((meetingId) => {
+    if (!shouldNotifyGate(meetingId, gateNotified)) return;
+    const meeting = meetings.findById(meetingId);
+    if (!meeting) return; // deleted between transition and callback — nothing to route to
+    try {
+      if (!Notification.isSupported()) return;
+      const n = new Notification({
+        title: 'MeetingNotes',
+        body: `"${meeting.title}" needs you to confirm speakers to keep processing.`,
+      });
+      n.on('click', () => {
+        focusMainWindow();
+        emitOpenMeeting(meetingId);
+      });
+      n.show();
+    } catch (err) {
+      logger.error('speaker-gate:notify-failed', { meetingId, err: String(err) });
+    }
+  });
 
   // Google account auth (BYO OAuth desktop client). The refresh token is
   // encrypted via the OS keychain (safeStorage); credentials + email live in
@@ -566,8 +605,10 @@ app.whenReady().then(async () => {
     meetings,
     speakers,
     actionItems,
+    stageDurations,
     settings,
     lmStudio,
+    llmSupervisor,
     recordingManager,
     appEnumerator,
     helperPath,
@@ -580,6 +621,7 @@ app.whenReady().then(async () => {
     weeklyAggregator,
     logger,
     googleAuth,
+    gateNotified,
   });
 
   const themeChoice = settings.get('theme');

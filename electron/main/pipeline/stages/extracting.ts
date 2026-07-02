@@ -5,6 +5,7 @@ import type { StageHandler } from '../context.js';
 import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../prompts.js';
 import { parseActionItemsLoose } from '../../lib/action-item-schema.js';
+import { matchSourceQuotes } from '../../lib/action-item-source.js';
 
 export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
@@ -43,7 +44,11 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
       { role: 'user', content: summary },
     ],
   });
-  const items = parseActionItemsLoose(raw);
+  // Attach provenance: match each extracted item back to the verbatim
+  // "## Action Items" bullet it was reworded from, so the UI can jump from an
+  // item to its summary source. Pure/LLM-free; unmatched items get null and
+  // simply show no "Show source" affordance. The summary is already in memory.
+  const items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
   fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
   ctx.actionItems.replaceForMeeting(meetingId, items);
   ctx.logger.info('extract:done', { meetingId, items: items.length });

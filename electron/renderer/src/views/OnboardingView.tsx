@@ -14,17 +14,35 @@
 // setup again".
 import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
+import { type StepStatus, statusFromProbe } from '../lib/setup-wizard';
+import { isKnownReasoningModel } from '../lib/reasoning-models';
 
 interface Props {
   onFinished: () => void;
 }
 
-type StepKey = 'permissions' | 'whisper' | 'hf' | 'llm';
-const STEPS: StepKey[] = ['permissions', 'whisper', 'hf', 'llm'];
+type StepKey = 'permissions' | 'whisper' | 'hf' | 'llm' | 'stt';
+const STEPS: StepKey[] = ['permissions', 'whisper', 'hf', 'llm', 'stt'];
+
+/** Small colored pip a step reports up so the stepper bar reflects
+ *  pending / checking / ok / warn without each step owning its own chrome. */
+function StatusPip({ status }: { status: StepStatus }): JSX.Element {
+  const cls =
+    status === 'ok' ? 'bg-status-ok'
+      : status === 'warn' ? 'bg-status-warn'
+        : status === 'checking' ? 'bg-brand-indigo animate-pulse'
+          : 'bg-surface-border';
+  return <span className={`inline-block w-2 h-2 rounded-full ${cls}`} aria-label={status} />;
+}
 
 export function OnboardingView({ onFinished }: Props): JSX.Element {
   const [idx, setIdx] = useState(0);
   const step = STEPS[idx]!;
+  const [stepStatus, setStepStatus] = useState<Record<StepKey, StepStatus>>({
+    permissions: 'pending', whisper: 'pending', hf: 'pending', llm: 'pending', stt: 'pending',
+  });
+  const setStatus = (k: StepKey, s: StepStatus): void =>
+    setStepStatus((prev) => ({ ...prev, [k]: s }));
 
   const next = (): void => setIdx((i) => Math.min(i + 1, STEPS.length - 1));
   const finish = async (): Promise<void> => {
@@ -47,10 +65,11 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
       </div>
 
       <div className="p-6 min-h-[260px]">
-        {step === 'permissions' && <PermissionsStep />}
-        {step === 'whisper' && <WhisperStep />}
-        {step === 'hf' && <HfStep />}
-        {step === 'llm' && <LlmStep />}
+        {step === 'permissions' && <PermissionsStep onStatus={(s) => setStatus('permissions', s)} />}
+        {step === 'whisper' && <WhisperStep onStatus={(s) => setStatus('whisper', s)} />}
+        {step === 'hf' && <HfStep onStatus={(s) => setStatus('hf', s)} />}
+        {step === 'llm' && <LlmStep onStatus={(s) => setStatus('llm', s)} />}
+        {step === 'stt' && <SttStep onStatus={(s) => setStatus('stt', s)} />}
       </div>
 
       {/* Skip lives in the action row, not buried in a corner. Both are
@@ -66,11 +85,13 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
           Back
         </button>
         <div className="flex-1 flex gap-1">
-          {STEPS.map((_, i) => (
-            <div
-              key={i}
-              className={`h-1 flex-1 rounded-full ${i <= idx ? 'bg-brand-indigo' : 'bg-surface-border'}`}
-            />
+          {STEPS.map((k, i) => (
+            <div key={k} className="flex-1 flex items-center gap-1">
+              <div
+                className={`h-1 flex-1 rounded-full ${i <= idx ? 'bg-brand-indigo' : 'bg-surface-border'}`}
+              />
+              <StatusPip status={stepStatus[k]} />
+            </div>
           ))}
         </div>
         {!done && (
@@ -112,7 +133,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
 
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 
-function PermissionsStep(): JSX.Element {
+function PermissionsStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
   const [mic, setMic] = useState<PermState>('unknown');
   const [audioCapture, setAudioCapture] = useState<PermState>('unknown');
 
@@ -121,6 +142,10 @@ function PermissionsStep(): JSX.Element {
     const perms = (await api.permissions.audio()) as { mic: PermState; audioCapture: PermState };
     setMic(micState);
     setAudioCapture(perms.audioCapture);
+    // Mic is the only honest audio signal — system-audio capture can't be
+    // verified pre-recording (macOS prompts on first Record), so report ok
+    // only when mic is granted and audio-capture isn't outright denied.
+    onStatus(micState === 'granted' && perms.audioCapture !== 'denied' ? 'ok' : 'warn');
   }
 
   useEffect(() => { void refresh(); const t = setInterval(refresh, 2000); return () => clearInterval(t); }, []);
@@ -215,14 +240,18 @@ const WHISPER_MODELS: { name: string; size: string; desc: string }[] = [
   { name: 'large-v3-turbo', size: '1.5 GB', desc: 'Near large-v3 accuracy, much faster' },
 ];
 
-function WhisperStep(): JSX.Element {
+function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
   const [installed, setInstalled] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<string>('medium.en');
   const [installing, setInstalling] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function refresh(): Promise<void> {
-    try { setInstalled((await api.onboarding.listWhisperModels()) as string[]); }
+    try {
+      const models = (await api.onboarding.listWhisperModels()) as string[];
+      setInstalled(models);
+      onStatus((models?.length ?? 0) > 0 ? 'ok' : 'pending');
+    }
     catch (e) { setErr((e as Error).message); }
   }
   useEffect(() => { void refresh(); }, []);
@@ -284,7 +313,7 @@ function WhisperStep(): JSX.Element {
 
 // ─── Step 3: Hugging Face token ────────────────────────────────────────
 
-function HfStep(): JSX.Element {
+function HfStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
   const [token, setToken] = useState('');
   const [validating, setValidating] = useState(false);
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid' | 'error'>('idle');
@@ -293,7 +322,7 @@ function HfStep(): JSX.Element {
 
   async function validateAndSave(): Promise<void> {
     const trimmed = token.trim();
-    if (!trimmed) { setStatus('invalid'); setErr('Token is empty.'); return; }
+    if (!trimmed) { setStatus('invalid'); onStatus('warn'); setErr('Token is empty.'); return; }
     setValidating(true); setErr(null); setStatus('idle');
     try {
       const resp = await fetch('https://huggingface.co/api/whoami-v2', {
@@ -301,15 +330,18 @@ function HfStep(): JSX.Element {
       });
       if (!resp.ok) {
         setStatus('invalid');
+        onStatus('warn');
         setErr(`HF rejected the token (${resp.status}). Double-check it's copied in full.`);
         return;
       }
       const who = (await resp.json()) as { name?: string };
       await api.onboarding.saveHfToken(trimmed);
       setStatus('valid');
+      onStatus('ok');
       setSavedUser(who.name ?? null);
     } catch (e) {
       setStatus('error');
+      onStatus('warn');
       setErr((e as Error).message);
     } finally { setValidating(false); }
   }
@@ -378,33 +410,68 @@ function HfStep(): JSX.Element {
 
 // ─── Step 4: LM Studio ─────────────────────────────────────────────────
 
-function LlmStep(): JSX.Element {
+function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
+  const [providers, setProviders] = useState<
+    { lmStudio: { binary: boolean; running: boolean }; ollama: { binary: boolean; running: boolean } } | null
+  >(null);
   const [loaded, setLoaded] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<string>('');
   const [checking, setChecking] = useState(true);
+  // Canary verdict for the picked model: null = not run, 'checking' = in flight.
+  const [health, setHealth] = useState<'checking' | 'ok' | 'loops' | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   async function check(): Promise<void> {
     setChecking(true); setErr(null);
     try {
+      // Same detection the Settings provider dropdown uses — surfaced here so a
+      // new user sees "LM Studio found / running" instead of a bare model list.
+      setProviders(await api.llm.detectProviders());
       const models = (await api.models.list()) as string[];
       setLoaded(models);
-      if (models[0] && !picked) setPicked(models[0]);
+      if (models[0] && !picked) { setPicked(models[0]); void runCanary(models[0]); }
+      onStatus(models.length > 0 ? 'ok' : 'warn');
     } catch (e) {
       setErr((e as Error).message);
       setLoaded([]);
+      onStatus('warn');
     } finally { setChecking(false); }
   }
   useEffect(() => { void check(); }, []);
 
-  async function saveModel(): Promise<void> {
-    if (!picked) return;
-    await api.settings.set('llmModel', picked);
+  // Fire the exact health-check canary Settings runs, and fold its verdict into
+  // the step status. A looping (reasoning) model -> 'warn': visible but the user
+  // can still proceed (canAdvance('warn') === true).
+  async function runCanary(modelId: string): Promise<void> {
+    if (!modelId) return;
+    setHealth('checking'); onStatus('checking');
+    try {
+      const result = await api.llm.healthCheckModel(modelId);
+      setHealth(result.verdict);
+      onStatus(statusFromProbe(result));
+    } catch {
+      // Best-effort canary — a transport error shouldn't trap the user.
+      setHealth(null); onStatus('pending');
+    }
+  }
+
+  async function pick(modelId: string): Promise<void> {
+    setPicked(modelId);
+    await api.settings.set('llmModel', modelId);
+    void runCanary(modelId);
   }
 
   return (
     <div>
       <StepHeader title="Pick an LM Studio model" />
+      {providers && (
+        <div className="text-xs text-ink-muted mb-2">
+          {providers.lmStudio.binary
+            ? providers.lmStudio.running ? '✓ LM Studio detected and running.' : 'LM Studio CLI found — start its local server to load a model.'
+            : 'LM Studio CLI not found.'}
+          {providers.ollama.binary ? ' Ollama also detected.' : ''}
+        </div>
+      )}
       <p className="text-sm text-ink-muted leading-relaxed mb-3">
         The summariser runs through a chat model loaded in{' '}
         <a
@@ -429,17 +496,34 @@ function LlmStep(): JSX.Element {
         <>
           <select
             value={picked}
-            onChange={(e) => setPicked(e.target.value)}
+            onChange={(e) => void pick(e.target.value)}
             className="input mb-2"
           >
-            {loaded!.map((m) => <option key={m} value={m}>{m}</option>)}
+            {loaded!.map((m) => (
+              <option key={m} value={m}>{isKnownReasoningModel(m) ? `🧠 ${m}` : m}</option>
+            ))}
           </select>
-          <button
-            onClick={() => void saveModel()}
-            className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2"
-          >
-            Use {picked}
-          </button>
+          {health && (
+            <div className={`text-xs mb-1.5 px-2.5 py-1 rounded-lg border ${
+              health === 'checking'
+                ? 'text-ink-muted border-surface-border bg-surface-sunken'
+                : health === 'loops'
+                  ? 'text-status-warnText border-status-warn/30 bg-status-warnBg'
+                  : 'text-status-ok border-status-ok/30 bg-status-okBg/40'
+            }`}>
+              {health === 'checking'
+                ? 'Checking whether this model tends to loop on structured tasks…'
+                : health === 'loops'
+                  ? '⚠ This model looped on a quick extraction test — expect it to fail on real meetings too. You can continue, but consider a non-reasoning model.'
+                  : '✓ Passed a quick extraction canary.'}
+            </div>
+          )}
+          {picked && isKnownReasoningModel(picked) && (
+            <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mb-1.5">
+              🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo;
+              and burn its token budget on chain-of-thought instead of answering.
+            </div>
+          )}
         </>
       )}
       <button
@@ -449,6 +533,79 @@ function LlmStep(): JSX.Element {
         Re-check
       </button>
       {err && <div className="text-xs text-danger mt-2">{err}</div>}
+    </div>
+  );
+}
+
+// ─── Step 5: STT (transcription) endpoint ─────────────────────────────
+//
+// New in the first-run wizard: verify the whisper-server actually answers
+// BEFORE the first meeting, instead of failing the transcribe stage later.
+// Reuses the exact stt:probe handler the Settings "Test" button uses — it
+// fetches <url>/health and checks for {"status":"ok"}, so a green here is a
+// real signal (unlike system-audio capture, which can't be verified upfront).
+function SttStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
+  const [url, setUrl] = useState<string>('');
+  const [result, setResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function probe(target: string): Promise<void> {
+    if (!target) return;
+    setChecking(true); onStatus('checking');
+    try {
+      const r = await api.stt.probe(target);
+      setResult(r);
+      onStatus(statusFromProbe(r));
+    } catch (e) {
+      const r = { ok: false as const, error: (e as Error).message };
+      setResult(r);
+      onStatus('warn');
+    } finally { setChecking(false); }
+  }
+
+  useEffect(() => {
+    void (async () => {
+      const all = (await api.settings.getAll()) as { sttUrl: string };
+      setUrl(all.sttUrl);
+      void probe(all.sttUrl);
+    })();
+  }, []);
+
+  return (
+    <div>
+      <StepHeader title="Verify transcription (whisper-server)" />
+      <p className="text-sm text-ink-muted leading-relaxed mb-3">
+        Meetings are transcribed by a local whisper-server. Confirm it&apos;s
+        reachable now so the transcribe stage doesn&apos;t fail on your first
+        meeting. Start it with{' '}
+        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">./scripts/whisper-server.sh</code>.
+      </p>
+      <div className="flex gap-2 mb-2">
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onBlur={() => void api.settings.set('sttUrl', url)}
+          className="input flex-1"
+          placeholder="http://127.0.0.1:8080"
+        />
+        <button
+          onClick={() => { void api.settings.set('sttUrl', url); void probe(url); }}
+          disabled={checking}
+          className="text-sm font-semibold bg-brand-indigo text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
+        >
+          {checking ? 'Checking…' : 'Test'}
+        </button>
+      </div>
+      {result?.ok === true && (
+        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1">
+          ✓ whisper-server is up and answering /health.
+        </div>
+      )}
+      {result && result.ok === false && (
+        <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1">
+          ⚠ Couldn&apos;t reach whisper-server: {result.error}. You can continue and fix this later in Settings.
+        </div>
+      )}
     </div>
   );
 }
