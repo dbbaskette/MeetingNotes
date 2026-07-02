@@ -16,10 +16,12 @@ permissions:
   pages: write
   id-token: write
 
-# One deploy at a time; a newer push supersedes an in-flight one.
+# One deploy at a time. Do NOT cancel an in-flight deploy — GitHub's first-ever
+# Pages provisioning for a repo can take 15-20 min, and cancelling mid-poll just
+# restarts that clock.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -39,3 +41,7 @@ jobs:
           path: site
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          # First-ever Pages provisioning for a repo can outlast the action's
+          # default 10-min poll. Give it 25 min so a single run rides through.
+          timeout: 1500000
