@@ -10,13 +10,14 @@
 export const OVERRUN_FACTOR = 1.5;
 
 /** "~45s" / "~3m" for a learned estimate in ms, or "estimating…" when we don't
- *  have enough samples yet (etaMs === null). Rounded to a coarse figure so it
- *  reads as an estimate, not a stopwatch. */
-export function fmtEta(etaMs: number | null): string {
+ *  have a sample yet (etaMs === null). Rounded to a coarse figure so it reads as
+ *  an estimate, not a stopwatch. When `rough` (derived from 1-2 samples), a
+ *  " (rough)" suffix hedges it; `rough` is ignored when there's no estimate. */
+export function fmtEta(etaMs: number | null, rough = false): string {
   if (etaMs === null) return 'estimating…';
   const seconds = etaMs / 1000;
-  if (seconds < 60) return `~${Math.round(seconds)}s`;
-  return `~${Math.round(seconds / 60)}m`;
+  const figure = seconds < 60 ? `~${Math.round(seconds)}s` : `~${Math.round(seconds / 60)}m`;
+  return rough ? `${figure} (rough)` : figure;
 }
 
 /** True when the current stage's elapsed time (seconds) has run past

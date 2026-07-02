@@ -8,6 +8,7 @@ import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost, useToast } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
+import { PipelineStatusBar } from './components/PipelineStatusBar';
 import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
@@ -353,6 +354,9 @@ function AppInner(): JSX.Element {
         <div className="flex-1 min-h-0">
           {body}
         </div>
+        {onboardStatus === 'done' && (
+          <PipelineStatusBar onOpenMeeting={(id) => setView({ kind: 'detail', id })} />
+        )}
       </div>
       <SearchPalette
         open={searchOpen}

@@ -16,6 +16,16 @@ describe('fmtEta', () => {
     expect(fmtEta(200_000)).toBe('~3m');
     expect(fmtEta(150_000)).toBe('~3m'); // 2.5m rounds to 3m
   });
+
+  it('hedges a rough estimate with a (rough) suffix', () => {
+    expect(fmtEta(180_000, true)).toBe('~3m (rough)');
+    expect(fmtEta(45_000, true)).toBe('~45s (rough)');
+    expect(fmtEta(180_000, false)).toBe('~3m');
+  });
+
+  it('ignores rough when there is no estimate', () => {
+    expect(fmtEta(null, true)).toBe('estimating…');
+  });
 });
 
 describe('isRunningLong', () => {

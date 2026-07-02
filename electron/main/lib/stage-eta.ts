@@ -11,8 +11,10 @@
  *  short / medium / long / very-long. Constants so they're easy to retune. */
 export const SIZE_BUCKETS = [5_000, 20_000, 60_000] as const;
 
-/** Below this many samples in a (stage,bucket) we don't trust an estimate and
- *  return null ("estimating…"). Keeps the first couple of meetings honest. */
+/** At/above this many samples in a (stage,bucket) the estimate is FIRM. With
+ *  1-2 samples we still surface a number, flagged `rough` so the UI can hedge
+ *  it ("~3m (rough)") — one real sample beats "estimating…". Zero samples is
+ *  the only true cold start. */
 export const MIN_SAMPLES = 3;
 
 /** Only ever keep/consider the most-recent N samples per (stage,bucket) so the
@@ -29,14 +31,24 @@ export function bucketForChars(chars: number): number {
   return SIZE_BUCKETS.length;
 }
 
-/** Median of the samples in milliseconds, or null on a cold start
- *  (fewer than MIN_SAMPLES). Median — not mean — so one runaway sample
- *  (e.g. a stage that limped to the request timeout) doesn't skew it.
- *  Does not mutate the input. */
-export function estimateMs(samples: readonly number[]): number | null {
-  if (samples.length < MIN_SAMPLES) return null;
+/** A learned estimate plus how much to trust it. `rough` is true when it was
+ *  derived from fewer than MIN_SAMPLES samples, so callers/UI can hedge it. */
+export interface StageEstimate {
+  etaMs: number;
+  rough: boolean;
+}
+
+/** Median of the samples (ms) with a roughness grade, or null on a true cold
+ *  start (zero samples). Median — not mean — so one runaway sample (e.g. a
+ *  stage that limped to the request timeout) doesn't skew it. With 1-2 samples
+ *  the median degrades naturally to the single value / two-value average and
+ *  the result is flagged `rough`. Does not mutate the input. */
+export function estimateStage(samples: readonly number[]): StageEstimate | null {
+  if (samples.length === 0) return null;
   const sorted = [...samples].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[mid]!;
-  return (sorted[mid - 1]! + sorted[mid]!) / 2;
+  const etaMs = sorted.length % 2 === 1
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+  return { etaMs, rough: samples.length < MIN_SAMPLES };
 }

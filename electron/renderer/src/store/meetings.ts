@@ -11,6 +11,8 @@ interface MeetingSummary {
   pipelineStage: string;
   status: string;
   stageStartedAt: string | null;
+  stageEtaMs: number | null;
+  stageEtaRough: boolean;
   unidentifiedCount: number;
   actionItemsCount: number;
   speakers: {
@@ -37,6 +39,7 @@ function shallowEqual(a: MeetingSummary[], b: MeetingSummary[]): boolean {
       x.pipelineStage !== y.pipelineStage ||
       x.status !== y.status ||
       x.stageStartedAt !== y.stageStartedAt ||
+      x.stageEtaMs !== y.stageEtaMs ||
       x.title !== y.title ||
       x.actionItemsCount !== y.actionItemsCount ||
       x.unidentifiedCount !== y.unidentifiedCount ||

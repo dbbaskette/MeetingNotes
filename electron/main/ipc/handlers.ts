@@ -154,7 +154,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         displayName: sp.displayName,
         confidence: sp.confidence,
       }));
-      const stageEtaMs = stageEtaForMeeting(
+      const eta = stageEtaForMeeting(
         s.stageDurations,
         m.pipelineStage,
         transcriptChars(s.libraryRoot, m.slug),
@@ -168,7 +168,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         skipSpeakerId: m.skipSpeakerId,
         unidentifiedCount: unidentifiedCount(speakers),
         actionItemsCount: counts.get(m.id) ?? 0,
-        stageEtaMs,
+        stageEtaMs: eta?.etaMs ?? null,
+        stageEtaRough: eta?.rough ?? false,
         speakers,
       };
     });
@@ -205,7 +206,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         }
       } catch { /* ignore */ }
     }
-    const stageEtaMs = stageEtaForMeeting(
+    const eta = stageEtaForMeeting(
       s.stageDurations,
       m.pipelineStage,
       transcriptChars(s.libraryRoot, m.slug),
@@ -216,7 +217,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       skipSpeakerId: m.skipSpeakerId,
       unidentifiedCount: unidentifiedCount(speakers),
       actionItemsCount: items.length,
-      stageEtaMs,
+      stageEtaMs: eta?.etaMs ?? null,
+      stageEtaRough: eta?.rough ?? false,
       speakers,
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
