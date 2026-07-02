@@ -85,6 +85,13 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
     // a runaway repetition loop is bounded to a few minutes instead of running
     // out the 10-minute request timeout. The client also rejects looping output.
     maxTokens: 8000,
+    // Gemma 4 & co. can't be told to stop thinking, and their reasoning length
+    // is heavy-tailed — the occasional sample spirals past maxTokens and returns
+    // nothing. temperature 0.2 makes each retry a fresh sample, so re-sampling
+    // clears the (rare) spiral instead of failing the whole meeting.
+    resampleRetries: 2,
+    onResample: (retry, words) =>
+      ctx.logger.warn('summarize:reasoning-retry', { meetingId, retry, reasoningWords: words }),
     messages: [
       { role: 'system', content: buildSummaryPrompt(ctx.settings.get('summaryDetail'), knownTopic) },
       { role: 'user', content: transcript },

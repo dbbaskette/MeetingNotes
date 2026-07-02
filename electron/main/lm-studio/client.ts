@@ -102,6 +102,21 @@ export interface ChatInput {
    *  (the only reliable lever — Gemma 4 has no LM Studio UI toggle). Models
    *  whose template doesn't reference the kwarg simply ignore it. */
   disableThinking?: boolean;
+  /** How many times to RE-ISSUE the request when the model returns an
+   *  intermittent "reasoning runaway" (empty content because it spent the
+   *  whole budget thinking). Gemma 4 can't be told to stop thinking (it
+   *  ignores every suppression knob and has no thinking-budget parameter),
+   *  but its reasoning length is heavy-tailed — most samples answer fine and
+   *  only the occasional one spirals past the budget. Re-sampling (callers use
+   *  temperature > 0) clears the spiral the vast majority of the time. Default
+   *  0: unset callers — notably the model health-check canary — still surface
+   *  the loop so it can be detected/reported. Only the reasoning-runaway case
+   *  is re-sampled; a true OOM (empty reasoning too) is not. */
+  resampleRetries?: number;
+  /** Called before each re-sample with the 1-based retry number and the
+   *  reasoning-word count of the spiral that triggered it, so callers can log
+   *  the otherwise-invisible retry. */
+  onResample?: (retry: number, reasoningWords: number) => void;
 }
 
 export class LMStudioClient {
@@ -199,6 +214,80 @@ export class LMStudioClient {
   }
 
   async chat(input: ChatInput): Promise<string> {
+    // Outer loop re-samples the intermittent reasoning runaway (see
+    // resampleRetries). Each pass is a fresh request; callers that re-sample
+    // use temperature > 0, so the retry gets a different generation and the
+    // spiral (a sampling tail event) almost always clears.
+    const maxResample = Math.max(0, input.resampleRetries ?? 0);
+    for (let attemptNo = 0; ; attemptNo++) {
+      const resp = await this.requestChatCompletion(input);
+      if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
+      const body = (await resp.json()) as {
+        choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
+      };
+      const choice = body.choices?.[0];
+      const content = choice?.message?.content ?? '';
+      // An empty answer has two very different causes, and conflating them sent
+      // users chasing the wrong fix ("out of GPU memory" when memory was fine):
+      //
+      //  1. Reasoning runaway. A reasoning model burns its whole token budget in
+      //     reasoning_content ("thinking") and never emits an answer — looping on
+      //     a messy transcript. Observed as finish_reason="length" (when capped)
+      //     or a huge reasoning_content with finish_reason="stop" (30k+ thinking
+      //     tokens, zero content). Intermittent, so we re-sample it before
+      //     surfacing the failure (below); the fix of last resort is a
+      //     non-reasoning model — NOT a smaller one.
+      //  2. Genuine mid-generation crash (Metal GPU OOM), where BOTH content and
+      //     reasoning come back empty. Here a smaller model genuinely helps, and
+      //     re-sampling won't — so this case is never retried.
+      if (content.trim() === '') {
+        const reasoning = (choice?.message?.reasoning_content ?? '').trim();
+        const reasoningWords = reasoning ? reasoning.split(/\s+/).length : 0;
+        if (choice?.finish_reason === 'length' || reasoningWords > 200) {
+          if (attemptNo < maxResample) {
+            input.onResample?.(attemptNo + 1, reasoningWords);
+            continue; // re-sample the spiral
+          }
+          throw new LMStudioError(
+            `LM Studio produced no answer — the model ${REASONING_LOOP_MARKER} ` +
+              `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
+              `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
+              `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +
+              `to skip its chain-of-thought, then retry. (If it's already on, this model ` +
+              `ignores the thinking toggle — switch to a non-reasoning model in LM Studio.)` +
+              (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
+          );
+        }
+        throw new LMStudioError(
+          `LM Studio returned empty content — the model likely ran out of GPU memory ` +
+            `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b).`,
+        );
+      }
+      const cleaned = stripThinking(content);
+      // A local model under memory pressure (or on a messy transcript) can
+      // degenerate into a repetition loop — emitting the same phrase thousands of
+      // times until the request times out. With no max_tokens cap that runs for
+      // the full 10-minute ceiling; even with one it produces unusable garbage.
+      // Catch it here and fail with an actionable message instead of writing a
+      // looping "summary" to disk.
+      if (looksDegenerate(cleaned)) {
+        const words = cleaned.trim().split(/\s+/).length;
+        throw new LMStudioError(
+          `LM Studio returned repetitive, looping output (${words} words, almost no ` +
+            `lexical variety) — the model degenerated mid-generation. This is usually ` +
+            `memory pressure or too-long a context. Free memory, lower the model's ` +
+            `context length, or switch to a smaller model in Settings.`,
+        );
+      }
+      return cleaned;
+    }
+  }
+
+  /** One chat-completion HTTP request with the existing timeout + single
+   *  network retry. Throws a fatal LMStudioError on timeout or a network
+   *  failure that survives the retry. Separated from {@link chat} so the
+   *  re-sample loop can re-issue it cleanly. */
+  private async requestChatCompletion(input: ChatInput): Promise<Response> {
     // 10-minute ceiling per attempt. Summarizing / extracting on a local model
     // routinely runs several minutes for long transcripts. One retry on
     // transient network failure — LM Studio occasionally drops mid-stream
@@ -261,59 +350,7 @@ export class LMStudioClient {
         );
       }
     }
-    if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
-    const body = (await resp.json()) as {
-      choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
-    };
-    const choice = body.choices?.[0];
-    const content = choice?.message?.content ?? '';
-    // An empty answer has two very different causes, and conflating them sent
-    // users chasing the wrong fix ("out of GPU memory" when memory was fine):
-    //
-    //  1. Reasoning runaway. A reasoning model burns its whole token budget in
-    //     reasoning_content ("thinking") and never emits an answer — looping on
-    //     a messy transcript. Observed as finish_reason="length" (when capped)
-    //     or a huge reasoning_content with finish_reason="stop" (30k+ thinking
-    //     tokens, zero content). The fix is a non-reasoning model / disabling
-    //     the model's thinking — NOT a smaller model.
-    //  2. Genuine mid-generation crash (Metal GPU OOM), where BOTH content and
-    //     reasoning come back empty. Here a smaller model genuinely helps.
-    if (content.trim() === '') {
-      const reasoning = (choice?.message?.reasoning_content ?? '').trim();
-      const reasoningWords = reasoning ? reasoning.split(/\s+/).length : 0;
-      if (choice?.finish_reason === 'length' || reasoningWords > 200) {
-        throw new LMStudioError(
-          `LM Studio produced no answer — the model ${REASONING_LOOP_MARKER} ` +
-            `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
-            `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
-            `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +
-            `to skip its chain-of-thought, then retry. (If it's already on, this model ` +
-            `ignores the thinking toggle — switch to a non-reasoning model in LM Studio.)` +
-            (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
-        );
-      }
-      throw new LMStudioError(
-        `LM Studio returned empty content — the model likely ran out of GPU memory ` +
-          `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b).`,
-      );
-    }
-    const cleaned = stripThinking(content);
-    // A local model under memory pressure (or on a messy transcript) can
-    // degenerate into a repetition loop — emitting the same phrase thousands of
-    // times until the request times out. With no max_tokens cap that runs for
-    // the full 10-minute ceiling; even with one it produces unusable garbage.
-    // Catch it here and fail with an actionable message instead of writing a
-    // looping "summary" to disk.
-    if (looksDegenerate(cleaned)) {
-      const words = cleaned.trim().split(/\s+/).length;
-      throw new LMStudioError(
-        `LM Studio returned repetitive, looping output (${words} words, almost no ` +
-          `lexical variety) — the model degenerated mid-generation. This is usually ` +
-          `memory pressure or too-long a context. Free memory, lower the model's ` +
-          `context length, or switch to a smaller model in Settings.`,
-      );
-    }
-    return cleaned;
+    return resp;
   }
 }
 
