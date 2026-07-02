@@ -19,6 +19,9 @@ export const MeetingSummarySchema = z.object({
    *  ("summarize — 1m 40s · ~3m"). Median of recent same-size samples on this
    *  machine; see stage-eta.ts. */
   stageEtaMs: z.number().nullable(),
+  /** True when stageEtaMs was derived from fewer than 3 samples, so the UI
+   *  hedges it ("~3m (rough)"). Always false when stageEtaMs is null. */
+  stageEtaRough: z.boolean(),
   skipSpeakerId: z.boolean(),
   speakers: z.array(z.object({
     localLabel: z.string(),
