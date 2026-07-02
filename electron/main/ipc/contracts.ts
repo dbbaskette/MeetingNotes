@@ -95,6 +95,10 @@ export const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  /** Reveal a storage location in Finder. Arg is a StorageLocationKey
+   *  ('library'|'models'|'logs'|'hfCache'); main resolves the path via
+   *  storageLocations(), mkdir -p's it, and shell.showItemInFolder()s it. */
+  settingsRevealStorage: 'settings:reveal-storage',
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',

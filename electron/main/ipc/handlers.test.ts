@@ -54,6 +54,8 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('llm:health-check-model');
     // Re-extract action items from the edited summary.
     expect(channels).toContain('action-items:reextract');
+    // Reveal a storage location (library/models/logs/hfCache) in Finder.
+    expect(channels).toContain('settings:reveal-storage');
   });
 
   it('llm:health-check-model reports ok for a well-behaved model and loops for one that burns its budget', async () => {
