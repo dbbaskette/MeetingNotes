@@ -64,7 +64,7 @@ export function findWhisperBinary(): string {
  *  os.homedir() because Node 22+ on macOS sometimes resolves
  *  os.homedir() via getpwuid_r and ignores HOME — that breaks the
  *  test override. */
-function modelsDir(): string {
+export function modelsDir(): string {
   const home = process.env.HOME ?? os.homedir();
   return path.join(
     home,

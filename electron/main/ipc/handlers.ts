@@ -43,6 +43,7 @@ import { clearGateNotified } from '../pipeline/gate-alert.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
+import { downloadWhisperModel } from '../whisper/download-model.js';
 import { ripgrepSearch } from '../search/ripgrep-search.js';
 import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/owner-filter.js';
 import type { Logger } from '../logging/logger.js';
@@ -692,21 +693,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 
   ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
-    if (typeof model !== 'string' || !/^[a-z0-9][a-z0-9.\-]*$/i.test(model)) {
-      throw new Error('invalid model id');
-    }
-    // Wrap the existing whisper-server.sh install command. Works in dev
-    // (scripts live in the source tree) and in a packaged .app (scripts
-    // are extraResources'd too, TODO — for now only dev supports this
-    // path cleanly).
-    const scriptPath = path.join(process.env.APP_ROOT ?? process.cwd(), 'scripts', 'whisper-server.sh');
-    const actualScript = fs.existsSync(scriptPath) ? scriptPath : 'scripts/whisper-server.sh';
-    await new Promise<void>((resolve, reject) => {
-      execFile('bash', [actualScript, 'install', model], { timeout: 10 * 60 * 1000 }, (err, _stdout, stderr) => {
-        if (err) return reject(new Error(stderr || err.message));
-        resolve();
-      });
-    });
+    if (typeof model !== 'string') throw new Error('invalid model id');
+    // Native streaming download (no shell script). The old path shelled out to
+    // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
+    // so onboarding's model download failed there with "No such file or
+    // directory". downloadWhisperModel validates the id and pulls the ggml
+    // file straight into the whisper-models directory.
+    await downloadWhisperModel(model);
   });
 
   ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
