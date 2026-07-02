@@ -157,7 +157,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       const eta = stageEtaForMeeting(
         s.stageDurations,
         m.pipelineStage,
-        transcriptChars(s.libraryRoot, m.slug),
+        () => transcriptChars(s.libraryRoot, m.slug),
       );
       return {
         id: m.id, slug: m.slug, title: m.title,
@@ -209,7 +209,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const eta = stageEtaForMeeting(
       s.stageDurations,
       m.pipelineStage,
-      transcriptChars(s.libraryRoot, m.slug),
+      () => transcriptChars(s.libraryRoot, m.slug),
     );
     return {
       ...m, slug: m.slug,

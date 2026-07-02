@@ -20,14 +20,19 @@ function estimateForStage(repo: SampleSource, stage: string, bucket: number): St
  *  and collapse to one user "transcribe" step, so their estimate is the max of
  *  the two (wall-clock is bounded by the slower branch); a null sibling is
  *  ignored so a single warm branch still yields a number. The combined estimate
- *  is `rough` if any contributing (non-null) branch is rough. */
+ *  is `rough` if any contributing (non-null) branch is rough.
+ *
+ *  `transcriptCharCount` is a THUNK, not a number: computing it costs a
+ *  statSync, and meetings:list calls this per meeting on every 3s poll —
+ *  mostly for 'done' meetings where the answer is null. Lazy evaluation keeps
+ *  the fs cost proportional to actively-processing meetings, not library size. */
 export function stageEtaForMeeting(
   repo: SampleSource,
   pipelineStage: string,
-  transcriptCharCount: number,
+  transcriptCharCount: () => number,
 ): StageEstimate | null {
   if (!WORK_STAGES.has(pipelineStage)) return null;
-  const bucket = bucketForChars(transcriptCharCount);
+  const bucket = bucketForChars(transcriptCharCount());
   if (pipelineStage === 'transcribing' || pipelineStage === 'diarizing') {
     const branches = [
       estimateForStage(repo, 'transcribing', bucket),

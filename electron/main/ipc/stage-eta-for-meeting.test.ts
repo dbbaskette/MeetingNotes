@@ -11,24 +11,38 @@ function repoWith(samples: Record<string, number[]>) {
 describe('stageEtaForMeeting', () => {
   it('returns null for a non-work stage (done / awaiting_speaker_id / discovered)', () => {
     const repo = repoWith({});
-    expect(stageEtaForMeeting(repo as any, 'done', 0)).toBeNull();
-    expect(stageEtaForMeeting(repo as any, 'awaiting_speaker_id', 0)).toBeNull();
-    expect(stageEtaForMeeting(repo as any, 'discovered', 0)).toBeNull();
+    expect(stageEtaForMeeting(repo as any, 'done', () => 0)).toBeNull();
+    expect(stageEtaForMeeting(repo as any, 'awaiting_speaker_id', () => 0)).toBeNull();
+    expect(stageEtaForMeeting(repo as any, 'discovered', () => 0)).toBeNull();
+  });
+
+  it('never evaluates the char count for a non-work stage (it costs a statSync)', () => {
+    // meetings:list computes an ETA per meeting on every 3s poll. Most
+    // meetings are 'done', where no estimate exists — the size lookup must be
+    // skipped entirely there, not paid N times per poll for nothing.
+    const repo = repoWith({});
+    let calls = 0;
+    const charCount = () => { calls++; return 0; };
+    stageEtaForMeeting(repo as any, 'done', charCount);
+    stageEtaForMeeting(repo as any, 'discovered', charCount);
+    expect(calls).toBe(0);
+    stageEtaForMeeting(repo as any, 'summarizing', charCount);
+    expect(calls).toBe(1);
   });
 
   it('returns null only on a true cold start (zero samples)', () => {
     const repo = repoWith({ 'summarizing:1': [] });
-    expect(stageEtaForMeeting(repo as any, 'summarizing', 8000)).toBeNull();
+    expect(stageEtaForMeeting(repo as any, 'summarizing', () => 8000)).toBeNull();
   });
 
   it('returns a rough estimate from 1-2 samples', () => {
     const repo = repoWith({ 'summarizing:1': [1000, 2000] }); // bucket for 8000 chars = 1
-    expect(stageEtaForMeeting(repo as any, 'summarizing', 8000)).toEqual({ etaMs: 1500, rough: true });
+    expect(stageEtaForMeeting(repo as any, 'summarizing', () => 8000)).toEqual({ etaMs: 1500, rough: true });
   });
 
   it('returns a firm median for a warm single-stage step', () => {
     const repo = repoWith({ 'summarizing:1': [1000, 3000, 2000] });
-    expect(stageEtaForMeeting(repo as any, 'summarizing', 8000)).toEqual({ etaMs: 2000, rough: false });
+    expect(stageEtaForMeeting(repo as any, 'summarizing', () => 8000)).toEqual({ etaMs: 2000, rough: false });
   });
 
   it('combines transcribing+diarizing with max, firm when both branches are firm', () => {
@@ -37,8 +51,8 @@ describe('stageEtaForMeeting', () => {
       'diarizing:0': [4000, 4000, 4000],
     });
     // Parallel stages: wall-clock is bounded by the slower one.
-    expect(stageEtaForMeeting(repo as any, 'transcribing', 0)).toEqual({ etaMs: 4000, rough: false });
-    expect(stageEtaForMeeting(repo as any, 'diarizing', 0)).toEqual({ etaMs: 4000, rough: false });
+    expect(stageEtaForMeeting(repo as any, 'transcribing', () => 0)).toEqual({ etaMs: 4000, rough: false });
+    expect(stageEtaForMeeting(repo as any, 'diarizing', () => 0)).toEqual({ etaMs: 4000, rough: false });
   });
 
   it('is rough when any contributing branch is rough, even if the slower branch is firm', () => {
@@ -47,7 +61,7 @@ describe('stageEtaForMeeting', () => {
       'diarizing:0': [4000, 4000, 4000], // firm, and the max
     });
     // max picks diarizing's 4000 (firm), but transcribing is rough → combined rough.
-    expect(stageEtaForMeeting(repo as any, 'transcribing', 0)).toEqual({ etaMs: 4000, rough: true });
+    expect(stageEtaForMeeting(repo as any, 'transcribing', () => 0)).toEqual({ etaMs: 4000, rough: true });
   });
 
   it('ignores a cold sibling and reports the warm branch as-is', () => {
@@ -55,6 +69,6 @@ describe('stageEtaForMeeting', () => {
       'transcribing:0': [2000, 2000, 2000], // firm
       'diarizing:0': [], // cold — ignored
     });
-    expect(stageEtaForMeeting(repo as any, 'transcribing', 0)).toEqual({ etaMs: 2000, rough: false });
+    expect(stageEtaForMeeting(repo as any, 'transcribing', () => 0)).toEqual({ etaMs: 2000, rough: false });
   });
 });
