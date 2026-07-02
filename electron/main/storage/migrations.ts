@@ -256,6 +256,17 @@ export const MIGRATIONS: Migration[] = [
         ON stage_durations(stage, size_bucket, recorded_at);
     `,
   },
+  {
+    version: 14,
+    // action_items had no index on meeting_id, so countsByMeeting()'s
+    // GROUP BY (run on every meetings:list poll, every ~3s) and
+    // listByMeeting()'s WHERE both walked the whole table. Cheap now,
+    // but it scales with total action items across all meetings forever.
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_action_items_meeting
+        ON action_items(meeting_id);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

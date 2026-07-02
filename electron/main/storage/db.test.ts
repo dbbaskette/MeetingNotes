@@ -26,6 +26,13 @@ describe('openDb', () => {
     expect(cols.map((c) => c.name)).toContain('source_quote');
   });
 
+  it('indexes action_items.meeting_id (countsByMeeting GROUP BY runs on every list poll)', () => {
+    const dir = tmp(); dirs.push(dir);
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const indexes = db.prepare("PRAGMA index_list('action_items')").all() as { name: string }[];
+    expect(indexes.map((i) => i.name)).toContain('idx_action_items_meeting');
+  });
+
   it('is idempotent (running twice keeps version)', () => {
     const dir = tmp(); dirs.push(dir);
     const dbPath = path.join(dir, 'db.sqlite');

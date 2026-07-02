@@ -15,6 +15,7 @@ import {
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
+import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
@@ -498,12 +499,11 @@ function FailureBanner({
 
   const failedStep = USER_STEPS[stepIndexFor(meeting.pipelineStage)] ?? null;
 
-  // The exact substring LMStudioClient.chat() throws when a reasoning model
-  // burns its whole token budget "thinking" instead of answering (see the
-  // empty-content guard in electron/main/lm-studio/client.ts). Gate the
-  // inline recovery controls on it so they only appear for the failure they
-  // actually fix, not every unrelated error.
-  const isReasoningLoopFailure = (meeting.errorMessage ?? '').includes('spent its entire token budget');
+  // Gate the inline recovery controls on the reasoning-runaway failure
+  // signature so they only appear for the failure they actually fix, not
+  // every unrelated error. Marker parity with the main-process client is
+  // test-enforced (lib/reasoning-loop.test.ts).
+  const isReasoningLoopFailure = (meeting.errorMessage ?? '').includes(REASONING_LOOP_MARKER);
 
   async function retry(): Promise<void> {
     if (retrying) return;
@@ -1727,13 +1727,23 @@ function MarkdownPreview({
     // `nonce` in the dep list re-runs this when the same item is clicked twice.
   }, [highlight?.quote, highlight?.nonce]);
 
+  // Parsing markdown is the expensive part (a long summary/transcript runs
+  // tens of ms). Memoize the element on `source` so re-renders that don't
+  // change the text — provenance-highlight clicks, the 2s meeting poll while
+  // processing, any parent state churn — reuse the previous element and React
+  // bails out of the subtree instead of re-parsing.
+  const rendered = useMemo(
+    () => <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>,
+    [source],
+  );
+
   // `prose` gives us reasonable defaults for headings, lists, code blocks,
   // tables (via remark-gfm), and links — without us having to hand-style
   // every element. `whitespace-pre-wrap` is intentionally absent: the
   // markdown renderer handles its own line breaks via paragraph splitting.
   return (
     <div ref={rootRef} className="prose prose-sm max-w-none prose-headings:mt-3 prose-p:my-2">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+      {rendered}
     </div>
   );
 }

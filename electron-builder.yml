@@ -36,6 +36,15 @@ files:
   # redistribution, and BSD/Apache-2 have an authors-attribution clause.)
   - "!**/node_modules/**/{README,README.md,README.markdown,readme,readme.md}"
   - "!**/node_modules/**/{CHANGELOG,CHANGELOG.md,HISTORY.md}"
+  # zod 3.25.x ships THREE copies of itself: the classic v3 API (what
+  # `import { z } from 'zod'` resolves to — index.cjs requires ./v3/),
+  # plus opt-in `zod/v4` + `zod/v4-mini` subpaths and the TypeScript
+  # sources in src/. Nothing here imports the v4 subpaths (verified: v3
+  # is self-contained, no ../v4 requires), so drop the dead ~4.4 MB.
+  # KEEP v3/ — that IS the runtime code.
+  - "!**/node_modules/zod/src/**"
+  - "!**/node_modules/zod/v4/**"
+  - "!**/node_modules/zod/v4-mini/**"
 # @vscode/ripgrep ships a per-platform native binary (powers Cmd+K
 # search) via optionalDependencies — the real binary lives in
 # @vscode/ripgrep-${platform}-${arch}/bin/rg. Binaries can't be exec'd

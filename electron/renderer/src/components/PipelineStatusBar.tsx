@@ -5,7 +5,7 @@
 // view that happens to render it. A thin shell over the pure `status-bar`
 // module — all the string/visibility logic is unit-tested there.
 import { useEffect, useState } from 'react';
-import { useMeetingsStore } from '../store/meetings';
+import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { useElapsed } from '../lib/useElapsed';
 import {
   deriveStatusBar,
@@ -37,14 +37,10 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element | null 
 
   const model = deriveStatusBar(meetings, status);
 
-  // Keep title/stage/ETA fresh from Settings/Weekly/detail (LibraryView's 3s
-  // poll only runs while it's mounted). Only ticks while something is actually
-  // processing; on the Library it's a cheap duplicate the store dedupes.
-  useEffect(() => {
-    if (!(model && model.kind === 'processing' && model.meetingId)) return;
-    const t = setInterval(() => { void refresh(); }, 3000);
-    return () => clearInterval(t);
-  }, [model?.kind, model?.meetingId, refresh]);
+  // Keep title/stage/ETA fresh from Settings/Weekly/detail (LibraryView's
+  // poll only runs while it's mounted). Shared + ref-counted with the
+  // Library's hold, so on the Library view this adds zero extra IPC.
+  useMeetingsPoll(!!(model && model.kind === 'processing' && model.meetingId));
 
   const elapsed = useElapsed(model?.stageStartedAt ?? null, model?.kind === 'processing');
 
