@@ -1727,13 +1727,23 @@ function MarkdownPreview({
     // `nonce` in the dep list re-runs this when the same item is clicked twice.
   }, [highlight?.quote, highlight?.nonce]);
 
+  // Parsing markdown is the expensive part (a long summary/transcript runs
+  // tens of ms). Memoize the element on `source` so re-renders that don't
+  // change the text — provenance-highlight clicks, the 2s meeting poll while
+  // processing, any parent state churn — reuse the previous element and React
+  // bails out of the subtree instead of re-parsing.
+  const rendered = useMemo(
+    () => <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>,
+    [source],
+  );
+
   // `prose` gives us reasonable defaults for headings, lists, code blocks,
   // tables (via remark-gfm), and links — without us having to hand-style
   // every element. `whitespace-pre-wrap` is intentionally absent: the
   // markdown renderer handles its own line breaks via paragraph splitting.
   return (
     <div ref={rootRef} className="prose prose-sm max-w-none prose-headings:mt-3 prose-p:my-2">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+      {rendered}
     </div>
   );
 }
