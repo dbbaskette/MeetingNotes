@@ -11,6 +11,7 @@ import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
+import { firstRunStatus } from './lib/setup-wizard';
 
 type View =
   | { kind: 'library' }
@@ -130,14 +131,21 @@ function AppInner(): JSX.Element {
   };
 
   // Wizard state (#43). `null` = not loaded yet (show nothing),
-  // 'needed' = show wizard, 'done' = past onboarding.
+  // 'needed' = show wizard, 'done' = past onboarding. `forceOpen` is set by
+  // the Settings "Run setup again" button to re-open the wizard without
+  // clearing onboardedAt — firstRunStatus() folds both inputs into one answer.
   const [onboardStatus, setOnboardStatus] = useState<null | 'needed' | 'done'>(null);
+  const [forceOpenSetup, setForceOpenSetup] = useState(false);
   useEffect(() => {
     void (async () => {
       const all = (await api.settings.getAll()) as { onboardedAt: string | null };
-      setOnboardStatus(all.onboardedAt ? 'done' : 'needed');
+      setOnboardStatus(firstRunStatus(all.onboardedAt));
     })();
   }, []);
+  // Re-open path: recompute from the flag once it flips. onboardedAt stays put.
+  useEffect(() => {
+    if (forceOpenSetup) setOnboardStatus(firstRunStatus('forced', { forceOpen: true }));
+  }, [forceOpenSetup]);
 
   useEffect(() => {
     void (async () => {
@@ -286,7 +294,7 @@ function AppInner(): JSX.Element {
   const body = onboardStatus === null ? (
     <div className="p-8 text-sm text-ink-muted">Loading…</div>
   ) : onboardStatus === 'needed' ? (
-    <OnboardingView onFinished={() => setOnboardStatus('done')} />
+    <OnboardingView onFinished={() => { setForceOpenSetup(false); setOnboardStatus('done'); }} />
   ) : !permsOk ? (
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
   ) : view.kind === 'library' ? (
@@ -312,7 +320,10 @@ function AppInner(): JSX.Element {
       onOpenMeeting={(id) => setView({ kind: 'detail', id })}
     />
   ) : (
-    <SettingsView onBack={() => setView({ kind: 'library' })} />
+    <SettingsView
+      onBack={() => setView({ kind: 'library' })}
+      onRunSetupAgain={() => { setView({ kind: 'library' }); setForceOpenSetup(true); }}
+    />
   );
 
   // Persistent recording banner on views that don't show the LibraryView's
