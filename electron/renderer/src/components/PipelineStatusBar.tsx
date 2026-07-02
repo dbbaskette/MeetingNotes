@@ -18,11 +18,13 @@ interface Props {
   onOpenMeeting: (id: string) => void;
 }
 
-export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element | null {
+export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [status, setStatus] = useState<PipelineStatusSnapshot>({
     paused: false, currentId: null, queueLength: 0, queueIds: [],
   });
+  const [version, setVersion] = useState('');
+  useEffect(() => { void api.app.getVersion().then(setVersion); }, []);
 
   // Same pull-then-subscribe pattern LibraryView uses, so the bar is live even
   // from views that don't poll meetings themselves.
@@ -44,22 +46,28 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element | null 
 
   const elapsed = useElapsed(model?.stageStartedAt ?? null, model?.kind === 'processing');
 
-  if (!model) return null;
-
-  const clickable = model.meetingId !== null;
+  // Permanent bar: when nothing is processing, sit idle showing the app version
+  // and "Ready" rather than disappearing. When a meeting is in flight it takes
+  // over with the live "Summarizing … — 17s · ~3m · 2 queued" status (this is
+  // where the elapsed/ETA timers live app-wide).
+  const clickable = model?.meetingId != null;
   return (
     <div
       className={`shrink-0 z-[900] border-t border-surface-border bg-surface-sunken/95 backdrop-blur px-4 py-1.5 text-xs text-ink-muted flex items-center gap-2 ${
         clickable ? 'cursor-pointer hover:text-ink' : ''
       }`}
-      onClick={clickable ? () => onOpenMeeting(model.meetingId!) : undefined}
+      onClick={clickable ? () => onOpenMeeting(model!.meetingId!) : undefined}
       role={clickable ? 'button' : undefined}
       title={clickable ? 'Open this meeting' : undefined}
     >
-      {model.kind === 'processing' && model.meetingId && (
+      {model?.kind === 'processing' && model.meetingId ? (
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-indigo animate-pulse" />
+      ) : (
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-status-ok/70" />
       )}
-      <span className="truncate">{statusBarText(model, elapsed)}</span>
+      <span className="truncate">
+        {model ? statusBarText(model, elapsed) : `MeetingNotes${version ? ` v${version}` : ''} · Ready`}
+      </span>
     </div>
   );
 }

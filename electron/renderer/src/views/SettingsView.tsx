@@ -60,7 +60,6 @@ export function SettingsView({
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
-  const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
     void (async () => {
@@ -69,7 +68,6 @@ export function SettingsView({
       setPerms((await api.permissions.audio()) as AudioPerms);
       setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
       setProviders((await api.llm.detectProviders()) as ProviderAvailability);
-      setAppVersion(await api.app.getVersion());
     })();
   }, []);
 
@@ -97,8 +95,8 @@ export function SettingsView({
   }
 
   return (
-    <div className="max-w-2xl mx-auto p-8 space-y-5">
-      <div className="flex items-center gap-3">
+    <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
+      <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted text-sm">
           ← Back
         </button>
@@ -111,8 +109,9 @@ export function SettingsView({
             Run setup again
           </button>
         )}
-      </div>
+      </header>
 
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -449,15 +448,7 @@ export function SettingsView({
       </section>
 
       <DiagnosticsSection />
-
-      <section className="border-t border-surface-border pt-5">
-        <div className="flex items-center gap-2">
-          <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">About</div>
-          <div className="font-mono text-xs text-ink-soft">
-            MeetingNotes v{appVersion || '…'}
-          </div>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }
