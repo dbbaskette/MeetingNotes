@@ -14,6 +14,7 @@ No cloud. No uploads. No API keys at inference time. No third-party recorder to 
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![100% local](https://img.shields.io/badge/inference-100%25%20local-8b5cf6)](#-privacy--security)
+[![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
 </div>
 

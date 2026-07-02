@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeetingNotes — local-first meeting notes for macOS</title>
+<meta name="description" content="Record any meeting on your Mac. Transcribe, diarize, summarize, and extract action items — 100% on-device. No cloud, no uploads, no API keys.">
+<meta property="og:title" content="MeetingNotes — your meetings never leave your Mac">
+<meta property="og:description" content="Record any app's audio, then transcribe, diarize, summarize, and extract action items — every step on-device. No cloud, no uploads, no API keys.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dbbaskette.github.io/MeetingNotes/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2242%22 fill=%22%23FFB224%22/></svg>">
+</head>
+<body style="margin:0;background:#0A0D13">
+<style>
+  :root{
+    --ground:#0A0D13; --panel:#111722; --panel-2:#18202C; --raised:#1D2734;
+    --line:#28313F; --line-soft:#1B2330;
+    --ink:#E7ECF3; --muted:#8593A6; --faint:#5A6778;
+    --amber:#FFB224; --amber-dim:#C98713;
+    --teal:#2DD4BF; --violet:#A78BFA; --green:#3DDC97;
+    --sans:-apple-system,"SF Pro Display","SF Pro Text",system-ui,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Monaco,"Cascadia Code",monospace;
+    --wrap:1120px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .mn{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--sans);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    font-size:17px;
+    overflow-x:hidden;
+    /* faint console grain */
+    background-image:
+      radial-gradient(1200px 600px at 78% -8%, rgba(255,178,36,.06), transparent 60%),
+      radial-gradient(900px 500px at 8% 4%, rgba(45,212,191,.05), transparent 55%);
+  }
+  .mn *{box-sizing:border-box}
+  .wrap{max-width:var(--wrap);margin:0 auto;padding:0 28px}
+  a{color:inherit}
+  h1,h2,h3{text-wrap:balance;margin:0;font-weight:640;letter-spacing:-.02em;line-height:1.08}
+  p{margin:0}
+
+  /* ---- mono label ---- */
+  .lab{
+    font-family:var(--mono);font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;
+  }
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+
+  /* ---- top bar ---- */
+  .top{position:sticky;top:0;z-index:40;backdrop-filter:blur(12px);
+    background:rgba(10,13,19,.72);border-bottom:1px solid var(--line-soft)}
+  .top .wrap{display:flex;align-items:center;gap:20px;height:60px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-weight:600;letter-spacing:.02em}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 0 rgba(255,178,36,.55);animation:pulse 2.4s ease-out infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,178,36,.5)}70%{box-shadow:0 0 0 9px rgba(255,178,36,0)}100%{box-shadow:0 0 0 0 rgba(255,178,36,0)}}
+  .top nav{margin-left:auto;display:flex;gap:26px;align-items:center}
+  .top nav a{font-family:var(--mono);font-size:13px;color:var(--muted);text-decoration:none;letter-spacing:.04em}
+  .top nav a:hover{color:var(--ink)}
+  .ghost{border:1px solid var(--line);padding:8px 14px;border-radius:7px;color:var(--ink)!important;transition:border-color .2s,background .2s}
+  .ghost:hover{border-color:var(--amber);background:rgba(255,178,36,.06)}
+  @media(max-width:720px){.top nav a.hidem{display:none}}
+
+  /* ---- hero ---- */
+  .hero{padding:76px 0 40px}
+  .hero .wrap{display:grid;grid-template-columns:1.02fr .98fr;gap:52px;align-items:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:10px;margin-bottom:26px}
+  .eyebrow .pill{font-family:var(--mono);font-size:11.5px;letter-spacing:.18em;color:var(--amber);
+    border:1px solid rgba(255,178,36,.35);background:rgba(255,178,36,.07);padding:5px 10px;border-radius:6px}
+  h1{font-size:clamp(38px,5.4vw,64px);letter-spacing:-.035em}
+  h1 .g{color:var(--amber)}
+  .sub{margin-top:22px;font-size:19px;color:var(--muted);max-width:33ch;line-height:1.55}
+  .sub b{color:var(--ink);font-weight:600}
+  .cta{margin-top:34px;display:flex;gap:14px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:14px;font-weight:600;
+    letter-spacing:.02em;text-decoration:none;padding:13px 20px;border-radius:8px;transition:transform .15s,box-shadow .2s,background .2s,border-color .2s}
+  .btn.primary{background:var(--amber);color:#1A1204;box-shadow:0 8px 30px -8px rgba(255,178,36,.5)}
+  .btn.primary:hover{transform:translateY(-1px);box-shadow:0 12px 36px -8px rgba(255,178,36,.6)}
+  .btn.line{border:1px solid var(--line);color:var(--ink)}
+  .btn.line:hover{border-color:var(--muted);background:var(--panel)}
+  .meta{margin-top:30px;display:flex;gap:22px;flex-wrap:wrap;color:var(--faint);font-family:var(--mono);font-size:12.5px;letter-spacing:.03em}
+  .meta span{display:inline-flex;align-items:center;gap:7px}
+  .meta i{width:5px;height:5px;border-radius:50%;background:var(--green);font-style:normal;display:inline-block}
+
+  /* ---- recorder panel ---- */
+  .rec{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    background:linear-gradient(180deg,#131A25,#0D131C);box-shadow:0 30px 80px -30px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.03)}
+  .rec-head{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line-soft);background:rgba(255,255,255,.015)}
+  .rec-head .reclab{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--amber);font-weight:600}
+  .rec-head .reclab .d{width:8px;height:8px;border-radius:50%;background:var(--amber);animation:blink 1.4s steps(1) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .rec-head .src{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+  .rec-head .clk{font-family:var(--mono);font-size:12px;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  canvas#wave{display:block;width:100%;height:172px}
+  .rec-foot{border-top:1px solid var(--line-soft);padding:15px 16px 17px;background:rgba(0,0,0,.18)}
+  .rec-foot .step{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .card{margin-top:11px;font-size:14.5px;line-height:1.5}
+  .card .ov{color:var(--muted)}
+  .card .ov b{color:var(--ink);font-weight:600}
+  .ai{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .ai .row{display:flex;gap:10px;align-items:flex-start;font-size:13.5px}
+  .ai .chk{margin-top:2px;width:15px;height:15px;border-radius:4px;border:1px solid var(--green);flex:none;position:relative}
+  .ai .chk:after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--green);border-width:0 2px 2px 0;transform:rotate(42deg)}
+  .ai .who{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.04em;margin-left:auto;white-space:nowrap}
+  .type-cursor{display:inline-block;width:7px;height:15px;background:var(--amber);vertical-align:-2px;margin-left:2px;animation:blink 1.05s steps(1) infinite}
+
+  /* ---- section frame ---- */
+  section.band{border-top:1px solid var(--line-soft);padding:78px 0}
+  .head{max-width:70ch}
+  .head .lab{display:block;margin-bottom:16px}
+  .head h2{font-size:clamp(27px,3.6vw,40px)}
+  .head p{margin-top:16px;color:var(--muted);font-size:18px;max-width:60ch}
+
+  /* ---- local-first ---- */
+  .svc{margin-top:44px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .svc .s{border:1px solid var(--line);border-radius:11px;padding:20px 18px;background:var(--panel);position:relative;overflow:hidden}
+  .svc .s .port{font-family:var(--mono);font-size:12px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .svc .s h3{font-size:16px;margin:12px 0 6px;letter-spacing:-.01em;font-weight:620}
+  .svc .s p{color:var(--muted);font-size:13.5px;line-height:1.5}
+  .svc .s .bar{position:absolute;left:0;top:0;bottom:0;width:3px}
+  .boundary{margin-top:26px;border:1px dashed rgba(61,220,151,.4);border-radius:12px;padding:16px 20px;
+    display:flex;align-items:center;gap:14px;background:rgba(61,220,151,.045);flex-wrap:wrap}
+  .boundary .k{font-family:var(--mono);font-size:12.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--green);font-weight:600}
+  .boundary .t{color:var(--muted);font-size:14.5px}
+
+  /* ---- pipeline signal chain ---- */
+  .chain-scroll{margin-top:44px;overflow-x:auto;padding-bottom:8px}
+  .chain{display:flex;align-items:stretch;gap:0;min-width:860px}
+  .stage{flex:1;min-width:130px;border:1px solid var(--line);border-radius:11px;padding:16px 15px;background:var(--panel);position:relative}
+  .stage + .arrow{align-self:center}
+  .arrow{flex:none;width:34px;display:flex;align-items:center;justify-content:center;color:var(--faint);font-family:var(--mono)}
+  .stage .n{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em}
+  .stage h3{font-size:15px;margin:9px 0 5px;font-weight:620;letter-spacing:-.01em}
+  .stage p{font-size:12.5px;color:var(--muted);line-height:1.45}
+  .stage .tag{margin-top:10px;display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+    padding:3px 7px;border-radius:5px;border:1px solid var(--line)}
+  .par{display:flex;flex-direction:column;gap:10px}
+  .gate{border-color:rgba(255,178,36,.5);background:linear-gradient(180deg,rgba(255,178,36,.09),var(--panel))}
+  .gate .n{color:var(--amber)}
+
+  /* ---- feature panels ---- */
+  .feat{margin-top:44px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .f{border:1px solid var(--line);border-radius:12px;padding:24px 22px;background:var(--panel);transition:border-color .2s,transform .2s,background .2s}
+  .f:hover{border-color:var(--line);transform:translateY(-2px);background:var(--panel-2)}
+  .f .glyph{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:15px}
+  .f h3{font-size:17.5px;letter-spacing:-.015em;font-weight:640}
+  .f p{margin-top:9px;color:var(--muted);font-size:14.5px;line-height:1.52}
+  .f .kv{margin-top:14px;font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.03em}
+
+  /* ---- reasoning callout ---- */
+  .callout{margin-top:8px;border:1px solid var(--line);border-radius:14px;background:
+    linear-gradient(180deg,var(--panel-2),var(--panel));padding:30px 30px;display:grid;grid-template-columns:1.1fr 1fr;gap:34px;align-items:center}
+  .callout .lab{color:var(--violet)}
+  .callout h2{font-size:clamp(24px,3vw,32px);margin-top:14px}
+  .callout p{margin-top:14px;color:var(--muted);font-size:16px}
+  .brain{border:1px solid var(--line);border-radius:10px;background:var(--ground);overflow:hidden;font-family:var(--mono);font-size:12.5px}
+  .brain .l{display:flex;gap:12px;padding:11px 15px;border-bottom:1px solid var(--line-soft);align-items:center}
+  .brain .l:last-child{border-bottom:0}
+  .brain .l .st{margin-left:auto;font-size:11px;letter-spacing:.04em}
+  .ok{color:var(--green)} .warn{color:var(--amber)} .fix{color:var(--teal)}
+
+  /* ---- quick start terminal ---- */
+  .term{margin-top:44px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0C1119}
+  .term .tt{display:flex;align-items:center;gap:8px;padding:11px 15px;border-bottom:1px solid var(--line-soft);background:rgba(255,255,255,.02)}
+  .term .tt .b{width:11px;height:11px;border-radius:50%;background:#33404F}
+  .term .tt .path{margin-left:10px;font-family:var(--mono);font-size:12px;color:var(--faint);letter-spacing:.02em}
+  .term pre{margin:0;padding:22px 20px;overflow-x:auto;font-family:var(--mono);font-size:13.5px;line-height:1.85;color:#C6D2E0}
+  .term .c{color:var(--amber)} .term .cm{color:var(--faint)} .term .p{color:var(--teal)}
+  .steps{margin-top:16px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .steps .st{font-family:var(--mono);font-size:12.5px;color:var(--muted);border:1px solid var(--line-soft);border-radius:9px;padding:13px 15px}
+  .steps .st b{color:var(--ink);font-weight:600;display:block;margin-bottom:3px;letter-spacing:.02em}
+
+  /* ---- footer ---- */
+  footer.band{padding:56px 0 40px}
+  .foot{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap;align-items:flex-start}
+  .foot .cols{display:flex;gap:56px;flex-wrap:wrap}
+  .foot .col .lab{display:block;margin-bottom:12px}
+  .foot .col a{display:block;color:var(--muted);text-decoration:none;font-size:14px;margin-bottom:8px}
+  .foot .col a:hover{color:var(--ink)}
+  .foot .sig{max-width:30ch;color:var(--faint);font-size:13.5px}
+  .foot .sig .brand{color:var(--ink);margin-bottom:10px}
+  .rule{height:1px;background:var(--line-soft);margin:34px 0 22px}
+  .legal{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--faint);letter-spacing:.04em}
+
+  a:focus-visible,.btn:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:6px}
+
+  @media(max-width:900px){
+    .hero .wrap{grid-template-columns:1fr;gap:38px}
+    .sub{max-width:none}
+    .svc{grid-template-columns:repeat(2,1fr)}
+    .feat{grid-template-columns:1fr 1fr}
+    .callout{grid-template-columns:1fr;gap:22px}
+    .steps{grid-template-columns:1fr}
+  }
+  @media(max-width:560px){
+    .wrap{padding:0 20px}
+    .svc,.feat{grid-template-columns:1fr}
+    .meta{gap:14px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .dot,.rec-head .reclab .d,.type-cursor{animation:none}
+  }
+</style>
+
+<div class="mn">
+
+  <header class="top">
+    <div class="wrap">
+      <div class="brand"><span class="dot" aria-hidden="true"></span>MeetingNotes</div>
+      <nav>
+        <a class="hidem" href="#local">Local-first</a>
+        <a class="hidem" href="#pipeline">Pipeline</a>
+        <a class="hidem" href="#features">Features</a>
+        <a class="ghost" href="https://github.com/dbbaskette/MeetingNotes">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <div class="eyebrow"><span class="pill">● REC · macOS 14.2+ · Apple Silicon</span></div>
+        <h1>Your meetings never<br>leave your <span class="g">Mac</span>.</h1>
+        <p class="sub">Hit record. MeetingNotes captures any app's audio, then <b>transcribes, diarizes, summarizes, and extracts action items</b> — every step on your machine. No cloud, no uploads, no API keys.</p>
+        <div class="cta">
+          <a class="btn primary" href="#start">▶ Quick start</a>
+          <a class="btn line" href="https://github.com/dbbaskette/MeetingNotes">View source</a>
+        </div>
+        <div class="meta">
+          <span><i></i>100% on-device inference</span>
+          <span><i></i>whisper.cpp · pyannote · your LLM</span>
+          <span><i></i>MIT licensed</span>
+        </div>
+      </div>
+
+      <!-- recorder instrument -->
+      <div class="rec" aria-label="A recording being transcribed and summarized on-device">
+        <div class="rec-head">
+          <span class="reclab"><span class="d" aria-hidden="true"></span>RECORDING</span>
+          <span class="src">SRC · zoom.us</span>
+          <span class="clk num" id="clk">00:12:41</span>
+        </div>
+        <canvas id="wave" role="img" aria-label="Live audio waveform"></canvas>
+        <div class="rec-foot">
+          <span class="step">▸ Resolved — Summary &amp; action items</span>
+          <div class="card">
+            <p class="ov"><b>Overview.</b> Q3 roadmap sync — the team locked the migration window and split ownership of the launch checklist.</p>
+            <div class="ai">
+              <div class="row"><span class="chk" aria-hidden="true"></span><span>Ship the v2 API by Friday<span class="type-cursor" id="tc" aria-hidden="true"></span></span><span class="who">DAN · JUL 3</span></div>
+              <div class="row"><span class="chk" aria-hidden="true"></span><span>Write the migration guide</span><span class="who">PRIYA · WED</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOCAL FIRST -->
+  <section class="band" id="local">
+    <div class="wrap">
+      <div class="head">
+        <span class="lab">01 — The thesis</span>
+        <h2>Four local services. Nothing on the wire.</h2>
+        <p>The app is an orchestrator. It spawns each engine on demand, runs it against your audio, and shuts it down when idle to keep memory free. Ports are loopback; the network is never touched at inference time.</p>
+      </div>
+      <div class="svc">
+        <div class="s"><span class="bar" style="background:var(--amber)"></span><div class="port" style="color:var(--amber)">CoreAudio Tap</div><h3>Capture</h3><p>A codesigned Swift helper taps any app's audio + your mic into a mixed M4A.</p></div>
+        <div class="s"><span class="bar" style="background:var(--teal)"></span><div class="port" style="color:var(--teal)">:8080</div><h3>whisper.cpp</h3><p>Metal-accelerated speech-to-text with a hallucination filter on the output.</p></div>
+        <div class="s"><span class="bar" style="background:var(--violet)"></span><div class="port" style="color:var(--violet)">:8765</div><h3>pyannote</h3><p>Speaker diarization in a Python sidecar — who spoke when, aligned to the transcript.</p></div>
+        <div class="s"><span class="bar" style="background:#FB923C"></span><div class="port" style="color:#FB923C">:1234 / :11434</div><h3>Your LLM</h3><p>Any chat model in LM Studio or Ollama writes the summary and pulls action items.</p></div>
+      </div>
+      <div class="boundary">
+        <span class="k">◈ Boundary</span>
+        <span class="t">Audio, transcripts, and summaries stay in <span class="num" style="color:var(--ink)">~/Documents/MeetingNotes</span>. The Hugging Face token is needed once — for the model download — then never again.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PIPELINE -->
+  <section class="band" id="pipeline">
+    <div class="wrap">
+      <div class="head">
+        <span class="lab">02 — Signal chain</span>
+        <h2>From waveform to action items.</h2>
+        <p>Transcribe and diarize run in parallel off one 16&nbsp;kHz decode; the rest is sequential. Midway, the pipeline pauses so you can name unknown voices — then bakes real names into the transcript before the LLM ever sees it.</p>
+      </div>
+      <div class="chain-scroll">
+        <div class="chain">
+          <div class="stage par">
+            <div>
+              <div class="n">01 · PARALLEL</div>
+              <h3>Transcribe</h3>
+              <p>whisper.cpp over the mixed audio.</p>
+              <span class="tag" style="color:var(--teal);border-color:rgba(45,212,191,.4)">:8080</span>
+            </div>
+            <div style="border-top:1px solid var(--line-soft);padding-top:10px">
+              <h3>Diarize</h3>
+              <p>pyannote speaker turns.</p>
+              <span class="tag" style="color:var(--violet);border-color:rgba(167,139,250,.4)">:8765</span>
+            </div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage"><div class="n">02</div><h3>Merge + Identify</h3><p>Stitch turns to text; match voice embeddings against your roster.</p><span class="tag" style="color:var(--muted)">roster</span></div>
+          <div class="arrow">→</div>
+          <div class="stage gate"><div class="n">03 · GATE</div><h3>Name voices</h3><p>Pause for unknown speakers. Play an 8-second sample, label, continue — or skip.</p><span class="tag" style="color:var(--amber);border-color:rgba(255,178,36,.45)">awaiting</span></div>
+          <div class="arrow">→</div>
+          <div class="stage"><div class="n">04</div><h3>Summarize + Extract</h3><p>Your LLM writes the structured notes and pulls action items with provenance.</p><span class="tag" style="color:#FB923C;border-color:rgba(251,146,60,.4)">:1234</span></div>
+          <div class="arrow">→</div>
+          <div class="stage" style="border-color:rgba(61,220,151,.4)"><div class="n" style="color:var(--green)">DONE</div><h3>Notes on disk</h3><p>transcript.md · summary.md · action-items.json</p><span class="tag" style="color:var(--green);border-color:rgba(61,220,151,.4)">✓ saved</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="band" id="features">
+    <div class="wrap">
+      <div class="head">
+        <span class="lab">03 — In the app</span>
+        <h2>Built for the whole meeting lifecycle.</h2>
+      </div>
+      <div class="feat">
+        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">⏺</div><h3>Trigger anywhere</h3><p>Auto-detect meetings in browsers and native apps, or fire a URL scheme from a Shortcut, Stream Deck, or calendar hook.</p><div class="kv">meetingnotes://record?source=zoom.us</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">◫</div><h3>Speaker memory</h3><p>Name a voice once; it's recognized across every future meeting by its embedding. Confirm, skip, or correct anytime.</p><div class="kv">voice → roster → real names</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(167,139,250,.12);color:var(--violet)">✎</div><h3>Editable summaries</h3><p>Preview / split / edit modes. Fix a hallucination or redact in place — changes write straight to summary.md.</p><div class="kv">overview · decisions · action items</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(61,220,151,.12);color:var(--green)">↦</div><h3>Action-item provenance</h3><p>Click any action item to jump to the exact summary line it came from. Edit the summary, hit re-extract, done in seconds.</p><div class="kv">click → source bullet</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">▤</div><h3>Weekly rollup</h3><p>A Mon–Sun narrative with cross-meeting themes, decisions, and your open action items — cached so re-opening is instant.</p><div class="kv">themes · owners · export .md</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">⇥</div><h3>Export & search</h3><p>Push items to Apple Reminders, Google Tasks/Docs, or any webhook. ⌘K searches every title, summary, and transcript.</p><div class="kv">reminders · tasks · webhook</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REASONING CALLOUT -->
+  <section class="band">
+    <div class="wrap">
+      <div class="callout">
+        <div>
+          <span class="lab">04 — Bring your own model</span>
+          <h2>Reasoning models, handled.</h2>
+          <p>Some local models "think" before they answer — and occasionally spiral, burning their whole budget without writing a word. MeetingNotes flags them, canary-tests your pick, strips the <span class="num" style="color:var(--ink)">&lt;think&gt;</span> blocks, and auto re-samples the rare spiral instead of failing your meeting.</p>
+        </div>
+        <div class="brain" aria-label="Model resilience checks">
+          <div class="l"><span>🧠 badge in the picker</span><span class="st warn">reasoning</span></div>
+          <div class="l"><span>health-check canary</span><span class="st ok">✓ passed</span></div>
+          <div class="l"><span>budget-spent-thinking</span><span class="st fix">↻ re-sampled</span></div>
+          <div class="l"><span>default · qwen3.5-9b</span><span class="st ok">fits VRAM</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUICK START -->
+  <section class="band" id="start">
+    <div class="wrap">
+      <div class="head">
+        <span class="lab">05 — Get running</span>
+        <h2>Three commands.</h2>
+        <p>Clone, install the two Homebrew binaries, and run setup. The app spawns everything else on demand — a five-step wizard walks you through permissions, models, and your token on first launch.</p>
+      </div>
+      <div class="term">
+        <div class="tt"><span class="b"></span><span class="b"></span><span class="b"></span><span class="path">~/Projects/MeetingNotes — zsh</span></div>
+<pre><span class="cm"># clone and enter</span>
+git clone https://github.com/dbbaskette/MeetingNotes.git
+cd MeetingNotes
+
+<span class="cm"># the two native dependencies</span>
+brew install <span class="c">whisper-cpp</span> <span class="c">ffmpeg</span>
+
+<span class="cm"># one interactive setup, then launch</span>
+./scripts/setup.sh
+./scripts/start.sh</pre>
+      </div>
+      <div class="steps">
+        <div class="st"><b>Requirements</b>macOS 14.2+ · Apple Silicon · ~16 GB RAM · LM Studio or Ollama</div>
+        <div class="st"><b>First launch</b>Permissions → Whisper model → HF token → LLM → STT. Every step skippable.</div>
+        <div class="st"><b>Then</b>⏺ Record → ▶ Process → name voices → read your notes.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="band">
+    <div class="wrap">
+      <div class="foot">
+        <div class="sig">
+          <div class="brand" style="font-family:var(--mono);font-weight:600;display:flex;gap:10px;align-items:center"><span class="dot" aria-hidden="true"></span>MeetingNotes</div>
+          Local-first meeting notes for macOS. You bring the models; it orchestrates the rest.
+        </div>
+        <div class="cols">
+          <div class="col">
+            <span class="lab">Project</span>
+            <a href="https://github.com/dbbaskette/MeetingNotes">Source on GitHub</a>
+            <a href="https://github.com/dbbaskette/MeetingNotes#-quick-start">Quick start</a>
+            <a href="https://github.com/dbbaskette/MeetingNotes/blob/main/LICENSE">MIT License</a>
+          </div>
+          <div class="col">
+            <span class="lab">Built on</span>
+            <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a>
+            <a href="https://github.com/pyannote/pyannote-audio">pyannote-audio</a>
+            <a href="https://lmstudio.ai">LM Studio · Ollama</a>
+          </div>
+        </div>
+      </div>
+      <div class="rule"></div>
+      <div class="legal">
+        <span>v1.8.4 · macOS 14.2+ · Apple Silicon</span>
+        <span>◈ Nothing leaves this Mac</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var c = document.getElementById('wave');
+  if(!c) return;
+  var ctx = c.getContext('2d');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var dpr = Math.min(window.devicePixelRatio||1, 2);
+  var W=0, H=0, N=88;
+
+  function size(){
+    var r = c.getBoundingClientRect();
+    W = r.width; H = r.height;
+    c.width = Math.round(W*dpr); c.height = Math.round(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  size();
+  window.addEventListener('resize', size);
+
+  // deterministic per-bar character
+  var seed = [];
+  for(var i=0;i<N;i++) seed.push(0.35 + 0.65*Math.abs(Math.sin(i*12.9898)*43758.5453 % 1));
+
+  function frame(t){
+    ctx.clearRect(0,0,W,H);
+    var mid = H*0.5;
+    var gap = 2.4;
+    var bw = (W/N) - gap;
+    var play = ((t*0.00013) % 1);           // sweeping playhead 0..1
+    var px = play*W;
+
+    for(var i=0;i<N;i++){
+      var x = i*(W/N) + gap*0.5;
+      var s = seed[i];
+      // layered motion → organic amplitude
+      var a = 0.30
+        + 0.34*Math.sin(i*0.32 + t*0.0026)
+        + 0.20*Math.sin(i*0.11 - t*0.0015)
+        + 0.16*Math.sin(i*0.7  + t*0.004);
+      a = Math.abs(a)*s;
+      // envelope: louder near the playhead, quiet far behind (as if "resolved")
+      var d = Math.abs(x - px)/W;
+      var env = 0.35 + 0.9*Math.exp(-d*d*22);
+      var settled = x < px-8 ? 0.55 : 1;      // bars behind the head calm down
+      var h = Math.max(2, a*env*settled*(H*0.86));
+
+      // color: teal → amber across the panel
+      var mixv = i/N;
+      var r1=45,g1=212,b1=191, r2=255,g2=178,b2=36;
+      var rr=Math.round(r1+(r2-r1)*mixv), gg=Math.round(g1+(g2-g1)*mixv), bb=Math.round(b1+(b2-b1)*mixv);
+      var near = Math.exp(-d*d*30);
+      var al = 0.28 + 0.62*near;
+      ctx.fillStyle = 'rgba('+rr+','+gg+','+bb+','+al.toFixed(3)+')';
+      // rounded bar, mirrored around mid
+      var rad = Math.min(bw/2, 2);
+      roundBar(x, mid-h, bw, h*2, rad);
+      ctx.fill();
+    }
+    // playhead
+    ctx.fillStyle='rgba(255,178,36,0.9)';
+    ctx.fillRect(px-0.75, 6, 1.5, H-12);
+    ctx.fillStyle='rgba(255,178,36,0.14)';
+    ctx.fillRect(px-6, 6, 12, H-12);
+  }
+
+  function roundBar(x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+
+  if(reduce){
+    frame(1200);   // one settled frame
+  } else {
+    var raf;
+    function loop(t){ frame(t); raf = requestAnimationFrame(loop); }
+    raf = requestAnimationFrame(loop);
+  }
+
+  // typing cursor on the first action item — tasteful, one line
+  var tc = document.getElementById('tc');
+  // cursor already blinks via CSS; nothing else needed.
+
+  // live-ish clock in the recorder header
+  var clk = document.getElementById('clk');
+  if(clk && !reduce){
+    var base = 12*60+41;
+    setInterval(function(){ base++; var m=Math.floor(base/60), s=base%60;
+      clk.textContent = '00:'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0'); }, 1000);
+  }
+})();
+</script>
+</body>
+</html>
