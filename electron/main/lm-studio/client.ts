@@ -52,6 +52,14 @@ function mimeFromExt(filePath: string): string {
  *  banner's recovery controls. A parity test keeps the copies in sync. */
 export const REASONING_LOOP_MARKER = 'spent its entire token budget';
 
+/** Minimum temperature for a RE-SAMPLE attempt. A temperature-0 caller's
+ *  request is deterministic, so re-issuing it verbatim reproduces the exact
+ *  same reasoning spiral (measured: 4/4 identical 1157-word spirals on a real
+ *  failing summary). Raising the retry's temperature breaks the deterministic
+ *  path so a fresh sample can escape the loop. Only used on retries, so the
+ *  first attempt keeps the caller's chosen temperature. */
+const RESAMPLE_MIN_TEMPERATURE = 0.6;
+
 export class LMStudioError extends Error {
   constructor(message: string, public cause?: unknown) {
     super(message);
@@ -220,7 +228,15 @@ export class LMStudioClient {
     // spiral (a sampling tail event) almost always clears.
     const maxResample = Math.max(0, input.resampleRetries ?? 0);
     for (let attemptNo = 0; ; attemptNo++) {
-      const resp = await this.requestChatCompletion(input);
+      // On a re-sample, force enough temperature that the retry actually
+      // diverges. Extract runs at temperature 0 (deterministic), so a plain
+      // re-issue reproduces the identical spiral — measured 4/4 identical
+      // 1157-word spirals on a real failing summary. Raising it breaks the
+      // deterministic path so a fresh sample can clear the loop.
+      const temperature = attemptNo === 0
+        ? input.temperature
+        : Math.max(input.temperature ?? 0.2, RESAMPLE_MIN_TEMPERATURE);
+      const resp = await this.requestChatCompletion(input, temperature);
       if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
       const body = (await resp.json()) as {
         choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
@@ -287,7 +303,7 @@ export class LMStudioClient {
    *  network retry. Throws a fatal LMStudioError on timeout or a network
    *  failure that survives the retry. Separated from {@link chat} so the
    *  re-sample loop can re-issue it cleanly. */
-  private async requestChatCompletion(input: ChatInput): Promise<Response> {
+  private async requestChatCompletion(input: ChatInput, temperature?: number): Promise<Response> {
     // 10-minute ceiling per attempt. Summarizing / extracting on a local model
     // routinely runs several minutes for long transcripts. One retry on
     // transient network failure — LM Studio occasionally drops mid-stream
@@ -302,7 +318,7 @@ export class LMStudioClient {
         body: JSON.stringify({
           model: input.model,
           messages: input.messages,
-          temperature: input.temperature ?? 0.2,
+          temperature: temperature ?? input.temperature ?? 0.2,
           max_tokens: input.maxTokens,
           // Only emit the key when we actually want thinking off, so a
           // request to a non-reasoning model stays byte-for-byte unchanged.

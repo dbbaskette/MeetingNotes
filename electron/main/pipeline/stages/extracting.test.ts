@@ -82,18 +82,21 @@ describe('runExtracting', () => {
     expect(written[0].sourceQuote).toContain('v2 API');
   });
 
-  it('caps the budget at 2000 tokens and keeps the preamble-forbidding prompt', async () => {
-    // The summary input is 1–3k tokens, so 2000 output tokens is generous for
-    // the short JSON answer while bounding a still-looping reasoning model to
-    // tens of seconds instead of minutes.
+  it('gives reasoning room (4000 tokens), re-samples spirals, and forbids preamble', async () => {
+    // Gemma reasons ~2000 words before emitting the JSON; the old 2000 cap
+    // guillotined it mid-thought → empty content. 4000 leaves room, and
+    // resampleRetries re-samples the intermittent spiral (temperature 0 makes a
+    // plain retry deterministic, so the client bumps the retry temperature).
     const { ctx, folder } = makeCtx(async () => '[]');
     fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
     await runExtracting({ meetingId: 'm' }, ctx);
     const arg = ctx.lmStudio.chat.mock.calls[0]![0] as {
       maxTokens: number;
+      resampleRetries: number;
       messages: { content: string }[];
     };
-    expect(arg.maxTokens).toBe(2000);
+    expect(arg.maxTokens).toBe(4000);
+    expect(arg.resampleRetries).toBe(2);
     expect(arg.messages[0]!.content).toContain('Do NOT think out loud');
   });
 });

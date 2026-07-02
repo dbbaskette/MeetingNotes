@@ -565,7 +565,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // 'done' meeting stays 'done' and can't be dragged back into the queue.
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const { count } = await extractActionItemsFromSummary(
-      s,
+      { ...s, onResample: (retry, words) =>
+        s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
       meetingId,
       folder,
       'save a summary (with an Action Items section) before re-extracting.',
