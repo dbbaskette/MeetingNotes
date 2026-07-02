@@ -273,6 +273,11 @@ export function createNarrativeGenerator(
       // salvages anyway if even this is exceeded. Runaway loops stay bounded by
       // looksDegenerate() and the 10-minute request timeout, not this cap.
       maxTokens: 16000,
+      // Same intermittent reasoning-spiral guard as summarize: a reasoning
+      // model occasionally burns the whole budget thinking and returns empty
+      // content. temperature 0.3 makes each retry a fresh sample, so re-sample
+      // the rare spiral instead of failing the weekly digest.
+      resampleRetries: 2,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(input) },
