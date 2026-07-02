@@ -11,6 +11,11 @@ export interface Settings {
   llmModel: string;
   audioHijackSessionName: string;
   libraryPath: string;
+  /** OPTIONAL extra folder watched for dropped audio. Empty by default.
+   *  The library's recordings dir (`<libraryPath>/recordings`) and the legacy
+   *  `~/Music/MeetingNotes` are ALWAYS watched regardless of this value — the
+   *  built-in recorder writes into the library, so this is purely an additional
+   *  drop location for users who want one. See libraryWatchPaths(). */
   audioWatchPath: string;
   sttLanguage: string;
   exporterApple: boolean;
@@ -129,7 +134,7 @@ export const DEFAULT_SETTINGS: Settings = {
   llmModel: 'qwen/qwen3.5-9b',
   audioHijackSessionName: 'Meeting',
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),
-  audioWatchPath: path.join(os.homedir(), 'Music', 'MeetingNotes'),
+  audioWatchPath: '',
   sttLanguage: 'en',
   exporterApple: true,
   exporterMarkdown: true,

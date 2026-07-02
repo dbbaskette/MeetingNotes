@@ -41,6 +41,7 @@ const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsRevealStorage: 'settings:reveal-storage',
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
@@ -225,6 +226,11 @@ const api = {
   settings: {
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
     set: (key: string, value: unknown) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, key, value),
+    /** Reveal a storage location in Finder. `key` is one of
+     *  'library' | 'models' | 'logs' | 'hfCache'; main creates the folder if
+     *  missing and shows it in Finder. */
+    revealStorage: (key: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.settingsRevealStorage, key) as Promise<void>,
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),

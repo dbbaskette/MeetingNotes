@@ -268,7 +268,7 @@ export function SettingsView({
         <div className="text-xs text-ink-muted mt-1">
           The model file to load when starting whisper-server. Must be installed in
           ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
-          (use the onboarding wizard or ./scripts/whisper-server.sh install &lt;name&gt;).
+          (use the setup wizard's Whisper step to download one).
         </div>
       </Field>
       <Field label="Library Path">
@@ -278,14 +278,17 @@ export function SettingsView({
           className="input"
         />
       </Field>
-      <Field label="Recordings folder">
+      <StoragePanel />
+      <Field label="Extra watch folder">
         <input
           value={s.audioWatchPath}
           onChange={(e) => update('audioWatchPath', e.target.value)}
+          placeholder="(none)"
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
-          Where dropped MP3s and external recordings are watched. The built-in recorder writes to ~/Music/MeetingNotes.
+          Optional. An extra folder watched for dropped audio. Your library&rsquo;s
+          recordings folder and the legacy ~/Music/MeetingNotes are always watched.
         </div>
       </Field>
       <Field label="STT Language">
@@ -599,6 +602,67 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
     <div className="flex items-center gap-3 text-sm">
       <span className="flex-1">{label}</span>
       <span className={`font-semibold ${cls}`}>{txt}</span>
+    </div>
+  );
+}
+
+/** Legible storage map (Option B). Recordings, meetings, and the database
+ *  live under the Library Path (edited above); re-downloadable / derived data
+ *  stays in the conventional macOS locations. The display strings mirror
+ *  storageLocations() in electron/main/lib/storage-paths.ts; the Reveal
+ *  buttons resolve the real (possibly relocated) paths in the main process. */
+function StoragePanel(): JSX.Element {
+  const rows: { key: string; label: string; path: string; note: string }[] = [
+    {
+      key: 'models',
+      label: 'Models',
+      path: '~/Library/Application Support/MeetingNotes/whisper-models',
+      note: 'Whisper models — re-downloadable, kept out of iCloud.',
+    },
+    {
+      key: 'logs',
+      label: 'Logs',
+      path: '~/Library/Logs/MeetingNotes',
+      note: 'App logs.',
+    },
+    {
+      key: 'hfCache',
+      label: 'AI model cache',
+      path: '~/.cache/huggingface',
+      note: 'Diarization models + token — shared with other Hugging Face tools.',
+    },
+  ];
+  return (
+    <div className="rounded-lg border border-surface-border bg-surface-sunken/40 divide-y divide-surface-border">
+      <div className="px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink flex-1">Library</span>
+          <button
+            onClick={() => void api.settings.revealStorage('library')}
+            className="text-xs font-semibold text-ink-muted hover:text-ink px-2 py-1 rounded-lg border border-surface-border hover:border-ink/30 transition shrink-0"
+          >
+            Reveal in Finder
+          </button>
+        </div>
+        <div className="text-xs text-ink-muted mt-0.5">
+          Recordings, meetings, and the database (Library Path above).
+        </div>
+      </div>
+      {rows.map((r) => (
+        <div key={r.key} className="px-3 py-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-ink flex-1">{r.label}</span>
+            <button
+              onClick={() => void api.settings.revealStorage(r.key)}
+              className="text-xs font-semibold text-ink-muted hover:text-ink px-2 py-1 rounded-lg border border-surface-border hover:border-ink/30 transition shrink-0"
+            >
+              Reveal in Finder
+            </button>
+          </div>
+          <div className="font-mono text-[11px] text-ink-muted mt-0.5 break-all">{r.path}</div>
+          <div className="text-xs text-ink-muted mt-0.5">{r.note}</div>
+        </div>
+      ))}
     </div>
   );
 }

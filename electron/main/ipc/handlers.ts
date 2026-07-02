@@ -24,6 +24,7 @@ import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
+import { storageLocations } from '../lib/storage-paths.js';
 import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
 import { transcriptChars } from '../pipeline/transcript-chars.js';
 import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
@@ -675,6 +676,17 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         else s.nativeAppDetector.stop();
       }
     }
+  });
+
+  ipc.handle(IPC_CHANNELS.settingsRevealStorage, (_e: unknown, key: unknown) => {
+    const rows = storageLocations({
+      libraryRoot: s.settings.get('libraryPath'),
+      home: os.homedir(),
+    });
+    const row = rows.find((r) => r.key === key);
+    if (!row) throw new Error(`unknown storage location: ${String(key)}`);
+    fs.mkdirSync(row.path, { recursive: true });
+    shell.showItemInFolder(row.path);
   });
 
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
