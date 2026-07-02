@@ -1,6 +1,8 @@
 // electron/renderer/src/store/meetings.ts
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { api } from '../ipc/client';
+import { createSharedInterval } from '../lib/shared-interval';
 
 interface MeetingSummary {
   id: string;
@@ -58,3 +60,20 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
     set({ meetings: list });
   },
 }));
+
+/** One shared cadence for "the pipeline is moving, keep the list fresh". */
+export const MEETINGS_POLL_MS = 3000;
+
+// Single app-wide poll loop. LibraryView (while there's motion) and the
+// bottom PipelineStatusBar (while processing) both want the same refresh on
+// the same cadence — ref-counting keeps overlapping holders from doubling
+// the meetings:list IPC + DB work.
+const meetingsPoll = createSharedInterval(
+  () => { void useMeetingsStore.getState().refresh(); },
+  MEETINGS_POLL_MS,
+);
+
+/** Hold the shared meetings poll while `active` is true. */
+export function useMeetingsPoll(active: boolean): void {
+  useEffect(() => (active ? meetingsPoll.acquire() : undefined), [active]);
+}

@@ -8,7 +8,7 @@
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useMeetingsStore } from '../store/meetings';
+import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
@@ -108,11 +108,7 @@ export function LibraryView({
     [meetings, liveRecording],
   );
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
-    if (!hasMotion) return;
-    const t = setInterval(refresh, 3000);
-    return () => clearInterval(t);
-  }, [refresh, hasMotion]);
+  useMeetingsPoll(hasMotion);
   useEffect(() => {
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') void refresh();
