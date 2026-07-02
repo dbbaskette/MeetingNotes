@@ -101,6 +101,7 @@ export const IPC_CHANNELS = {
   onboardingWhisperList: 'onboarding:whisper-list',
   onboardingWhisperInstall: 'onboarding:whisper-install',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
+  onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',

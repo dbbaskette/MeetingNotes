@@ -713,6 +713,18 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
   });
 
+  ipc.handle(IPC_CHANNELS.onboardingHfTokenStatus, async () => {
+    // Report whether a non-empty token file exists — so the wizard's HF step,
+    // after the user navigates away and back, shows "already saved" rather than
+    // a blank field that looks like the token vanished. We never read the
+    // secret back into the renderer.
+    const tokenPath = path.join(os.homedir(), '.cache', 'huggingface', 'token');
+    let saved = false;
+    try { saved = fs.existsSync(tokenPath) && fs.readFileSync(tokenPath, 'utf8').trim().length > 0; }
+    catch { saved = false; }
+    return { saved };
+  });
+
   ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
     if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
       throw new Error('invalid url');

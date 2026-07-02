@@ -47,6 +47,7 @@ const IPC_CHANNELS = {
   onboardingWhisperList: 'onboarding:whisper-list',
   onboardingWhisperInstall: 'onboarding:whisper-install',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
+  onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',
@@ -265,6 +266,11 @@ const api = {
      *  Caller is expected to have validated it already. */
     saveHfToken: (token: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenSave, token) as Promise<void>,
+    /** Whether an HF token is already on disk (~/.cache/huggingface/token).
+     *  Lets the wizard show "already saved" after back-nav instead of a
+     *  blank field — we never read the secret back into the UI. */
+    hfTokenStatus: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenStatus) as Promise<{ saved: boolean }>,
     /** Open an external URL (HF model-gate pages, LM Studio download,
      *  System Settings deep-links) via shell.openExternal. */
     openExternal: (url: string) =>
