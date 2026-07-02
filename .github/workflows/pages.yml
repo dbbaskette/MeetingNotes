@@ -1,7 +1,12 @@
-# Deploys the marketing/landing page in site/ to GitHub Pages at
-# https://dbbaskette.github.io/MeetingNotes/ whenever it changes on main.
-# The page is fully self-contained (no build step) — upload and deploy.
-name: Deploy site to GitHub Pages
+# Publishes the landing page in site/ to the gh-pages branch, which GitHub
+# Pages serves at https://dbbaskette.github.io/MeetingNotes/ (Pages source is
+# set to the gh-pages branch, build_type=legacy).
+#
+# Why not actions/deploy-pages: on this repo that pipeline hung indefinitely in
+# `deployment_queued` on first provisioning. The classic branch build is
+# reliable — but pushing the branch alone didn't auto-trigger a build here, so
+# we also request one explicitly via the API.
+name: Publish site to GitHub Pages
 
 on:
   push:
@@ -12,36 +17,40 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write   # push the gh-pages branch
+  pages: write      # request a Pages build
 
-# One deploy at a time. Do NOT cancel an in-flight deploy — GitHub's first-ever
-# Pages provisioning for a repo can take 15-20 min, and cancelling mid-poll just
-# restarts that clock.
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+
+      - name: Publish site/ to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          # First run flips the repo's Pages source to "GitHub Actions"
-          # so no manual Settings step is needed.
-          enablement: true
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
-        with:
-          # First-ever Pages provisioning for a repo can outlast the action's
-          # default 10-min poll. Give it 25 min so a single run rides through.
-          timeout: 1500000
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          # peaceiris drops a .nojekyll automatically; keep the raw HTML as-is.
+          enable_jekyll: false
+          commit_message: "site: publish ${{ github.sha }}"
+
+      - name: Trigger a Pages build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The branch push doesn't reliably auto-trigger a build on this repo,
+          # so request one and wait for it to finish.
+          gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
+          for i in $(seq 1 30); do
+            s=$(gh api "repos/${{ github.repository }}/pages/builds/latest" --jq '.status' 2>/dev/null || echo "")
+            echo "pages build status: $s"
+            [ "$s" = "built" ] && exit 0
+            [ "$s" = "errored" ] && { gh api "repos/${{ github.repository }}/pages/builds/latest" --jq '.error.message'; exit 1; }
+            sleep 10
+          done
