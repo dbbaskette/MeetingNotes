@@ -12,7 +12,8 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   const { count } = await extractActionItemsFromSummary(
-    ctx,
+    { ...ctx, onResample: (retry, words) =>
+      ctx.logger.warn('extract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
     meetingId,
     folder,
     're-run processing so the summarize stage regenerates it before action-item extraction.',

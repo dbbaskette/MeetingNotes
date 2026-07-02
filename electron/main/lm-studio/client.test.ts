@@ -233,6 +233,22 @@ describe('LMStudioClient.chat — timeout & runaway handling', () => {
     expect(onResample).toHaveBeenCalledTimes(2);
   });
 
+  it('re-samples at a higher temperature so a temperature-0 caller actually diverges', async () => {
+    // Extract runs at temperature 0 (deterministic), so a plain re-issue would
+    // reproduce the exact same spiral — measured 4/4 identical 1157-word spirals
+    // on the real failing summary. The retry must raise the temperature to break
+    // the deterministic path.
+    fetchMock.mockResolvedValueOnce(reasoningRunaway()).mockResolvedValueOnce(goodSummary());
+    const c = new LMStudioClient('http://localhost:1234');
+    await c.chat({
+      model: 'm', temperature: 0, messages: [{ role: 'user', content: 'hi' }], resampleRetries: 1,
+    });
+    const firstBody = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    const retryBody = JSON.parse((fetchMock.mock.calls[1]![1] as { body: string }).body);
+    expect(firstBody.temperature).toBe(0); // original request unchanged
+    expect(retryBody.temperature).toBeGreaterThanOrEqual(0.5); // retry diverges
+  });
+
   it('does NOT retry by default so the health-check canary still detects a loop', async () => {
     fetchMock.mockResolvedValueOnce(reasoningRunaway());
     const c = new LMStudioClient('http://localhost:1234');
