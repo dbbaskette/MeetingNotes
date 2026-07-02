@@ -36,6 +36,11 @@ export type PipelineStatusListener = (s: PipelineStatus) => void;
  *  but their errors are isolated — webhook delivery failures must not
  *  poison the next meeting's run. Issue #79. */
 export type MeetingCompleteListener = (meetingId: string) => void | Promise<void>;
+/** Fires the instant a meeting enters the `awaiting_speaker_id` gate — the one
+ *  place the pipeline stops and waits on the user. The wiring in index.ts uses
+ *  it to raise a native notification. Errors thrown by listeners are isolated
+ *  so a bad listener can't wedge the pipeline. */
+export type SpeakerGateListener = (meetingId: string) => void;
 
 export class Pipeline {
   private queue: string[] = [];
@@ -45,6 +50,7 @@ export class Pipeline {
   private currentId: string | null = null;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
   private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
+  private readonly gateListeners: Set<SpeakerGateListener> = new Set();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -125,6 +131,13 @@ export class Pipeline {
     return () => { this.completeListeners.delete(cb); };
   }
 
+  /** Subscribe to gate entries. Fires once each time a meeting reaches
+   *  `awaiting_speaker_id`. Returns an unsubscribe fn. */
+  onAwaitingSpeakerId(cb: SpeakerGateListener): () => void {
+    this.gateListeners.add(cb);
+    return () => { this.gateListeners.delete(cb); };
+  }
+
   private notify(): void {
     const status = this.getStatus();
     for (const cb of this.statusListeners) {
@@ -203,6 +216,12 @@ export class Pipeline {
           if (!fresh?.skipSpeakerId) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
+            // Notify subscribers that this meeting is now blocked on the user.
+            // Per-listener isolation matches notify()/complete-listener loops:
+            // a throwing listener must not stop us returning to park the gate.
+            for (const cb of this.gateListeners) {
+              try { cb(meetingId); } catch { /* listener errors must not break the pipeline */ }
+            }
             return; // stop; user action re-enqueues
           }
           // Skip flag is set — don't stop. But before summarize reads

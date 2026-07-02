@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -90,6 +90,53 @@ describe('Pipeline', () => {
     expect(calls).toContain('s');
     expect(calls).toContain('e');
     expect(meetings.findById('m')?.pipelineStage).toBe('done');
+  });
+
+  it('fires onAwaitingSpeakerId exactly once when a meeting parks at the gate', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-gate-fire-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const meetings = new MeetingsRepo(db);
+    // skipSpeakerId defaults false — this meeting reaches and parks at the gate.
+    meetings.insert({ id: 'm1', slug: 'm1', title: 't', startedAt: null, durationS: null,
+      audioPath: '/x.mp3', status: 'processing', pipelineStage: 'discovered' });
+
+    const mk = () => async () => {};
+    const pipeline = new Pipeline({
+      ctx: { meetings, logger: { info: () => {}, error: () => {} } } as any,
+      stages: {
+        transcribing: mk(), diarizing: mk(), merging: mk(),
+        identifying: mk(), summarizing: mk(), extracting: mk(),
+      },
+    });
+    const gateSpy = vi.fn();
+    pipeline.onAwaitingSpeakerId(gateSpy);
+    await pipeline.run('m1');
+    expect(gateSpy).toHaveBeenCalledTimes(1);
+    expect(gateSpy).toHaveBeenCalledWith('m1');
+    // Parked at the gate, not run to done.
+    expect(meetings.findById('m1')!.status).toBe('awaiting_user');
+  });
+
+  it('does NOT fire onAwaitingSpeakerId when skipSpeakerId is set', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-gate-skip-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const meetings = new MeetingsRepo(db);
+    meetings.insert({ id: 'm2', slug: 'm2', title: 't', startedAt: null, durationS: null,
+      audioPath: '/x.mp3', status: 'processing', pipelineStage: 'discovered' });
+    meetings.updateSkipSpeakerId('m2', true);
+
+    const mk = () => async () => {};
+    const pipeline = new Pipeline({
+      ctx: { meetings, logger: { info: () => {}, error: () => {} } } as any,
+      stages: {
+        transcribing: mk(), diarizing: mk(), merging: mk(),
+        identifying: mk(), summarizing: mk(), extracting: mk(),
+      },
+    });
+    const gateSpy = vi.fn();
+    pipeline.onAwaitingSpeakerId(gateSpy);
+    await pipeline.run('m2');
+    expect(gateSpy).not.toHaveBeenCalled();
   });
 
   it('marks status=failed when a stage throws and rolls back parallel stage', async () => {
