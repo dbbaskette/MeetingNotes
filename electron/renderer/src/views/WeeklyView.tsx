@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { fmtDueLabel } from '../lib/due-date';
+import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
 import logoUrl from '../assets/logo.png';
 
 interface Props {
@@ -255,6 +256,16 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
   };
   const onToday = (): void => setWeek(currentIsoWeek());
 
+  // Direct week jump from the native week picker. Invalid values are
+  // ignored (the input can emit '' mid-edit), and future weeks clamp to
+  // the current one — same ceiling the ▶ arrow enforces.
+  const onPickWeek = (value: string): void => {
+    const picked = parseWeekInput(value);
+    if (!picked) return;
+    const now = currentIsoWeek();
+    setWeek(compareIsoWeeks(picked, now) > 0 ? now : picked);
+  };
+
   const onRegenerate = async (): Promise<void> => {
     await load(week, true);
   };
@@ -305,6 +316,21 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
               <path d="M15 18l-6-6 6-6" />
             </svg>
           </button>
+          {/* Direct week jump. max caps the native picker at the current
+              week (future weeks have nothing to show); onPickWeek still
+              clamps in case the browser lets an out-of-range value
+              through. Styled to sit flush with the arrow buttons. */}
+          <input
+            type="week"
+            aria-label="Jump to week"
+            title="Jump to a specific week"
+            value={weekToInputValue(week)}
+            max={weekToInputValue(currentIsoWeek())}
+            onChange={(e) => onPickWeek(e.target.value)}
+            className="text-sm text-ink-soft bg-surface border border-surface-border rounded-md
+                       px-2 py-1 hover:border-ink/30 focus:outline-none focus:border-brand-indigo
+                       focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)] [color-scheme:inherit]"
+          />
           <button
             onClick={onToday}
             className="text-sm text-ink-soft px-2 py-1 hover:bg-surface-sunken rounded-md"
