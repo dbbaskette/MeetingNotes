@@ -6,9 +6,11 @@
 // removed duplicated rendering logic and made search work across every
 // state, including pending.
 //
-// For pending meetings the row exposes a checkbox (for bulk Process)
-// and an inline ▶ Process button. For everything else it shows the
-// speakers/status/action-items side, and clicking the row opens detail.
+// Every row exposes a selection checkbox (for bulk Process / Delete):
+// pending rows show it in place of the avatar stack and toggle on body
+// click; all other rows reveal it on hover (or while a selection is
+// active) next to the speakers/status/action-items side, and clicking
+// the row opens detail unless a bulk selection is in progress.
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
@@ -31,11 +33,16 @@ interface Props {
   meeting: Meeting;
   onOpen: (id: string) => void;
   onChanged: () => void;
-  /** Only meaningful when `meeting.status === 'pending'`. When present,
-   *  the pending row renders a selection checkbox (for bulk Process) and
-   *  toggling it calls `onToggle`. */
+  /** When present, the row renders a selection checkbox (for bulk
+   *  Process / Delete) and toggling it calls `onToggle`. Every row is
+   *  selectable — pending rows show the checkbox in place of the avatar
+   *  stack, all others reveal it on hover / while a selection is active. */
   checked?: boolean;
   onToggle?: () => void;
+  /** True while ≥1 row is selected anywhere in the list. Keeps every
+   *  row's checkbox visible during a bulk selection (instead of
+   *  hover-only) and makes row clicks toggle instead of open. */
+  selectionActive?: boolean;
 }
 
 function fmtDur(s: number | null): string {
@@ -53,7 +60,7 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Props): JSX.Element {
+export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle, selectionActive }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
   const edge =
@@ -68,10 +75,12 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
   const bg = isPending ? 'bg-surface-sunken/40' : 'bg-surface';
 
   function handleRowClick(): void {
-    // On a pending row with selection props, clicking the row body toggles
-    // the checkbox (makes "select 5 and process" fast). Without selection
-    // props — or for any non-pending row — clicking opens detail.
-    if (isPending && onToggle) onToggle();
+    // Pending rows toggle on body click (makes "select 5 and process"
+    // fast — there's no detail view worth opening yet). Other rows open
+    // detail on click, EXCEPT while a bulk selection is in progress, when
+    // clicking anywhere toggles so multi-select doesn't require pixel-
+    // hunting the checkbox.
+    if (onToggle && (isPending || selectionActive)) onToggle();
     else onOpen(meeting.id);
   }
 
@@ -87,15 +96,18 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
         ${checked ? 'ring-1 ring-brand-indigo/40' : ''}
       `}
     >
-      {isPending && onToggle ? (
+      {onToggle && (
         <button
           onClick={(e) => { e.stopPropagation(); onToggle(); }}
-          aria-label={checked ? 'Deselect' : 'Select for processing'}
+          aria-label={checked ? 'Deselect' : 'Select'}
           className={`
             w-[18px] h-[18px] rounded-[5px] border-2 shrink-0 flex items-center justify-center transition
             ${checked
               ? 'bg-brand-indigo border-brand-indigo text-white'
               : 'border-ink/20 bg-surface group-hover:border-ink/40'}
+            ${isPending || checked || selectionActive
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100'}
           `}
         >
           {checked && (
@@ -104,9 +116,8 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle }: Pr
             </svg>
           )}
         </button>
-      ) : (
-        <AvatarStack meeting={meeting} />
       )}
+      {(!isPending || !onToggle) && <AvatarStack meeting={meeting} />}
 
       <div className="flex-1 min-w-0">
         <div className={`font-semibold text-sm truncate ${isPending ? 'text-ink-muted font-mono' : 'text-ink'}`}>{meeting.title}</div>

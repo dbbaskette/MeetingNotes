@@ -29,11 +29,15 @@ export interface TrashManifest {
   trashedAt: string;
 }
 
-/** Undo window in milliseconds. Balances "long enough to click Undo" with
- *  "short enough to feel ephemeral" — 90s is the toast + a bit of slack
- *  for users who switch apps while reading it. Main process enforces via
- *  purgeExpired on startup + a 60s setInterval. */
-export const UNDO_WINDOW_MS = 90_000;
+/** How long a soft-deleted meeting stays recoverable, in milliseconds.
+ *  Was 90 s when the only restore affordance was the undo toast; now that
+ *  the Library has a "Recently deleted" section with a Restore button,
+ *  trash behaves like a real trash can — 30 days, matching what users
+ *  expect from macOS/Gmail-style soft delete. Main process enforces via
+ *  purgeExpired on startup + a periodic timer, and the trash:list IPC
+ *  purges expired entries before answering so the UI never offers a
+ *  restore that can't succeed. */
+export const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** Path to the per-meeting trash directory. */
 export function trashDirForMeeting(libraryRoot: string, meetingId: string): string {

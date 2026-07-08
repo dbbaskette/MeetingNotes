@@ -17,6 +17,11 @@ import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
 import { awaitingGateMeetings } from '../lib/awaiting-gate';
+import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
+import { pruneSelection, partitionSelection } from '../lib/selection';
+import {
+  LIBRARY_SORT_OPTIONS, libraryComparator, sanitizeSortKey, type LibrarySortKey,
+} from '../lib/library-sort';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
@@ -48,6 +53,10 @@ interface Props {
 
 type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 
+/** localStorage key for the browse-sort choice. Renderer-only preference —
+ *  not worth an IPC round-trip to the settings repo. */
+const SORT_STORAGE_KEY = 'librarySortKey';
+
 // From the user's perspective `awaiting_user` is just "still in flight" —
 // the pipeline hasn't reached `done`, it's just paused for input. So the
 // Processing filter and counter both bucket awaiting_user with processing.
@@ -60,7 +69,30 @@ export function LibraryView({
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
+  // Browse-mode sort. Persisted per machine in localStorage; sanitize on
+  // read so a corrupt/stale value degrades to the default instead of
+  // producing an option the dropdown doesn't have.
+  const [sortKey, setSortKey] = useState<LibrarySortKey>(() => {
+    try { return sanitizeSortKey(window.localStorage.getItem(SORT_STORAGE_KEY)); }
+    catch { return 'newest'; }
+  });
+  const changeSort = (key: LibrarySortKey): void => {
+    setSortKey(key);
+    try { window.localStorage.setItem(SORT_STORAGE_KEY, key); }
+    catch { /* private mode / quota — the choice just doesn't persist */ }
+  };
   const toast = useToast();
+
+  // Recently deleted (trash). Fetched on mount and re-fetched after any
+  // row mutation (delete / restore) — the main process purges expired
+  // entries inside trash:list, so this list is always restorable.
+  const [trash, setTrash] = useState<TrashedMeeting[]>([]);
+  const refreshTrash = useCallback(async () => {
+    try {
+      setTrash(await api.trash.list());
+    } catch { /* non-fatal — the section just stays hidden */ }
+  }, []);
+  useEffect(() => { void refreshTrash(); }, [refreshTrash]);
 
   // Pipeline queue state. Pushed from main on every change, plus an
   // initial pull on mount so the banner appears even if no events have
@@ -174,22 +206,14 @@ export function LibraryView({
           : list.filter((m) => m.status === libFilter)
   ), [libFilter]);
 
-  // Browse mode (no active query): the previous in-memory behavior —
-  // pending floats first, then awaiting, processing, failed, done by
-  // recency.
+  // Browse mode (no active query): status buckets keep their fixed
+  // precedence (pending floats first, then awaiting, processing, failed,
+  // done); the sort dropdown re-orders within each bucket. 'newest' is
+  // the previous hardcoded behavior.
   const browseList = useMemo(() => {
     if (isSearching) return [];
-    const filtered = applyFilter(meetings);
-    const rank: Record<string, number> = {
-      pending: 0, awaiting_user: 1, processing: 2, failed: 3, done: 4,
-    };
-    return [...filtered].sort((a, b) => {
-      const ra = rank[a.status] ?? 9;
-      const rb = rank[b.status] ?? 9;
-      if (ra !== rb) return ra - rb;
-      return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-    });
-  }, [meetings, isSearching, applyFilter]);
+    return [...applyFilter(meetings)].sort(libraryComparator(sortKey));
+  }, [meetings, isSearching, applyFilter, sortKey]);
 
   // Search mode buckets: a meeting with a title hit goes in the Title
   // section ONLY (cleaner than showing it in both — the user can click
@@ -269,31 +293,25 @@ export function LibraryView({
     };
   }, [meetings, hits, isSearching]);
 
-  const pendingIds = useMemo(
-    () => meetings.filter((m) => m.status === 'pending').map((m) => m.id),
-    [meetings],
-  );
-
   // Meetings parked at the speaker-ID gate (status='awaiting_user'). Drives the
   // app-wide "needs you to name voices" badge below — the per-row amber
   // treatment already lives in LibraryRow, this is the summary signal.
   const awaiting = useMemo(() => awaitingGateMeetings(meetings), [meetings]);
 
-  // Drop stale selections — a meeting that just transitioned out of pending
-  // (e.g. user clicked Process and it's now 'processing') shouldn't stay
-  // checked. Keeps the "N selected" pill honest.
+  // Drop stale selections — a meeting that disappeared from the list
+  // (deleted elsewhere, purged) shouldn't stay checked. Status changes
+  // are fine now that every row is selectable: a pending row that starts
+  // processing stays selected, it just falls out of the Process target.
   useEffect(() => {
-    const ids = new Set(pendingIds);
-    setSelected((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (ids.has(id)) next.add(id);
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [pendingIds]);
+    setSelected((prev) => pruneSelection(prev, meetings));
+  }, [meetings]);
+
+  // What the two bulk actions would act on. Process only touches pending
+  // rows within the selection; Delete touches everything selected.
+  const { pendingIds: selectedPendingIds, allIds: selectedAllIds } = useMemo(
+    () => partitionSelection(selected, meetings),
+    [selected, meetings],
+  );
 
   function toggleSelect(id: string): void {
     setSelected((prev) => {
@@ -305,7 +323,9 @@ export function LibraryView({
   }
 
   async function processSelected(): Promise<void> {
-    const ids = [...selected];
+    // Only the pending rows within the selection — a selected done/failed
+    // meeting is a Delete candidate, not a Process one.
+    const ids = selectedPendingIds;
     if (ids.length === 0) return;
     setSelected(new Set());
     await api.meetings.startMany(ids);
@@ -317,6 +337,42 @@ export function LibraryView({
       durationMs: 4000,
     });
     void refresh();
+  }
+
+  async function deleteSelected(): Promise<void> {
+    const ids = selectedAllIds;
+    if (ids.length === 0) return;
+    const n = ids.length;
+    if (!window.confirm(`Move ${n} meeting${n === 1 ? '' : 's'} to Recently deleted?`)) return;
+    setSelected(new Set());
+    for (const id of ids) {
+      try { await api.meetings.delete(id); }
+      catch { /* keep going — one bad row shouldn't abort the batch */ }
+    }
+    // One toast for the whole batch; Undo restores everything at once.
+    toast.show({
+      message: `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const results = await Promise.all(
+            ids.map((id) => api.meetings.undoDelete(id).catch(() => false)),
+          );
+          const restored = results.filter(Boolean).length;
+          if (restored < n) {
+            toast.show({
+              message: `Restored ${restored} of ${n} — the rest were already purged.`,
+              variant: 'error',
+            });
+          }
+          void refresh();
+          void refreshTrash();
+        },
+      },
+      durationMs: 10_000,
+    });
+    void refresh();
+    void refreshTrash();
   }
 
   return (
@@ -468,6 +524,25 @@ export function LibraryView({
             n={libCounts.failed}
             dotClass="bg-danger-solid"
           />
+          {/* Browse-order dropdown. Chip-shaped so it reads as part of the
+              filter row. Disabled while a search is active — search results
+              have their own ordering (score / the Content section's own
+              Recent-vs-Most-matches toggle). */}
+          <select
+            value={sortKey}
+            onChange={(e) => changeSort(sanitizeSortKey(e.target.value))}
+            disabled={isSearching}
+            aria-label="Sort meetings"
+            title={isSearching ? 'Search results use match ordering' : 'Sort order for the list'}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-full border border-surface-border
+                       bg-surface text-ink-muted hover:text-ink hover:border-ink/30 transition
+                       focus:outline-none focus:border-brand-indigo cursor-pointer
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {LIBRARY_SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
+            ))}
+          </select>
           <div className="relative flex-1 sm:flex-none sm:w-72 sm:ml-auto min-w-[8rem]">
             <input
               placeholder="Search titles, summaries, transcripts…"
@@ -525,9 +600,10 @@ export function LibraryView({
                 <LibraryRow
                   meeting={m}
                   onOpen={(id) => onOpen(id, hint)}
-                  onChanged={() => void refresh()}
-                  checked={m.status === 'pending' ? selected.has(m.id) : undefined}
-                  onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
+                  onChanged={() => { void refresh(); void refreshTrash(); }}
+                  checked={selected.has(m.id)}
+                  onToggle={() => toggleSelect(m.id)}
+                  selectionActive={selected.size > 0}
                 />
                 {meetingHits.length > 0 && (
                   <SearchMatches
@@ -567,12 +643,31 @@ export function LibraryView({
             </div>
           );
         })()}
+
+        {/* Recently deleted — muted, collapsed by default, only when the
+            trash is non-empty. Restore is the recovery path once the undo
+            toast is gone; entries expire after the 30-day retention. */}
+        <TrashSection
+          trash={trash}
+          onRestore={async (m) => {
+            const restored = await api.meetings.undoDelete(m.id);
+            if (restored) {
+              toast.show({ message: `Restored "${m.title}"`, durationMs: 4000 });
+            } else {
+              toast.show({ message: 'Too late — this meeting has already been purged.', variant: 'error' });
+            }
+            void refresh();
+            void refreshTrash();
+          }}
+        />
       </section>
 
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
       <SelectionBar
         count={selected.size}
+        pendingCount={selectedPendingIds.length}
         onProcess={processSelected}
+        onDelete={deleteSelected}
         onCancel={() => setSelected(new Set())}
       />
     </div>
@@ -580,6 +675,67 @@ export function LibraryView({
 }
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
+
+/** Muted "Recently deleted (N)" affordance at the bottom of the Library.
+ *  Collapsed by default; expanding lists the trashed meetings with a
+ *  Restore button each. Renders nothing when the trash is empty — no
+ *  permanent chrome for a state most sessions never enter. */
+function TrashSection({
+  trash, onRestore,
+}: {
+  trash: TrashedMeeting[];
+  onRestore: (m: TrashedMeeting) => Promise<void>;
+}): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  if (trash.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-surface-border pt-2 pb-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink transition px-1 py-1"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
+          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        >
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        Recently deleted ({trash.length})
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1">
+          {trash.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-sunken/40 border border-surface-border/60"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-ink-muted truncate">{m.title}</div>
+                <div className="text-[11px] text-ink-muted/70">
+                  Deleted {fmtDeletedAgo(m.deletedAt)}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={busyId === m.id}
+                onClick={() => {
+                  setBusyId(m.id);
+                  void onRestore(m).finally(() => setBusyId(null));
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-ink-muted hover:text-ink hover:border-ink/40 transition disabled:opacity-50 shrink-0"
+              >
+                {busyId === m.id ? 'Restoring…' : 'Restore'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SearchSectionHeader({
   label, count, sort, onSortChange,
@@ -795,10 +951,14 @@ function QueueBanner({
 }
 
 function SelectionBar({
-  count, onProcess, onCancel,
+  count, pendingCount, onProcess, onDelete, onCancel,
 }: {
   count: number;
+  /** How many of the selected rows are pending — the Process target.
+   *  Process is hidden when it's zero (nothing to start). */
+  pendingCount: number;
   onProcess: () => void;
+  onDelete: () => void;
   onCancel: () => void;
 }): JSX.Element {
   const visible = count > 0;
@@ -824,11 +984,20 @@ function SelectionBar({
             Cancel
           </button>
           <button
-            onClick={onProcess}
-            className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition"
+            onClick={onDelete}
+            className="text-sm font-semibold bg-danger-solid text-white px-4 py-1.5 rounded-lg hover:opacity-90 transition"
           >
-            ▶ Process {count} {count === 1 ? 'recording' : 'recordings'}
+            Delete ({count})
           </button>
+          {pendingCount > 0 && (
+            <button
+              onClick={onProcess}
+              title="Starts processing the pending recordings in the selection"
+              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition"
+            >
+              ▶ Process ({pendingCount})
+            </button>
+          )}
         </div>
       </div>
     </div>

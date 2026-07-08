@@ -214,13 +214,12 @@ function DeleteDialog({
     setBusy(true); setErr(null);
     try {
       await api.meetings.delete(meeting.id);
-      // Offer an undo while the backend's 90s window lasts. The toast
-      // timer is intentionally shorter (10s) — users who read the message
-      // and move on don't expect "Undo" to sit forever. Users who need
-      // the full window can always click Undo up to 90s via a direct
-      // API call, but that's a power-user escape hatch, not the UI.
+      // Offer a quick undo toast (10s) for the "oops, wrong row" case.
+      // After the toast is gone, the meeting stays restorable from the
+      // Library's "Recently deleted" section for the full 30-day trash
+      // retention window.
       toast.show({
-        message: `Deleted "${meeting.title}"`,
+        message: `Moved "${meeting.title}" to Recently deleted`,
         action: {
           label: 'Undo',
           onClick: async () => {
@@ -252,8 +251,8 @@ function DeleteDialog({
         <span className="font-mono text-ink">{meeting.title}</span>
         <br />
         Moves the audio file, transcript, summary, and any exports into
-        the trash. You&apos;ll have a short window to <strong>Undo</strong>;
-        after that the files are permanently removed.
+        <strong> Recently deleted</strong>, where you can restore it for
+        30 days. After that the files are permanently removed.
       </div>
       {err && <div className="text-xs text-danger mb-2">{err}</div>}
       <div className="flex justify-end gap-2">
