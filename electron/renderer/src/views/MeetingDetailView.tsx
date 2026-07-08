@@ -16,6 +16,7 @@ import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
 import { setUnsavedGuard, confirmLeave } from '../lib/unsaved-guard';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
+import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -1127,6 +1128,14 @@ function TranscriptPanel({
     try { localStorage.setItem(VIEW_MODE_KEY, viewMode); } catch { /* private mode */ }
   }, [viewMode]);
 
+  // Speaker → palette index by first appearance (#A4), sharing the avatar
+  // palette so the tinted name matches the speaker's rail color language.
+  // Memoized on the parsed lines; each row receives the resolved color as
+  // a PRIMITIVE string prop so React.memo on the rows keeps bailing.
+  const colorIdxBySpeaker = useMemo(() => speakerColorIndex(parsed.lines), [parsed.lines]);
+  const speakerColor = (speaker: string): string =>
+    colorForSpeakerIndex(colorIdxBySpeaker.get(speaker) ?? 0);
+
   // Active line = the one whose [start, nextStart) window covers currentTime.
   // Computed ONCE per render here so each row receives a stable primitive
   // `active` boolean — React.memo on the rows then bails everything except
@@ -1233,6 +1242,7 @@ function TranscriptPanel({
               key={i}
               line={line}
               active={i === activeIdx}
+              speakerColor={speakerColor(line.speaker)}
               onSeek={onSeek}
               activeRef={activeRef}
             />
@@ -1243,6 +1253,7 @@ function TranscriptPanel({
               key={i}
               group={g}
               active={i === activeGroupIdx}
+              speakerColor={speakerColor(g.speaker)}
               onSeek={onSeek}
               activeRef={activeRef}
             />
@@ -1433,10 +1444,14 @@ function ExportMenuItem({
 // `active` boolean — so memo bails on all rows except the two whose
 // `active` flag flipped.
 const TranscriptLineRow = memo(function TranscriptLineRow({
-  line, active, onSeek, activeRef,
+  line, active, speakerColor, onSeek, activeRef,
 }: {
   line: TranscriptLine;
   active: boolean;
+  /** Palette color for this line's speaker (#A4). A primitive string
+   *  computed from the parent's memoized first-appearance map, so it's
+   *  value-stable across playback ticks and memo keeps bailing. */
+  speakerColor: string;
   onSeek: (seconds: number) => void;
   /** Attached only while `active` — drives the auto-scroll-into-view. */
   activeRef: React.RefObject<HTMLButtonElement>;
@@ -1454,7 +1469,7 @@ const TranscriptLineRow = memo(function TranscriptLineRow({
       <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
         {fmtTimestamp(line.seconds)}
       </span>
-      <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
+      <span className="font-semibold mr-2" style={{ color: speakerColor }}>{line.speaker}</span>
       <span>{line.text}</span>
     </button>
   );
@@ -1464,10 +1479,12 @@ const TranscriptLineRow = memo(function TranscriptLineRow({
  *  paragraph, with the start–end range to its right. Cleaner than
  *  inlining everything when the merged text is long. */
 const TranscriptGroupRow = memo(function TranscriptGroupRow({
-  group, active, onSeek, activeRef,
+  group, active, speakerColor, onSeek, activeRef,
 }: {
   group: TranscriptGroup;
   active: boolean;
+  /** Primitive palette color for the group's speaker — see TranscriptLineRow. */
+  speakerColor: string;
   onSeek: (seconds: number) => void;
   activeRef: React.RefObject<HTMLButtonElement>;
 }): JSX.Element {
@@ -1483,7 +1500,7 @@ const TranscriptGroupRow = memo(function TranscriptGroupRow({
           : 'hover:bg-surface-sunken'}`}
     >
       <div className="flex items-baseline gap-2 mb-1">
-        <span className="font-semibold text-ink">{group.speaker}</span>
+        <span className="font-semibold" style={{ color: speakerColor }}>{group.speaker}</span>
         <span className="font-mono text-[11px] text-ink-muted tabular-nums">
           {fmtTimestamp(group.startSeconds)}
           {showRange && (
