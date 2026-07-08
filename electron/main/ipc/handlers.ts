@@ -794,17 +794,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     const hits: Hit[] = [];
 
-    const meetings = s.meetings.listAll();
-    const bySlug = new Map(meetings.map((m) => [m.slug, m]));
-
     // Title hits — rank highest so an exact-title match surfaces first.
-    for (const m of meetings) {
-      if (m.title.toLowerCase().includes(qLower)) {
-        hits.push({
-          meetingId: m.id, title: m.title, source: 'title',
-          snippet: m.title, score: 1000,
-        });
-      }
+    // Pushed down to SQL (LIKE, parameter-bound) instead of scanning a
+    // listAll() snapshot per keystroke. Newest-first, capped at `max` —
+    // the final slice keeps at most `max` anyway and titles outrank
+    // everything else.
+    for (const m of s.meetings.searchByTitle(q, max)) {
+      hits.push({
+        meetingId: m.id, title: m.title, source: 'title',
+        snippet: m.title, score: 1000,
+      });
     }
 
     // Content hits — one rg invocation across both file types. We pass
@@ -817,9 +816,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       globs: ['summary.md', 'transcript.md'],
     });
 
+    // Resolve only the slugs rg actually hit — one chunked IN query
+    // instead of materializing the entire library.
+    const slugFor = (file: string): string | null => {
+      // Path shape: {libraryRoot}/meetings/{slug}/(summary|transcript).md
+      const segs = path.relative(meetingsRoot, file).split(path.sep);
+      return segs.length === 2 ? segs[0]! : null;
+    };
+    const hitSlugs = [...new Set(
+      rgHits.map((r) => slugFor(r.file)).filter((sl): sl is string => sl !== null),
+    )];
+    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs).map((m) => [m.slug, m]));
+
     const summarySeen = new Set<string>(); // slug — caps summary hits at 1/meeting
     for (const r of rgHits) {
-      // Path shape: {libraryRoot}/meetings/{slug}/(summary|transcript).md
       const rel = path.relative(meetingsRoot, r.file);
       const segs = rel.split(path.sep);
       if (segs.length !== 2) continue;

@@ -184,6 +184,38 @@ export class MeetingsRepo {
     this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
   }
 
+  /** Case-insensitive title substring search, newest first. Powers the
+   *  Cmd+K palette's title tier — pushed down to SQL so a keystroke
+   *  doesn't materialize the whole library via listAll(). Parameter-
+   *  bound; excludes soft-deleted rows. */
+  searchByTitle(q: string, limit: number): MeetingRow[] {
+    const rows = this.db.prepare(`
+      SELECT * FROM meetings
+      WHERE deleted_at IS NULL AND title LIKE '%'||?||'%' COLLATE NOCASE
+      ORDER BY COALESCE(started_at, created_at) DESC
+      LIMIT ?
+    `).all(q, limit) as Record<string, unknown>[];
+    return rows.map(rowToMeeting);
+  }
+
+  /** Resolve a set of folder slugs (e.g. from ripgrep content hits) to
+   *  their live meeting rows in one round-trip. Parameter-bound IN list,
+   *  chunked to stay under SQLite's default 999-variable limit. Excludes
+   *  soft-deleted rows, matching listAll(). */
+  findBySlugs(slugs: string[]): MeetingRow[] {
+    const CHUNK = 900;
+    const out: MeetingRow[] = [];
+    for (let i = 0; i < slugs.length; i += CHUNK) {
+      const chunk = slugs.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      const rows = this.db.prepare(
+        `SELECT * FROM meetings WHERE deleted_at IS NULL AND slug IN (${placeholders})`,
+      ).all(...chunk) as Record<string, unknown>[];
+      out.push(...rows.map(rowToMeeting));
+    }
+    return out;
+  }
+
   /** All rows where `started_at` is unset. Used by the startup backfill
    *  job that parses the timestamp out of the audio filename. */
   findMissingStartedAt(): { id: string; audioPath: string }[] {
