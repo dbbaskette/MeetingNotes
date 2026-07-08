@@ -273,9 +273,17 @@ app.whenReady().then(async () => {
   recordingManager.on('level', (sessionId, peakDb) => {
     levelThrottle.push(sessionId, peakDb);
   });
+  // Dock badge while recording: "REC" whenever at least one session is
+  // actively capturing ('starting' counts — the helper is already attached
+  // by then), cleared when the last one ends. app.dock is macOS-only, so
+  // guard it for the (hypothetical) non-Mac build.
+  const activeRecordings = new Set<string>();
   recordingManager.on('state-change', (sessionId, state) => {
     BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state }));
+    if (state === 'starting' || state === 'recording') activeRecordings.add(sessionId);
+    else activeRecordings.delete(sessionId);
+    app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
   });
 
   // One-shot orphan scan at launch: any 'recording' rows whose helper PID is
@@ -739,6 +747,7 @@ app.whenReady().then(async () => {
       } catch (err) {
         logger.error('shutdown:error', { err: String(err) });
       } finally {
+        app.dock?.setBadge(''); // belt-and-braces; the recording stops above already clear it
         logger.close();
         app.exit(0);
       }
