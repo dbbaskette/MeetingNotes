@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
-  formatTranscriptForExport,
+  formatTranscriptForExport, activeLineIndexAt,
 } from './transcript-lines.js';
 
 describe('parseTranscript', () => {
@@ -172,5 +172,35 @@ describe('fmtTimestamp', () => {
   it('H:MM:SS at and over one hour', () => {
     expect(fmtTimestamp(3600)).toBe('1:00:00');
     expect(fmtTimestamp(3723)).toBe('1:02:03');
+  });
+});
+
+describe('activeLineIndexAt', () => {
+  const lines = parseTranscript([
+    '[Alice 00:00] Hi.',
+    '[Bob 00:05] Hello.',
+    '[Alice 00:12] More.',
+    '[Bob 1:00:00] Late.',
+  ].join('\n')).lines;
+
+  it('returns -1 for an empty transcript', () => {
+    expect(activeLineIndexAt([], 10)).toBe(-1);
+  });
+
+  it('returns -1 when time is before the first line', () => {
+    expect(activeLineIndexAt(lines, -1)).toBe(-1);
+  });
+
+  it('returns the line whose [start, nextStart) window covers the time', () => {
+    expect(activeLineIndexAt(lines, 0)).toBe(0);
+    expect(activeLineIndexAt(lines, 4.9)).toBe(0);
+    expect(activeLineIndexAt(lines, 5)).toBe(1);
+    expect(activeLineIndexAt(lines, 11)).toBe(1);
+    expect(activeLineIndexAt(lines, 12)).toBe(2);
+  });
+
+  it('returns the last line for times past the final start', () => {
+    expect(activeLineIndexAt(lines, 3600)).toBe(3);
+    expect(activeLineIndexAt(lines, 999999)).toBe(3);
   });
 });

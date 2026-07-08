@@ -1,5 +1,5 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../ipc/client';
@@ -9,7 +9,7 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import {
   parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
-  formatTranscriptForExport,
+  formatTranscriptForExport, activeLineIndexAt,
   type TranscriptLine, type TranscriptGroup, type ExportFormat,
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
@@ -93,12 +93,24 @@ export function MeetingDetailView({
   // player. (#42)
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const seekTo = (seconds: number): void => {
+  // timeupdate fires ~4x/sec, but the transcript highlight only changes
+  // at whole-second granularity. Quantize the state update to 1/sec so
+  // playback doesn't re-render the whole detail tree 4x/sec.
+  const lastFlooredTimeRef = useRef(0);
+  const onTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    const floored = Math.floor((e.target as HTMLAudioElement).currentTime);
+    if (floored === lastFlooredTimeRef.current) return;
+    lastFlooredTimeRef.current = floored;
+    setCurrentTime(floored);
+  }, []);
+  // Stable identity: passed down to every (memoized) transcript row —
+  // a fresh function per render would defeat React.memo on the rows.
+  const seekTo = useCallback((seconds: number): void => {
     const el = audioRef.current;
     if (!el) return;
     el.currentTime = seconds;
     if (el.paused) void el.play();
-  };
+  }, []);
 
   // Palette-driven jump (#45): when opened with `seekSeconds`, switch to
   // the transcript tab and seek the audio once it's ready. readyState >= 1
@@ -247,7 +259,7 @@ export function MeetingDetailView({
           ref={audioRef}
           controls
           src={`file://${m.audioPath}`}
-          onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+          onTimeUpdate={onTimeUpdate}
           className="w-full"
         />
       </div>
@@ -905,16 +917,13 @@ function TranscriptPanel({
   }, [viewMode]);
 
   // Active line = the one whose [start, nextStart) window covers currentTime.
-  const activeIdx = useMemo(() => {
-    if (parsed.lines.length === 0) return -1;
-    let lo = 0, hi = parsed.lines.length - 1, best = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (parsed.lines[mid]!.seconds <= currentTime) { best = mid; lo = mid + 1; }
-      else hi = mid - 1;
-    }
-    return best;
-  }, [parsed, currentTime]);
+  // Computed ONCE per render here so each row receives a stable primitive
+  // `active` boolean — React.memo on the rows then bails everything except
+  // the (at most) two rows whose `active` flipped on this tick.
+  const activeIdx = useMemo(
+    () => activeLineIndexAt(parsed.lines, currentTime),
+    [parsed.lines, currentTime],
+  );
 
   // Active group = the group whose lineIndices range contains activeIdx.
   // Stored as a number for the same scrollIntoView trigger; -1 means none.
@@ -1008,41 +1017,25 @@ function TranscriptPanel({
           actually scrolls, so "don't fight manual scroll" keeps working. */}
       <div ref={panelRef} className="text-sm leading-relaxed font-sans pr-1">
         {viewMode === 'lines' ? (
-          parsed.lines.map((line, i) => {
-            const active = i === activeIdx;
-            return (
-              <button
-                key={i}
-                ref={active ? activeRef : undefined}
-                onClick={() => onSeek(line.seconds)}
-                title={`Jump to ${fmtTimestamp(line.seconds)}`}
-                className={`w-full text-left rounded-md px-2 py-1 mb-0.5 transition-colors
-                  ${active
-                    ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
-                    : 'hover:bg-surface-sunken'}`}
-              >
-                <TranscriptLineRow line={line} />
-              </button>
-            );
-          })
+          parsed.lines.map((line, i) => (
+            <TranscriptLineRow
+              key={i}
+              line={line}
+              active={i === activeIdx}
+              onSeek={onSeek}
+              activeRef={activeRef}
+            />
+          ))
         ) : (
-          groups.map((g, i) => {
-            const active = i === activeGroupIdx;
-            return (
-              <button
-                key={i}
-                ref={active ? activeRef : undefined}
-                onClick={() => onSeek(g.startSeconds)}
-                title={`Jump to ${fmtTimestamp(g.startSeconds)}`}
-                className={`w-full text-left rounded-md px-3 py-2 mb-2 transition-colors
-                  ${active
-                    ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
-                    : 'hover:bg-surface-sunken'}`}
-              >
-                <TranscriptGroupRow group={g} />
-              </button>
-            );
-          })
+          groups.map((g, i) => (
+            <TranscriptGroupRow
+              key={i}
+              group={g}
+              active={i === activeGroupIdx}
+              onSeek={onSeek}
+              activeRef={activeRef}
+            />
+          ))
         )}
       </div>
     </div>
@@ -1221,25 +1214,63 @@ function ExportMenuItem({
   );
 }
 
-function TranscriptLineRow({ line }: { line: TranscriptLine }): JSX.Element {
+// Transcript rows are memoized: during playback the panel re-renders once
+// per second (quantized currentTime), and without memo every one of the
+// potentially thousands of rows would be reconciled per tick. Each row
+// receives only stable-identity props (line/group objects from a useMemo'd
+// parse, the useCallback'd onSeek, the ref object itself) plus a primitive
+// `active` boolean — so memo bails on all rows except the two whose
+// `active` flag flipped.
+const TranscriptLineRow = memo(function TranscriptLineRow({
+  line, active, onSeek, activeRef,
+}: {
+  line: TranscriptLine;
+  active: boolean;
+  onSeek: (seconds: number) => void;
+  /** Attached only while `active` — drives the auto-scroll-into-view. */
+  activeRef: React.RefObject<HTMLButtonElement>;
+}): JSX.Element {
   return (
-    <>
+    <button
+      ref={active ? activeRef : undefined}
+      onClick={() => onSeek(line.seconds)}
+      title={`Jump to ${fmtTimestamp(line.seconds)}`}
+      className={`w-full text-left rounded-md px-2 py-1 mb-0.5 transition-colors
+        ${active
+          ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
+          : 'hover:bg-surface-sunken'}`}
+    >
       <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
         {fmtTimestamp(line.seconds)}
       </span>
       <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
       <span>{line.text}</span>
-    </>
+    </button>
   );
-}
+});
 
 /** Grouped-view row: speaker name on its own line above the merged
  *  paragraph, with the start–end range to its right. Cleaner than
  *  inlining everything when the merged text is long. */
-function TranscriptGroupRow({ group }: { group: TranscriptGroup }): JSX.Element {
+const TranscriptGroupRow = memo(function TranscriptGroupRow({
+  group, active, onSeek, activeRef,
+}: {
+  group: TranscriptGroup;
+  active: boolean;
+  onSeek: (seconds: number) => void;
+  activeRef: React.RefObject<HTMLButtonElement>;
+}): JSX.Element {
   const showRange = group.endSeconds > group.startSeconds;
   return (
-    <>
+    <button
+      ref={active ? activeRef : undefined}
+      onClick={() => onSeek(group.startSeconds)}
+      title={`Jump to ${fmtTimestamp(group.startSeconds)}`}
+      className={`w-full text-left rounded-md px-3 py-2 mb-2 transition-colors
+        ${active
+          ? 'bg-brand-indigo/10 ring-1 ring-brand-indigo/30'
+          : 'hover:bg-surface-sunken'}`}
+    >
       <div className="flex items-baseline gap-2 mb-1">
         <span className="font-semibold text-ink">{group.speaker}</span>
         <span className="font-mono text-[11px] text-ink-muted tabular-nums">
@@ -1255,9 +1286,9 @@ function TranscriptGroupRow({ group }: { group: TranscriptGroup }): JSX.Element 
         </span>
       </div>
       <div className="text-ink-soft">{group.text}</div>
-    </>
+    </button>
   );
-}
+});
 
 // Inline-editable list of action items (#44). Click a row → expands to
 // text / owner / due-date inputs. Add-item row at the bottom. Delete is
