@@ -18,6 +18,7 @@ import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
 import { awaitingGateMeetings } from '../lib/awaiting-gate';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
+import { pruneSelection, partitionSelection } from '../lib/selection';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
@@ -281,31 +282,25 @@ export function LibraryView({
     };
   }, [meetings, hits, isSearching]);
 
-  const pendingIds = useMemo(
-    () => meetings.filter((m) => m.status === 'pending').map((m) => m.id),
-    [meetings],
-  );
-
   // Meetings parked at the speaker-ID gate (status='awaiting_user'). Drives the
   // app-wide "needs you to name voices" badge below — the per-row amber
   // treatment already lives in LibraryRow, this is the summary signal.
   const awaiting = useMemo(() => awaitingGateMeetings(meetings), [meetings]);
 
-  // Drop stale selections — a meeting that just transitioned out of pending
-  // (e.g. user clicked Process and it's now 'processing') shouldn't stay
-  // checked. Keeps the "N selected" pill honest.
+  // Drop stale selections — a meeting that disappeared from the list
+  // (deleted elsewhere, purged) shouldn't stay checked. Status changes
+  // are fine now that every row is selectable: a pending row that starts
+  // processing stays selected, it just falls out of the Process target.
   useEffect(() => {
-    const ids = new Set(pendingIds);
-    setSelected((prev) => {
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (ids.has(id)) next.add(id);
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [pendingIds]);
+    setSelected((prev) => pruneSelection(prev, meetings));
+  }, [meetings]);
+
+  // What the two bulk actions would act on. Process only touches pending
+  // rows within the selection; Delete touches everything selected.
+  const { pendingIds: selectedPendingIds, allIds: selectedAllIds } = useMemo(
+    () => partitionSelection(selected, meetings),
+    [selected, meetings],
+  );
 
   function toggleSelect(id: string): void {
     setSelected((prev) => {
@@ -317,7 +312,9 @@ export function LibraryView({
   }
 
   async function processSelected(): Promise<void> {
-    const ids = [...selected];
+    // Only the pending rows within the selection — a selected done/failed
+    // meeting is a Delete candidate, not a Process one.
+    const ids = selectedPendingIds;
     if (ids.length === 0) return;
     setSelected(new Set());
     await api.meetings.startMany(ids);
@@ -329,6 +326,42 @@ export function LibraryView({
       durationMs: 4000,
     });
     void refresh();
+  }
+
+  async function deleteSelected(): Promise<void> {
+    const ids = selectedAllIds;
+    if (ids.length === 0) return;
+    const n = ids.length;
+    if (!window.confirm(`Move ${n} meeting${n === 1 ? '' : 's'} to Recently deleted?`)) return;
+    setSelected(new Set());
+    for (const id of ids) {
+      try { await api.meetings.delete(id); }
+      catch { /* keep going — one bad row shouldn't abort the batch */ }
+    }
+    // One toast for the whole batch; Undo restores everything at once.
+    toast.show({
+      message: `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const results = await Promise.all(
+            ids.map((id) => api.meetings.undoDelete(id).catch(() => false)),
+          );
+          const restored = results.filter(Boolean).length;
+          if (restored < n) {
+            toast.show({
+              message: `Restored ${restored} of ${n} — the rest were already purged.`,
+              variant: 'error',
+            });
+          }
+          void refresh();
+          void refreshTrash();
+        },
+      },
+      durationMs: 10_000,
+    });
+    void refresh();
+    void refreshTrash();
   }
 
   return (
@@ -538,8 +571,9 @@ export function LibraryView({
                   meeting={m}
                   onOpen={(id) => onOpen(id, hint)}
                   onChanged={() => { void refresh(); void refreshTrash(); }}
-                  checked={m.status === 'pending' ? selected.has(m.id) : undefined}
-                  onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
+                  checked={selected.has(m.id)}
+                  onToggle={() => toggleSelect(m.id)}
+                  selectionActive={selected.size > 0}
                 />
                 {meetingHits.length > 0 && (
                   <SearchMatches
@@ -601,7 +635,9 @@ export function LibraryView({
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
       <SelectionBar
         count={selected.size}
+        pendingCount={selectedPendingIds.length}
         onProcess={processSelected}
+        onDelete={deleteSelected}
         onCancel={() => setSelected(new Set())}
       />
     </div>
@@ -885,10 +921,14 @@ function QueueBanner({
 }
 
 function SelectionBar({
-  count, onProcess, onCancel,
+  count, pendingCount, onProcess, onDelete, onCancel,
 }: {
   count: number;
+  /** How many of the selected rows are pending — the Process target.
+   *  Process is hidden when it's zero (nothing to start). */
+  pendingCount: number;
   onProcess: () => void;
+  onDelete: () => void;
   onCancel: () => void;
 }): JSX.Element {
   const visible = count > 0;
@@ -914,11 +954,20 @@ function SelectionBar({
             Cancel
           </button>
           <button
-            onClick={onProcess}
-            className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition"
+            onClick={onDelete}
+            className="text-sm font-semibold bg-danger-solid text-white px-4 py-1.5 rounded-lg hover:opacity-90 transition"
           >
-            ▶ Process {count} {count === 1 ? 'recording' : 'recordings'}
+            Delete ({count})
           </button>
+          {pendingCount > 0 && (
+            <button
+              onClick={onProcess}
+              title="Starts processing the pending recordings in the selection"
+              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition"
+            >
+              ▶ Process ({pendingCount})
+            </button>
+          )}
         </div>
       </div>
     </div>
