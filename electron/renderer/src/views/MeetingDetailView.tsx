@@ -15,6 +15,7 @@ import {
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
 import { setUnsavedGuard, confirmLeave } from '../lib/unsaved-guard';
+import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -111,6 +112,58 @@ export function MeetingDetailView({
     if (!el) return;
     el.currentTime = seconds;
     if (el.paused) void el.play();
+  }, []);
+
+  // Playback controls (#A3): speed cycle + ±15s skips. The chosen rate is
+  // per-session component state; a ref mirrors it so the loadedmetadata
+  // re-apply (rates reset when a new src loads) and the keydown handler
+  // below stay identity-stable.
+  const [rate, setRate] = useState(1);
+  const rateRef = useRef(1);
+  const cycleRate = useCallback((): void => {
+    const next = nextPlaybackRate(rateRef.current);
+    rateRef.current = next;
+    setRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
+  }, []);
+  const applyRate = useCallback((): void => {
+    if (audioRef.current) audioRef.current.playbackRate = rateRef.current;
+  }, []);
+  // Relative skip. Unlike seekTo (click-to-seek), a skip on a paused
+  // player stays paused — the user is scrubbing, not asking for playback.
+  const skipBy = useCallback((delta: number): void => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = guardedSeek(el.currentTime, delta, el.duration);
+  }, []);
+
+  // Keyboard transport: Space play/pause, ←/→ skip ∓/±15s. Ignored while
+  // typing (input/textarea/select/contentEditable) or with any modifier
+  // held, so cmd-K, shift-selection etc. pass through untouched. Space is
+  // additionally ignored when a button/link has focus — Space must keep
+  // activating the focused control (arrows still seek there, which is
+  // what makes them work right after clicking a transcript row).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input,textarea,select,[contenteditable]')) return;
+      const el = audioRef.current;
+      if (!el) return;
+      if (e.code === 'Space') {
+        if (t?.closest('button,[role="button"],a')) return;
+        e.preventDefault(); // don't scroll the page
+        if (el.paused) void el.play(); else el.pause();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        el.currentTime = guardedSeek(el.currentTime, -SKIP_SECONDS, el.duration);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        el.currentTime = guardedSeek(el.currentTime, SKIP_SECONDS, el.duration);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // Palette-driven jump (#45): when opened with `seekSeconds`, switch to
@@ -362,13 +415,42 @@ export function MeetingDetailView({
           CenterPane so it stays visible while the user reads the summary
           OR transcript — no more "switch tabs to play". Click-to-seek on
           transcript lines pipes through `seekTo` to this element. */}
-      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3">
+      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3 flex items-center gap-2">
+        {/* Transport controls (#A3). Keyboard: Space play/pause, ←/→ ∓/±15s. */}
+        <button
+          type="button"
+          onClick={() => skipBy(-SKIP_SECONDS)}
+          title="Back 15 seconds (←)"
+          aria-label="Back 15 seconds"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          ↺ 15s
+        </button>
+        <button
+          type="button"
+          onClick={() => skipBy(SKIP_SECONDS)}
+          title="Forward 15 seconds (→)"
+          aria-label="Forward 15 seconds"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          15s ↻
+        </button>
+        <button
+          type="button"
+          onClick={cycleRate}
+          title="Playback speed — click to cycle"
+          aria-label={`Playback speed ${fmtPlaybackRate(rate)} — click to cycle`}
+          className="shrink-0 min-w-[3.75rem] text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          {fmtPlaybackRate(rate)}
+        </button>
         <audio
           ref={audioRef}
           controls
           src={`file://${m.audioPath}`}
           onTimeUpdate={onTimeUpdate}
-          className="w-full"
+          onLoadedMetadata={applyRate}
+          className="flex-1 min-w-0"
         />
       </div>
     </div>
