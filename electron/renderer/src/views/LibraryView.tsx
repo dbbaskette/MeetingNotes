@@ -19,6 +19,9 @@ import { api } from '../ipc/client';
 import { awaitingGateMeetings } from '../lib/awaiting-gate';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import { pruneSelection, partitionSelection } from '../lib/selection';
+import {
+  LIBRARY_SORT_OPTIONS, libraryComparator, sanitizeSortKey, type LibrarySortKey,
+} from '../lib/library-sort';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
@@ -50,6 +53,10 @@ interface Props {
 
 type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 
+/** localStorage key for the browse-sort choice. Renderer-only preference —
+ *  not worth an IPC round-trip to the settings repo. */
+const SORT_STORAGE_KEY = 'librarySortKey';
+
 // From the user's perspective `awaiting_user` is just "still in flight" —
 // the pipeline hasn't reached `done`, it's just paused for input. So the
 // Processing filter and counter both bucket awaiting_user with processing.
@@ -62,6 +69,18 @@ export function LibraryView({
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
+  // Browse-mode sort. Persisted per machine in localStorage; sanitize on
+  // read so a corrupt/stale value degrades to the default instead of
+  // producing an option the dropdown doesn't have.
+  const [sortKey, setSortKey] = useState<LibrarySortKey>(() => {
+    try { return sanitizeSortKey(window.localStorage.getItem(SORT_STORAGE_KEY)); }
+    catch { return 'newest'; }
+  });
+  const changeSort = (key: LibrarySortKey): void => {
+    setSortKey(key);
+    try { window.localStorage.setItem(SORT_STORAGE_KEY, key); }
+    catch { /* private mode / quota — the choice just doesn't persist */ }
+  };
   const toast = useToast();
 
   // Recently deleted (trash). Fetched on mount and re-fetched after any
@@ -187,22 +206,14 @@ export function LibraryView({
           : list.filter((m) => m.status === libFilter)
   ), [libFilter]);
 
-  // Browse mode (no active query): the previous in-memory behavior —
-  // pending floats first, then awaiting, processing, failed, done by
-  // recency.
+  // Browse mode (no active query): status buckets keep their fixed
+  // precedence (pending floats first, then awaiting, processing, failed,
+  // done); the sort dropdown re-orders within each bucket. 'newest' is
+  // the previous hardcoded behavior.
   const browseList = useMemo(() => {
     if (isSearching) return [];
-    const filtered = applyFilter(meetings);
-    const rank: Record<string, number> = {
-      pending: 0, awaiting_user: 1, processing: 2, failed: 3, done: 4,
-    };
-    return [...filtered].sort((a, b) => {
-      const ra = rank[a.status] ?? 9;
-      const rb = rank[b.status] ?? 9;
-      if (ra !== rb) return ra - rb;
-      return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-    });
-  }, [meetings, isSearching, applyFilter]);
+    return [...applyFilter(meetings)].sort(libraryComparator(sortKey));
+  }, [meetings, isSearching, applyFilter, sortKey]);
 
   // Search mode buckets: a meeting with a title hit goes in the Title
   // section ONLY (cleaner than showing it in both — the user can click
@@ -513,6 +524,25 @@ export function LibraryView({
             n={libCounts.failed}
             dotClass="bg-danger-solid"
           />
+          {/* Browse-order dropdown. Chip-shaped so it reads as part of the
+              filter row. Disabled while a search is active — search results
+              have their own ordering (score / the Content section's own
+              Recent-vs-Most-matches toggle). */}
+          <select
+            value={sortKey}
+            onChange={(e) => changeSort(sanitizeSortKey(e.target.value))}
+            disabled={isSearching}
+            aria-label="Sort meetings"
+            title={isSearching ? 'Search results use match ordering' : 'Sort order for the list'}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-full border border-surface-border
+                       bg-surface text-ink-muted hover:text-ink hover:border-ink/30 transition
+                       focus:outline-none focus:border-brand-indigo cursor-pointer
+                       disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {LIBRARY_SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
+            ))}
+          </select>
           <div className="relative flex-1 sm:flex-none sm:w-72 sm:ml-auto min-w-[8rem]">
             <input
               placeholder="Search titles, summaries, transcripts…"
