@@ -240,6 +240,21 @@ const WHISPER_MODELS: { name: string; size: string; desc: string }[] = [
   { name: 'large-v3-turbo', size: '1.5 GB', desc: 'Near large-v3 accuracy, much faster' },
 ];
 
+/** Button label while a download runs: percent + sizes when the host sent
+ *  content-length, MB received when it didn't, and the old static line
+ *  until the first progress event arrives. */
+function whisperDownloadLabel(
+  progress: { received: number; total: number | null } | null,
+): string {
+  if (!progress) return 'Downloading… (this can take a few minutes)';
+  const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(0);
+  if (progress.total !== null && progress.total > 0) {
+    const pct = Math.min(100, Math.floor((progress.received / progress.total) * 100));
+    return `Downloading… ${pct}% (${mb(progress.received)} of ${mb(progress.total)} MB)`;
+  }
+  return `Downloading… ${mb(progress.received)} MB so far`;
+}
+
 function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
   const [installed, setInstalled] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<string>('medium.en');
@@ -248,6 +263,19 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
   // The model that just finished downloading this session — drives the
   // explicit "✓ downloaded and ready" confirmation.
   const [justDownloaded, setJustDownloaded] = useState<string | null>(null);
+  // Live download progress pushed from main (~4 events/sec). `total` is
+  // null when the model host omitted content-length — render MB received
+  // instead of a percent in that case.
+  const [progress, setProgress] = useState<{ received: number; total: number | null } | null>(null);
+
+  // Subscribe for the whole time the step is mounted; the events only flow
+  // while a download is running, and unmounting (wizard nav) unsubscribes.
+  useEffect(() => {
+    const off = api.onboarding.onWhisperProgress((e) => {
+      setProgress({ received: e.received, total: e.total });
+    });
+    return () => { off(); };
+  }, []);
 
   async function refresh(): Promise<string[]> {
     try {
@@ -261,7 +289,7 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
   useEffect(() => { void refresh(); }, []);
 
   async function install(): Promise<void> {
-    setInstalling(true); setErr(null); setJustDownloaded(null);
+    setInstalling(true); setErr(null); setJustDownloaded(null); setProgress(null);
     const target = picked;
     try {
       await api.onboarding.installWhisperModel(target);
@@ -317,10 +345,26 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
         disabled={installing}
         className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2 disabled:opacity-50"
       >
-        {installing ? 'Downloading… (this can take a few minutes)'
+        {installing ? whisperDownloadLabel(progress)
           : pickedInstalled ? `Re-download ${picked}`
             : `Download ${picked}`}
       </button>
+      {installing && progress && (
+        <div className="mt-2" aria-hidden>
+          <div className="h-1.5 rounded-full bg-surface-sunken overflow-hidden">
+            <div
+              className={`h-full bg-brand-indigo rounded-full transition-[width] duration-300 ${
+                progress.total === null ? 'animate-pulse' : ''
+              }`}
+              style={{
+                width: progress.total !== null && progress.total > 0
+                  ? `${Math.min(100, (progress.received / progress.total) * 100)}%`
+                  : '100%',
+              }}
+            />
+          </div>
+        </div>
+      )}
       {justDownloaded && (
         <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1.5 mt-2">
           ✓ {justDownloaded} downloaded and ready to transcribe.

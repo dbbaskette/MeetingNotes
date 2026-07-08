@@ -64,6 +64,25 @@ export function fmtTimestamp(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** Index of the line "active" at playback time `currentTime` — the line
+ *  whose [start, nextStart) window covers the time. Binary search over
+ *  the (sorted, ascending) line start times, so the per-tick highlight
+ *  computation is O(log n) even for multi-thousand-line transcripts.
+ *  Returns -1 when there are no lines or the time precedes the first. */
+export function activeLineIndexAt(
+  lines: readonly TranscriptLine[],
+  currentTime: number,
+): number {
+  if (lines.length === 0) return -1;
+  let lo = 0, hi = lines.length - 1, best = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid]!.seconds <= currentTime) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return best;
+}
+
 /** A run of consecutive same-speaker lines collapsed into one block.
  *  The merged view renders these instead of individual lines so a
  *  monologue reads as one paragraph rather than 30 timestamped

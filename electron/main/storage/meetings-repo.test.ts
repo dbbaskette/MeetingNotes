@@ -96,4 +96,68 @@ describe('MeetingsRepo', () => {
     repo.hardDelete('gone');
     expect(repo.findById('gone')).toBeNull();
   });
+
+  describe('searchByTitle', () => {
+    it('matches substrings case-insensitively, newest first', () => {
+      repo.insert({ id: 'a', slug: 'a', title: 'Q2 Planning', startedAt: '2026-04-16', durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'b', slug: 'b', title: 'weekly planning sync', startedAt: '2026-04-17', durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'c', slug: 'c', title: 'Retro', startedAt: '2026-04-18', durationS: null, audioPath: '/c', status: 'done', pipelineStage: 'done' });
+      expect(repo.searchByTitle('PLAN', 20).map((m) => m.id)).toEqual(['b', 'a']);
+    });
+
+    it('excludes soft-deleted rows', () => {
+      repo.insert({ id: 'a', slug: 'a', title: 'Budget review', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+      repo.softDelete('a');
+      expect(repo.searchByTitle('budget', 20)).toEqual([]);
+    });
+
+    it('respects the limit', () => {
+      for (let i = 0; i < 5; i++) {
+        repo.insert({ id: `m${i}`, slug: `m${i}`, title: `Sync ${i}`, startedAt: null, durationS: null, audioPath: `/m${i}`, status: 'done', pipelineStage: 'done' });
+      }
+      expect(repo.searchByTitle('Sync', 3)).toHaveLength(3);
+    });
+
+    it('treats LIKE metacharacters as literal text (parity with the old .includes())', () => {
+      repo.insert({ id: 'pct', slug: 'pct', title: 'Q3 at 50% capacity', startedAt: null, durationS: null, audioPath: '/p', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'und', slug: 'und', title: 'proj_alpha kickoff', startedAt: null, durationS: null, audioPath: '/u', status: 'done', pipelineStage: 'done' });
+      // "%" must not act as a wildcard: "9%" matches nothing (no title contains it literally).
+      expect(repo.searchByTitle('9%', 20)).toEqual([]);
+      expect(repo.searchByTitle('50%', 20).map((m) => m.id)).toEqual(['pct']);
+      // "_" must not match any-single-char: "proj_" only hits the literal underscore title.
+      expect(repo.searchByTitle('proj_', 20).map((m) => m.id)).toEqual(['und']);
+    });
+
+    it('is safe with quote characters in the query (parameter-bound)', () => {
+      repo.insert({ id: 'q', slug: 'q', title: "Dan's 1:1", startedAt: null, durationS: null, audioPath: '/q', status: 'done', pipelineStage: 'done' });
+      expect(repo.searchByTitle("dan's", 20).map((m) => m.id)).toEqual(['q']);
+      expect(() => repo.searchByTitle(`'; DROP TABLE meetings; --`, 20)).not.toThrow();
+      expect(repo.findById('q')).not.toBeNull();
+    });
+  });
+
+  describe('findBySlugs', () => {
+    it('returns rows matching the given slugs, skipping unknowns and soft-deleted', () => {
+      repo.insert({ id: 'a', slug: 'slug-a', title: 'A', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'b', slug: 'slug-b', title: 'B', startedAt: null, durationS: null, audioPath: '/b', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'c', slug: 'slug-c', title: 'C', startedAt: null, durationS: null, audioPath: '/c', status: 'done', pipelineStage: 'done' });
+      repo.softDelete('c');
+      const got = repo.findBySlugs(['slug-a', 'slug-c', 'no-such-slug']);
+      expect(got.map((m) => m.id)).toEqual(['a']);
+    });
+
+    it('returns [] for an empty slug list', () => {
+      expect(repo.findBySlugs([])).toEqual([]);
+    });
+
+    it('handles more than 900 slugs by chunking the IN list', () => {
+      repo.insert({ id: 'a', slug: 'slug-a', title: 'A', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'z', slug: 'slug-z', title: 'Z', startedAt: null, durationS: null, audioPath: '/z', status: 'done', pipelineStage: 'done' });
+      // 1500 slugs — a single IN (...) would blow past SQLite's default
+      // 999-parameter limit without chunking.
+      const slugs = ['slug-a', ...Array.from({ length: 1498 }, (_, i) => `nope-${i}`), 'slug-z'];
+      const got = repo.findBySlugs(slugs);
+      expect(got.map((m) => m.id).sort()).toEqual(['a', 'z']);
+    });
+  });
 });

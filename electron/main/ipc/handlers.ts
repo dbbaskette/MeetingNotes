@@ -237,6 +237,34 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     };
   });
 
+  // Light status poll for the detail view's 2s processing loop. Mirrors the
+  // per-row shape of meetings:list (DB + learned eta only) — deliberately no
+  // transcript/summary/raw-json file reads, which is what makes meetings:get
+  // heavy for long meetings.
+  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: string) => {
+    const m = s.meetings.findById(id);
+    if (!m) return null;
+    const speakers = listMeetingSpeakers(s.speakers, id);
+    const eta = stageEtaForMeeting(
+      s.stageDurations,
+      m.pipelineStage,
+      () => transcriptChars(s.libraryRoot, m.slug),
+    );
+    return {
+      id: m.id,
+      title: m.title,
+      pipelineStage: m.pipelineStage,
+      status: m.status,
+      errorMessage: m.errorMessage,
+      stageStartedAt: m.stageStartedAt,
+      stageEtaMs: eta?.etaMs ?? null,
+      stageEtaRough: eta?.rough ?? false,
+      skipSpeakerId: m.skipSpeakerId,
+      unidentifiedCount: unidentifiedCount(speakers),
+      actionItemsCount: s.actionItems.listByMeeting(id).length,
+    };
+  });
+
   ipc.handle(IPC_CHANNELS.meetingsRename, (_e, id: string, title: string) => {
     if (typeof id !== 'string' || typeof title !== 'string') throw new Error('invalid args');
     return s.meetings.updateTitle(id, title.slice(0, 500));
@@ -710,8 +738,15 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
     // so onboarding's model download failed there with "No such file or
     // directory". downloadWhisperModel validates the id and pulls the ggml
-    // file straight into the whisper-models directory.
-    await downloadWhisperModel(model);
+    // file straight into the whisper-models directory. Progress fans out on
+    // the onboarding:whisper-progress push channel (throttled to ~4/sec in
+    // download-model.ts) so the wizard can render a real progress bar.
+    await downloadWhisperModel(model, {
+      onProgress: (received, total) => {
+        BrowserWindow.getAllWindows().forEach((w) =>
+          w.webContents.send(IPC_CHANNELS.onboardingWhisperProgress, { model, received, total }));
+      },
+    });
   });
 
   ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
@@ -766,17 +801,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     const hits: Hit[] = [];
 
-    const meetings = s.meetings.listAll();
-    const bySlug = new Map(meetings.map((m) => [m.slug, m]));
-
     // Title hits — rank highest so an exact-title match surfaces first.
-    for (const m of meetings) {
-      if (m.title.toLowerCase().includes(qLower)) {
-        hits.push({
-          meetingId: m.id, title: m.title, source: 'title',
-          snippet: m.title, score: 1000,
-        });
-      }
+    // Pushed down to SQL (LIKE, parameter-bound) instead of scanning a
+    // listAll() snapshot per keystroke. Newest-first, capped at `max` —
+    // the final slice keeps at most `max` anyway and titles outrank
+    // everything else.
+    for (const m of s.meetings.searchByTitle(q, max)) {
+      hits.push({
+        meetingId: m.id, title: m.title, source: 'title',
+        snippet: m.title, score: 1000,
+      });
     }
 
     // Content hits — one rg invocation across both file types. We pass
@@ -789,9 +823,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       globs: ['summary.md', 'transcript.md'],
     });
 
+    // Resolve only the slugs rg actually hit — one chunked IN query
+    // instead of materializing the entire library.
+    const slugFor = (file: string): string | null => {
+      // Path shape: {libraryRoot}/meetings/{slug}/(summary|transcript).md
+      const segs = path.relative(meetingsRoot, file).split(path.sep);
+      return segs.length === 2 ? segs[0]! : null;
+    };
+    const hitSlugs = [...new Set(
+      rgHits.map((r) => slugFor(r.file)).filter((sl): sl is string => sl !== null),
+    )];
+    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs).map((m) => [m.slug, m]));
+
     const summarySeen = new Set<string>(); // slug — caps summary hits at 1/meeting
     for (const r of rgHits) {
-      // Path shape: {libraryRoot}/meetings/{slug}/(summary|transcript).md
       const rel = path.relative(meetingsRoot, r.file);
       const segs = rel.split(path.sep);
       if (segs.length !== 2) continue;

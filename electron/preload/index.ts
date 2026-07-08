@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsGetStatus: 'meetings:get-status',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
   meetingsUndoDelete: 'meetings:undo-delete',
@@ -47,6 +48,7 @@ const IPC_CHANNELS = {
   meetingDetectorDismiss: 'meeting-detector:dismiss',
   onboardingWhisperList: 'onboarding:whisper-list',
   onboardingWhisperInstall: 'onboarding:whisper-install',
+  onboardingWhisperProgress: 'onboarding:whisper-progress',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
@@ -81,6 +83,24 @@ const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
+    /** Light status snapshot for processing polls — DB fields + eta only,
+     *  no transcript/summary file reads. The detail view polls this every
+     *  2s while processing and only re-fetches the full `get` payload when
+     *  stage/status/error actually changed. */
+    getStatus: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetStatus, id) as Promise<{
+        id: string;
+        title: string;
+        pipelineStage: string;
+        status: string;
+        errorMessage: string | null;
+        stageStartedAt: string | null;
+        stageEtaMs: number | null;
+        stageEtaRough: boolean;
+        skipSpeakerId: boolean;
+        unidentifiedCount: number;
+        actionItemsCount: number;
+      } | null>,
     rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
     /** Soft delete: moves audio files + meeting folder to the trash and
      *  stamps `deleted_at` on the DB row. The row is hidden from listings
@@ -268,6 +288,14 @@ const api = {
      *  download depending on model + connection. */
     installWhisperModel: (model: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperInstall, model) as Promise<void>,
+    /** Subscribe to byte-level progress for an in-flight model download.
+     *  `total` is null when the host omitted content-length. Returns an
+     *  unsubscribe callback. */
+    onWhisperProgress: (cb: (e: { model: string; received: number; total: number | null }) => void) => {
+      const wrapped = (_e: unknown, payload: { model: string; received: number; total: number | null }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
+    },
     /** Write an HF token to ~/.cache/huggingface/token with 0600 perms.
      *  Caller is expected to have validated it already. */
     saveHfToken: (token: string) =>
