@@ -227,6 +227,69 @@ describe('WeeklyAggregator', () => {
     );
   });
 
+  it('reads speakerCount from diarization.meta.json without touching diarization.json', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Mtg', startedAt: '2026-04-20T10:00:00.000Z', slug: 'mtg',
+    });
+    const folder = path.join(lib, 'meetings', 'mtg');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'diarization.meta.json'), JSON.stringify({ num_speakers: 3 }));
+    // Deliberately-corrupt big file: if the aggregator parsed it, the
+    // speakerCount would fall back to null.
+    fs.writeFileSync(path.join(folder, 'diarization.json'), 'not json {{{');
+
+    const generate = vi.fn(async () => ({ narrative: 'n', themes: [], decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const structured = await agg.getStructuredWeek(2026, 17);
+    expect(structured.meetings[0]!.speakerCount).toBe(3);
+  });
+
+  it('self-heals a missing meta file from diarization.json and uses it', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Mtg', startedAt: '2026-04-20T10:00:00.000Z', slug: 'mtg',
+    });
+    const folder = path.join(lib, 'meetings', 'mtg');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(
+      path.join(folder, 'diarization.json'),
+      JSON.stringify({ segments: [], num_speakers: 4 }),
+    );
+
+    const generate = vi.fn(async () => ({ narrative: 'n', themes: [], decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const structured = await agg.getStructuredWeek(2026, 17);
+    expect(structured.meetings[0]!.speakerCount).toBe(4);
+    // The one-time big parse leaves a meta cache behind for next open.
+    const meta = JSON.parse(
+      fs.readFileSync(path.join(folder, 'diarization.meta.json'), 'utf8'),
+    );
+    expect(meta).toEqual({ num_speakers: 4 });
+  });
+
+  it('leaves speakerCount null when neither diarization file exists', async () => {
+    const { meetings, actionItems, speakers, settings, weekly } = setupDb();
+    insertMeeting(meetings, undefined as never, {
+      id: 'm1', title: 'Mtg', startedAt: '2026-04-20T10:00:00.000Z', slug: 'mtg',
+    });
+    fs.mkdirSync(path.join(lib, 'meetings', 'mtg'), { recursive: true });
+
+    const generate = vi.fn(async () => ({ narrative: 'n', themes: [], decisions: [] }));
+    const agg = new WeeklyAggregator({
+      meetings, actionItems, speakers, settings, weeklySummaries: weekly,
+      libraryRoot: lib, generateNarrative: generate,
+    });
+    const structured = await agg.getStructuredWeek(2026, 17);
+    expect(structured.meetings[0]!.speakerCount).toBeNull();
+  });
+
   it('groups open action items by owner, with the user pinned first', async () => {
     const { meetings, actionItems, speakers, settings, weekly, db } = setupDb();
     insertMeeting(meetings, undefined as never, {

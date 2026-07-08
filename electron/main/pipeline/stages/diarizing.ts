@@ -29,7 +29,16 @@ export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   const wav = await ensureWav(meeting.audioPath);
   try {
     const result = await ctx.diarization.diarize(wav.path);
-    fs.writeFileSync(path.join(folder, 'diarization.json'), JSON.stringify(result, null, 2));
+    // Compact JSON: the per-segment embeddings make this file multi-MB,
+    // and pretty-print indentation roughly doubles both the on-disk size
+    // and the cost of any later JSON.parse.
+    fs.writeFileSync(path.join(folder, 'diarization.json'), JSON.stringify(result));
+    // Tiny sidecar for consumers (weekly rollup) that only need the
+    // speaker count — saves them parsing the embeddings-laden file.
+    fs.writeFileSync(
+      path.join(folder, 'diarization.meta.json'),
+      JSON.stringify({ num_speakers: result.num_speakers }),
+    );
     ctx.logger.info('diarize:done', { meetingId, speakers: result.num_speakers });
   } finally {
     wav.cleanup();

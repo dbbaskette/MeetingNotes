@@ -323,12 +323,28 @@ export class WeeklyAggregator {
         highlight = extractOverviewRecap(md);
       } catch { /* best-effort */ }
     }
+    // Speaker count comes from the tiny diarization.meta.json sidecar —
+    // parsing the full diarization.json (multi-MB of per-segment
+    // embeddings) per meeting per weekly open was measurably slow. For
+    // meetings that predate the sidecar, parse the big file ONCE and
+    // write the meta file as a self-healing cache.
     let speakerCount: number | null = null;
+    const metaPath = path.join(folder, 'diarization.meta.json');
     const diarPath = path.join(folder, 'diarization.json');
-    if (fs.existsSync(diarPath)) {
+    if (fs.existsSync(metaPath)) {
+      try {
+        const d = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { num_speakers?: number };
+        speakerCount = typeof d.num_speakers === 'number' ? d.num_speakers : null;
+      } catch { /* best-effort */ }
+    } else if (fs.existsSync(diarPath)) {
       try {
         const d = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as { num_speakers?: number };
         speakerCount = typeof d.num_speakers === 'number' ? d.num_speakers : null;
+        if (speakerCount !== null) {
+          try {
+            fs.writeFileSync(metaPath, JSON.stringify({ num_speakers: speakerCount }));
+          } catch { /* best-effort cache write */ }
+        }
       } catch { /* best-effort */ }
     }
     return {

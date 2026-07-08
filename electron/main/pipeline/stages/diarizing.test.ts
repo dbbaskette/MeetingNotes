@@ -32,8 +32,37 @@ describe('runDiarizing', () => {
       logger: { info: vi.fn() },
     };
     await runDiarizing({ meetingId: 'm' }, ctx);
-    const got = JSON.parse(fs.readFileSync(path.join(mFolder, 'diarization.json'), 'utf8'));
+    const raw = fs.readFileSync(path.join(mFolder, 'diarization.json'), 'utf8');
+    const got = JSON.parse(raw);
     expect(got.num_speakers).toBe(1);
+    // Compact JSON — the embeddings make this file multi-MB; pretty-print
+    // indentation roughly doubles the on-disk and re-parse cost.
+    expect(raw).toBe(JSON.stringify(got));
+  });
+
+  it('writes a tiny diarization.meta.json sidecar with num_speakers', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-meta-'));
+    const mFolder = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(mFolder, { recursive: true });
+
+    const ctx: any = {
+      libraryRoot: dir,
+      diarSupervisor: { ensureReady: async () => {} },
+      diarization: {
+        diarize: vi.fn(async () => ({
+          segments: [
+            { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) },
+            { start: 1, end: 2, speaker: 'SPEAKER_01', embedding: new Array(512).fill(0) },
+          ],
+          num_speakers: 2,
+        })),
+      },
+      meetings: { findById: () => ({ slug: 'slug', audioPath: '/x.mp3' }) },
+      logger: { info: vi.fn() },
+    };
+    await runDiarizing({ meetingId: 'm' }, ctx);
+    const meta = JSON.parse(fs.readFileSync(path.join(mFolder, 'diarization.meta.json'), 'utf8'));
+    expect(meta).toEqual({ num_speakers: 2 });
   });
 
   it('diarizes the mixed file (not any stem) even when stems exist', async () => {
