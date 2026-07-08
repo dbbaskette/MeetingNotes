@@ -1364,6 +1364,14 @@ function ActionItemsPanel({
   const [reextractError, setReextractError] = useState<string | null>(null);
   const items = meeting.actionItems;
 
+  // Flip a single item between open ⇄ done. Same reload path add/delete
+  // use: the setStatus IPC persists, then onReload() re-fetches the meeting
+  // so the row re-renders with the DONE badge / strikethrough.
+  async function toggleStatus(it: MeetingDetail['actionItems'][number]): Promise<void> {
+    await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
+    await onReload();
+  }
+
   // Re-run ONLY the extract step over the current SAVED summary.md and swap in
   // the fresh items. The meeting's pipeline state is untouched (a 'done'
   // meeting stays 'done'); the whole thing is one short LLM call. onReload()
@@ -1412,6 +1420,7 @@ function ActionItemsPanel({
               item={it}
               onOpen={() => setEditing(it.id)}
               onShowSource={onShowSource}
+              onToggleStatus={() => void toggleStatus(it)}
             />
           )
         ))}
@@ -1457,20 +1466,39 @@ function ActionItemsPanel({
 }
 
 function ActionItemDisplay({
-  item, onOpen, onShowSource,
+  item, onOpen, onShowSource, onToggleStatus,
 }: {
   item: MeetingDetail['actionItems'][number];
   onOpen: () => void;
   onShowSource: (quote: string) => void;
+  onToggleStatus: () => void;
 }): JSX.Element {
+  const done = item.status === 'done';
   return (
-    <div className="relative">
+    <div className="relative flex items-start gap-2">
+      {/* Click-to-toggle done circle. A sibling of the open-editor button
+          (nested buttons are invalid HTML), so checking an item off never
+          accidentally opens the editor. */}
+      <button
+        type="button"
+        onClick={onToggleStatus}
+        aria-pressed={done}
+        title={done ? 'Mark as open' : 'Mark as done'}
+        className={`mt-2.5 w-4 h-4 rounded-full border shrink-0 flex items-center justify-center transition-colors
+          ${done
+            ? 'bg-status-ok border-status-ok text-white'
+            : 'bg-surface border-ink-muted/50 text-transparent hover:border-status-ok hover:text-status-ok/40'}`}
+      >
+        <svg viewBox="0 0 16 16" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 8l3.5 3.5L13 5" />
+        </svg>
+      </button>
       <button
         onClick={onOpen}
-        className="w-full text-left rounded-lg border border-surface-border bg-surface
+        className="flex-1 min-w-0 text-left rounded-lg border border-surface-border bg-surface
                    hover:border-brand-indigo/60 hover:shadow-pop px-3 py-2 transition"
       >
-        <div className="text-sm text-ink">{item.text}</div>
+        <div className={`text-sm ${done ? 'text-ink-muted line-through' : 'text-ink'}`}>{item.text}</div>
         <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
           {item.ownerName && <span>👤 {item.ownerName}</span>}
           {item.dueDate && <span>📅 {item.dueDate}</span>}

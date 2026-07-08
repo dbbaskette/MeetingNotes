@@ -543,7 +543,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.speakers.linkToMeeting(meetingId, localLabel, null, 0);
   });
 
-  ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: string, status: string) => {
+  ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: unknown, status: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     if (status !== 'open' && status !== 'done') throw new Error('invalid status');
     return s.actionItems.setStatus(id, status);
   });
