@@ -44,6 +44,7 @@ import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters
 import { Logger } from './logging/logger.js';
 import { createMeetingFolder, meetingFolderPath } from './storage/meeting-folder.js';
 import { parseAudioHijackFilename } from './lib/title-from-filename.js';
+import { createPeakThrottle } from './lib/peak-throttle.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
 import { createSplash } from './splash.js';
@@ -211,9 +212,17 @@ app.whenReady().then(async () => {
   // Broadcast level + state-change events to all renderer windows. Doing this
   // here (not inside RecordingManager) keeps the manager free of any Electron
   // dependency, which makes it unit-testable with a fake spawn.
-  recordingManager.on('level', (sessionId, peakDb) => {
+  // The helper prints a level line per audio buffer (30–60/sec) — far more
+  // than a VU meter needs. Coalesce to 10Hz per session with peak-hold so
+  // the meter still catches transients but each window's webContents.send
+  // rate drops ~5x. The manager keeps emitting per-line (Electron-free,
+  // unit-testable); the throttle lives at the IPC boundary.
+  const levelThrottle = createPeakThrottle(100, (sessionId, peakDb) => {
     BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, peakDb }));
+  });
+  recordingManager.on('level', (sessionId, peakDb) => {
+    levelThrottle.push(sessionId, peakDb);
   });
   recordingManager.on('state-change', (sessionId, state) => {
     BrowserWindow.getAllWindows().forEach((w) =>
