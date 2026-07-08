@@ -109,6 +109,11 @@ export const IPC_CHANNELS = {
   meetingDetectorDismiss: 'meeting-detector:dismiss',
   onboardingWhisperList: 'onboarding:whisper-list',
   onboardingWhisperInstall: 'onboarding:whisper-install',
+  /** Push channel: byte-level progress for an in-flight whisper model
+   *  download. Payload: { model, received, total } — total is null when
+   *  the host omitted content-length. ~4 events/sec (throttled in
+   *  download-model.ts). */
+  onboardingWhisperProgress: 'onboarding:whisper-progress',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',

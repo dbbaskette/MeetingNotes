@@ -738,8 +738,15 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
     // so onboarding's model download failed there with "No such file or
     // directory". downloadWhisperModel validates the id and pulls the ggml
-    // file straight into the whisper-models directory.
-    await downloadWhisperModel(model);
+    // file straight into the whisper-models directory. Progress fans out on
+    // the onboarding:whisper-progress push channel (throttled to ~4/sec in
+    // download-model.ts) so the wizard can render a real progress bar.
+    await downloadWhisperModel(model, {
+      onProgress: (received, total) => {
+        BrowserWindow.getAllWindows().forEach((w) =>
+          w.webContents.send(IPC_CHANNELS.onboardingWhisperProgress, { model, received, total }));
+      },
+    });
   });
 
   ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {

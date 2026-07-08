@@ -48,6 +48,7 @@ const IPC_CHANNELS = {
   meetingDetectorDismiss: 'meeting-detector:dismiss',
   onboardingWhisperList: 'onboarding:whisper-list',
   onboardingWhisperInstall: 'onboarding:whisper-install',
+  onboardingWhisperProgress: 'onboarding:whisper-progress',
   onboardingHfTokenSave: 'onboarding:hf-token-save',
   onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
@@ -287,6 +288,14 @@ const api = {
      *  download depending on model + connection. */
     installWhisperModel: (model: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperInstall, model) as Promise<void>,
+    /** Subscribe to byte-level progress for an in-flight model download.
+     *  `total` is null when the host omitted content-length. Returns an
+     *  unsubscribe callback. */
+    onWhisperProgress: (cb: (e: { model: string; received: number; total: number | null }) => void) => {
+      const wrapped = (_e: unknown, payload: { model: string; received: number; total: number | null }): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
+    },
     /** Write an HF token to ~/.cache/huggingface/token with 0600 perms.
      *  Caller is expected to have validated it already. */
     saveHfToken: (token: string) =>
