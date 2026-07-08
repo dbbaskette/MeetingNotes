@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsGetStatus: 'meetings:get-status',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
   meetingsUndoDelete: 'meetings:undo-delete',
@@ -81,6 +82,24 @@ const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
+    /** Light status snapshot for processing polls — DB fields + eta only,
+     *  no transcript/summary file reads. The detail view polls this every
+     *  2s while processing and only re-fetches the full `get` payload when
+     *  stage/status/error actually changed. */
+    getStatus: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetStatus, id) as Promise<{
+        id: string;
+        title: string;
+        pipelineStage: string;
+        status: string;
+        errorMessage: string | null;
+        stageStartedAt: string | null;
+        stageEtaMs: number | null;
+        stageEtaRough: boolean;
+        skipSpeakerId: boolean;
+        unidentifiedCount: number;
+        actionItemsCount: number;
+      } | null>,
     rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
     /** Soft delete: moves audio files + meeting folder to the trash and
      *  stamps `deleted_at` on the DB row. The row is hidden from listings

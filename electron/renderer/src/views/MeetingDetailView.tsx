@@ -135,6 +135,15 @@ export function MeetingDetailView({
     setKick((k) => k + 1);
   };
 
+  // Last live-state snapshot from either the full load or the light poll.
+  // The 2s processing poll only pays for the heavy meetings:get (which
+  // reads transcript.md / summary.md / transcript.raw.json off disk) when
+  // one of these actually changed — a stage advance triggers a full load,
+  // which is also what makes the transcript preview appear.
+  const lastLiveStateRef = useRef<{
+    pipelineStage: string; status: string; errorMessage: string | null;
+  } | null>(null);
+
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -142,10 +151,59 @@ export function MeetingDetailView({
       const d = (await api.meetings.get(id)) as MeetingDetail;
       if (!alive) return;
       setM(d);
+      lastLiveStateRef.current = {
+        pipelineStage: d.pipelineStage,
+        status: d.status,
+        errorMessage: d.errorMessage,
+      };
       // Poll while anything is in flight. A rerun puts the meeting back into
       // 'processing', which re-enters this branch via the `kick` dependency.
       if (d.status === 'processing') {
-        timer = setTimeout(load, 2000);
+        timer = setTimeout(poll, 2000);
+      }
+    }
+    // Light poll tick: DB-only status snapshot. Falls back to the full
+    // load the moment stage/status/error changed (or the meeting vanished
+    // — load()'s null handling is the same either way).
+    async function poll(): Promise<void> {
+      let st: Awaited<ReturnType<typeof api.meetings.getStatus>>;
+      try {
+        st = await api.meetings.getStatus(id);
+      } catch {
+        st = null;
+      }
+      if (!alive) return;
+      if (st === null) {
+        // Meeting vanished (deleted?) or the IPC failed — let the full
+        // load path decide what to render.
+        await load();
+        return;
+      }
+      const last = lastLiveStateRef.current;
+      const changed = last === null
+        || st.pipelineStage !== last.pipelineStage
+        || st.status !== last.status
+        || st.errorMessage !== last.errorMessage;
+      if (changed) {
+        // Stage advanced / failed / finished — refresh everything,
+        // including the transcript preview for the newly-written files.
+        // load() reschedules polling itself while still processing.
+        await load();
+        return;
+      }
+      // No state change: keep the cheap live fields (eta, counts) fresh
+      // without re-shipping the transcript, and keep polling.
+      const snap = st;
+      setM((prev) => (prev === null ? prev : {
+        ...prev,
+        title: snap.title,
+        stageStartedAt: snap.stageStartedAt,
+        stageEtaMs: snap.stageEtaMs,
+        stageEtaRough: snap.stageEtaRough,
+        skipSpeakerId: snap.skipSpeakerId,
+      }));
+      if (snap.status === 'processing') {
+        timer = setTimeout(poll, 2000);
       }
     }
     void load();

@@ -57,6 +57,11 @@ export type MeetingDetail = z.infer<typeof MeetingDetailSchema>;
 export const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  /** Light status poll for the detail view while a meeting is processing.
+   *  Returns only the DB-backed live fields (stage/status/error/eta/counts)
+   *  — never the transcript/summary markdown that meetings:get reads off
+   *  disk, so the 2s poll doesn't ship hundreds of KB per tick. */
+  meetingsGetStatus: 'meetings:get-status',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
   meetingsUndoDelete: 'meetings:undo-delete',

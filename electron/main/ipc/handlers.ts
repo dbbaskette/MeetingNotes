@@ -237,6 +237,34 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     };
   });
 
+  // Light status poll for the detail view's 2s processing loop. Mirrors the
+  // per-row shape of meetings:list (DB + learned eta only) — deliberately no
+  // transcript/summary/raw-json file reads, which is what makes meetings:get
+  // heavy for long meetings.
+  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: string) => {
+    const m = s.meetings.findById(id);
+    if (!m) return null;
+    const speakers = listMeetingSpeakers(s.speakers, id);
+    const eta = stageEtaForMeeting(
+      s.stageDurations,
+      m.pipelineStage,
+      () => transcriptChars(s.libraryRoot, m.slug),
+    );
+    return {
+      id: m.id,
+      title: m.title,
+      pipelineStage: m.pipelineStage,
+      status: m.status,
+      errorMessage: m.errorMessage,
+      stageStartedAt: m.stageStartedAt,
+      stageEtaMs: eta?.etaMs ?? null,
+      stageEtaRough: eta?.rough ?? false,
+      skipSpeakerId: m.skipSpeakerId,
+      unidentifiedCount: unidentifiedCount(speakers),
+      actionItemsCount: s.actionItems.listByMeeting(id).length,
+    };
+  });
+
   ipc.handle(IPC_CHANNELS.meetingsRename, (_e, id: string, title: string) => {
     if (typeof id !== 'string' || typeof title !== 'string') throw new Error('invalid args');
     return s.meetings.updateTitle(id, title.slice(0, 500));

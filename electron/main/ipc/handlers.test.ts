@@ -37,6 +37,8 @@ describe('registerIpcHandlers', () => {
     const channels = handle.mock.calls.map((c) => c[0]);
     expect(channels).toContain('meetings:list');
     expect(channels).toContain('meetings:get');
+    // Light detail-view status poll (no transcript/summary file reads).
+    expect(channels).toContain('meetings:get-status');
     expect(channels).toContain('export:run');
     expect(channels).toContain('models:list');
     // New endpoints from the UX-review pass: Settings "Test connection"
