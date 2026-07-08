@@ -38,7 +38,7 @@ import {
   averageEmbeddingForLabel,
   type DiarizationSegment,
 } from '../speakers/sample-extractor.js';
-import { moveToTrash, restoreFromTrash } from '../storage/trash.js';
+import { moveToTrash, restoreFromTrash, purgeTrashDir, TRASH_RETENTION_MS } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { clearGateNotified } from '../pipeline/gate-alert.js';
 import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
@@ -294,6 +294,22 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const restored = restoreFromTrash(s.libraryRoot, id);
     if (restored) s.meetings.restore(id);
     return restored;
+  });
+
+  ipc.handle(IPC_CHANNELS.trashList, () => {
+    // Purge anything past the retention window first, so the "Recently
+    // deleted" section never lists a meeting whose files are already
+    // gone (or about to be). Same semantics as the startup/hourly purge
+    // in main/index.ts — this just runs it on demand.
+    const cutoff = new Date(Date.now() - TRASH_RETENTION_MS).toISOString();
+    for (const m of s.meetings.findSoftDeleted(cutoff)) {
+      purgeTrashDir(s.libraryRoot, m.id);
+      s.meetings.hardDelete(m.id);
+      s.logger.info('trash:purged', { meetingId: m.id });
+    }
+    return s.meetings.findSoftDeleted()
+      .sort((a, b) => (b.deletedAt ?? '').localeCompare(a.deletedAt ?? ''))
+      .map((m) => ({ id: m.id, title: m.title, deletedAt: m.deletedAt }));
   });
 
   ipc.handle(IPC_CHANNELS.meetingsRerun, (_e, id: string, fromStage: string) => {

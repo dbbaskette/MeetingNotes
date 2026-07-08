@@ -11,6 +11,7 @@ const IPC_CHANNELS = {
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
   meetingsUndoDelete: 'meetings:undo-delete',
+  trashList: 'trash:list',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
@@ -104,13 +105,14 @@ const api = {
     rename: (id: string, title: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRename, id, title),
     /** Soft delete: moves audio files + meeting folder to the trash and
      *  stamps `deleted_at` on the DB row. The row is hidden from listings
-     *  but recoverable via `undoDelete` for ~90s. After the undo window,
-     *  a periodic purge job in the main process hard-deletes the files
-     *  and the row. */
+     *  but recoverable via `undoDelete` (undo toast or the Library's
+     *  "Recently deleted" section) for 30 days. After the retention
+     *  window, a periodic purge job in the main process hard-deletes the
+     *  files and the row. */
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<void>,
     /** Restore a soft-deleted meeting. Returns true if the files were
-     *  moved back and the row's deleted_at cleared; false if the undo
-     *  window already expired. */
+     *  moved back and the row's deleted_at cleared; false if the
+     *  retention window already expired. */
     undoDelete: (id: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsUndoDelete, id) as Promise<boolean>,
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
@@ -161,6 +163,17 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.meetingsAddedEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.meetingsAddedEvent, wrapped);
     },
+  },
+  trash: {
+    /** Soft-deleted meetings still inside the retention window, newest
+     *  first. The main process purges expired entries before answering,
+     *  so every returned entry is restorable via meetings.undoDelete. */
+    list: () =>
+      ipcRenderer.invoke(IPC_CHANNELS.trashList) as Promise<{
+        id: string;
+        title: string;
+        deletedAt: string;
+      }[]>,
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),

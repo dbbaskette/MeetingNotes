@@ -58,6 +58,41 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('action-items:reextract');
     // Reveal a storage location (library/models/logs/hfCache) in Finder.
     expect(channels).toContain('settings:reveal-storage');
+    expect(channels).toContain('trash:list');
+  });
+
+  it('trash:list purges expired entries then returns the rest, newest first', () => {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const rows = [
+      { id: 'old', title: 'Ancient standup', deletedAt: new Date(now - 40 * day).toISOString() },
+      { id: 'a', title: 'Design sync', deletedAt: new Date(now - 2 * day).toISOString() },
+      { id: 'b', title: 'Retro', deletedAt: new Date(now - 1 * day).toISOString() },
+    ];
+    const hardDelete = vi.fn((id: string) => {
+      const i = rows.findIndex((r) => r.id === id);
+      if (i >= 0) rows.splice(i, 1);
+    });
+    const findSoftDeleted = vi.fn((olderThanIso?: string) =>
+      olderThanIso ? rows.filter((r) => r.deletedAt < olderThanIso) : [...rows]);
+    const handle = vi.fn();
+    const fakeIpc = { handle } as any;
+    const services = baseServices({
+      meetings: { listAll: () => [], findSoftDeleted, hardDelete },
+    });
+    registerIpcHandlers(fakeIpc, services);
+    const call = handle.mock.calls.find((c) => c[0] === 'trash:list');
+    expect(call).toBeDefined();
+    const handler = call![1] as () => { id: string; title: string; deletedAt: string }[];
+
+    const list = handler();
+
+    // The 40-day-old entry is past the 30-day retention window: purged…
+    expect(hardDelete).toHaveBeenCalledTimes(1);
+    expect(hardDelete).toHaveBeenCalledWith('old');
+    // …and the survivors come back newest-deletion first.
+    expect(list.map((m) => m.id)).toEqual(['b', 'a']);
+    expect(list[0]).toEqual({ id: 'b', title: 'Retro', deletedAt: rows[1]!.deletedAt });
   });
 
   it('llm:health-check-model reports ok for a well-behaved model and loops for one that burns its budget', async () => {

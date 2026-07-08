@@ -37,7 +37,7 @@ import { runExtracting } from './pipeline/stages/extracting.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
 import { MeetingDetector } from './meeting-detector/detector.js';
 import { NativeAppDetector } from './meeting-detector/native-app-detector.js';
-import { purgeTrashDir, UNDO_WINDOW_MS } from './storage/trash.js';
+import { purgeTrashDir, TRASH_RETENTION_MS } from './storage/trash.js';
 import { buildExporterRegistry } from './exporters/registry.js';
 import { GoogleAuth } from './google/auth.js';
 import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters/webhook.js';
@@ -357,12 +357,14 @@ app.whenReady().then(async () => {
     }
   });
 
-  // Trash purge (UX rec #2 undo-delete). Soft-deleted meetings stay
-  // recoverable for UNDO_WINDOW_MS. On launch, purge anything that's
-  // already past the window so the user doesn't see day-old trash come
-  // back on a restart. Then every 60s check again.
+  // Trash purge (UX rec #2 undo-delete + Recently deleted view).
+  // Soft-deleted meetings stay recoverable for TRASH_RETENTION_MS (30
+  // days). On launch, purge anything already past the window; then check
+  // hourly — with a 30-day window, second-level precision buys nothing.
+  // The trash:list IPC also purges before answering, so the "Recently
+  // deleted" section never offers a restore that can't succeed.
   const purgeExpiredTrash = (): void => {
-    const cutoff = new Date(Date.now() - UNDO_WINDOW_MS).toISOString();
+    const cutoff = new Date(Date.now() - TRASH_RETENTION_MS).toISOString();
     const expired = meetings.findSoftDeleted(cutoff);
     for (const m of expired) {
       purgeTrashDir(libraryRoot, m.id);
@@ -371,7 +373,7 @@ app.whenReady().then(async () => {
     }
   };
   purgeExpiredTrash();
-  const trashPurgeTimer = setInterval(purgeExpiredTrash, 60_000);
+  const trashPurgeTimer = setInterval(purgeExpiredTrash, 60 * 60_000);
 
   // Meeting auto-detect (#12 browser tabs, #78 native apps). Two detectors,
   // each opt-in via its own toggle inside the autoDetectMeetings setting

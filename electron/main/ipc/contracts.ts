@@ -65,6 +65,11 @@ export const IPC_CHANNELS = {
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
   meetingsUndoDelete: 'meetings:undo-delete',
+  /** List soft-deleted meetings still inside the trash retention window
+   *  (id, title, deletedAt — newest first). Purges expired entries before
+   *  answering so the "Recently deleted" UI never shows a meeting whose
+   *  files are already gone. Restore goes through meetings:undo-delete. */
+  trashList: 'trash:list',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',

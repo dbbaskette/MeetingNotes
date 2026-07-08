@@ -17,6 +17,7 @@ import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { api } from '../ipc/client';
 import { awaitingGateMeetings } from '../lib/awaiting-gate';
+import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
@@ -61,6 +62,17 @@ export function LibraryView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
   const toast = useToast();
+
+  // Recently deleted (trash). Fetched on mount and re-fetched after any
+  // row mutation (delete / restore) — the main process purges expired
+  // entries inside trash:list, so this list is always restorable.
+  const [trash, setTrash] = useState<TrashedMeeting[]>([]);
+  const refreshTrash = useCallback(async () => {
+    try {
+      setTrash(await api.trash.list());
+    } catch { /* non-fatal — the section just stays hidden */ }
+  }, []);
+  useEffect(() => { void refreshTrash(); }, [refreshTrash]);
 
   // Pipeline queue state. Pushed from main on every change, plus an
   // initial pull on mount so the banner appears even if no events have
@@ -525,7 +537,7 @@ export function LibraryView({
                 <LibraryRow
                   meeting={m}
                   onOpen={(id) => onOpen(id, hint)}
-                  onChanged={() => void refresh()}
+                  onChanged={() => { void refresh(); void refreshTrash(); }}
                   checked={m.status === 'pending' ? selected.has(m.id) : undefined}
                   onToggle={m.status === 'pending' ? () => toggleSelect(m.id) : undefined}
                 />
@@ -567,6 +579,23 @@ export function LibraryView({
             </div>
           );
         })()}
+
+        {/* Recently deleted — muted, collapsed by default, only when the
+            trash is non-empty. Restore is the recovery path once the undo
+            toast is gone; entries expire after the 30-day retention. */}
+        <TrashSection
+          trash={trash}
+          onRestore={async (m) => {
+            const restored = await api.meetings.undoDelete(m.id);
+            if (restored) {
+              toast.show({ message: `Restored "${m.title}"`, durationMs: 4000 });
+            } else {
+              toast.show({ message: 'Too late — this meeting has already been purged.', variant: 'error' });
+            }
+            void refresh();
+            void refreshTrash();
+          }}
+        />
       </section>
 
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
@@ -580,6 +609,67 @@ export function LibraryView({
 }
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
+
+/** Muted "Recently deleted (N)" affordance at the bottom of the Library.
+ *  Collapsed by default; expanding lists the trashed meetings with a
+ *  Restore button each. Renders nothing when the trash is empty — no
+ *  permanent chrome for a state most sessions never enter. */
+function TrashSection({
+  trash, onRestore,
+}: {
+  trash: TrashedMeeting[];
+  onRestore: (m: TrashedMeeting) => Promise<void>;
+}): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  if (trash.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-surface-border pt-2 pb-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink transition px-1 py-1"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
+          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        >
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        Recently deleted ({trash.length})
+      </button>
+      {open && (
+        <div className="mt-1 space-y-1">
+          {trash.map((m) => (
+            <div
+              key={m.id}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-sunken/40 border border-surface-border/60"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-ink-muted truncate">{m.title}</div>
+                <div className="text-[11px] text-ink-muted/70">
+                  Deleted {fmtDeletedAgo(m.deletedAt)}
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={busyId === m.id}
+                onClick={() => {
+                  setBusyId(m.id);
+                  void onRestore(m).finally(() => setBusyId(null));
+                }}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-ink-muted hover:text-ink hover:border-ink/40 transition disabled:opacity-50 shrink-0"
+              >
+                {busyId === m.id ? 'Restoring…' : 'Restore'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function SearchSectionHeader({
   label, count, sort, onSortChange,
