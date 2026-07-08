@@ -464,9 +464,44 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     return id;
   });
+  // Re-run the merge step for every meeting linked to a roster speaker, so
+  // a rename/merge shows up in the transcripts, not just the roster list.
+  // Best-effort per meeting: a missing transcript.raw.json (meeting not yet
+  // transcribed, files relocated) shouldn't fail the roster operation —
+  // the DB is already consistent and the next pipeline run rewrites the file.
+  const remergeMeetings = (meetingIds: string[]): void => {
+    for (const meetingId of meetingIds) {
+      try {
+        remergeTranscript(meetingId, {
+          libraryRoot: s.libraryRoot,
+          meetings: s.meetings,
+          speakers: s.speakers,
+          userName: s.settings.get('userName'),
+        });
+      } catch { /* see note above */ }
+    }
+  };
+
   ipc.handle(IPC_CHANNELS.speakersRename, (_e, id: string, name: string) => {
     if (typeof id !== 'string' || typeof name !== 'string') throw new Error('invalid args');
-    return s.speakers.rename(id, name.slice(0, 200));
+    s.speakers.rename(id, name.slice(0, 200));
+    // Push the new name into the transcripts of every meeting this speaker
+    // appears in (previously the rename only touched the roster row).
+    remergeMeetings(s.speakers.meetingIdsForSpeaker(id));
+  });
+
+  ipc.handle(IPC_CHANNELS.speakersMerge, (_e, sourceId: unknown, targetId: unknown) => {
+    if (typeof sourceId !== 'string' || sourceId.length === 0
+      || typeof targetId !== 'string' || targetId.length === 0) throw new Error('invalid args');
+    if (sourceId === targetId) throw new Error('cannot merge a speaker into itself');
+    if (!s.speakers.findById(sourceId)) throw new Error('source speaker not found');
+    if (!s.speakers.findById(targetId)) throw new Error('target speaker not found');
+    const affectedMeetingIds = s.speakers.mergeSpeakers(sourceId, targetId);
+    // Keep the "You are…" pointer valid if it referenced the deleted source
+    // (mirrors the startup dedupe pass in electron/main/index.ts).
+    if (s.settings.get('userSpeakerId') === sourceId) s.settings.set('userSpeakerId', targetId);
+    remergeMeetings(affectedMeetingIds);
+    return { affectedMeetingIds };
   });
 
   ipc.handle(IPC_CHANNELS.speakersSample, async (_e, meetingId: unknown, localLabel: unknown) => {

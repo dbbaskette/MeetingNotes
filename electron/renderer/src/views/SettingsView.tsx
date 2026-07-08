@@ -94,6 +94,10 @@ export function SettingsView({
     setPerms((await api.permissions.audio()) as AudioPerms);
   }
 
+  async function refreshSpeakers(): Promise<void> {
+    setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
+  }
+
   return (
     <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
       <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
@@ -328,6 +332,32 @@ export function SettingsView({
           first to populate this list.
         </div>
       </Field>
+
+      <section className="border-t border-surface-border pt-5">
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Speakers</div>
+        <div className="text-xs text-ink-muted mb-3">
+          Everyone you&rsquo;ve identified across meetings. Rename fixes a
+          misspelling everywhere; merge collapses duplicates (&ldquo;Dan&rdquo; /
+          &ldquo;Dan B.&rdquo;) into one person. Both rewrite the affected
+          transcripts with the surviving name.
+        </div>
+        {speakers.length === 0 ? (
+          <div className="text-xs text-ink-muted italic">
+            No speakers yet — confirm a voice in any meeting&rsquo;s Speakers panel first.
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {speakers.map((sp) => (
+              <SpeakerRosterRow
+                key={sp.id}
+                speaker={sp}
+                others={speakers.filter((o) => o.id !== sp.id)}
+                onChanged={refreshSpeakers}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="border-t border-surface-border pt-5">
         <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Recording quality</div>
@@ -996,6 +1026,104 @@ function WebhookExporterCard({
         </div>
       )}
     </section>
+  );
+}
+
+/** One roster-management row: the speaker's name, an inline ✎ rename, and a
+ *  "Merge into…" picker. Rename reuses the existing speakers:rename IPC;
+ *  merge confirms first (it deletes this roster entry) then calls
+ *  speakers:merge. Both rewrite the affected transcripts in main. */
+function SpeakerRosterRow({
+  speaker,
+  others,
+  onChanged,
+}: {
+  speaker: SpeakerListEntry;
+  others: SpeakerListEntry[];
+  onChanged: () => Promise<void>;
+}): JSX.Element {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(speaker.displayName);
+  const [busy, setBusy] = useState(false);
+
+  async function saveRename(): Promise<void> {
+    const name = draft.trim();
+    if (!name || name === speaker.displayName) { setEditing(false); setDraft(speaker.displayName); return; }
+    setBusy(true);
+    try {
+      await api.speakers.rename(speaker.id, name);
+      await onChanged();
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mergeInto(targetId: string): Promise<void> {
+    const target = others.find((o) => o.id === targetId);
+    if (!target) return;
+    const ok = window.confirm(
+      `Merge "${speaker.displayName}" into "${target.displayName}"?\n\n` +
+      `Their meetings and action items move to "${target.displayName}", ` +
+      `"${speaker.displayName}" is removed from the roster, and the affected ` +
+      'transcripts are rewritten. This can’t be undone.',
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.speakers.merge(speaker.id, targetId);
+      await onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-1.5">
+      {editing ? (
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void saveRename();
+            if (e.key === 'Escape') { setEditing(false); setDraft(speaker.displayName); }
+          }}
+          onBlur={() => void saveRename()}
+          disabled={busy}
+          autoFocus
+          className="input flex-1 !py-1 text-sm"
+          maxLength={200}
+        />
+      ) : (
+        <>
+          <span className="flex-1 min-w-0 text-sm text-ink truncate">{speaker.displayName}</span>
+          <button
+            type="button"
+            onClick={() => { setDraft(speaker.displayName); setEditing(true); }}
+            disabled={busy}
+            title="Rename speaker"
+            aria-label={`Rename ${speaker.displayName}`}
+            className="text-xs text-ink-muted hover:text-ink px-1.5 py-0.5 rounded transition disabled:opacity-50"
+          >
+            ✎
+          </button>
+        </>
+      )}
+      {others.length > 0 && !editing && (
+        <select
+          value=""
+          onChange={(e) => { if (e.target.value) void mergeInto(e.target.value); }}
+          disabled={busy}
+          title={`Merge ${speaker.displayName} into another speaker`}
+          className="text-xs text-ink-muted bg-transparent border border-surface-border rounded-md px-1.5 py-0.5 max-w-[9rem] disabled:opacity-50"
+        >
+          <option value="">Merge into…</option>
+          {others.map((o) => (
+            <option key={o.id} value={o.id}>{o.displayName}</option>
+          ))}
+        </select>
+      )}
+    </li>
   );
 }
 

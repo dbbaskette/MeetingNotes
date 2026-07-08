@@ -65,6 +65,73 @@ describe('SpeakersRepo', () => {
     });
   });
 
+  describe('meetingIdsForSpeaker', () => {
+    it('returns distinct meeting ids linked to the speaker', () => {
+      const id = repo.create({ displayName: 'Dan' });
+      insertMeeting('m1');
+      insertMeeting('m2');
+      repo.linkToMeeting('m1', 'SPEAKER_00', id, 1);
+      repo.linkToMeeting('m1', 'SPEAKER_01', id, 1); // same meeting twice
+      repo.linkToMeeting('m2', 'SPEAKER_00', id, 1);
+      expect(repo.meetingIdsForSpeaker(id)).toEqual(['m1', 'm2']);
+    });
+
+    it('returns empty for an unlinked speaker', () => {
+      const id = repo.create({ displayName: 'Nobody' });
+      expect(repo.meetingIdsForSpeaker(id)).toEqual([]);
+    });
+  });
+
+  describe('mergeSpeakers', () => {
+    it('re-points links + action items to the target, deletes the source, returns affected meetings', () => {
+      const source = repo.create({ displayName: 'Daniel' });
+      const target = repo.create({ displayName: 'Dan' });
+      insertMeeting('m1');
+      insertMeeting('m2');
+      repo.linkToMeeting('m1', 'SPEAKER_00', source, 1);
+      repo.linkToMeeting('m2', 'SPEAKER_01', source, 0.8);
+      db.prepare(`
+        INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, created_at)
+        VALUES ('a1', 'm1', 'follow up', ?, ?)
+      `).run(source, new Date().toISOString());
+
+      const affected = repo.mergeSpeakers(source, target);
+
+      expect(affected.sort()).toEqual(['m1', 'm2']);
+      expect(repo.findById(source)).toBeNull();
+      const links = db.prepare('SELECT meeting_id, roster_speaker_id FROM meeting_speakers ORDER BY meeting_id').all();
+      expect(links).toEqual([
+        { meeting_id: 'm1', roster_speaker_id: target },
+        { meeting_id: 'm2', roster_speaker_id: target },
+      ]);
+      const item = db.prepare('SELECT owner_speaker_id FROM action_items WHERE id = ?').get('a1') as { owner_speaker_id: string };
+      expect(item.owner_speaker_id).toBe(target);
+    });
+
+    it("when a meeting links both, keeps the target's row and drops the source's", () => {
+      const source = repo.create({ displayName: 'Daniel' });
+      const target = repo.create({ displayName: 'Dan' });
+      insertMeeting('m1');
+      repo.linkToMeeting('m1', 'SPEAKER_00', target, 1);
+      repo.linkToMeeting('m1', 'SPEAKER_01', source, 0.7);
+
+      const affected = repo.mergeSpeakers(source, target);
+
+      expect(affected).toEqual(['m1']);
+      const links = db.prepare('SELECT local_label, roster_speaker_id FROM meeting_speakers ORDER BY local_label').all();
+      // The source's SPEAKER_01 row is gone; the target's original link survives untouched.
+      expect(links).toEqual([{ local_label: 'SPEAKER_00', roster_speaker_id: target }]);
+    });
+
+    it('merging an unlinked speaker just deletes the roster row', () => {
+      const source = repo.create({ displayName: 'Ghost' });
+      const target = repo.create({ displayName: 'Dan' });
+      expect(repo.mergeSpeakers(source, target)).toEqual([]);
+      expect(repo.findById(source)).toBeNull();
+      expect(repo.findById(target)).not.toBeNull();
+    });
+  });
+
   describe('dedupeByDisplayName', () => {
     it('returns an empty map and changes nothing when the roster has no duplicates', () => {
       repo.create({ displayName: 'Dan' });
