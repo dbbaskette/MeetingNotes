@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, screen, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -47,6 +47,7 @@ import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { createPeakThrottle } from './lib/peak-throttle.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
+import { boundsVisibleOn, sanitizeBounds, type WindowBounds } from './lib/window-bounds.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
@@ -80,10 +81,24 @@ app.on('open-url', (event, url) => {
   handleSchemeUrl(url);
 });
 
+// Window-bounds persistence (UX: remember size/position across launches).
+// Populated in whenReady() once the settings repo exists; createWindow —
+// which is also invoked from the dock-icon 'activate' handler — consults it
+// on every window creation. load() returns null when nothing usable is
+// saved (first run, garbage row, or the saved position is on a display
+// that's no longer attached), in which case the hardcoded defaults apply.
+let windowBoundsStore: {
+  load: () => WindowBounds | null;
+  save: (b: WindowBounds) => void;
+} | null = null;
+
 async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow> {
+  const restored = windowBoundsStore?.load() ?? null;
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: restored?.width ?? 1200,
+    height: restored?.height ?? 800,
+    // Only pin x/y when restoring — otherwise let macOS center the window.
+    ...(restored ? { x: restored.x, y: restored.y } : {}),
     // Keep the window from shrinking to a size where the detail view's
     // fixed-width rails + stage timeline chips would clip content off the
     // right edge. 900×600 still leaves the three-column detail layout
@@ -103,6 +118,28 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
       nodeIntegration: false,
     },
   });
+  // Persist bounds on resize/move (debounced — these fire continuously
+  // during a drag) and once more on close so the final position always
+  // wins even if it landed inside the debounce window.
+  if (windowBoundsStore) {
+    const store = windowBoundsStore;
+    let saveTimer: NodeJS.Timeout | null = null;
+    const saveBounds = (): void => {
+      if (win.isDestroyed() || win.isMinimized() || win.isFullScreen()) return;
+      const b = sanitizeBounds(win.getBounds());
+      if (b) store.save(b);
+    };
+    const debouncedSave = (): void => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveBounds, 500);
+    };
+    win.on('resize', debouncedSave);
+    win.on('move', debouncedSave);
+    win.on('close', () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveBounds();
+    });
+  }
   if (isDev) await win.loadURL(process.env.VITE_DEV_URL ?? 'http://localhost:5174');
   else await win.loadFile(path.join(__dirname, '../../renderer/index.html'));
   return win;
@@ -124,6 +161,18 @@ app.whenReady().then(async () => {
   const settingsDb = openDb(path.join(os.homedir(), 'Documents', 'MeetingNotes', 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
   const s = settings.getAll();
+
+  // Restore the window where the user left it — but only if that position
+  // is still on an attached display (a laptop that left its desk monitor
+  // behind would otherwise open the window into the void).
+  windowBoundsStore = {
+    load: () => {
+      const saved = sanitizeBounds(settings.get('windowBounds'));
+      if (!saved) return null;
+      return boundsVisibleOn(screen.getAllDisplays(), saved) ? saved : null;
+    },
+    save: (b) => settings.set('windowBounds', b),
+  };
 
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));

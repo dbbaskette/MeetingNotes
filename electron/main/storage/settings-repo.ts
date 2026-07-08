@@ -120,6 +120,10 @@ export interface Settings {
   /** Refresh token, encrypted via Electron safeStorage and base64-encoded.
    *  Null = not signed in. Never logged. */
   googleRefreshTokenEnc: string | null;
+  /** Last-known main-window bounds, saved on resize/move/close and restored
+   *  at launch (after a visibility check against the current displays — see
+   *  lib/window-bounds.ts). Null until the first save. */
+  windowBounds: { x: number; y: number; width: number; height: number } | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -159,6 +163,7 @@ export const DEFAULT_SETTINGS: Settings = {
   googleClientSecret: '',
   googleAccountEmail: null,
   googleRefreshTokenEnc: null,
+  windowBounds: null,
 };
 
 type Key = keyof Settings;
