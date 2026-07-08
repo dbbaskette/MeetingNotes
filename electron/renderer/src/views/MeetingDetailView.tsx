@@ -14,6 +14,7 @@ import {
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
+import { setUnsavedGuard, confirmLeave } from '../lib/unsaved-guard';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -126,6 +127,46 @@ export function MeetingDetailView({
     else el.addEventListener('loadedmetadata', apply, { once: true });
   }, [seekSeconds]);
 
+  // Summary edit session (#A2). Lives HERE, not in SummaryPanel: the panel
+  // is conditionally rendered (`tab === 'summary' && …`), so a tab switch
+  // unmounts it — state kept inside the panel died with it and silently
+  // discarded the user's edits. `summarySaved` is the local baseline (what
+  // we believe is on disk); it advances on save, ahead of `m.summaryMd`
+  // catching up via reload. dirty = draft !== baseline.
+  const [summaryMode, setSummaryMode] = useState<SummaryMode>('view');
+  const [summaryDraft, setSummaryDraft] = useState('');
+  const [summarySaved, setSummarySaved] = useState('');
+  const summaryDirty = summaryDraft !== summarySaved;
+
+  // Seed / reset the session, keyed on meeting id + on-disk summary. A
+  // meeting switch always reseeds; a summaryMd change on the SAME meeting
+  // (re-summarize, save-reload round trip) only reseeds when there are no
+  // unsaved edits to lose. The ref makes re-runs from unrelated renders
+  // (polls, dirty flips) cheap no-ops.
+  const summarySeedRef = useRef<{ id: string; original: string } | null>(null);
+  useEffect(() => {
+    if (m === null) return;
+    const original = m.summaryMd ?? '';
+    const prev = summarySeedRef.current;
+    if (prev !== null && prev.id === m.id && prev.original === original) return;
+    const idChanged = prev === null || prev.id !== m.id;
+    summarySeedRef.current = { id: m.id, original };
+    if (idChanged || !summaryDirty) {
+      setSummaryDraft(original);
+      setSummarySaved(original);
+      if (idChanged) setSummaryMode('view');
+    }
+  }, [m, summaryDirty]);
+
+  // While dirty, register the global unsaved-edits guard so destructive
+  // exits (back button below, App-level meeting switches via the search
+  // palette / URL scheme / status bar) confirm before discarding.
+  useEffect(() => {
+    if (!summaryDirty) return;
+    setUnsavedGuard(() => window.confirm('Discard unsaved summary edits?'));
+    return () => setUnsavedGuard(null);
+  }, [summaryDirty]);
+
   // `kick` is a deliberate re-run trigger for the polling effect. Mutations
   // that change the meeting's live state (rerun, speaker assign) bump it so
   // the effect tears down its old timer and starts fresh — polling resumes
@@ -223,7 +264,10 @@ export function MeetingDetailView({
     // on screen while the user reads a long summary or transcript.
     <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
       <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
+        <button
+          onClick={() => { if (confirmLeave()) onBack(); }}
+          className="text-ink-muted hover:text-ink text-sm shrink-0"
+        >
           ← Library
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
@@ -302,6 +346,12 @@ export function MeetingDetailView({
             onReload={reload}
             onShowSource={showSource}
             provenance={provenance}
+            summaryMode={summaryMode}
+            onSummaryMode={setSummaryMode}
+            summaryDraft={summaryDraft}
+            onSummaryDraft={setSummaryDraft}
+            summarySaved={summarySaved}
+            onSummaryBaseline={setSummarySaved}
           />
         </div>
         <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
@@ -880,6 +930,7 @@ function LeftRail({
 
 function CenterPane({
   meeting, tab, onTab, currentTime, onSeek, onReload, onShowSource, provenance,
+  summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
@@ -889,6 +940,14 @@ function CenterPane({
   onReload: () => Promise<void>;
   onShowSource: (quote: string) => void;
   provenance: { quote: string; nonce: number } | null;
+  /** Lifted summary edit session (owned by the view root so tab
+   *  switches don't discard it) — see the state block up there. */
+  summaryMode: SummaryMode;
+  onSummaryMode: (m: SummaryMode) => void;
+  summaryDraft: string;
+  onSummaryDraft: (v: string) => void;
+  summarySaved: string;
+  onSummaryBaseline: (v: string) => void;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
@@ -915,7 +974,19 @@ function CenterPane({
         ))}
       </div>
       <div className="p-5">
-        {tab === 'summary' && <SummaryPanel meeting={meeting} onReload={onReload} provenance={provenance} />}
+        {tab === 'summary' && (
+          <SummaryPanel
+            meeting={meeting}
+            onReload={onReload}
+            provenance={provenance}
+            mode={summaryMode}
+            onMode={onSummaryMode}
+            draft={summaryDraft}
+            onDraft={onSummaryDraft}
+            savedValue={summarySaved}
+            onBaseline={onSummaryBaseline}
+          />
+        )}
         {tab === 'transcript' && (
           <TranscriptPanel
             meeting={meeting}
@@ -1673,39 +1744,34 @@ function Placeholder({ text }: { text: string }): JSX.Element {
 // disk; the next pipeline run that touches summarize will overwrite, so
 // users wanting to preserve edits across re-runs should avoid re-summarizing.
 //
-// Edits are kept in component state and only persisted on Save. Disk writes
+// Edits are kept in LIFTED state (the view root owns draft/mode/baseline —
+// this panel unmounts on every tab switch, so keeping the session here
+// used to silently discard edits) and only persisted on Save. Disk writes
 // happen via the meetings:save-summary IPC, NOT via re-running the pipeline.
 type SummaryMode = 'view' | 'edit';
 
 function SummaryPanel({
-  meeting, onReload, provenance,
-}: { meeting: MeetingDetail; onReload: () => Promise<void>; provenance: { quote: string; nonce: number } | null }): JSX.Element {
+  meeting, onReload, provenance, mode, onMode, draft, onDraft, savedValue, onBaseline,
+}: {
+  meeting: MeetingDetail;
+  onReload: () => Promise<void>;
+  provenance: { quote: string; nonce: number } | null;
+  mode: SummaryMode;
+  onMode: (m: SummaryMode) => void;
+  draft: string;
+  onDraft: (v: string) => void;
+  /** The local "what's on disk" baseline. Advances via onBaseline on a
+   *  successful save, ahead of `meeting.summaryMd` catching up to the
+   *  reload — so dirty (and the view) reflect the just-saved content. */
+  savedValue: string;
+  onBaseline: (v: string) => void;
+}): JSX.Element {
   const original = meeting.summaryMd ?? '';
-  const [mode, setMode] = useState<SummaryMode>('view');
-  // `savedValue` is the local baseline — what we believe is on disk. It
-  // advances on save, ahead of the parent's `meeting.summaryMd` prop, so
-  // `dirty` (and the view) reflect the just-saved content even while the
-  // parent prop is still catching up to the reload.
-  const [savedValue, setSavedValue] = useState(original);
-  const [draft, setDraft] = useState(original);
+  // Transient save-cycle state can stay local: losing "Saving…" / the
+  // ✓-saved timestamp / an error banner on a tab switch is harmless.
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Re-seed when summary.md actually changes (summarize re-ran, or the user
-  // switched meetings without unmounting). We track the previous prop via
-  // ref so a mode flip alone doesn't trigger a reset — without this, saving
-  // would clobber `draft` back to the stale prop value the instant we drop
-  // into view mode, and the user would see their edit "disappear" even
-  // though the write succeeded. Edit-mode is still never clobbered.
-  const prevOriginalRef = useRef(original);
-  useEffect(() => {
-    if (prevOriginalRef.current === original) return;
-    prevOriginalRef.current = original;
-    if (mode === 'view') {
-      setDraft(original);
-      setSavedValue(original);
-    }
-  }, [original, mode]);
 
   const dirty = draft !== savedValue;
 
@@ -1714,11 +1780,11 @@ function SummaryPanel({
     setSaving(true); setError(null);
     try {
       await api.meetings.saveSummary(meeting.id, draft);
-      setSavedValue(draft);
+      onBaseline(draft);
       setSavedAt(new Date());
       // After a successful save, drop back into view so the rendered
       // markdown reflects what's now on disk.
-      setMode('view');
+      onMode('view');
       // Refresh the parent so other panes keying off `meeting.summaryMd`
       // (e.g. RightRail's "has summary" check) see the new content.
       void onReload();
@@ -1737,18 +1803,18 @@ function SummaryPanel({
     <div className="flex flex-col gap-3">
       <SummaryToolbar
         mode={mode}
-        onMode={setMode}
+        onMode={onMode}
         dirty={dirty}
         saving={saving}
         savedAt={savedAt}
         error={error}
         onSave={save}
-        onRevert={() => { setDraft(original); setError(null); }}
+        onRevert={() => { onDraft(savedValue); setError(null); }}
       />
       {mode === 'view' && <MarkdownPreview source={draft} highlight={provenance} />}
       {mode === 'edit' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <MarkdownEditor value={draft} onChange={setDraft} />
+          <MarkdownEditor value={draft} onChange={onDraft} />
           <div className="border border-surface-border rounded-lg p-4 bg-surface-sunken/40 overflow-auto max-h-[60vh]">
             <MarkdownPreview source={draft} />
           </div>
