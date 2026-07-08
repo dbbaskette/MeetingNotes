@@ -153,6 +153,32 @@ describe('registerIpcHandlers', () => {
     expect(fs.existsSync(path.join(folder, 'action-items.json'))).toBe(true);
   });
 
+  it('action-items:set-status whitelists the status value and validates the id', () => {
+    const setStatus = vi.fn();
+    const handle = vi.fn();
+    const fakeIpc = { handle } as any;
+    const services = baseServices({
+      actionItems: { listByMeeting: () => [], setStatus },
+    });
+    registerIpcHandlers(fakeIpc, services);
+    const call = handle.mock.calls.find((c) => c[0] === 'action-items:set-status');
+    expect(call).toBeDefined();
+    const handler = call![1] as (e: unknown, id: unknown, status: unknown) => unknown;
+
+    handler(null, 'ai-1', 'done');
+    expect(setStatus).toHaveBeenCalledWith('ai-1', 'done');
+    handler(null, 'ai-1', 'open');
+    expect(setStatus).toHaveBeenCalledWith('ai-1', 'open');
+
+    // Anything outside the open|done whitelist is rejected before the store.
+    expect(() => handler(null, 'ai-1', 'archived')).toThrow(/invalid status/);
+    expect(() => handler(null, 'ai-1', 42)).toThrow(/invalid status/);
+    // Bad ids never reach the store either.
+    expect(() => handler(null, '', 'done')).toThrow(/invalid args/);
+    expect(() => handler(null, 42, 'done')).toThrow(/invalid args/);
+    expect(setStatus).toHaveBeenCalledTimes(2);
+  });
+
   it('clearing the speaker-ID gate flag lets a re-entry notify again', () => {
     const gateNotified = new Set<string>(['m1']); // already notified this visit
     const handle = vi.fn();

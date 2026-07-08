@@ -14,6 +14,9 @@ import {
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
+import { setUnsavedGuard, confirmLeave } from '../lib/unsaved-guard';
+import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
+import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -112,6 +115,58 @@ export function MeetingDetailView({
     if (el.paused) void el.play();
   }, []);
 
+  // Playback controls (#A3): speed cycle + ±15s skips. The chosen rate is
+  // per-session component state; a ref mirrors it so the loadedmetadata
+  // re-apply (rates reset when a new src loads) and the keydown handler
+  // below stay identity-stable.
+  const [rate, setRate] = useState(1);
+  const rateRef = useRef(1);
+  const cycleRate = useCallback((): void => {
+    const next = nextPlaybackRate(rateRef.current);
+    rateRef.current = next;
+    setRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
+  }, []);
+  const applyRate = useCallback((): void => {
+    if (audioRef.current) audioRef.current.playbackRate = rateRef.current;
+  }, []);
+  // Relative skip. Unlike seekTo (click-to-seek), a skip on a paused
+  // player stays paused — the user is scrubbing, not asking for playback.
+  const skipBy = useCallback((delta: number): void => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = guardedSeek(el.currentTime, delta, el.duration);
+  }, []);
+
+  // Keyboard transport: Space play/pause, ←/→ skip ∓/±15s. Ignored while
+  // typing (input/textarea/select/contentEditable) or with any modifier
+  // held, so cmd-K, shift-selection etc. pass through untouched. Space is
+  // additionally ignored when a button/link has focus — Space must keep
+  // activating the focused control (arrows still seek there, which is
+  // what makes them work right after clicking a transcript row).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input,textarea,select,[contenteditable]')) return;
+      const el = audioRef.current;
+      if (!el) return;
+      if (e.code === 'Space') {
+        if (t?.closest('button,[role="button"],a')) return;
+        e.preventDefault(); // don't scroll the page
+        if (el.paused) void el.play(); else el.pause();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        el.currentTime = guardedSeek(el.currentTime, -SKIP_SECONDS, el.duration);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        el.currentTime = guardedSeek(el.currentTime, SKIP_SECONDS, el.duration);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Palette-driven jump (#45): when opened with `seekSeconds`, switch to
   // the transcript tab and seek the audio once it's ready. readyState >= 1
   // means metadata is loaded and `currentTime` writes will stick;
@@ -125,6 +180,46 @@ export function MeetingDetailView({
     if (el.readyState >= 1) apply();
     else el.addEventListener('loadedmetadata', apply, { once: true });
   }, [seekSeconds]);
+
+  // Summary edit session (#A2). Lives HERE, not in SummaryPanel: the panel
+  // is conditionally rendered (`tab === 'summary' && …`), so a tab switch
+  // unmounts it — state kept inside the panel died with it and silently
+  // discarded the user's edits. `summarySaved` is the local baseline (what
+  // we believe is on disk); it advances on save, ahead of `m.summaryMd`
+  // catching up via reload. dirty = draft !== baseline.
+  const [summaryMode, setSummaryMode] = useState<SummaryMode>('view');
+  const [summaryDraft, setSummaryDraft] = useState('');
+  const [summarySaved, setSummarySaved] = useState('');
+  const summaryDirty = summaryDraft !== summarySaved;
+
+  // Seed / reset the session, keyed on meeting id + on-disk summary. A
+  // meeting switch always reseeds; a summaryMd change on the SAME meeting
+  // (re-summarize, save-reload round trip) only reseeds when there are no
+  // unsaved edits to lose. The ref makes re-runs from unrelated renders
+  // (polls, dirty flips) cheap no-ops.
+  const summarySeedRef = useRef<{ id: string; original: string } | null>(null);
+  useEffect(() => {
+    if (m === null) return;
+    const original = m.summaryMd ?? '';
+    const prev = summarySeedRef.current;
+    if (prev !== null && prev.id === m.id && prev.original === original) return;
+    const idChanged = prev === null || prev.id !== m.id;
+    summarySeedRef.current = { id: m.id, original };
+    if (idChanged || !summaryDirty) {
+      setSummaryDraft(original);
+      setSummarySaved(original);
+      if (idChanged) setSummaryMode('view');
+    }
+  }, [m, summaryDirty]);
+
+  // While dirty, register the global unsaved-edits guard so destructive
+  // exits (back button below, App-level meeting switches via the search
+  // palette / URL scheme / status bar) confirm before discarding.
+  useEffect(() => {
+    if (!summaryDirty) return;
+    setUnsavedGuard(() => window.confirm('Discard unsaved summary edits?'));
+    return () => setUnsavedGuard(null);
+  }, [summaryDirty]);
 
   // `kick` is a deliberate re-run trigger for the polling effect. Mutations
   // that change the meeting's live state (rerun, speaker assign) bump it so
@@ -223,13 +318,19 @@ export function MeetingDetailView({
     // on screen while the user reads a long summary or transcript.
     <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
       <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
+        <button
+          onClick={() => { if (confirmLeave()) onBack(); }}
+          className="text-ink-muted hover:text-ink text-sm shrink-0"
+        >
           ← Library
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
             forcing the flex row to overflow — otherwise a long title would
-            push the actions menu off the right edge. */}
-        <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">{m.title}</div>
+            push the actions menu off the right edge. Click-to-edit (#A5):
+            the same rename IPC the ⋯ menu uses, without the modal. */}
+        <div className="flex-1 min-w-0 text-center px-2">
+          <EditableTitle id={m.id} title={m.title} onRenamed={() => void reload()} />
+        </div>
         {/* Actions menu: rename/delete from the detail view. When the user
             deletes from here, route back to Library since the detail we're
             viewing no longer exists. */}
@@ -302,6 +403,12 @@ export function MeetingDetailView({
             onReload={reload}
             onShowSource={showSource}
             provenance={provenance}
+            summaryMode={summaryMode}
+            onSummaryMode={setSummaryMode}
+            summaryDraft={summaryDraft}
+            onSummaryDraft={setSummaryDraft}
+            summarySaved={summarySaved}
+            onSummaryBaseline={setSummarySaved}
           />
         </div>
         <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
@@ -312,16 +419,140 @@ export function MeetingDetailView({
           CenterPane so it stays visible while the user reads the summary
           OR transcript — no more "switch tabs to play". Click-to-seek on
           transcript lines pipes through `seekTo` to this element. */}
-      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3">
+      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3 flex items-center gap-2">
+        {/* Transport controls (#A3). Keyboard: Space play/pause, ←/→ ∓/±15s. */}
+        <button
+          type="button"
+          onClick={() => skipBy(-SKIP_SECONDS)}
+          title="Back 15 seconds (←)"
+          aria-label="Back 15 seconds"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          ↺ 15s
+        </button>
+        <button
+          type="button"
+          onClick={() => skipBy(SKIP_SECONDS)}
+          title="Forward 15 seconds (→)"
+          aria-label="Forward 15 seconds"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          15s ↻
+        </button>
+        <button
+          type="button"
+          onClick={cycleRate}
+          title="Playback speed — click to cycle"
+          aria-label={`Playback speed ${fmtPlaybackRate(rate)} — click to cycle`}
+          className="shrink-0 min-w-[3.75rem] text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+        >
+          {fmtPlaybackRate(rate)}
+        </button>
         <audio
           ref={audioRef}
           controls
           src={`file://${m.audioPath}`}
           onTimeUpdate={onTimeUpdate}
-          className="w-full"
+          onLoadedMetadata={applyRate}
+          className="flex-1 min-w-0"
         />
       </div>
     </div>
+  );
+}
+
+/** Click-to-edit meeting title for the detail header (#A5). Display mode
+ *  is a button with a quiet hover affordance (dotted underline + faint
+ *  pencil) so the interaction is discoverable without shouting; clicking
+ *  swaps in an input seeded with the current title, focused + selected.
+ *  Enter saves, Esc cancels, blur saves-if-changed; an empty/whitespace
+ *  title cancels rather than saving. Persists through the SAME
+ *  meetings:rename IPC the ⋯ menu's rename dialog uses, then reloads. */
+function EditableTitle({
+  id, title, onRenamed,
+}: {
+  id: string;
+  title: string;
+  onRenamed: () => void;
+}): JSX.Element {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Set when Enter/Esc already resolved the edit, so the blur the
+  // resolution itself triggers doesn't commit a second time (or commit
+  // a value the user just escaped out of).
+  const settledRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  function start(): void {
+    setValue(title);
+    settledRef.current = false;
+    setEditing(true);
+  }
+
+  async function commit(): Promise<void> {
+    setEditing(false);
+    const trimmed = value.trim();
+    // Empty/whitespace → cancel, don't save. Unchanged → no-op.
+    if (trimmed === '' || trimmed === title || busy) return;
+    setBusy(true);
+    try {
+      await api.meetings.rename(id, trimmed);
+      onRenamed();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={start}
+        title="Click to rename"
+        className="group max-w-full font-semibold truncate align-middle
+                   hover:underline decoration-dotted underline-offset-4"
+      >
+        {title}
+        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity">✎</span>
+      </button>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      disabled={busy}
+      maxLength={500}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          settledRef.current = true;
+          void commit();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          settledRef.current = true;
+          setEditing(false);
+        }
+      }}
+      onBlur={() => {
+        if (settledRef.current) return;
+        void commit();
+      }}
+      aria-label="Meeting title"
+      className="w-full max-w-md text-center font-semibold bg-surface border border-brand-indigo/60
+                 rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-indigo/30
+                 disabled:opacity-60"
+    />
   );
 }
 
@@ -880,6 +1111,7 @@ function LeftRail({
 
 function CenterPane({
   meeting, tab, onTab, currentTime, onSeek, onReload, onShowSource, provenance,
+  summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
@@ -889,6 +1121,14 @@ function CenterPane({
   onReload: () => Promise<void>;
   onShowSource: (quote: string) => void;
   provenance: { quote: string; nonce: number } | null;
+  /** Lifted summary edit session (owned by the view root so tab
+   *  switches don't discard it) — see the state block up there. */
+  summaryMode: SummaryMode;
+  onSummaryMode: (m: SummaryMode) => void;
+  summaryDraft: string;
+  onSummaryDraft: (v: string) => void;
+  summarySaved: string;
+  onSummaryBaseline: (v: string) => void;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
@@ -915,7 +1155,19 @@ function CenterPane({
         ))}
       </div>
       <div className="p-5">
-        {tab === 'summary' && <SummaryPanel meeting={meeting} onReload={onReload} provenance={provenance} />}
+        {tab === 'summary' && (
+          <SummaryPanel
+            meeting={meeting}
+            onReload={onReload}
+            provenance={provenance}
+            mode={summaryMode}
+            onMode={onSummaryMode}
+            draft={summaryDraft}
+            onDraft={onSummaryDraft}
+            savedValue={summarySaved}
+            onBaseline={onSummaryBaseline}
+          />
+        )}
         {tab === 'transcript' && (
           <TranscriptPanel
             meeting={meeting}
@@ -973,6 +1225,14 @@ function TranscriptPanel({
   useEffect(() => {
     try { localStorage.setItem(VIEW_MODE_KEY, viewMode); } catch { /* private mode */ }
   }, [viewMode]);
+
+  // Speaker → palette index by first appearance (#A4), sharing the avatar
+  // palette so the tinted name matches the speaker's rail color language.
+  // Memoized on the parsed lines; each row receives the resolved color as
+  // a PRIMITIVE string prop so React.memo on the rows keeps bailing.
+  const colorIdxBySpeaker = useMemo(() => speakerColorIndex(parsed.lines), [parsed.lines]);
+  const speakerColor = (speaker: string): string =>
+    colorForSpeakerIndex(colorIdxBySpeaker.get(speaker) ?? 0);
 
   // Active line = the one whose [start, nextStart) window covers currentTime.
   // Computed ONCE per render here so each row receives a stable primitive
@@ -1080,6 +1340,7 @@ function TranscriptPanel({
               key={i}
               line={line}
               active={i === activeIdx}
+              speakerColor={speakerColor(line.speaker)}
               onSeek={onSeek}
               activeRef={activeRef}
             />
@@ -1090,6 +1351,7 @@ function TranscriptPanel({
               key={i}
               group={g}
               active={i === activeGroupIdx}
+              speakerColor={speakerColor(g.speaker)}
               onSeek={onSeek}
               activeRef={activeRef}
             />
@@ -1280,10 +1542,14 @@ function ExportMenuItem({
 // `active` boolean — so memo bails on all rows except the two whose
 // `active` flag flipped.
 const TranscriptLineRow = memo(function TranscriptLineRow({
-  line, active, onSeek, activeRef,
+  line, active, speakerColor, onSeek, activeRef,
 }: {
   line: TranscriptLine;
   active: boolean;
+  /** Palette color for this line's speaker (#A4). A primitive string
+   *  computed from the parent's memoized first-appearance map, so it's
+   *  value-stable across playback ticks and memo keeps bailing. */
+  speakerColor: string;
   onSeek: (seconds: number) => void;
   /** Attached only while `active` — drives the auto-scroll-into-view. */
   activeRef: React.RefObject<HTMLButtonElement>;
@@ -1301,7 +1567,7 @@ const TranscriptLineRow = memo(function TranscriptLineRow({
       <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
         {fmtTimestamp(line.seconds)}
       </span>
-      <span className="font-semibold text-ink-muted mr-2">{line.speaker}</span>
+      <span className="font-semibold mr-2" style={{ color: speakerColor }}>{line.speaker}</span>
       <span>{line.text}</span>
     </button>
   );
@@ -1311,10 +1577,12 @@ const TranscriptLineRow = memo(function TranscriptLineRow({
  *  paragraph, with the start–end range to its right. Cleaner than
  *  inlining everything when the merged text is long. */
 const TranscriptGroupRow = memo(function TranscriptGroupRow({
-  group, active, onSeek, activeRef,
+  group, active, speakerColor, onSeek, activeRef,
 }: {
   group: TranscriptGroup;
   active: boolean;
+  /** Primitive palette color for the group's speaker — see TranscriptLineRow. */
+  speakerColor: string;
   onSeek: (seconds: number) => void;
   activeRef: React.RefObject<HTMLButtonElement>;
 }): JSX.Element {
@@ -1330,7 +1598,7 @@ const TranscriptGroupRow = memo(function TranscriptGroupRow({
           : 'hover:bg-surface-sunken'}`}
     >
       <div className="flex items-baseline gap-2 mb-1">
-        <span className="font-semibold text-ink">{group.speaker}</span>
+        <span className="font-semibold" style={{ color: speakerColor }}>{group.speaker}</span>
         <span className="font-mono text-[11px] text-ink-muted tabular-nums">
           {fmtTimestamp(group.startSeconds)}
           {showRange && (
@@ -1363,6 +1631,14 @@ function ActionItemsPanel({
   const [reextracting, setReextracting] = useState(false);
   const [reextractError, setReextractError] = useState<string | null>(null);
   const items = meeting.actionItems;
+
+  // Flip a single item between open ⇄ done. Same reload path add/delete
+  // use: the setStatus IPC persists, then onReload() re-fetches the meeting
+  // so the row re-renders with the DONE badge / strikethrough.
+  async function toggleStatus(it: MeetingDetail['actionItems'][number]): Promise<void> {
+    await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
+    await onReload();
+  }
 
   // Re-run ONLY the extract step over the current SAVED summary.md and swap in
   // the fresh items. The meeting's pipeline state is untouched (a 'done'
@@ -1412,6 +1688,7 @@ function ActionItemsPanel({
               item={it}
               onOpen={() => setEditing(it.id)}
               onShowSource={onShowSource}
+              onToggleStatus={() => void toggleStatus(it)}
             />
           )
         ))}
@@ -1457,20 +1734,39 @@ function ActionItemsPanel({
 }
 
 function ActionItemDisplay({
-  item, onOpen, onShowSource,
+  item, onOpen, onShowSource, onToggleStatus,
 }: {
   item: MeetingDetail['actionItems'][number];
   onOpen: () => void;
   onShowSource: (quote: string) => void;
+  onToggleStatus: () => void;
 }): JSX.Element {
+  const done = item.status === 'done';
   return (
-    <div className="relative">
+    <div className="relative flex items-start gap-2">
+      {/* Click-to-toggle done circle. A sibling of the open-editor button
+          (nested buttons are invalid HTML), so checking an item off never
+          accidentally opens the editor. */}
+      <button
+        type="button"
+        onClick={onToggleStatus}
+        aria-pressed={done}
+        title={done ? 'Mark as open' : 'Mark as done'}
+        className={`mt-2.5 w-4 h-4 rounded-full border shrink-0 flex items-center justify-center transition-colors
+          ${done
+            ? 'bg-status-ok border-status-ok text-white'
+            : 'bg-surface border-ink-muted/50 text-transparent hover:border-status-ok hover:text-status-ok/40'}`}
+      >
+        <svg viewBox="0 0 16 16" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 8l3.5 3.5L13 5" />
+        </svg>
+      </button>
       <button
         onClick={onOpen}
-        className="w-full text-left rounded-lg border border-surface-border bg-surface
+        className="flex-1 min-w-0 text-left rounded-lg border border-surface-border bg-surface
                    hover:border-brand-indigo/60 hover:shadow-pop px-3 py-2 transition"
       >
-        <div className="text-sm text-ink">{item.text}</div>
+        <div className={`text-sm ${done ? 'text-ink-muted line-through' : 'text-ink'}`}>{item.text}</div>
         <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
           {item.ownerName && <span>👤 {item.ownerName}</span>}
           {item.dueDate && <span>📅 {item.dueDate}</span>}
@@ -1645,39 +1941,34 @@ function Placeholder({ text }: { text: string }): JSX.Element {
 // disk; the next pipeline run that touches summarize will overwrite, so
 // users wanting to preserve edits across re-runs should avoid re-summarizing.
 //
-// Edits are kept in component state and only persisted on Save. Disk writes
+// Edits are kept in LIFTED state (the view root owns draft/mode/baseline —
+// this panel unmounts on every tab switch, so keeping the session here
+// used to silently discard edits) and only persisted on Save. Disk writes
 // happen via the meetings:save-summary IPC, NOT via re-running the pipeline.
 type SummaryMode = 'view' | 'edit';
 
 function SummaryPanel({
-  meeting, onReload, provenance,
-}: { meeting: MeetingDetail; onReload: () => Promise<void>; provenance: { quote: string; nonce: number } | null }): JSX.Element {
+  meeting, onReload, provenance, mode, onMode, draft, onDraft, savedValue, onBaseline,
+}: {
+  meeting: MeetingDetail;
+  onReload: () => Promise<void>;
+  provenance: { quote: string; nonce: number } | null;
+  mode: SummaryMode;
+  onMode: (m: SummaryMode) => void;
+  draft: string;
+  onDraft: (v: string) => void;
+  /** The local "what's on disk" baseline. Advances via onBaseline on a
+   *  successful save, ahead of `meeting.summaryMd` catching up to the
+   *  reload — so dirty (and the view) reflect the just-saved content. */
+  savedValue: string;
+  onBaseline: (v: string) => void;
+}): JSX.Element {
   const original = meeting.summaryMd ?? '';
-  const [mode, setMode] = useState<SummaryMode>('view');
-  // `savedValue` is the local baseline — what we believe is on disk. It
-  // advances on save, ahead of the parent's `meeting.summaryMd` prop, so
-  // `dirty` (and the view) reflect the just-saved content even while the
-  // parent prop is still catching up to the reload.
-  const [savedValue, setSavedValue] = useState(original);
-  const [draft, setDraft] = useState(original);
+  // Transient save-cycle state can stay local: losing "Saving…" / the
+  // ✓-saved timestamp / an error banner on a tab switch is harmless.
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Re-seed when summary.md actually changes (summarize re-ran, or the user
-  // switched meetings without unmounting). We track the previous prop via
-  // ref so a mode flip alone doesn't trigger a reset — without this, saving
-  // would clobber `draft` back to the stale prop value the instant we drop
-  // into view mode, and the user would see their edit "disappear" even
-  // though the write succeeded. Edit-mode is still never clobbered.
-  const prevOriginalRef = useRef(original);
-  useEffect(() => {
-    if (prevOriginalRef.current === original) return;
-    prevOriginalRef.current = original;
-    if (mode === 'view') {
-      setDraft(original);
-      setSavedValue(original);
-    }
-  }, [original, mode]);
 
   const dirty = draft !== savedValue;
 
@@ -1686,11 +1977,11 @@ function SummaryPanel({
     setSaving(true); setError(null);
     try {
       await api.meetings.saveSummary(meeting.id, draft);
-      setSavedValue(draft);
+      onBaseline(draft);
       setSavedAt(new Date());
       // After a successful save, drop back into view so the rendered
       // markdown reflects what's now on disk.
-      setMode('view');
+      onMode('view');
       // Refresh the parent so other panes keying off `meeting.summaryMd`
       // (e.g. RightRail's "has summary" check) see the new content.
       void onReload();
@@ -1709,18 +2000,18 @@ function SummaryPanel({
     <div className="flex flex-col gap-3">
       <SummaryToolbar
         mode={mode}
-        onMode={setMode}
+        onMode={onMode}
         dirty={dirty}
         saving={saving}
         savedAt={savedAt}
         error={error}
         onSave={save}
-        onRevert={() => { setDraft(original); setError(null); }}
+        onRevert={() => { onDraft(savedValue); setError(null); }}
       />
       {mode === 'view' && <MarkdownPreview source={draft} highlight={provenance} />}
       {mode === 'edit' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <MarkdownEditor value={draft} onChange={setDraft} />
+          <MarkdownEditor value={draft} onChange={onDraft} />
           <div className="border border-surface-border rounded-lg p-4 bg-surface-sunken/40 overflow-auto max-h-[60vh]">
             <MarkdownPreview source={draft} />
           </div>

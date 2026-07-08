@@ -13,6 +13,7 @@ import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
+import { confirmLeave } from './lib/unsaved-guard';
 
 type View =
   | { kind: 'library' }
@@ -123,6 +124,9 @@ function AppInner(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   const onPaletteOpen = (t: PaletteTarget): void => {
+    // Meeting switch is destructive to an in-flight summary edit session in
+    // the detail view — it registers an unsaved-edits guard while dirty.
+    if (!confirmLeave()) return;
     setView({
       kind: 'detail',
       id: t.meetingId,
@@ -201,6 +205,7 @@ function AppInner(): JSX.Element {
   // caller invokes the URL scheme (#77). Navigate to the detail view.
   useEffect(() => {
     const off = api.onOpenMeeting((id) => {
+      if (!confirmLeave()) return;
       setView({ kind: 'detail', id });
     });
     return () => { off(); };
@@ -355,7 +360,7 @@ function AppInner(): JSX.Element {
           {body}
         </div>
         {onboardStatus === 'done' && (
-          <PipelineStatusBar onOpenMeeting={(id) => setView({ kind: 'detail', id })} />
+          <PipelineStatusBar onOpenMeeting={(id) => { if (confirmLeave()) setView({ kind: 'detail', id }); }} />
         )}
       </div>
       <SearchPalette
