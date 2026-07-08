@@ -47,6 +47,11 @@ describe('SettingsRepo', () => {
     repo.set('theme', 'dark');
     expect(repo.get('theme')).toBe('dark');
   });
+  it('windowBounds defaults to null and round-trips', () => {
+    expect(repo.get('windowBounds')).toBeNull();
+    repo.set('windowBounds', { x: -100, y: 50, width: 1280, height: 860 });
+    expect(repo.get('windowBounds')).toEqual({ x: -100, y: 50, width: 1280, height: 860 });
+  });
 });
 
 describe('normalizeAutoDetectMeetings', () => {

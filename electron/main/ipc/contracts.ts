@@ -88,6 +88,11 @@ export const IPC_CHANNELS = {
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
+  /** Merge one roster speaker into another (duplicate cleanup). All meeting
+   *  links + action-item ownership move source → target, the source roster
+   *  row is deleted, and every affected meeting's transcript.md is re-merged
+   *  so the surviving name appears in the output. */
+  speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
   speakersSuggestions: 'speakers:suggestions',

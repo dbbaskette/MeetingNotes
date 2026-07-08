@@ -92,6 +92,39 @@ export class SpeakersRepo {
     this.db.prepare('UPDATE speakers SET display_name = ? WHERE id = ?').run(displayName, id);
   }
 
+  /** Distinct ids of meetings that link to this roster speaker. Used to know
+   *  which transcripts need re-merging after a rename or merge. */
+  meetingIdsForSpeaker(rosterId: string): string[] {
+    const rows = this.db.prepare(
+      'SELECT DISTINCT meeting_id FROM meeting_speakers WHERE roster_speaker_id = ? ORDER BY meeting_id'
+    ).all(rosterId) as { meeting_id: string }[];
+    return rows.map((r) => r.meeting_id);
+  }
+
+  /** Merge one roster speaker into another: every meeting_speakers link and
+   *  action-item ownership moves source → target, then the source roster row
+   *  is deleted. When a meeting links BOTH speakers, the target's link wins
+   *  and the source's row is dropped (re-pointing it would leave two local
+   *  labels claiming the same person with no way to tell them apart).
+   *  Returns the ids of meetings that referenced the source, so callers can
+   *  re-merge their transcripts. */
+  mergeSpeakers(sourceId: string, targetId: string): string[] {
+    const affected = this.meetingIdsForSpeaker(sourceId);
+    this.db.transaction(() => {
+      this.db.prepare(`
+        DELETE FROM meeting_speakers
+        WHERE roster_speaker_id = ?
+          AND meeting_id IN (SELECT meeting_id FROM meeting_speakers WHERE roster_speaker_id = ?)
+      `).run(sourceId, targetId);
+      this.db.prepare('UPDATE meeting_speakers SET roster_speaker_id = ? WHERE roster_speaker_id = ?')
+        .run(targetId, sourceId);
+      this.db.prepare('UPDATE action_items SET owner_speaker_id = ? WHERE owner_speaker_id = ?')
+        .run(targetId, sourceId);
+      this.db.prepare('DELETE FROM speakers WHERE id = ?').run(sourceId);
+    })();
+    return affected;
+  }
+
   delete(id: string): void {
     this.db.prepare('DELETE FROM speakers WHERE id = ?').run(id);
   }

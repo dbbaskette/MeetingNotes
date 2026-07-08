@@ -30,6 +30,7 @@ const IPC_CHANNELS = {
   speakersList: 'speakers:list',
   speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
+  speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
   speakersSuggestions: 'speakers:suggestions',
@@ -197,6 +198,13 @@ const api = {
     confirm: (input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] }) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
+    /** Merge the source roster speaker into the target. Meeting links and
+     *  action items move to the target, the source is deleted, and every
+     *  affected meeting's transcript is rewritten with the surviving name. */
+    merge: (sourceId: string, targetId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersMerge, sourceId, targetId) as Promise<{
+        affectedMeetingIds: string[];
+      }>,
     // Returns the sample clip for a diarized speaker as a data URI so the
     // renderer can play it with <audio src={dataUri}> without any custom
     // protocol / webSecurity juggling.

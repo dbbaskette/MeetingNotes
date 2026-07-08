@@ -1,6 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { registerIpcHandlers } from './handlers.js';
 import { LMStudioError } from '../lm-studio/client.js';
+import { remergeTranscript } from '../pipeline/stages/merging.js';
+
+// Mock the merge step so speaker rename/merge tests can assert the re-merge
+// fan-out without needing real transcript files on disk.
+vi.mock('../pipeline/stages/merging.js', () => ({
+  remergeTranscript: vi.fn(),
+  runMerging: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.mocked(remergeTranscript).mockClear();
+});
 
 function baseServices(overrides: Record<string, unknown> = {}): any {
   return {
@@ -59,6 +71,75 @@ describe('registerIpcHandlers', () => {
     // Reveal a storage location (library/models/logs/hfCache) in Finder.
     expect(channels).toContain('settings:reveal-storage');
     expect(channels).toContain('trash:list');
+    // Roster management (rename existed already; merge is new).
+    expect(channels).toContain('speakers:rename');
+    expect(channels).toContain('speakers:merge');
+  });
+
+  it('speakers:rename updates the roster row and re-merges every affected transcript', () => {
+    const rename = vi.fn();
+    const handle = vi.fn();
+    const fakeIpc = { handle } as any;
+    const services = baseServices({
+      speakers: {
+        list: () => [],
+        rename,
+        meetingIdsForSpeaker: vi.fn(() => ['m1', 'm2']),
+      },
+    });
+    registerIpcHandlers(fakeIpc, services);
+    const call = handle.mock.calls.find((c) => c[0] === 'speakers:rename');
+    expect(call).toBeDefined();
+    const handler = call![1] as (e: unknown, id: unknown, name: unknown) => void;
+
+    handler(null, 'spk_1', 'Dan Baskette');
+
+    expect(rename).toHaveBeenCalledWith('spk_1', 'Dan Baskette');
+    // Both linked meetings get their transcript.md rewritten with the new name.
+    expect(vi.mocked(remergeTranscript).mock.calls.map((c) => c[0])).toEqual(['m1', 'm2']);
+
+    expect(() => handler(null, 42 as unknown, 'x')).toThrow(/invalid args/);
+  });
+
+  it('speakers:merge validates ids, merges via the repo, and re-merges affected transcripts', () => {
+    const mergeSpeakers = vi.fn(() => ['m1', 'm3']);
+    const known = new Set(['spk_a', 'spk_b']);
+    const stored: Record<string, unknown> = { userSpeakerId: 'spk_a' };
+    const handle = vi.fn();
+    const fakeIpc = { handle } as any;
+    const services = baseServices({
+      speakers: {
+        list: () => [],
+        findById: (id: string) => (known.has(id) ? { id, displayName: id } : null),
+        mergeSpeakers,
+      },
+      settings: {
+        getAll: () => ({}),
+        get: (key: string) => stored[key] ?? '',
+        set: (key: string, value: unknown) => { stored[key] = value; },
+      },
+    });
+    registerIpcHandlers(fakeIpc, services);
+    const call = handle.mock.calls.find((c) => c[0] === 'speakers:merge');
+    expect(call).toBeDefined();
+    const handler = call![1] as (e: unknown, src: unknown, tgt: unknown) => { affectedMeetingIds: string[] };
+
+    // Bad inputs never reach the repo.
+    expect(() => handler(null, '', 'spk_b')).toThrow(/invalid args/);
+    expect(() => handler(null, 'spk_a', 42)).toThrow(/invalid args/);
+    expect(() => handler(null, 'spk_a', 'spk_a')).toThrow(/cannot merge a speaker into itself/);
+    expect(() => handler(null, 'spk_nope', 'spk_b')).toThrow(/source speaker not found/);
+    expect(() => handler(null, 'spk_a', 'spk_nope')).toThrow(/target speaker not found/);
+    expect(mergeSpeakers).not.toHaveBeenCalled();
+
+    const result = handler(null, 'spk_a', 'spk_b');
+
+    expect(mergeSpeakers).toHaveBeenCalledWith('spk_a', 'spk_b');
+    expect(result.affectedMeetingIds).toEqual(['m1', 'm3']);
+    // Each affected meeting's transcript is rewritten with the survivor's name.
+    expect(vi.mocked(remergeTranscript).mock.calls.map((c) => c[0])).toEqual(['m1', 'm3']);
+    // The "You are…" pointer follows the merge when it referenced the source.
+    expect(stored.userSpeakerId).toBe('spk_b');
   });
 
   it('trash:list purges expired entries then returns the rest, newest first', () => {
