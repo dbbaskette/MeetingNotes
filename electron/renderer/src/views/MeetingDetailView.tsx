@@ -326,8 +326,11 @@ export function MeetingDetailView({
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
             forcing the flex row to overflow — otherwise a long title would
-            push the actions menu off the right edge. */}
-        <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">{m.title}</div>
+            push the actions menu off the right edge. Click-to-edit (#A5):
+            the same rename IPC the ⋯ menu uses, without the modal. */}
+        <div className="flex-1 min-w-0 text-center px-2">
+          <EditableTitle id={m.id} title={m.title} onRenamed={() => void reload()} />
+        </div>
         {/* Actions menu: rename/delete from the detail view. When the user
             deletes from here, route back to Library since the detail we're
             viewing no longer exists. */}
@@ -455,6 +458,101 @@ export function MeetingDetailView({
         />
       </div>
     </div>
+  );
+}
+
+/** Click-to-edit meeting title for the detail header (#A5). Display mode
+ *  is a button with a quiet hover affordance (dotted underline + faint
+ *  pencil) so the interaction is discoverable without shouting; clicking
+ *  swaps in an input seeded with the current title, focused + selected.
+ *  Enter saves, Esc cancels, blur saves-if-changed; an empty/whitespace
+ *  title cancels rather than saving. Persists through the SAME
+ *  meetings:rename IPC the ⋯ menu's rename dialog uses, then reloads. */
+function EditableTitle({
+  id, title, onRenamed,
+}: {
+  id: string;
+  title: string;
+  onRenamed: () => void;
+}): JSX.Element {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Set when Enter/Esc already resolved the edit, so the blur the
+  // resolution itself triggers doesn't commit a second time (or commit
+  // a value the user just escaped out of).
+  const settledRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  function start(): void {
+    setValue(title);
+    settledRef.current = false;
+    setEditing(true);
+  }
+
+  async function commit(): Promise<void> {
+    setEditing(false);
+    const trimmed = value.trim();
+    // Empty/whitespace → cancel, don't save. Unchanged → no-op.
+    if (trimmed === '' || trimmed === title || busy) return;
+    setBusy(true);
+    try {
+      await api.meetings.rename(id, trimmed);
+      onRenamed();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={start}
+        title="Click to rename"
+        className="group max-w-full font-semibold truncate align-middle
+                   hover:underline decoration-dotted underline-offset-4"
+      >
+        {title}
+        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity">✎</span>
+      </button>
+    );
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      value={value}
+      disabled={busy}
+      maxLength={500}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          settledRef.current = true;
+          void commit();
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          settledRef.current = true;
+          setEditing(false);
+        }
+      }}
+      onBlur={() => {
+        if (settledRef.current) return;
+        void commit();
+      }}
+      aria-label="Meeting title"
+      className="w-full max-w-md text-center font-semibold bg-surface border border-brand-indigo/60
+                 rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-indigo/30
+                 disabled:opacity-60"
+    />
   );
 }
 
