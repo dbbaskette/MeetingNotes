@@ -189,12 +189,16 @@ export class MeetingsRepo {
    *  doesn't materialize the whole library via listAll(). Parameter-
    *  bound; excludes soft-deleted rows. */
   searchByTitle(q: string, limit: number): MeetingRow[] {
+    // Escape LIKE metacharacters so the palette matches the user's text
+    // literally — "50%" or "q_2" must behave like the old .includes()
+    // substring match, not as SQL wildcards.
+    const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
     const rows = this.db.prepare(`
       SELECT * FROM meetings
-      WHERE deleted_at IS NULL AND title LIKE '%'||?||'%' COLLATE NOCASE
+      WHERE deleted_at IS NULL AND title LIKE '%'||?||'%' ESCAPE '\\' COLLATE NOCASE
       ORDER BY COALESCE(started_at, created_at) DESC
       LIMIT ?
-    `).all(q, limit) as Record<string, unknown>[];
+    `).all(escaped, limit) as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 

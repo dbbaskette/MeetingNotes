@@ -118,6 +118,16 @@ describe('MeetingsRepo', () => {
       expect(repo.searchByTitle('Sync', 3)).toHaveLength(3);
     });
 
+    it('treats LIKE metacharacters as literal text (parity with the old .includes())', () => {
+      repo.insert({ id: 'pct', slug: 'pct', title: 'Q3 at 50% capacity', startedAt: null, durationS: null, audioPath: '/p', status: 'done', pipelineStage: 'done' });
+      repo.insert({ id: 'und', slug: 'und', title: 'proj_alpha kickoff', startedAt: null, durationS: null, audioPath: '/u', status: 'done', pipelineStage: 'done' });
+      // "%" must not act as a wildcard: "9%" matches nothing (no title contains it literally).
+      expect(repo.searchByTitle('9%', 20)).toEqual([]);
+      expect(repo.searchByTitle('50%', 20).map((m) => m.id)).toEqual(['pct']);
+      // "_" must not match any-single-char: "proj_" only hits the literal underscore title.
+      expect(repo.searchByTitle('proj_', 20).map((m) => m.id)).toEqual(['und']);
+    });
+
     it('is safe with quote characters in the query (parameter-bound)', () => {
       repo.insert({ id: 'q', slug: 'q', title: "Dan's 1:1", startedAt: null, durationS: null, audioPath: '/q', status: 'done', pipelineStage: 'done' });
       expect(repo.searchByTitle("dan's", 20).map((m) => m.id)).toEqual(['q']);
