@@ -82,7 +82,9 @@ export function ToastHost({ children }: { children: React.ReactNode }): JSX.Elem
       {createPortal(
         <div
           aria-live="polite"
-          className="fixed bottom-6 right-6 z-[1100] flex flex-col gap-2 pointer-events-none"
+          // bottom-10 clears the permanent ~29px pipeline status bar docked at
+          // the viewport bottom — bottom-6 left toasts painting over its text.
+          className="fixed bottom-10 right-6 z-[1100] flex flex-col gap-2 pointer-events-none"
         >
           {toasts.map((t) => (
             <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />

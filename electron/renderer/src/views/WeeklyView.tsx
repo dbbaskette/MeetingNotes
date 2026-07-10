@@ -286,7 +286,9 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
   };
 
   return (
-    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 flex flex-col">
+    // pt-8 at every width keeps the header clear of the 28px window drag strip
+    // (see LibraryView) so its buttons stay clickable edge to edge.
+    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
       {/* Header — pinned via shrink-0; only the content region below scrolls,
           matching the Library page's top bar. */}
       <header className="shrink-0 flex items-center gap-4 mb-8">

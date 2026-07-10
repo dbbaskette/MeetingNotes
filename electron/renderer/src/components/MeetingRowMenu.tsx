@@ -24,7 +24,9 @@ type ModalKind = null | 'rename' | 'delete';
 export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
-  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const [anchor, setAnchor] = useState<
+    { top?: number; bottom?: number; right: number } | null
+  >(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,7 +39,16 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const rect = btnRef.current.getBoundingClientRect();
-    setAnchor({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+    const right = window.innerWidth - rect.right;
+    // For rows near the window bottom, open upward — a downward menu would
+    // land under the app status bar / window edge, and since the popover
+    // dismisses on scroll there'd be no way to ever reach its items.
+    // 120px ≈ menu height plus the docked status bar, with margin.
+    if (window.innerHeight - rect.bottom < 120) {
+      setAnchor({ bottom: window.innerHeight - rect.top + 6, right });
+    } else {
+      setAnchor({ top: rect.bottom + 6, right });
+    }
   }, [open]);
 
   // Close the popover on outside click + Escape. Doesn't close the modal —
@@ -88,7 +99,13 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
         <div
           ref={menuRef}
           onClick={(e) => e.stopPropagation()}
-          style={{ position: 'fixed', top: anchor.top, right: anchor.right, zIndex: 1000 }}
+          style={{
+            position: 'fixed',
+            top: anchor.top,
+            bottom: anchor.bottom,
+            right: anchor.right,
+            zIndex: 1000,
+          }}
           className="
             min-w-[140px]
             bg-surface border border-surface-border rounded-lg shadow-pop

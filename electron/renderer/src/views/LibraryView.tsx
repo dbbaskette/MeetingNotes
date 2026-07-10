@@ -356,10 +356,9 @@ export function LibraryView({
     const n = ids.length;
     if (!window.confirm(`Move ${n} meeting${n === 1 ? '' : 's'} to Recently deleted?`)) return;
     setSelected(new Set());
-    for (const id of ids) {
-      try { await api.meetings.delete(id); }
-      catch { /* keep going — one bad row shouldn't abort the batch */ }
-    }
+    // In parallel like the Undo path below — one bad row shouldn't abort the
+    // batch, and N serial IPC round-trips made big deletions crawl.
+    await Promise.allSettled(ids.map((id) => api.meetings.delete(id)));
     // One toast for the whole batch; Undo restores everything at once.
     toast.show({
       message: `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`,
@@ -387,7 +386,10 @@ export function LibraryView({
   }
 
   return (
-    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 lg:pt-8 flex flex-col">
+    // pt-8 (32px) at every width: the frameless window's drag strip covers the
+    // top 28px, so smaller paddings put the header buttons under it and clicks
+    // near their top edge dragged the window instead.
+    <div className="relative h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
       <header className="shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
@@ -628,7 +630,13 @@ export function LibraryView({
             );
           };
           return (
-            <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8 space-y-2">
+            <div
+              className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 space-y-2 ${
+                // Extra clearance while the selection pill is docked over the
+                // bottom of the list, so the last rows can scroll above it.
+                selected.size > 0 ? 'pb-28' : 'pb-8'
+              }`}
+            >
               {isSearching ? (
                 <>
                   {titleMatches.length > 0 && (
@@ -973,17 +981,22 @@ function SelectionBar({
   onCancel: () => void;
 }): JSX.Element {
   const visible = count > 0;
+  // Anchored `absolute` to the LibraryView root (which fills the shell's
+  // flex-1 slot), NOT `fixed` to the viewport — the app-wide status bar
+  // occupies the bottom of the viewport and would paint over the pill's
+  // bottom edge. The slot ends where the status bar begins, so bottom-0
+  // here docks the pill just above it, whatever the status bar's height.
   return (
     <div
       aria-hidden={!visible}
       className={`
-        fixed bottom-0 left-0 right-0 z-10
-        transition-transform duration-200 ease-out
-        ${visible ? 'translate-y-0' : 'translate-y-full'}
+        absolute bottom-0 left-0 right-0 z-10 pointer-events-none
+        transition-[transform,opacity] duration-200 ease-out
+        ${visible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}
       `}
     >
-      <div className="max-w-5xl mx-auto px-8 pb-4">
-        <div className="bg-ink text-surface rounded-xl shadow-pop flex items-center gap-3 px-4 py-3">
+      <div className="px-4 sm:px-6 lg:px-8 pb-4">
+        <div className="pointer-events-auto bg-ink text-surface rounded-xl shadow-pop flex items-center gap-3 px-4 py-3">
           <span className="text-sm font-semibold tabular-nums">
             {count} selected
           </span>
