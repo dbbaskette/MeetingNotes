@@ -23,6 +23,7 @@ import {
   LIBRARY_SORT_OPTIONS, libraryComparator, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
+import { shouldPollLibrary } from '../lib/poll-gate';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
@@ -125,19 +126,21 @@ export function LibraryView({
     return () => { off(); };
   }, [refresh]);
 
-  // Conditional polling. The list only changes when the user is recording
-  // or the pipeline is moving something through processing/awaiting_user/
-  // pending. With 47 done meetings sitting around, the old "poll every 3 s
-  // forever" path was a battery drain (every tick re-runs the JOIN over
-  // speakers + the per-meeting action_items aggregate in handlers.ts).
-  // Now we poll while there's actual motion, refresh once on window
-  // visibility regain, and otherwise stay quiet until the user does
-  // something that should re-fetch (e.g. processSelected below).
+  // Conditional polling. Gate on ACTUAL pipeline activity — the same
+  // signal the bottom status bar shows (currentId / queueLength) — not on
+  // the presence of pending/awaiting rows. A `pending` recording just sits
+  // in the catalog until the user processes it, and an `awaiting_user`
+  // meeting sits parked at the speaker-ID gate; neither changes on its own,
+  // and both already surface via push (meetings:added, pipeline:status).
+  // The previous gate counted those static rows as "motion", so a single
+  // pending recording kept the 3s poll — and its speakers JOIN + per-meeting
+  // action_items aggregate — running forever while the status bar read
+  // "Ready". Now we poll only while something is truly in flight or a live
+  // recording is running; everything else is push-driven or refreshed on
+  // window-visibility regain.
   const hasMotion = useMemo(
-    () => !!liveRecording || meetings.some((m) =>
-      m.status === 'pending' || m.status === 'processing' || m.status === 'awaiting_user',
-    ),
-    [meetings, liveRecording],
+    () => shouldPollLibrary(pipelineStatus, !!liveRecording),
+    [pipelineStatus, liveRecording],
   );
   useEffect(() => { void refresh(); }, [refresh]);
   useMeetingsPoll(hasMotion);
