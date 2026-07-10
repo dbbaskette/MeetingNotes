@@ -11,6 +11,14 @@
 // click; all other rows reveal it on hover (or while a selection is
 // active) next to the speakers/status/action-items side, and clicking
 // the row opens detail unless a bulk selection is in progress.
+//
+// The component is memoized: the meetings store recycles unchanged row
+// objects across polls (lib/meetings-recycle), so with stable callback
+// props from LibraryView only the rows whose meeting actually moved
+// re-render on a poll tick. Callbacks therefore take the meeting id as
+// an argument instead of closing over it — a per-row arrow function in
+// the parent would defeat the memo.
+import { memo } from 'react';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
@@ -31,14 +39,16 @@ interface Meeting {
 
 interface Props {
   meeting: Meeting;
-  onOpen: (id: string) => void;
+  /** The row passes a skeleton hint built from its own meeting so the
+   *  detail view can paint title + stage before the full IPC resolves. */
+  onOpen: (id: string, hint: { title: string; pipelineStage: string; status: string }) => void;
   onChanged: () => void;
   /** When present, the row renders a selection checkbox (for bulk
    *  Process / Delete) and toggling it calls `onToggle`. Every row is
    *  selectable — pending rows show the checkbox in place of the avatar
    *  stack, all others reveal it on hover / while a selection is active. */
   checked?: boolean;
-  onToggle?: () => void;
+  onToggle?: (id: string) => void;
   /** True while ≥1 row is selected anywhere in the list. Keeps every
    *  row's checkbox visible during a bulk selection (instead of
    *  hover-only) and makes row clicks toggle instead of open. */
@@ -60,7 +70,9 @@ function fmtDate(iso: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle, selectionActive }: Props): JSX.Element {
+export const LibraryRow = memo(function LibraryRow({
+  meeting, onOpen, onChanged, checked, onToggle, selectionActive,
+}: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
   const edge =
@@ -80,8 +92,12 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle, sele
     // detail on click, EXCEPT while a bulk selection is in progress, when
     // clicking anywhere toggles so multi-select doesn't require pixel-
     // hunting the checkbox.
-    if (onToggle && (isPending || selectionActive)) onToggle();
-    else onOpen(meeting.id);
+    if (onToggle && (isPending || selectionActive)) onToggle(meeting.id);
+    else onOpen(meeting.id, {
+      title: meeting.title,
+      pipelineStage: meeting.pipelineStage,
+      status: meeting.status,
+    });
   }
 
   return (
@@ -98,7 +114,7 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle, sele
     >
       {onToggle && (
         <button
-          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          onClick={(e) => { e.stopPropagation(); onToggle(meeting.id); }}
           aria-label={checked ? 'Deselect' : 'Select'}
           className={`
             w-[18px] h-[18px] rounded-[5px] border-2 shrink-0 flex items-center justify-center transition
@@ -163,7 +179,7 @@ export function LibraryRow({ meeting, onOpen, onChanged, checked, onToggle, sele
       )}
     </div>
   );
-}
+});
 
 function AvatarStack({ meeting }: { meeting: Meeting }): JSX.Element {
   if (meeting.status === 'failed') {
