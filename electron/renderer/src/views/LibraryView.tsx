@@ -313,14 +313,22 @@ export function LibraryView({
     [selected, meetings],
   );
 
-  function toggleSelect(id: string): void {
+  // Row callbacks are hoisted + stable (useCallback) so the memoized
+  // LibraryRow doesn't see a fresh closure on every render — per-row
+  // arrows here would put all 100+ rows back on the 3 s poll treadmill.
+  const toggleSelect = useCallback((id: string): void => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }
+  }, []);
+
+  const rowChanged = useCallback((): void => {
+    void refresh();
+    void refreshTrash();
+  }, [refresh, refreshTrash]);
 
   async function processSelected(): Promise<void> {
     // Only the pending rows within the selection — a selected done/failed
@@ -599,10 +607,10 @@ export function LibraryView({
               <div key={m.id}>
                 <LibraryRow
                   meeting={m}
-                  onOpen={(id) => onOpen(id, hint)}
-                  onChanged={() => { void refresh(); void refreshTrash(); }}
+                  onOpen={onOpen}
+                  onChanged={rowChanged}
                   checked={selected.has(m.id)}
-                  onToggle={() => toggleSelect(m.id)}
+                  onToggle={toggleSelect}
                   selectionActive={selected.size > 0}
                 />
                 {meetingHits.length > 0 && (
