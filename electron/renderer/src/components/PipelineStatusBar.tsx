@@ -4,7 +4,7 @@
 // (Library, Weekly, Settings, detail) so progress isn't hidden behind the one
 // view that happens to render it. A thin shell over the pure `status-bar`
 // module — all the string/visibility logic is unit-tested there.
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { useElapsed } from '../lib/useElapsed';
 import {
@@ -37,7 +37,9 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
     return () => { off(); };
   }, [refresh]);
 
-  const model = deriveStatusBar(meetings, status);
+  // Memoized: useElapsed re-renders this bar every second while processing,
+  // and deriveStatusBar scans the whole meetings array each call.
+  const model = useMemo(() => deriveStatusBar(meetings, status), [meetings, status]);
 
   // Keep title/stage/ETA fresh from Settings/Weekly/detail (LibraryView's
   // poll only runs while it's mounted). Shared + ref-counted with the
