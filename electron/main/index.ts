@@ -255,6 +255,8 @@ app.whenReady().then(async () => {
     helperPath,
     recordingsDir,
     repo: recordingSessionsRepo,
+    onAutoStop: (sessionId, silenceMs) =>
+      logger.info('recording:auto-stop-silence', { sessionId, silenceMs }),
   });
   const appEnumerator = new AppEnumerator({ helperPath });
 

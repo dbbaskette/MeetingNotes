@@ -16,12 +16,17 @@ export interface StartResult {
   outputPath: string;
 }
 
+export const SILENCE_TIMEOUT_MS = 5 * 60_000;
+export const SILENCE_THRESHOLD_DB = -50;
+
 type SpawnFn = (cmd: string, args: string[]) => ChildProcessWithoutNullStreams | any;
 
 interface SessionEntry {
   proc: any;
   outputPath: string;
   state: RecordingState;
+  silenceTimer: ReturnType<typeof setTimeout> | null;
+  stopPromise: Promise<void> | null;
 }
 
 export class RecordingManager {
@@ -37,6 +42,7 @@ export class RecordingManager {
     repo: RecordingSessionsRepo;
     spawn?: SpawnFn;
     clock?: () => Date;
+    onAutoStop?: (sessionId: string, silenceMs: number) => void;
   }) {}
 
   async start(input: StartInput): Promise<StartResult> {
@@ -62,7 +68,13 @@ export class RecordingManager {
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
-    const entry: SessionEntry = { proc, outputPath, state: 'starting' };
+    const entry: SessionEntry = {
+      proc,
+      outputPath,
+      state: 'starting',
+      silenceTimer: null,
+      stopPromise: null,
+    };
     this.sessions.set(sessionId, entry);
     this.deps.repo.insert({
       id: sessionId,
@@ -92,12 +104,14 @@ export class RecordingManager {
       });
     });
     this.transition(sessionId, 'recording');
+    this.armSilenceTimer(sessionId);
     // Keep draining stdout for level events for the lifetime of the session.
     // The handler installed above keeps running because we never removed it.
     proc.on('exit', () => {
       const cur = this.sessions.get(sessionId);
       if (cur && cur.state === 'recording') {
         // Helper exited on its own (target app quit / parent watchdog).
+        this.clearSilenceTimer(cur);
         this.transition(sessionId, 'idle');
         try { this.deps.repo.finalize(sessionId); } catch { /* best-effort */ }
         this.sessions.delete(sessionId);
@@ -109,17 +123,33 @@ export class RecordingManager {
   async stop(sessionId: string): Promise<void> {
     const s = this.sessions.get(sessionId);
     if (!s) throw new Error(`no such session: ${sessionId}`);
+    if (s.stopPromise) return s.stopPromise;
+    s.stopPromise = this.performStop(sessionId, s);
+    return s.stopPromise;
+  }
+
+  private async performStop(sessionId: string, s: SessionEntry): Promise<void> {
+    this.clearSilenceTimer(s);
     this.transition(sessionId, 'stopping');
-    s.proc.kill('SIGTERM');
     await new Promise<void>((resolve) => {
       let done = false;
-      const finish = (): void => { if (!done) { done = true; resolve(); } };
+      let hardKillTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        if (hardKillTimer !== null) clearTimeout(hardKillTimer);
+        resolve();
+      };
       s.proc.on('exit', finish);
       // Hard-kill safety: if SIGTERM doesn't end it in 5s, SIGKILL.
-      setTimeout(() => { try { s.proc.kill('SIGKILL'); } catch { /* already dead */ } finish(); }, 5000);
+      hardKillTimer = setTimeout(() => {
+        try { s.proc.kill('SIGKILL'); } catch { /* already dead */ }
+        finish();
+      }, 5000);
+      s.proc.kill('SIGTERM');
     });
     this.deps.repo.finalize(sessionId);
-    this.sessions.delete(sessionId);
+    if (this.sessions.get(sessionId) === s) this.sessions.delete(sessionId);
   }
 
   state(sessionId: string): RecordingState {
@@ -144,7 +174,28 @@ export class RecordingManager {
     let payload: { event?: string; peak_db?: number } | undefined;
     try { payload = JSON.parse(line); } catch { return; }
     if (payload?.event === 'level' && typeof payload.peak_db === 'number') {
+      if (payload.peak_db > SILENCE_THRESHOLD_DB) this.armSilenceTimer(sessionId);
       for (const cb of this.listeners.level) cb(sessionId, payload.peak_db);
     }
+  }
+
+  private clearSilenceTimer(entry: SessionEntry): void {
+    if (entry.silenceTimer !== null) clearTimeout(entry.silenceTimer);
+    entry.silenceTimer = null;
+  }
+
+  private armSilenceTimer(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry || entry.state !== 'recording') return;
+    this.clearSilenceTimer(entry);
+    entry.silenceTimer = setTimeout(() => {
+      const current = this.sessions.get(sessionId);
+      if (!current || current.state !== 'recording') return;
+      current.silenceTimer = null;
+      try { this.deps.onAutoStop?.(sessionId, SILENCE_TIMEOUT_MS); } catch { /* observer only */ }
+      void this.stop(sessionId).catch(() => this.transition(sessionId, 'error'));
+    }, SILENCE_TIMEOUT_MS);
+    // This watchdog should not keep a test process or the app alive by itself.
+    (entry.silenceTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
   }
 }
