@@ -400,6 +400,9 @@ app.whenReady().then(async () => {
         w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
       }
     } catch (e) {
+      // The built-in helper may stop appending samples before it finalizes the
+      // M4A's moov atom. Let the finalization change event retry this path.
+      watcher.release(audioPath);
       logger.error('library:discover-fail', { audioPath, err: String(e) });
     }
   });
