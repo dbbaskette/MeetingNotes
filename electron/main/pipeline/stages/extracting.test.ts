@@ -82,11 +82,10 @@ describe('runExtracting', () => {
     expect(written[0].sourceQuote).toContain('v2 API');
   });
 
-  it('gives reasoning room (4000 tokens), re-samples spirals, and forbids preamble', async () => {
-    // Gemma reasons ~2000 words before emitting the JSON; the old 2000 cap
-    // guillotined it mid-thought → empty content. 4000 leaves room, and
-    // resampleRetries re-samples the intermittent spiral (temperature 0 makes a
-    // plain retry deterministic, so the client bumps the retry temperature).
+  it('gives reasoning room (6000 tokens), re-samples spirals, and forbids preamble', async () => {
+    // Gemma repeatedly exhausted 4000 tokens around 2200 reasoning words in
+    // production. 6000 leaves room, and resampleRetries still re-samples the
+    // intermittent longer spiral (the client bumps retry temperature).
     const { ctx, folder } = makeCtx(async () => '[]');
     fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
     await runExtracting({ meetingId: 'm' }, ctx);
@@ -95,7 +94,7 @@ describe('runExtracting', () => {
       resampleRetries: number;
       messages: { content: string }[];
     };
-    expect(arg.maxTokens).toBe(4000);
+    expect(arg.maxTokens).toBe(6000);
     expect(arg.resampleRetries).toBe(2);
     expect(arg.messages[0]!.content).toContain('Do NOT think out loud');
   });

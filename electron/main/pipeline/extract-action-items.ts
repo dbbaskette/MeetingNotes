@@ -21,15 +21,14 @@ import type { LMStudioClient } from '../lm-studio/client.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 
-/** Output cap for the extraction call. The JSON answer is tiny, but a reasoning
- *  model (Gemma 4) can't be told not to think and deliberates heavily on the
- *  "what is / isn't an action item" rules — measured ~2000-2200 reasoning words
- *  on a real 3.6k-char summary before it emits the array. The old 2000 cap
- *  guillotined that mid-thought → empty content → hard fail (deterministic at
- *  temperature 0, so it repeated on every retry). 4000 gives the reasoning room
- *  to finish and then write the JSON; a genuine runaway is still bounded by the
- *  resample retries, the degenerate-output check, and the 10-minute timeout. */
-export const EXTRACT_MAX_TOKENS = 4000;
+/** Output cap for the extraction call. The JSON answer is tiny, but Gemma 4
+ *  ignores thinking suppression and deliberates heavily on the action-item
+ *  rules. Production runs on 2026-07-28/29 repeatedly exhausted the old 4000
+ *  cap at ~2200 reasoning words with no answer; a fresh sample eventually
+ *  succeeded, proving memory was not the problem. 6000 gives that measured tail
+ *  room to finish while genuine runaways remain bounded by two temperature-
+ *  shifted re-samples, the degenerate-output check, and 10-minute timeout. */
+export const EXTRACT_MAX_TOKENS = 6000;
 
 export interface ExtractActionItemsDeps {
   lmStudio: Pick<LMStudioClient, 'chat'>;
