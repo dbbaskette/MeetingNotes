@@ -29,6 +29,7 @@ sidecar/*.egg-info/
 
 # Worktrees / local tooling
 .claude/
+.worktrees/
 
 # Phase 0 research scratch — not committed
 research/

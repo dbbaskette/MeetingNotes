@@ -253,10 +253,10 @@ describe('registerIpcHandlers', () => {
 
     const result = await handler(null, 'm');
 
-    // Sent the summary with the strict extract prompt, room to reason (4000),
+    // Sent the summary with the strict extract prompt, room to reason (6000),
     // and the re-sample retry that clears an intermittent spiral.
     const arg = chat.mock.calls[0]![0] as { maxTokens: number; resampleRetries: number; messages: { content: string }[] };
-    expect(arg.maxTokens).toBe(4000);
+    expect(arg.maxTokens).toBe(6000);
     expect(arg.resampleRetries).toBe(2);
     expect(arg.messages[1]!.content).toContain('## Action Items');
     // Replaced the meeting's items with the parsed output and reported the count.

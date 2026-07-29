@@ -10,6 +10,9 @@ export interface WatcherOptions {
   paths?: string[];
   stabilityMs?: number;
   pollMs?: number;
+  /** Test/runtime escape hatch for environments where native filesystem
+   *  events are unavailable. Production keeps chokidar's native default. */
+  usePolling?: boolean;
 }
 
 const SUPPORTED_EXT = /\.(mp3|m4a)$/i;
@@ -43,6 +46,13 @@ export class LibraryWatcher {
   }
 
   onStableFile(fn: (p: string) => void): void { this.listeners.push(fn); }
+
+  /** Make a previously delivered path eligible for a future stable change.
+   *  The library calls this when probing/cataloging fails because a recorder
+   *  may have paused writes before its M4A metadata was finalized. */
+  release(p: string): void {
+    this.emitted.delete(p);
+  }
 
   async start(): Promise<void> {
     const rawPaths = this.opts.paths ?? (this.opts.path ? [this.opts.path] : []);
@@ -83,12 +93,13 @@ export class LibraryWatcher {
     const watcher = chokidar.watch(watchPath, {
       ignoreInitial: true,
       persistent: true,
+      usePolling: this.opts.usePolling,
       awaitWriteFinish: { stabilityThreshold: this.stability, pollInterval: this.poll },
     });
     await new Promise<void>((resolve) => {
       watcher.once('ready', () => resolve());
     });
-    watcher.on('add', (p) => {
+    const handleAudioEvent = (p: string): void => {
       if (!SUPPORTED_EXT.test(p) || isStemArtifact(p)) return;
       // Re-root resolved paths so consumers store stable identifiers — without
       // this, a watch path that's a symlink would get its real-path version
@@ -98,7 +109,12 @@ export class LibraryWatcher {
         out = path.join(watchPath, p.slice(realWatchPath.length));
       }
       this.emit(out);
-    });
+    };
+    watcher.on('add', handleAudioEvent);
+    // A recorder can stop appending samples while keeping the M4A open. The
+    // first stable add then fails ffprobe (no moov atom); helper finalization
+    // changes the file later and must get another delivery after release().
+    watcher.on('change', handleAudioEvent);
     this.watchers.push(watcher);
   }
 
