@@ -69,8 +69,15 @@ case .listAudioProcesses:
     var out: [String: Any] = ["pid": Int(p.pid)]
     if let b = p.bundleID { out["bundle_id"] = b }
     if let n = p.name { out["name"] = n }
-    out["is_meeting_app"] = (p.bundleID.map { MEETING_APP_BUNDLE_IDS.contains($0) }) ?? false
+    // A helper process inherits meeting-app status from its owning app, so a
+    // Zoom/Teams audio helper still gets the MEETING badge in the picker.
+    let meetingIds = [p.bundleID, p.ownerBundleID].compactMap { $0 }
+    out["is_meeting_app"] = meetingIds.contains { MEETING_APP_BUNDLE_IDS.contains($0) }
     out["is_running_output"] = p.isRunningOutput
+    out["is_user_app"] = p.ownerPid != nil
+    if let op = p.ownerPid { out["owner_pid"] = Int(op) }
+    if let ob = p.ownerBundleID { out["owner_bundle_id"] = ob }
+    if let on = p.ownerName { out["owner_name"] = on }
     return out
   }
   StatusEvent.emit(["event": "processes", "items": procs])
