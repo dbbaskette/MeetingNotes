@@ -22,6 +22,11 @@ export async function recoverOrphans(deps: RecoverDeps): Promise<void> {
 }
 
 function defaultIsAlive(pid: number): boolean {
+  // Rows written after a failed spawn carry pid -1 (proc.pid was undefined).
+  // POSIX kill(-1, 0) means "signal every process I may signal" — it succeeds
+  // and made these rows look alive forever, keeping auto-detect suppressed
+  // across every relaunch. No real helper ever has pid <= 0.
+  if (pid <= 0) return false;
   try {
     // Signal 0 doesn't actually send anything but errors if process is gone.
     process.kill(pid, 0);

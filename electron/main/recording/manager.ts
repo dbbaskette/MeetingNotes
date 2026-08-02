@@ -85,24 +85,47 @@ export class RecordingManager {
     });
 
     // Wait for the started event (helper emits {"event":"started"} when CoreAudio is attached).
-    await new Promise<void>((resolve, reject) => {
-      let buf = '';
-      const onChunk = (chunk: string): void => {
-        buf += chunk;
-        let nl;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-          this.handleLine(sessionId, line);
-          if (line.includes('"event":"started"')) resolve();
-        }
-      };
-      proc.stdout.on('data', onChunk);
-      proc.on('exit', (code: number | null) => {
-        if (this.sessions.get(sessionId)?.state !== 'recording') {
-          reject(new Error(`helper exited before started (code=${code})`));
-        }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let buf = '';
+        const onChunk = (chunk: string): void => {
+          buf += chunk;
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+            this.handleLine(sessionId, line);
+            if (line.includes('"event":"started"')) resolve();
+          }
+        };
+        proc.stdout.on('data', onChunk);
+        // A missing/non-executable binary emits 'error' and NEVER 'exit' —
+        // without this listener the EventEmitter throws uncaught and this
+        // promise (and the renderer's Record invoke) hangs forever.
+        proc.on('error', (err: Error) => {
+          reject(new Error(`helper failed to spawn: ${err.message}`));
+        });
+        proc.on('exit', (code: number | null) => {
+          if (this.sessions.get(sessionId)?.state !== 'recording') {
+            reject(new Error(`helper exited before started (code=${code})`));
+          }
+        });
       });
-    });
+    } catch (e) {
+      // A failed start must not leave a live-looking session behind: an open
+      // 'recording' row suppresses meeting auto-detect and makes every later
+      // meetingnotes://record answer "Already recording" until app restart.
+      try { this.deps.repo.markError(sessionId); } catch { /* best-effort */ }
+      this.sessions.delete(sessionId);
+      throw e;
+    }
+    // A stop can land while we were still 'starting' (URL-scheme stop knows
+    // the session id before this method returns). performStop has already
+    // finalized the row and killed the helper — resurrecting the session to
+    // 'recording' here would report success for a capture that never ran and
+    // double-finalize on the helper's exit.
+    if (this.sessions.get(sessionId)?.state !== 'starting') {
+      throw new Error('recording was stopped before capture started');
+    }
     this.transition(sessionId, 'recording');
     this.armSilenceTimer(sessionId);
     // Keep draining stdout for level events for the lifetime of the session.
