@@ -47,6 +47,7 @@ import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { createPeakThrottle } from './lib/peak-throttle.js';
 import { makeSlug, shortId } from './lib/slug.js';
 import { probeAudio } from './library/ffprobe.js';
+import { DiscoverFailureGate, fileState } from './library/discover-failure-gate.js';
 import { boundsVisibleOn, sanitizeBounds, type WindowBounds } from './lib/window-bounds.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
@@ -354,12 +355,23 @@ app.whenReady().then(async () => {
   const watcher = new LibraryWatcher({
     paths: libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
   });
+  // Unprobeable files (header-only stubs from a killed recorder, junk in a
+  // watch folder) get 3 probe attempts per on-disk state, then go quiet
+  // instead of re-erroring on every rescan. A real change (late moov
+  // finalization) resets the count and probing resumes.
+  const discoverGate = new DiscoverFailureGate(3);
   watcher.onStableFile(async (audioPath) => {
     try {
       // Dedupe: skip files we've already cataloged. Lets us catalog backlog
       // on first run and quietly no-op on every restart afterward.
       if (meetings.findByAudioPath(audioPath)) return;
+      const onDisk = fileState(audioPath);
+      if (onDisk && discoverGate.shouldSkip(audioPath, onDisk)) {
+        watcher.release(audioPath);
+        return;
+      }
       const info = await probeAudio(audioPath);
+      discoverGate.clear(audioPath);
       const parsed = parseAudioHijackFilename(audioPath);
       const dateIso = parsed.startedAtIso?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
       // Retry on the (now extremely rare) UNIQUE(slug) collision rather than
@@ -401,9 +413,21 @@ app.whenReady().then(async () => {
       }
     } catch (e) {
       // The built-in helper may stop appending samples before it finalizes the
-      // M4A's moov atom. Let the finalization change event retry this path.
+      // M4A's moov atom. Let the finalization change event retry this path —
+      // but only while the file keeps changing; a static unprobeable file
+      // quarantines after the gate's limit.
       watcher.release(audioPath);
-      logger.error('library:discover-fail', { audioPath, err: String(e) });
+      const onDisk = fileState(audioPath);
+      const verdict = onDisk ? discoverGate.recordFailure(audioPath, onDisk) : 'retry';
+      if (verdict === 'quarantined') {
+        logger.warn('library:discover-quarantined', {
+          audioPath,
+          err: String(e),
+          note: 'giving up until the file changes on disk',
+        });
+      } else {
+        logger.error('library:discover-fail', { audioPath, err: String(e) });
+      }
     }
   });
   await watcher.start();
