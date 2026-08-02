@@ -124,7 +124,32 @@ describe('LLMSupervisor', () => {
     });
     await sup.ensureReady();
     expect(lmsListLoadedModels).toHaveBeenCalledWith('127.0.0.1', 1234);
-    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b');
+    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b', 0);
+    await sup.stop();
+  });
+
+  it('lm-studio auto-load passes the configured context length through', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const lmsLoadModel = vi.fn(async () => {});
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      getContextLength: () => 32768,
+      spawn: vi.fn(() => fakeProc() as any),
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels: vi.fn(async () => [] as string[]),
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b', 32768);
     await sup.stop();
   });
 

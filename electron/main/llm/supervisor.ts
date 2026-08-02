@@ -59,7 +59,11 @@ export interface LLMSupervisorOpts {
   ollamaProbe?: ManagedServiceDeps['healthProbe'];
   /** Test seam for the LM Studio model-load step. Defaults to
    *  shelling out via execFile to the resolved `lms` binary. */
-  lmsLoadModel?: (binary: string, modelId: string) => Promise<void>;
+  lmsLoadModel?: (binary: string, modelId: string, contextLength?: number) => Promise<void>;
+  /** Context window (tokens) to request at model load. 0/undefined = let
+   *  LM Studio use the model's saved default. Read per-load so a Settings
+   *  change applies on the next respawn without an app restart. */
+  getContextLength?: () => number;
   /** Test seam for the loaded-models check. Returns ids that LM
    *  Studio's /v1/models endpoint reports as currently loaded. */
   lmsListLoadedModels?: (host: string, port: number) => Promise<string[]>;
@@ -133,8 +137,12 @@ async function defaultLmsListLoaded(host: string, port: number): Promise<string[
 /** Default model-load implementation — shells out to `lms load`.
  *  60s timeout matches the worst-case Q5 load time for a 7B-class
  *  model on Apple Silicon. */
-async function defaultLmsLoadModel(binary: string, modelId: string): Promise<void> {
-  await execFileAsync(binary, ['load', modelId], { timeout: 60_000 });
+async function defaultLmsLoadModel(binary: string, modelId: string, contextLength?: number): Promise<void> {
+  const args = ['load', modelId];
+  // Without an explicit context length LM Studio falls back to the model's
+  // saved default (often 4k), which silently truncates meeting transcripts.
+  if (contextLength && contextLength > 0) args.push('--context-length', String(contextLength));
+  await execFileAsync(binary, args, { timeout: 60_000 });
 }
 
 /** Reports which providers are available (binary present + reachable
@@ -266,8 +274,9 @@ export class LLMSupervisor {
     }
     const loader = this.opts.lmsLoadModel ?? defaultLmsLoadModel;
     try {
-      this.opts.onLog?.(`lm-studio: loading ${wanted}…`);
-      await loader(binary, wanted);
+      const ctx = this.opts.getContextLength?.() ?? 0;
+      this.opts.onLog?.(`lm-studio: loading ${wanted}${ctx > 0 ? ` (context ${ctx})` : ''}…`);
+      await loader(binary, wanted, ctx);
       this.opts.onLog?.(`lm-studio: ${wanted} loaded`);
     } catch (e) {
       this.opts.onLog?.(

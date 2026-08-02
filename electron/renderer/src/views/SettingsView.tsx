@@ -31,6 +31,7 @@ interface Settings {
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  llmContextLength: number;
   summaryDetail: 'concise' | 'standard' | 'detailed';
   disableThinking: boolean;
   theme: 'system' | 'light' | 'dark';
@@ -72,6 +73,19 @@ export function SettingsView({
   }, []);
 
   if (!s) return <div className="p-8">Loading…</div>;
+
+  // The chat client follows the active provider, not the LM Studio URL field —
+  // managed modes hardcode their ports (see LMStudioClient wiring in main).
+  // Test buttons and captions must probe the same endpoint the pipeline uses,
+  // otherwise a healthy ollama setup "fails" a test against :1234.
+  const effectiveLlmUrl =
+    s.summaryProvider === 'lm-studio' ? 'http://127.0.0.1:1234'
+    : s.summaryProvider === 'ollama' ? 'http://127.0.0.1:11434'
+    : s.lmStudioUrl;
+  const providerLabel =
+    s.summaryProvider === 'lm-studio' ? 'LM Studio, managed'
+    : s.summaryProvider === 'ollama' ? 'Ollama, managed'
+    : 'external server';
 
   async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
     setS((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -145,14 +159,17 @@ export function SettingsView({
             onChange={(e) => update('lmStudioUrl', e.target.value)}
             className="input flex-1"
           />
-          <TestButton kind="llm" url={s.lmStudioUrl} />
+          <TestButton kind="llm" url={effectiveLlmUrl} lazySpawn={s.summaryProvider !== 'external'} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
           Default for the &lsquo;external&rsquo; provider. Managed providers use their own
           ports (1234 for LM Studio, 11434 for Ollama).
+          {s.summaryProvider !== 'external' && (
+            <> Test probes the active provider at <code>{effectiveLlmUrl}</code>.</>
+          )}
         </div>
       </Field>
-      <Field label="LLM Model (loaded in LM Studio)">
+      <Field label="LLM Model">
         <select
           value={s.llmModel}
           onChange={(e) => void changeLlmModel(e.target.value)}
@@ -188,9 +205,29 @@ export function SettingsView({
           </div>
         )}
         <div className="text-xs text-ink-muted mt-1">
-          Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
+          Loaded from {effectiveLlmUrl}/v1/models ({providerLabel}). Used for
+          summarization and action-item extraction.
         </div>
       </Field>
+      {s.summaryProvider === 'lm-studio' && (
+        <Field label="Context length (managed LM Studio)">
+          <select
+            value={String(s.llmContextLength)}
+            onChange={(e) => update('llmContextLength', Number(e.target.value))}
+            className="input"
+          >
+            <option value="0">Model default (LM Studio setting — often 4k)</option>
+            <option value="8192">8k — short meetings, low RAM</option>
+            <option value="16384">16k — up to ~1 hour</option>
+            <option value="32768">32k — long meetings (recommended if you have the RAM)</option>
+          </select>
+          <div className="text-xs text-ink-muted mt-1">
+            Passed as <code>--context-length</code> when MeetingNotes auto-loads the model.
+            Too-small contexts silently truncate long transcripts; too-large ones can
+            exhaust memory on smaller Macs. Applies at the next model load.
+          </div>
+        </Field>
+      )}
       <Field label="Summary detail level">
         <select
           value={s.summaryDetail}
@@ -272,7 +309,7 @@ export function SettingsView({
         <div className="text-xs text-ink-muted mt-1">
           The model file to load when starting whisper-server. Must be installed in
           ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
-          (use the setup wizard's Whisper step to download one).
+          (use the setup wizard&apos;s Whisper step to download one).
         </div>
       </Field>
       <Field label="Library Path">
@@ -722,7 +759,7 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
  *  Surfaces config errors at edit time instead of letting them bite the
  *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
  *  so the row doesn't accumulate stale state as the user keeps editing. */
-function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.Element {
+function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; detail?: string }
@@ -775,12 +812,29 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         </span>
       )}
       {result && !result.ok && (
-        <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
-          ✗ {result.error}
-        </span>
+        // "Connection refused" on a service the app spawns on demand is the
+        // normal idle state, not a failure — whisper-server and the managed
+        // LLM runtimes shut down after 10 min. Only unexpected responses
+        // (wrong port answering with 404s, timeouts mid-request) stay red.
+        isIdleRefusal(kind === 'stt' || lazySpawn, result.error) ? (
+          <span className="text-xs text-ink-muted whitespace-nowrap">
+            ○ not running — starts on demand when needed
+          </span>
+        ) : (
+          <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
+            ✗ {result.error}
+          </span>
+        )
       )}
     </div>
   );
+}
+
+/** True when a probe failure just means "nothing is listening" on a service
+ *  MeetingNotes lazily spawns (whisper always; LLM in managed modes). */
+function isIdleRefusal(lazySpawn: boolean, error: string): boolean {
+  const refused = /connection refused|ECONNREFUSED|fetch failed/i.test(error);
+  return refused && lazySpawn;
 }
 
 /** Google account card. BYO OAuth credentials (Client ID + Secret from a

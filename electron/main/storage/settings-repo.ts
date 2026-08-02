@@ -83,6 +83,12 @@ export interface Settings {
    *    and shuts it down after idle.
    *  - 'ollama': MeetingNotes spawns `ollama serve` on demand. */
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  /** Context window (tokens) passed to `lms load --context-length` when the
+   *  managed LM Studio provider auto-loads llmModel. 0 = don't pass the flag,
+   *  LM Studio uses the model's saved default — which is often 4k, silently
+   *  truncating long transcripts. Only meaningful for summaryProvider
+   *  'lm-studio'; ollama bakes context into the model, external is user-run. */
+  llmContextLength: number;
   /** How verbose the generated summary should be. Drives which "Length &
    *  depth" guidance gets baked into the summarization prompt (see
    *  buildSummaryPrompt). Independent of the model — the prompt pins the
@@ -155,6 +161,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardedAt: null,
   userSpeakerId: null,
   summaryProvider: 'external',
+  llmContextLength: 0,
   summaryDetail: 'detailed',
   disableThinking: true,
   modelHealthChecks: {},
