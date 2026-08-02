@@ -106,15 +106,18 @@ final class Recorder {
     detachProcessTap()
     // Finalize all three writers. Await each so the encoders flush cleanly;
     // the queue.sync inside AACWriter makes the cost additive but still
-    // bounded (sub-second each).
-    if let w = writerMixed { await w.finalize() }
-    if let w = writerVoice { await w.finalize() }
-    if let w = writerSystem { await w.finalize() }
+    // bounded (sub-second each). A writer that never received audio deletes
+    // its file (see AACWriter.finalize) so no unreadable stubs survive.
+    var dropped: [String] = []
+    if let w = writerMixed, await !w.finalize() { dropped.append("mixed") }
+    if let w = writerVoice, await !w.finalize() { dropped.append("voice") }
+    if let w = writerSystem, await !w.finalize() { dropped.append("system") }
     StatusEvent.emit([
       "event": "stopped",
       "bytes": NSNumber(value: writerMixed?.bytesWritten ?? 0),
       "bytes_voice": NSNumber(value: writerVoice?.bytesWritten ?? 0),
       "bytes_system": NSNumber(value: writerSystem?.bytesWritten ?? 0),
+      "empty_stems_deleted": dropped,
     ])
   }
 

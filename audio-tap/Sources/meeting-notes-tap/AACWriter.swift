@@ -11,6 +11,7 @@ final class AACWriter {
   private let processingFormat: AVAudioFormat
   private var file: AVAudioFile?
   private var started = false
+  private var framesWritten: Int64 = 0
   private let queue = DispatchQueue(label: "AACWriter.serialize")
 
   init(outputURL: URL, sampleRate: Double, bitrate: Int) throws {
@@ -52,6 +53,7 @@ final class AACWriter {
       guard let file = file else { return }
       do {
         try file.write(from: buffer)
+        framesWritten += Int64(buffer.frameLength)
       } catch {
         StatusEvent.emit(["event": "diag", "stage": "avaudiofile_write_err",
                           "err": String(describing: error)])
@@ -59,11 +61,22 @@ final class AACWriter {
     }
   }
 
-  func finalize() async {
+  /// Flushes and closes the file. When no audio frames were ever written,
+  /// deletes the output instead of leaving a header-only stub: AVAudioFile
+  /// stubs abandoned before any packets are unreadable ("moov atom not
+  /// found"), and downstream ffprobe chokes on them forever. Returns true
+  /// when a real file was kept.
+  @discardableResult
+  func finalize() async -> Bool {
     queue.sync {
       // Releasing the file flushes the AAC encoder and finalizes the M4A.
       file = nil
     }
+    if framesWritten == 0 {
+      try? FileManager.default.removeItem(at: outputURL)
+      return false
+    }
+    return true
   }
 
   var bytesWritten: Int64 {
