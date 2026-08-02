@@ -91,11 +91,20 @@ describe('validateUrl', () => {
 });
 
 describe('redactUrl', () => {
-  it('strips query strings and userinfo', () => {
-    expect(redactUrl('https://user:pw@example.com/hook?token=abc')).toBe('https://example.com/hook');
+  it('strips query strings, userinfo, and the path', () => {
+    expect(redactUrl('https://user:pw@example.com/hook?token=abc')).toBe('https://example.com/…');
   });
-  it('keeps host + path visible', () => {
-    expect(redactUrl('https://example.com/hook')).toBe('https://example.com/hook');
+  it('keeps scheme + host + port visible', () => {
+    expect(redactUrl('https://example.com:8443/hook')).toBe('https://example.com:8443/…');
+    expect(redactUrl('https://example.com/')).toBe('https://example.com');
+  });
+  it('hides path credentials for the documented Slack and Telegram setups', () => {
+    // Both services carry the secret in the PATH, which the old redaction
+    // left fully visible in the persistent log file.
+    expect(redactUrl('https://hooks.slack.com/services/T0/B0/SUPERSECRET'))
+      .toBe('https://hooks.slack.com/…');
+    expect(redactUrl('https://api.telegram.org/bot123:REALTOKEN/sendMessage?chat_id=1'))
+      .toBe('https://api.telegram.org/…');
   });
 });
 

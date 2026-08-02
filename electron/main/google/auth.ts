@@ -119,10 +119,15 @@ export class GoogleAuth {
       this.accessTokenExpiresAt = Date.now() + expiresInSec * 1000;
       return accessToken;
     } catch (e) {
-      // Most refresh failures are a revoked/expired refresh token — force a
-      // re-sign-in rather than leaving the user stuck.
-      this.signOut();
-      throw new Error('Google session expired — reconnect your account in Settings.');
+      // Only a definitive invalid_grant means the refresh token is dead
+      // (revoked/expired) — that's the one case where forcing re-sign-in
+      // helps. Network blips and Google 5xxs must NOT destroy the stored
+      // token, or a captive portal logs the user out of Google.
+      if (String(e).includes('invalid_grant')) {
+        this.signOut();
+        throw new Error('Google session expired — reconnect your account in Settings.');
+      }
+      throw new Error(`Google token refresh failed (kept your session): ${String(e)}`);
     }
   }
 
