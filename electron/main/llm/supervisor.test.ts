@@ -101,6 +101,33 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  it('lm-studio cold spawn survives the launcher exiting 0 before health (lms daemonizes)', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 3 };
+    };
+    const spawn = vi.fn(() => {
+      const proc = fakeProc() as any;
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc;
+    });
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel: vi.fn(async () => {}),
+      lmsListLoadedModels: vi.fn(async () => ['qwen/qwen3.5-9b']),
+      idleShutdownMs: 0,
+    });
+    await expect(sup.ensureReady()).resolves.toBeUndefined();
+    await sup.stop();
+  });
+
   it('lm-studio mode auto-loads the configured model when not already loaded', async () => {
     let probeCalls = 0;
     const probe = async (): Promise<{ ok: boolean }> => {
