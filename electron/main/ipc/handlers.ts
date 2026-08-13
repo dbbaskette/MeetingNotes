@@ -1,6 +1,5 @@
 import type { IpcMain } from 'electron';
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,6 +14,7 @@ import { LMStudioError, REASONING_LOOP_MARKER, type LMStudioClient } from '../lm
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { extractActionItemsFromSummary } from '../pipeline/extract-action-items.js';
 import type { RecordingManager } from '../recording/manager.js';
+import type { RecordingRecoveryService } from '../recording/recovery.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
 import type { NativeAppDetector } from '../meeting-detector/native-app-detector.js';
@@ -50,6 +50,7 @@ import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/own
 import type { Logger } from '../logging/logger.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
+import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -63,6 +64,7 @@ export interface IpcServices {
    *  does — a no-op when provider='external' (user-managed LM Studio). */
   llmSupervisor: { ensureReady: () => Promise<void> };
   recordingManager: RecordingManager;
+  recordingRecovery: RecordingRecoveryService;
   appEnumerator: AppEnumerator;
   helperPath: string;
   roster: RosterService;
@@ -110,6 +112,23 @@ function listMeetingSpeakers(
 
 function unidentifiedCount(rows: { rosterId: string | null }[]): number {
   return rows.filter((r) => r.rosterId === null).length;
+}
+
+function speakerReviewForFolder(
+  folder: string,
+  links: ReturnType<typeof listMeetingSpeakers>,
+): Map<string, SpeakerReviewMetadata> {
+  try {
+    const diar = JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] };
+    const raw = JSON.parse(fs.readFileSync(path.join(folder, 'transcript.raw.json'), 'utf8')) as {
+      segments?: Array<{ start: number; end: number; text: string; source?: 'voice' | 'system' }>;
+    };
+    return buildSpeakerReviewMetadata({
+      links, diarization: diar.segments ?? [], transcript: raw.segments ?? [],
+    });
+  } catch {
+    return new Map();
+  }
 }
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
@@ -182,6 +201,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const read = (p: string) => fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
     const speakers = listMeetingSpeakers(s.speakers, id);
+    const speakerReview = speakerReviewForFolder(folder, speakers);
     const settingsSnapshot = s.settings.getAll();
     const items = s.actionItems.listByMeeting(id);
     // Owner identity for the per-item `isMine` flag — drives the task-app
@@ -220,7 +240,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       actionItemsCount: items.length,
       stageEtaMs: eta?.etaMs ?? null,
       stageEtaRough: eta?.rough ?? false,
-      speakers,
+      speakers: speakers.map((speaker) => ({
+        ...speaker,
+        ...(speakerReview.get(speaker.localLabel) ?? {
+          state: speaker.rosterId ? ((speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
+          needsReview: !speaker.rosterId, segmentCount: 0, durationS: 0, lineCount: 0,
+        }),
+      })),
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
       transcriptMd: read(path.join(folder, 'transcript.md')),
@@ -434,6 +460,26 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.recordingManager.state(sessionId);
   });
 
+  ipc.handle(IPC_CHANNELS.recoveryList, () => s.recordingRecovery.list());
+  ipc.handle(IPC_CHANNELS.recoveryRecover, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    return s.recordingRecovery.recover(id);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryTrim, (_e, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('invalid recovery trim');
+    const { id, endSeconds } = input as { id?: unknown; endSeconds?: unknown };
+    if (typeof id !== 'string' || typeof endSeconds !== 'number') throw new Error('invalid recovery trim');
+    return s.recordingRecovery.trim(id, endSeconds);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryReveal, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    s.recordingRecovery.reveal(id);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryDismiss, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    s.recordingRecovery.dismiss(id);
+  });
+
   ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, input: unknown) => {
     // Two banner sources (browser-tab URL, native-app bundle id) share one
     // dismissal channel. The renderer sends an object discriminator so the
@@ -557,6 +603,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         } catch { /* roster update is best-effort; don't fail the link */ }
       }
       s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, parsed.rosterId, 1.0);
+      remergeMeetings([parsed.meetingId]);
       return parsed.rosterId;
     }
 
@@ -571,7 +618,38 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!embedding) throw new Error(`no embeddings for ${parsed.localLabel}`);
     const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding });
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
+    remergeMeetings([parsed.meetingId]);
     return id;
+  });
+
+  const BulkAssignSchema = z.object({
+    meetingId: z.string().min(1),
+    localLabels: z.array(z.string().min(1)).min(1).max(100),
+    rosterId: z.string().min(1),
+  });
+  ipc.handle(IPC_CHANNELS.speakersAssignBulk, (_e, input: unknown) => {
+    const parsed = BulkAssignSchema.parse(input);
+    const meeting = s.meetings.findById(parsed.meetingId);
+    if (!meeting) throw new Error('meeting not found');
+    if (!s.speakers.findById(parsed.rosterId)) throw new Error('roster speaker not found');
+    const labels = [...new Set(parsed.localLabels)];
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const links = listMeetingSpeakers(s.speakers, parsed.meetingId);
+    const metadata = speakerReviewForFolder(folder, links);
+    let diarization: DiarizationSegment[] = [];
+    try {
+      diarization = (JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] }).segments ?? [];
+    } catch { /* assignment itself remains valid without embedding reinforcement */ }
+    for (const localLabel of labels) {
+      const embedding = averageEmbeddingForLabel(diarization, localLabel);
+      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+      s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
+    }
+    remergeMeetings([parsed.meetingId]);
+    return {
+      assigned: labels.length,
+      impactedLines: labels.reduce((sum, label) => sum + (metadata.get(label)?.lineCount ?? 0), 0),
+    };
   });
 
   ipc.handle(IPC_CHANNELS.speakersSuggestions, (_e, meetingId: unknown, localLabel: unknown) => {
@@ -592,6 +670,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // "Unlink" removes the roster_speaker_id but keeps the meeting_speakers
     // row so the local label still shows up as an unidentified voice.
     s.speakers.linkToMeeting(meetingId, localLabel, null, 0);
+    remergeMeetings([meetingId]);
   });
 
   ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: unknown, status: unknown) => {

@@ -24,6 +24,11 @@ const IPC_CHANNELS = {
   recordingState: 'recording:state',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  recoveryList: 'recovery:list',
+  recoveryRecover: 'recovery:recover',
+  recoveryTrim: 'recovery:trim',
+  recoveryReveal: 'recovery:reveal',
+  recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
@@ -33,6 +38,7 @@ const IPC_CHANNELS = {
   speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
@@ -182,8 +188,8 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
     stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
     state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
-    onLevel: (cb: (e: { sessionId: string; peakDb: number }) => void) => {
-      const wrapped = (_e: unknown, payload: { sessionId: string; peakDb: number }): void => cb(payload);
+    onLevel: (cb: (e: { sessionId: string; source: 'mic' | 'system' | 'mixed'; peakDb: number }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; source: 'mic' | 'system' | 'mixed'; peakDb: number }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.recordingLevelEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingLevelEvent, wrapped);
     },
@@ -192,6 +198,18 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
     },
+  },
+  recovery: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.recoveryList) as Promise<Array<{
+      id: string; targetLabel: string; startedAt: string; outputPath: string;
+      status: string; reason: 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
+      durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
+    }>>,
+    recover: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryRecover, id) as Promise<{ meetingId: string }>,
+    trim: (id: string, endSeconds: number) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recoveryTrim, { id, endSeconds }) as Promise<{ meetingId: string }>,
+    reveal: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryReveal, id) as Promise<void>,
+    dismiss: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryDismiss, id) as Promise<void>,
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
@@ -224,6 +242,8 @@ const api = {
       rosterId?: string;
       displayName?: string;
     }) => ipcRenderer.invoke(IPC_CHANNELS.speakersAssign, input) as Promise<string>,
+    assignBulk: (input: { meetingId: string; localLabels: string[]; rosterId: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersAssignBulk, input) as Promise<{ assigned: number; impactedLines: number }>,
     // Ranked "might be X" guesses for one unidentified speaker, computed
     // from the same voice embeddings the auto-matcher uses — just without
     // its MATCH_THRESHOLD gate, since this is for a human to confirm.

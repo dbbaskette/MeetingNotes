@@ -22,6 +22,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     settings: { getAll: () => ({}), get: () => '', set: () => {} },
     lmStudio: { listModels: async () => [] },
     recordingManager: { start: async () => ({ sessionId: 's', outputPath: '/o' }), stop: async () => {}, state: () => 'idle', on: () => {} },
+    recordingRecovery: { list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal: () => {}, dismiss: () => {} },
     appEnumerator: { list: async () => [] },
     helperPath: '/bin/meeting-notes-tap',
     roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
@@ -74,6 +75,32 @@ describe('registerIpcHandlers', () => {
     // Roster management (rename existed already; merge is new).
     expect(channels).toContain('speakers:rename');
     expect(channels).toContain('speakers:merge');
+    expect(channels).toContain('speakers:assign-bulk');
+    expect(channels).toContain('recovery:list');
+  });
+
+  it('speakers:assign-bulk links every label and re-merges once', () => {
+    const linkToMeeting = vi.fn();
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      meetings: { listAll: () => [], findById: () => ({ id: 'm1', slug: 'meeting-1' }) },
+      speakers: {
+        list: () => [], findById: (id: string) => id === 'spk_a' ? { id, displayName: 'Alice' } : null,
+        listForMeeting: () => [],
+        linkToMeeting,
+      },
+    }));
+    const call = handle.mock.calls.find((c) => c[0] === 'speakers:assign-bulk');
+    const handler = call![1] as (event: unknown, input: unknown) => { assigned: number; impactedLines: number };
+
+    const result = handler(null, { meetingId: 'm1', localLabels: ['SPEAKER_00', 'SPEAKER_01'], rosterId: 'spk_a' });
+
+    expect(linkToMeeting.mock.calls).toEqual([
+      ['m1', 'SPEAKER_00', 'spk_a', 1],
+      ['m1', 'SPEAKER_01', 'spk_a', 1],
+    ]);
+    expect(vi.mocked(remergeTranscript)).toHaveBeenCalledTimes(1);
+    expect(result.assigned).toBe(2);
   });
 
   it('speakers:rename updates the roster row and re-merges every affected transcript', () => {
