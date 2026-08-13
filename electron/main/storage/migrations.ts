@@ -267,6 +267,14 @@ export const MIGRATIONS: Migration[] = [
         ON action_items(meeting_id);
     `,
   },
+  {
+    version: 15,
+    // Recovery inbox (#177). A dismissed capture remains on disk and in the
+    // session ledger; this nullable timestamp only hides it from the inbox.
+    up: `
+      ALTER TABLE recording_sessions ADD COLUMN dismissed_at TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

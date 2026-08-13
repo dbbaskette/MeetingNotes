@@ -142,6 +142,24 @@ describe('RecordingManager', () => {
     expect(repo.finalize).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards source-aware levels and treats legacy events as mixed', async () => {
+    const repo = fakeRepo();
+    const { proc, stdout } = fakeRecordingProcess();
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const levels: Array<[string, string, number]> = [];
+    mgr.on('level', (sessionId, source, peakDb) => levels.push([sessionId, source, peakDb]));
+
+    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
+    stdout.emit('data', '{"event":"level","source":"mic","peak_db":-12}\n');
+    stdout.emit('data', '{"event":"level","peak_db":-18}\n');
+
+    expect(levels).toEqual([
+      [sessionId, 'mic', -12],
+      [sessionId, 'mixed', -18],
+    ]);
+    await mgr.stop(sessionId);
+  });
+
   it('does not reset for a peak exactly at the silence threshold', async () => {
     vi.useFakeTimers();
     const repo = fakeRepo();
