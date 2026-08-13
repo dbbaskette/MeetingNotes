@@ -28,13 +28,33 @@ export interface RecoveryItem {
 type Probe = (file: string) => Promise<AudioInfo>;
 type Trim = (source: string, destination: string, endSeconds: number) => Promise<void>;
 
+export interface FinderShell {
+  showItemInFolder: (file: string) => void;
+  openPath: (directory: string) => Promise<string>;
+}
+
+/**
+ * Show a recovered capture in Finder. `showItemInFolder` is a no-op when a
+ * stale recovery row points at a file that has since been moved or removed;
+ * opening its parent directory still gives the user a useful way to inspect
+ * the remaining capture files and is reliable for that case.
+ */
+export async function revealPathInFinder(audioPath: string, shell: FinderShell): Promise<void> {
+  const absolutePath = path.resolve(audioPath);
+  if (fs.existsSync(absolutePath)) {
+    shell.showItemInFolder(absolutePath);
+    return;
+  }
+  await shell.openPath(path.dirname(absolutePath));
+}
+
 export class RecordingRecoveryService {
   constructor(private readonly deps: {
     sessions: RecordingSessionsRepo;
     meetings: MeetingsRepo;
     probe?: Probe;
     catalog: (audioPath: string) => Promise<CatalogResult>;
-    reveal: (audioPath: string) => void;
+    reveal: (audioPath: string) => void | Promise<void>;
     trim?: Trim;
   }) {}
 
@@ -85,8 +105,8 @@ export class RecordingRecoveryService {
     return { meetingId: result.meeting.id };
   }
 
-  reveal(id: string): void {
-    this.deps.reveal(this.requireSession(id).outputPath);
+  async reveal(id: string): Promise<void> {
+    await this.deps.reveal(this.requireSession(id).outputPath);
   }
 
   dismiss(id: string): void {

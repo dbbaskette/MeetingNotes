@@ -473,7 +473,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
   ipc.handle(IPC_CHANNELS.recoveryReveal, (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) throw new Error('recovery id required');
-    s.recordingRecovery.reveal(id);
+    return s.recordingRecovery.reveal(id);
   });
   ipc.handle(IPC_CHANNELS.recoveryDismiss, (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) throw new Error('recovery id required');

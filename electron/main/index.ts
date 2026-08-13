@@ -25,7 +25,7 @@ import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
 import { catalogAudio } from './library/catalog.js';
-import { RecordingRecoveryService } from './recording/recovery.js';
+import { RecordingRecoveryService, revealPathInFinder } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
@@ -389,7 +389,7 @@ app.whenReady().then(async () => {
     sessions: recordingSessionsRepo,
     meetings,
     catalog: catalogRecording,
-    reveal: (audioPath) => shell.showItemInFolder(audioPath),
+    reveal: (audioPath) => revealPathInFinder(audioPath, shell),
   });
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
