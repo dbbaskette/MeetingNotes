@@ -9,7 +9,7 @@ No cloud. No uploads. No API keys at inference time. No third-party recorder to 
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.8.4-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.10.0-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -42,7 +42,7 @@ Local **whisper.cpp** transcription + **pyannote** diarization, then a local LLM
 <td width="33%" valign="top">
 
 ### 🗂️ Organize
-Name voices once and they're recognized across meetings. A **Weekly** rollup stitches the week into a narrative with cross-meeting themes and your open action items.
+Name voices once and they're recognized across meetings. A **Needs attention** panel gathers recovery, failure, speaker-review, and pending work, while **Weekly** stitches the week into a narrative with cross-meeting themes and your open action items.
 
 </td>
 </tr>
@@ -143,7 +143,7 @@ Each meeting is one row in SQLite (`~/Documents/MeetingNotes/db.sqlite`) and one
 
 ```
 meetings/<slug>/
-├── audio.m4a            symlink to the recording
+├── audio.mp3            symlink to the recording
 ├── transcript.raw.json  whisper output
 ├── diarization.json     pyannote speaker turns
 ├── transcript.md        speaker-labeled, with real names after the gate
@@ -181,12 +181,14 @@ brew install whisper-cpp ffmpeg
 4. Click **■ Stop** — the new row lands in your library instantly.
 5. Click **▶ Process** to run the pipeline.
 
-Each recording writes three AAC files to `~/Music/MeetingNotes/` (mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline) plus `.voice` and `.system` stems reserved for future stem-aware processing.
+Each recording writes up to three AAC files to `~/Music/MeetingNotes/` (mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
+
+If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Finder**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched.
 
 <details>
 <summary><strong>Managing recordings</strong></summary>
 
-Every row and the detail-view header has a **⋯** menu with **Rename…** and **Delete…**. Delete is a hard delete — mixed m4a, both stems, the meeting folder, and the DB row.
+Every row and the detail-view header has a **⋯** menu with **Rename…** and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
 </details>
 
 ## 🧠 Bring your own model (and reasoning-model resilience)
@@ -208,7 +210,7 @@ MeetingNotes talks to any chat model in **LM Studio** or **Ollama** over an Open
 <details open>
 <summary><strong>The speaker-ID gate</strong> — name unknown voices once</summary>
 
-After diarize + identify, the pipeline pauses at `awaiting_speaker_id`; the library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each unknown voice has a **▶ Play sample** (8-second clip) and a dropdown to link an existing roster entry or create a new one. **Continue** re-merges the transcript with real names and proceeds. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
+After diarize + identify, the pipeline pauses at `awaiting_speaker_id`; the library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
 </details>
 
 <details>
@@ -236,6 +238,7 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
 - <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.
+- **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings are prioritized in one compact panel with a next action and age.
 </details>
 
 ## 📤 Integrations & export
@@ -297,14 +300,14 @@ Create a **fine-grained** token with "Read access to contents of all public gate
 
 ```bash
 npm run dev        # vite + electron with HMR
-npx vitest run     # test suite (540 tests)   ·  see note below
+npm test           # rebuild native deps, then run the full suite (688 tests)
 npm run lint
 npm run build      # tsc main + preload (CJS) + vite
 npm run dist       # full installer: audio-tap + sidecar + app + .dmg + .zip
 ```
 
 > [!NOTE]
-> Use `npx vitest run` rather than `npm test` — the repo's `posttest` hook rebuilds `better-sqlite3` for Electron's ABI and can exit non-zero on newer Node even when every test passes.
+> `npm test` rebuilds `better-sqlite3` for the current Node/Electron ABI before running Vitest. If you only need the JavaScript tests and already have the native dependency built, use `npx vitest run`.
 
 <details>
 <summary><strong>Source layout</strong></summary>
@@ -312,7 +315,8 @@ npm run dist       # full installer: audio-tap + sidecar + app + .dmg + .zip
 ```
 audio-tap/            Swift CLI helper — CoreAudio Process Tap recording (swiftc + codesign)
 electron/main/        main process: pipeline, storage, IPC, watcher, services
-  recording/          RecordingManager, AppEnumerator, orphan-recovery
+  recording/          RecordingManager, AppEnumerator, orphan-recovery, recovery inbox
+  library/            watcher, catalog service, ffprobe
   meeting-detector/   browser-tab URL polling + native-app detector
   url-scheme/         meetingnotes:// handler
   exporters/          apple-reminders · google-tasks · google-doc · markdown · webhook
@@ -322,19 +326,19 @@ electron/main/        main process: pipeline, storage, IPC, watcher, services
   diarization/        pyannote sidecar supervisor + HTTP client
   weekly/             Mon–Sun aggregator + narrative prompt
   pipeline/stages/    transcribing · diarizing · merging · identifying · summarizing · extracting
-  storage/            SQLite repos + migrations (schema v14)
+  storage/            SQLite repos + migrations (schema v15)
 electron/preload/     CJS IPC bridge (with a parity test)
 electron/renderer/    React UI (views/ · components/ · lib/ · store/)
 sidecar/              Python pyannote diarization sidecar, FastAPI :8765
 scripts/              setup.sh · start.sh · rebuild.sh · whisper-server.sh · doctor.sh
-docs/                 url-scheme.md · exporters.md · google-setup.md · smoke-test · specs
+docs/                 url-scheme.md · exporters.md · google-setup.md · releases/ · smoke-test · specs
 ```
 </details>
 
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.8.4-arm64.dmg` + `.zip`.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.10.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -350,7 +354,7 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.8.4** — stable on macOS 14.2+ / Apple Silicon. Full pipeline working end-to-end; the packaged `.dmg` runs the same path as `npm run dev`. Browser + native-app meeting detection ship enabled-but-off. The "All system audio" capture path remains experimental.
+**1.10.0** — stable on macOS 14.2+ / Apple Silicon. Full local pipeline working end-to-end, with source-aware capture diagnostics, non-destructive recording recovery, unified attention triage, and faster speaker review. Browser + native-app meeting detection ship enabled-but-off. The "All system audio" capture path remains an explicit fallback for cases where a specific app source is silent.
 
 ## 📄 License
 
