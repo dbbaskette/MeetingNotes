@@ -20,6 +20,7 @@ import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
+import { speakerReviewLayout } from '../lib/speaker-review-layout';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -2672,6 +2673,7 @@ function SpeakerRow({
 }): JSX.Element {
   const named = rosterId !== null;
   const color = colorForSpeakerIndex(colorIdx);
+  const layout = speakerReviewLayout();
 
   return (
     <div
@@ -2691,7 +2693,7 @@ function SpeakerRow({
         )}
         <button
           onClick={onToggle}
-          className="flex-1 min-w-0 flex items-center gap-2 p-2 text-left"
+          className={layout.button}
           aria-expanded={isOpen}
         >
         <div
@@ -2700,22 +2702,24 @@ function SpeakerRow({
         >
           {(displayName?.[0] ?? localLabel.replace('SPEAKER_', '').slice(-1) ?? '?').toUpperCase()}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className={layout.details}>
           <div className="font-semibold truncate">{displayName ?? localLabel}</div>
-          <div className="text-[10px] text-ink-muted">
+          <div className="text-[10px] text-ink-muted truncate">
             {named ? `${localLabel} · ` : ''}{fmtSec(durationS)} speaking · {lineCount} line{lineCount === 1 ? '' : 's'}
           </div>
+          <div className={layout.status}>
+            <span className={`max-w-full text-[10px] px-1.5 py-0.5 rounded-full ${
+              reviewState === 'confirmed' ? 'bg-status-okBg text-status-ok'
+                : reviewState === 'probable' ? 'bg-brand-indigo/10 text-brand-indigo'
+                  : 'bg-status-warnBg text-status-warnText'
+            }`}>
+              {reviewState === 'confirmed' ? 'Confirmed'
+                : reviewState === 'probable' ? `Probably ${displayName ?? ''} ${Math.round((confidence ?? 0) * 100)}%`
+                  : 'Unknown'}
+            </span>
+            {needsReview && <span className="text-[10px] text-status-warnText font-semibold">Needs review</span>}
+          </div>
         </div>
-        <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${
-          reviewState === 'confirmed' ? 'bg-status-okBg text-status-ok'
-            : reviewState === 'probable' ? 'bg-brand-indigo/10 text-brand-indigo'
-              : 'bg-status-warnBg text-status-warnText'
-        }`}>
-          {reviewState === 'confirmed' ? 'Confirmed'
-            : reviewState === 'probable' ? `Probably ${displayName ?? ''} ${Math.round((confidence ?? 0) * 100)}%`
-              : 'Unknown'}
-        </span>
-        {needsReview && <span className="text-[10px] text-status-warnText font-semibold">Needs review</span>}
         <svg
           viewBox="0 0 16 16"
           className={`w-3 h-3 text-ink-muted shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
