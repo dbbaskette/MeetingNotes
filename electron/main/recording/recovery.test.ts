@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { RecordingRecoveryService } from './recovery.js';
+import { RecordingRecoveryService, revealPathInFinder } from './recovery.js';
 
 describe('RecordingRecoveryService', () => {
   it('classifies and recovers a microphone-only recording without changing its stem', async () => {
@@ -56,9 +56,20 @@ describe('RecordingRecoveryService', () => {
     });
 
     expect(await service.list()).toMatchObject([{ reason: 'unreadable', canRecover: false }]);
-    service.reveal('bad');
+    await service.reveal('bad');
     service.dismiss('bad');
     expect(reveal).toHaveBeenCalledWith(primary);
     expect(dismissRecovery).toHaveBeenCalledWith('bad');
+  });
+
+  it('opens the containing folder when the original capture has gone missing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-recovery-missing-'));
+    const showItemInFolder = vi.fn();
+    const openPath = vi.fn(async () => '');
+
+    await revealPathInFinder(path.join(dir, 'gone.m4a'), { showItemInFolder, openPath });
+
+    expect(showItemInFolder).not.toHaveBeenCalled();
+    expect(openPath).toHaveBeenCalledWith(dir);
   });
 });

@@ -79,6 +79,20 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('recovery:list');
   });
 
+  it('recovery:reveal waits for the Finder handoff to finish', async () => {
+    const handle = vi.fn();
+    const reveal = vi.fn(async () => {});
+    registerIpcHandlers({ handle } as any, baseServices({ recordingRecovery: {
+      list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal, dismiss: () => {},
+    } }));
+    const call = handle.mock.calls.find((c) => c[0] === 'recovery:reveal');
+    const result = (call![1] as (event: unknown, id: unknown) => Promise<void>)(null, 'r1');
+
+    expect(result).toBeInstanceOf(Promise);
+    await result;
+    expect(reveal).toHaveBeenCalledWith('r1');
+  });
+
   it('speakers:assign-bulk links every label and re-merges once', () => {
     const linkToMeeting = vi.fn();
     const handle = vi.fn();
