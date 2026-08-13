@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { VuMeter } from './VuMeter';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
-import { createSilenceDetector } from '../lib/silence-detector';
+import {
+  captureSummary, deriveCaptureHealth, type CaptureLevelSource,
+} from '../lib/capture-health';
 
 /** How long the "Confirm stop" state stays armed before reverting to the
  *  plain Stop button. Long enough for a deliberate second click, short
@@ -10,39 +12,43 @@ import { createSilenceDetector } from '../lib/silence-detector';
 const CONFIRM_STOP_MS = 3000;
 
 export function LiveRecordingRow({
-  sessionId, label, startedAt, onStopped,
+  sessionId, label, startedAt, onStopped, onRestarted,
 }: {
   sessionId: string;
   label: string;
   startedAt: string;
-  onStopped: () => void;
+  onStopped: (summary: string) => void;
+  onRestarted: (recording: { sessionId: string; label: string; startedAt: string }) => void;
 }): JSX.Element {
   const elapsed = useElapsed(startedAt, true);
-  const [peakDb, setPeakDb] = useState(-60);
+  const [peaks, setPeaks] = useState<Record<CaptureLevelSource, number>>({ mic: -60, system: -60, mixed: -60 });
+  const [lastAudibleAt, setLastAudibleAt] = useState<Partial<Record<CaptureLevelSource, number>>>({});
+  const [nowMs, setNowMs] = useState(Date.now());
   const [stopping, setStopping] = useState(false);
   const [confirmingStop, setConfirmingStop] = useState(false);
-  const [silent, setSilent] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seen = useRef(new Set<CaptureLevelSource>());
 
-  // No-audio watchdog: silent when nothing above -50 dBFS has been heard for
-  // 20s (after a 5s startup grace). Anchored to the session's real start so
-  // a remount doesn't restart the grace period.
-  const detector = useRef(createSilenceDetector({ thresholdDb: -50, windowMs: 20_000, graceMs: 5_000 }));
-  useEffect(() => {
-    const startMs = Date.parse(startedAt);
-    detector.current.feed(Number.isFinite(startMs) ? startMs : Date.now(), -Infinity);
-  }, [startedAt]);
+  const parsedStart = Date.parse(startedAt);
+  const health = deriveCaptureHealth({
+    startedAtMs: Number.isFinite(parsedStart) ? parsedStart : nowMs,
+    nowMs,
+    lastAudibleAt,
+  });
 
   useEffect(() => {
     const off = api.recording.onLevel((e) => {
       if (e.sessionId !== sessionId) return;
-      setPeakDb(e.peakDb);
-      detector.current.feed(Date.now(), e.peakDb);
-      setSilent(detector.current.isSilent(Date.now()));
+      const source = e.source ?? 'mixed';
+      setPeaks((current) => ({ ...current, [source]: e.peakDb }));
+      if (e.peakDb > -50) {
+        const at = Date.now();
+        seen.current.add(source);
+        setLastAudibleAt((current) => ({ ...current, [source]: at }));
+      }
     });
-    // Level events normally arrive ~10Hz, but if they stall entirely (helper
-    // wedged) this 1s tick still lets the warning appear.
-    const tick = setInterval(() => setSilent(detector.current.isSilent(Date.now())), 1000);
+    const tick = setInterval(() => setNowMs(Date.now()), 1000);
     return () => { off(); clearInterval(tick); };
   }, [sessionId]);
 
@@ -56,7 +62,22 @@ export function LiveRecordingRow({
       await api.recording.stop(sessionId);
     } finally {
       setStopping(false);
-      onStopped();
+      onStopped(captureSummary(seen.current));
+    }
+  }
+
+  async function restartWithSystemAudio(): Promise<void> {
+    if (!window.confirm('Stop this recording and restart using All system audio?')) return;
+    setStopping(true);
+    setRestartError(null);
+    try {
+      await api.recording.stop(sessionId);
+      const next = await api.recording.start({ targetPid: 'system', targetLabel: 'All system audio', mic: true }) as { sessionId: string };
+      onRestarted({ sessionId: next.sessionId, label: 'All system audio', startedAt: new Date().toISOString() });
+    } catch (error) {
+      setRestartError(`Could not restart capture: ${(error as Error).message}`);
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -81,7 +102,12 @@ export function LiveRecordingRow({
           <div className="text-sm font-semibold text-ink truncate">Recording: {label}</div>
           <div className="text-xs text-ink-muted tabular-nums">{elapsed !== null ? fmtElapsed(elapsed) : '0s'}</div>
         </div>
-        <VuMeter peakDb={peakDb} />
+        <div className="hidden sm:flex items-center gap-3" aria-label="Capture source health">
+          <StreamIndicator label="Mic" active={health.active.mic} checking={health.state === 'checking'} />
+          <StreamIndicator label="App" active={health.active.system} checking={health.state === 'checking'} />
+          <StreamIndicator label="File" active={health.active.mixed} checking={health.state === 'checking'} />
+        </div>
+        <VuMeter peakDb={peaks.mixed} />
         <button
           onClick={handleStopClick}
           disabled={stopping}
@@ -92,12 +118,30 @@ export function LiveRecordingRow({
           {stopping ? 'Stopping…' : confirmingStop ? 'Confirm stop' : '■ Stop'}
         </button>
       </div>
-      {silent && !stopping && (
+      {health.state === 'checking' && !stopping && (
+        <div className="mt-2 text-xs text-ink-muted px-3 py-1">Checking microphone, app audio, and recording file…</div>
+      )}
+      {health.state === 'warning' && !stopping && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-status-warnBg text-status-warnText text-xs font-medium px-3 py-1.5">
           <span aria-hidden>⚠︎</span>
-          No audio detected — check the selected source.
+          <span className="flex-1">{health.message}</span>
+          {(health.warning === 'app-silent' || health.warning === 'all-silent') && (
+            <button className="underline underline-offset-2" onClick={() => void restartWithSystemAudio()}>
+              Restart with All system audio
+            </button>
+          )}
         </div>
       )}
+      {restartError && <div className="mt-2 text-xs text-danger-solid">{restartError}</div>}
     </div>
+  );
+}
+
+function StreamIndicator({ label, active, checking }: { label: string; active: boolean; checking: boolean }): JSX.Element {
+  const dot = checking ? 'bg-gray-400 animate-pulse' : active ? 'bg-emerald-500' : 'bg-amber-500';
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />{label}
+    </span>
   );
 }

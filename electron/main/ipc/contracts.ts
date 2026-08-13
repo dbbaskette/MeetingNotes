@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const MeetingSpeakerSchema = z.object({
+  localLabel: z.string(),
+  rosterId: z.string().nullable(),
+  displayName: z.string().nullable(),
+  confidence: z.number().nullable(),
+});
+
 export const MeetingSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
@@ -23,16 +30,18 @@ export const MeetingSummarySchema = z.object({
    *  hedges it ("~3m (rough)"). Always false when stageEtaMs is null. */
   stageEtaRough: z.boolean(),
   skipSpeakerId: z.boolean(),
-  speakers: z.array(z.object({
-    localLabel: z.string(),
-    rosterId: z.string().nullable(),
-    displayName: z.string().nullable(),
-    confidence: z.number().nullable(),
-  })),
+  speakers: z.array(MeetingSpeakerSchema),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
 export const MeetingDetailSchema = MeetingSummarySchema.extend({
+  speakers: z.array(MeetingSpeakerSchema.extend({
+    state: z.enum(['unknown', 'probable', 'confirmed']),
+    needsReview: z.boolean(),
+    segmentCount: z.number(),
+    durationS: z.number(),
+    lineCount: z.number(),
+  })),
   transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
@@ -82,6 +91,11 @@ export const IPC_CHANNELS = {
   recordingState: 'recording:state',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  recoveryList: 'recovery:list',
+  recoveryRecover: 'recovery:recover',
+  recoveryTrim: 'recovery:trim',
+  recoveryReveal: 'recovery:reveal',
+  recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
@@ -95,6 +109,7 @@ export const IPC_CHANNELS = {
   speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
