@@ -15,6 +15,7 @@ import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
 import { requestLeave } from './lib/unsaved-guard';
+import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
 
 type View =
   | { kind: 'library' }
@@ -39,17 +40,6 @@ export interface RecordingStartInput {
   targetPid: number | 'system';
   targetLabel: string;
   mic: boolean;
-}
-
-/** Loose equality for history de-duplication: same screen (and same
- *  meeting for detail views) counts as the same entry even if row hints
- *  differ between clicks. */
-function viewsEqual(a: View, b: View): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === 'detail' && b.kind === 'detail') {
-    return a.id === b.id && a.seekSeconds === b.seekSeconds;
-  }
-  return true;
 }
 
 /** Lives at the App level (not inside LibraryView) so navigating between
@@ -77,44 +67,22 @@ export function App(): JSX.Element {
 function AppInner(): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'library' });
 
-  // Navigation history (#190). A simple cursor-based stack: navigate()
-  // truncates any forward entries and pushes; goBack/goForward move the
-  // cursor. Both route through the unsaved-edits guard, so a dirty
-  // summary draft blocks back/forward just like it blocks the detail
-  // view's own back button.
-  const stackRef = useRef<View[]>([{ kind: 'library' }]);
-  const cursorRef = useRef(0);
-
-  const navigate = useCallback(async (next: View): Promise<void> => {
-    if (!(await requestLeave())) return;
-    const stack = stackRef.current.slice(0, cursorRef.current + 1);
-    const cur = stack[stack.length - 1]!;
-    if (!viewsEqual(cur, next)) stack.push(next);
-    if (stack.length > 50) stack.shift();
-    stackRef.current = stack;
-    cursorRef.current = stack.length - 1;
-    setView(next);
-  }, []);
-
-  const goBack = useCallback(async (): Promise<void> => {
-    if (cursorRef.current === 0) return;
-    if (!(await requestLeave())) return;
-    cursorRef.current -= 1;
-    setView(stackRef.current[cursorRef.current]!);
-  }, []);
-
-  const goForward = useCallback(async (): Promise<void> => {
-    if (cursorRef.current >= stackRef.current.length - 1) return;
-    if (!(await requestLeave())) return;
-    cursorRef.current += 1;
-    setView(stackRef.current[cursorRef.current]!);
-  }, []);
-
-  // Latest nav functions for the once-registered global listeners below —
-  // the callbacks are stable (useCallback with [] deps), but the ref keeps
-  // the wiring explicit and immune to future dep changes.
-  const navRef = useRef({ navigate, goBack, goForward });
-  navRef.current = { navigate, goBack, goForward };
+  // Navigation history (#190). Semantics live in lib/nav-history (unit-
+  // tested there): de-dup via viewsEqual, forward-truncation on navigate,
+  // 50-entry cap, and guard gating on every transition so a dirty summary
+  // draft blocks back/forward/navigate exactly once — callers must not
+  // pre-guard, or the discard dialog would appear twice.
+  const navRef = useRef<NavHistory<View> | null>(null);
+  if (navRef.current === null) {
+    navRef.current = createNavHistory<View>({ kind: 'library' }, {
+      equal: viewsEqual,
+      guard: requestLeave,
+      onChange: setView,
+    });
+  }
+  // Methods are closures over the history's internal state (no `this`),
+  // so destructuring is safe.
+  const { navigate, back: goBack, forward: goForward } = navRef.current;
 
   const [permsOk, setPermsOk] = useState(true);
   const [liveRecording, setLiveRecordingState] = useState<LiveRecording | null>(null);
@@ -196,23 +164,23 @@ function AppInner(): JSX.Element {
       // bare keystroke.
       if ((e.metaKey || e.ctrlKey) && e.key === '[') {
         e.preventDefault();
-        void navRef.current.goBack();
+        void goBack();
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ']') {
         e.preventDefault();
-        void navRef.current.goForward();
+        void goForward();
         return;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [goBack, goForward]);
   const onPaletteOpen = (t: PaletteTarget): void => {
     // Meeting switch is destructive to an in-flight summary edit session in
     // the detail view — it registers an unsaved-edits guard while dirty.
     // navigate() itself consults the guard, so no separate check here.
-    void navRef.current.navigate({
+    void navigate({
       kind: 'detail',
       id: t.meetingId,
       seekSeconds: t.seekSeconds,
@@ -303,19 +271,19 @@ function AppInner(): JSX.Element {
           window.dispatchEvent(new CustomEvent('mn:toggle-record'));
           break;
         case 'view-library':
-          void navRef.current.navigate({ kind: 'library' });
+          void navigate({ kind: 'library' });
           break;
         case 'view-weekly':
-          void navRef.current.navigate({ kind: 'weekly' });
+          void navigate({ kind: 'weekly' });
           break;
         case 'view-settings':
-          void navRef.current.navigate({ kind: 'settings' });
+          void navigate({ kind: 'settings' });
           break;
         case 'nav-back':
-          void navRef.current.goBack();
+          void goBack();
           break;
         case 'nav-forward':
-          void navRef.current.goForward();
+          void goForward();
           break;
         case 'open-search':
           setSearchOpen(true);
@@ -323,17 +291,17 @@ function AppInner(): JSX.Element {
       }
     });
     return () => { off(); };
-  }, []);
+  }, [goBack, goForward, navigate]);
 
   // meetingnotes://open?id=… — main process emits this when an external
   // caller invokes the URL scheme (#77). Navigate to the detail view.
   // navigate() consults the unsaved-edits guard.
   useEffect(() => {
     const off = api.onOpenMeeting((id) => {
-      void navRef.current.navigate({ kind: 'detail', id });
+      void navigate({ kind: 'detail', id });
     });
     return () => { off(); };
-  }, []);
+  }, [navigate]);
 
   // Auto-record-started — main process started a recording on its own
   // (Zoom + autoRecordZoom). Route into LiveRecording so the in-progress

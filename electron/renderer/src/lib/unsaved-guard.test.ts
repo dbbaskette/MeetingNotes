@@ -22,6 +22,17 @@ describe('unsaved-guard', () => {
     expect(await requestLeave()).toBe(false);
   });
 
+  it('resolves each call independently for async guards', async () => {
+    let answer = false;
+    setUnsavedGuard(() => Promise.resolve(answer));
+    const first = requestLeave();
+    // The caller flips the answer (as if the user confirmed in the dialog)
+    // before the second navigation attempt — each call gets its own verdict.
+    answer = true;
+    expect(await first).toBe(false);
+    expect(await requestLeave()).toBe(true);
+  });
+
   it('clearing the guard restores the default allow', async () => {
     setUnsavedGuard(() => false);
     expect(await requestLeave()).toBe(false);

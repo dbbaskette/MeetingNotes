@@ -14,7 +14,7 @@ import {
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
-import { setUnsavedGuard, requestLeave } from '../lib/unsaved-guard';
+import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
@@ -342,8 +342,11 @@ export function MeetingDetailView({
     // on screen while the user reads a long summary or transcript.
     <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
       <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+        {/* onBack (App's history goBack) consults the unsaved-edits guard
+            itself — do NOT guard again here, or a dirty summary would
+            prompt the discard dialog twice. */}
         <button
-          onClick={() => void requestLeave().then((ok) => { if (ok) onBack(); })}
+          onClick={onBack}
           className="text-ink-muted hover:text-ink text-sm shrink-0"
         >
           ← Library
