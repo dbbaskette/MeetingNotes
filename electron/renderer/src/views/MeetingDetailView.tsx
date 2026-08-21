@@ -14,7 +14,9 @@ import {
 } from '../lib/transcript-lines';
 import { useToast } from '../components/Toasts';
 import { shortcutMod } from '../lib/shortcut';
-import { setUnsavedGuard, confirmLeave } from '../lib/unsaved-guard';
+import { setUnsavedGuard, requestLeave } from '../lib/unsaved-guard';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
 import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
@@ -214,12 +216,34 @@ export function MeetingDetailView({
 
   // While dirty, register the global unsaved-edits guard so destructive
   // exits (back button below, App-level meeting switches via the search
-  // palette / URL scheme / status bar) confirm before discarding.
+  // palette / URL scheme / status bar / history) confirm before discarding.
+  // The guard is asynchronous: it opens a styled ConfirmDialog and resolves
+  // with the user's answer, replacing the old window.confirm (#192).
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const discardResolveRef = useRef<((ok: boolean) => void) | null>(null);
   useEffect(() => {
     if (!summaryDirty) return;
-    setUnsavedGuard(() => window.confirm('Discard unsaved summary edits?'));
-    return () => setUnsavedGuard(null);
+    setUnsavedGuard(() => new Promise<boolean>((resolve) => {
+      // A second navigation attempt while the dialog is open resolves the
+      // first (denied) so it can't dangle.
+      discardResolveRef.current?.(false);
+      discardResolveRef.current = resolve;
+      setDiscardOpen(true);
+    }));
+    return () => {
+      discardResolveRef.current = null;
+      setUnsavedGuard(null);
+    };
   }, [summaryDirty]);
+
+  function settleDiscard(ok: boolean): void {
+    setDiscardOpen(false);
+    const resolve = discardResolveRef.current;
+    discardResolveRef.current = null;
+    resolve?.(ok);
+    // If declined, the draft stays dirty and the effect re-registers the
+    // guard on the next dirty flip — no action needed here.
+  }
 
   // `kick` is a deliberate re-run trigger for the polling effect. Mutations
   // that change the meeting's live state (rerun, speaker assign) bump it so
@@ -319,7 +343,7 @@ export function MeetingDetailView({
     <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
       <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button
-          onClick={() => { if (confirmLeave()) onBack(); }}
+          onClick={() => void requestLeave().then((ok) => { if (ok) onBack(); })}
           className="text-ink-muted hover:text-ink text-sm shrink-0"
         >
           ← Library
@@ -426,18 +450,20 @@ export function MeetingDetailView({
           onClick={() => skipBy(-SKIP_SECONDS)}
           title="Back 15 seconds (←)"
           aria-label="Back 15 seconds"
-          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition inline-flex items-center gap-1"
         >
-          ↺ 15s
+          <Icon name="rotate-ccw" className="w-3 h-3" />
+          15s
         </button>
         <button
           type="button"
           onClick={() => skipBy(SKIP_SECONDS)}
           title="Forward 15 seconds (→)"
           aria-label="Forward 15 seconds"
-          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition"
+          className="shrink-0 text-xs font-semibold text-ink-muted hover:text-ink bg-surface border border-surface-border rounded-lg px-2.5 py-1.5 tabular-nums transition inline-flex items-center gap-1"
         >
-          15s ↻
+          15s
+          <Icon name="rotate-cw" className="w-3 h-3" />
         </button>
         <button
           type="button"
@@ -457,6 +483,19 @@ export function MeetingDetailView({
           className="flex-1 min-w-0"
         />
       </div>
+
+      {/* Unsaved-summary discard confirmation (#192). Opened by the async
+          unsaved-edits guard registered above; resolves the pending
+          navigation promise with the user's answer. */}
+      <ConfirmDialog
+        open={discardOpen}
+        title="Discard unsaved summary edits?"
+        body="Your edits to the summary haven't been saved. Leaving this meeting now discards them."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => settleDiscard(true)}
+        onCancel={() => settleDiscard(false)}
+      />
     </div>
   );
 }
@@ -903,7 +942,7 @@ function ReasoningRecoveryControls(): JSX.Element {
       >
         <option value="">(choose)</option>
         {models.map((m) => (
-          <option key={m} value={m}>{isKnownReasoningModel(m) ? `🧠 ${m}` : m}</option>
+          <option key={m} value={m}>{isKnownReasoningModel(m) ? `${m} (reasoning)` : m}</option>
         ))}
       </select>
       <label className="flex items-center gap-2 text-xs text-danger-text cursor-pointer">
@@ -1075,9 +1114,10 @@ function LeftRail({
         {neverProcessed ? (
           <button
             onClick={startProcessing}
-            className="w-full bg-brand-indigo text-white text-sm font-semibold rounded-lg py-2 hover:bg-brand-indigo/90 transition"
+            className="w-full bg-brand-indigo text-white text-sm font-semibold rounded-lg py-2 hover:bg-brand-indigo/90 transition inline-flex items-center justify-center gap-1.5"
           >
-            ▶ Process recording
+            <Icon name="play" className="w-3.5 h-3.5" />
+            Process recording
           </button>
         ) : isProcessing ? (
           <div className="text-xs text-ink-muted italic px-1">
@@ -1768,8 +1808,18 @@ function ActionItemDisplay({
       >
         <div className={`text-sm ${done ? 'text-ink-muted line-through' : 'text-ink'}`}>{item.text}</div>
         <div className="text-xs text-ink-muted mt-1 flex items-center gap-3">
-          {item.ownerName && <span>👤 {item.ownerName}</span>}
-          {item.dueDate && <span>📅 {item.dueDate}</span>}
+          {item.ownerName && (
+            <span className="inline-flex items-center gap-1">
+              <Icon name="user" className="w-3 h-3" />
+              {item.ownerName}
+            </span>
+          )}
+          {item.dueDate && (
+            <span className="inline-flex items-center gap-1">
+              <Icon name="calendar" className="w-3 h-3" />
+              {item.dueDate}
+            </span>
+          )}
           {item.status === 'done' && (
             <span className="bg-status-okBg text-status-ok font-semibold px-1.5 rounded">DONE</span>
           )}
@@ -2246,23 +2296,32 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
             users export to Markdown for distribution and Reminders is
             the platform-specific niche. Equal weight lets the user
             choose without the UI nudging. Disabled exporters keep the
-            muted treatment so it's clear which options are live. */}
-        <button
-          disabled={!canTaskExport}
-          onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
-          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
-          title={taskDisabledReason ?? (hasItems ? undefined : 'Needs action items — run Extract first')}
-        >
-          → Apple Reminders
-        </button>
-        <button
-          disabled={!canMarkdown}
-          onClick={() => void exportMarkdown()}
-          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
-          title={canMarkdown ? undefined : 'Needs a summary — run Summarize first'}
-        >
-          ↓ Markdown
-        </button>
+            muted treatment so it's clear which options are live, and
+            their reason renders as an inline hint line (#202) — the old
+            title-only tooltips were invisible to trackpad and keyboard
+            users. */}
+        <div className="space-y-2">
+          <button
+            disabled={!canTaskExport}
+            onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
+            className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          >
+            → Apple Reminders
+          </button>
+          {!canTaskExport && (
+            <DisabledHint text={taskDisabledReason ?? 'Needs action items — run Extract first'} />
+          )}
+        </div>
+        <div className="space-y-2">
+          <button
+            disabled={!canMarkdown}
+            onClick={() => void exportMarkdown()}
+            className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          >
+            ↓ Markdown
+          </button>
+          {!canMarkdown && <DisabledHint text="Needs a summary — run Summarize first" />}
+        </div>
         {markdownError && (
           <div className="text-[11px] text-danger">{markdownError}</div>
         )}
@@ -2277,26 +2336,34 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
             </span>
           </div>
         )}
-        <button
-          disabled={!googleSignedIn || !canTaskExport}
-          onClick={() => setExporting({ id: 'google-tasks', label: 'Google Tasks' })}
-          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
-          title={!googleSignedIn ? 'Connect a Google account in Settings' : taskDisabledReason}
-        >
-          → Google Tasks{googleSignedIn ? '' : ' (connect in Settings)'}
-        </button>
-        <button
-          disabled={!googleSignedIn || !canMarkdown}
-          onClick={() => setExporting({ id: 'google-doc', label: 'Google Doc' })}
-          className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
-          title={!googleSignedIn ? 'Connect a Google account in Settings' : (canMarkdown ? undefined : 'Needs a summary — run Summarize first')}
-        >
-          → Google Doc{googleSignedIn ? '' : ' (connect in Settings)'}
-        </button>
+        <div className="space-y-2">
+          <button
+            disabled={!googleSignedIn || !canTaskExport}
+            onClick={() => setExporting({ id: 'google-tasks', label: 'Google Tasks' })}
+            className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          >
+            → Google Tasks{googleSignedIn ? '' : ' (connect in Settings)'}
+          </button>
+          {!googleSignedIn && <DisabledHint text="Connect a Google account in Settings" />}
+          {googleSignedIn && !canTaskExport && taskDisabledReason && (
+            <DisabledHint text={taskDisabledReason} />
+          )}
+        </div>
+        <div className="space-y-2">
+          <button
+            disabled={!googleSignedIn || !canMarkdown}
+            onClick={() => setExporting({ id: 'google-doc', label: 'Google Doc' })}
+            className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
+          >
+            → Google Doc{googleSignedIn ? '' : ' (connect in Settings)'}
+          </button>
+          {!googleSignedIn && <DisabledHint text="Connect a Google account in Settings" />}
+          {googleSignedIn && !canMarkdown && <DisabledHint text="Needs a summary — run Summarize first" />}
+        </div>
         {/* Persistent reminder: task-app exports are scoped to the user's own
             items, so this is never a surprise. */}
         <div className="text-[11px] text-ink-muted flex items-start gap-1.5 pt-0.5">
-          <span aria-hidden>🔒</span>
+          <Icon name="lock" className="w-3.5 h-3.5 shrink-0 mt-px" />
           <span>
             Reminders &amp; Google Tasks send <strong className="font-semibold">only items assigned to you</strong>
             {meeting.userIdentified ? '.' : ' — set "You are…" in Settings first.'}
@@ -2323,6 +2390,15 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
         />
       )}
     </div>
+  );
+}
+
+/** Inline reason line under a disabled export button (#202). Replaces the
+ *  hover-only `title` tooltip, which trackpad and keyboard users could
+ *  never see. */
+function DisabledHint({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="text-[11px] text-ink-muted italic leading-snug -mt-1">{text}</div>
   );
 }
 
@@ -2425,7 +2501,7 @@ function ExportPickerModal({
 
         {isTaskApp && (
           <div className="mx-3 mt-2 text-[11px] text-ink-soft bg-brand-indigo/5 border border-brand-indigo/20 rounded-lg px-3 py-2 flex items-start gap-1.5">
-            <span aria-hidden>🔒</span>
+            <Icon name="lock" className="w-3.5 h-3.5 shrink-0 mt-px" />
             <span>Only action items assigned to <strong className="font-semibold">you</strong> are sent to {exporter.label}.</span>
           </div>
         )}
@@ -2453,8 +2529,18 @@ function ExportPickerModal({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-ink">{it.text}</div>
                   <div className="text-[11px] text-ink-muted mt-0.5 flex items-center gap-2">
-                    {it.ownerName && <span>👤 {it.ownerName}</span>}
-                    {it.dueDate && <span>📅 {it.dueDate}</span>}
+                    {it.ownerName && (
+                      <span className="inline-flex items-center gap-1">
+                        <Icon name="user" className="w-3 h-3" />
+                        {it.ownerName}
+                      </span>
+                    )}
+                    {it.dueDate && (
+                      <span className="inline-flex items-center gap-1">
+                        <Icon name="calendar" className="w-3 h-3" />
+                        {it.dueDate}
+                      </span>
+                    )}
                     {it.status === 'done' && (
                       <span className="bg-status-okBg text-status-ok font-semibold px-1.5 rounded">DONE</span>
                     )}

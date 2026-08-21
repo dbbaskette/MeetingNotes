@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 import { SourcePicker, type PickedSource } from './SourcePicker';
 import { shortcutMod } from '../lib/shortcut';
+import { Icon } from './icons';
+import type { RecordingStartInput } from '../App';
 
 export function RecordButton({
   onStarted,
 }: {
-  onStarted: (info: { sessionId: string; label: string }) => void;
+  onStarted: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
 }): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,11 +30,12 @@ export function RecordButton({
   async function pick(src: PickedSource): Promise<void> {
     setPickerOpen(false);
     setBusy(true); setError(null);
+    const input: RecordingStartInput = {
+      targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true,
+    };
     try {
-      const { sessionId } = await api.recording.start({
-        targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true,
-      }) as { sessionId: string };
-      onStarted({ sessionId, label: src.targetLabel });
+      const { sessionId } = await api.recording.start(input) as { sessionId: string };
+      onStarted({ sessionId, label: src.targetLabel, startInput: input });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -48,7 +51,8 @@ export function RecordButton({
         title={`Start recording (${shortcutMod()}+R)`}
         className="rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-card bg-gradient-to-br from-brand-indigo to-brand-violet disabled:opacity-50 inline-flex items-center gap-2"
       >
-        <span>{busy ? 'Starting…' : '⏺ Record'}</span>
+        {!busy && <Icon name="record" className="w-3 h-3" />}
+        <span>{busy ? 'Starting…' : 'Record'}</span>
         {!busy && (
           <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white/20 text-white/90 hidden sm:inline-block">
             {shortcutMod()}R

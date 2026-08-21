@@ -107,12 +107,15 @@ export class RecordingManager {
     this.armSilenceTimer(sessionId);
     // Keep draining stdout for level events for the lifetime of the session.
     // The handler installed above keeps running because we never removed it.
-    proc.on('exit', () => {
+    proc.on('exit', (code: number | null) => {
       const cur = this.sessions.get(sessionId);
       if (cur && cur.state === 'recording') {
         // Helper exited on its own (target app quit / parent watchdog).
+        // The reason rides along on the state-change broadcast so the
+        // renderer can tell the user WHY their capture ended instead of
+        // silently swallowing the banner (#191).
         this.clearSilenceTimer(cur);
-        this.transition(sessionId, 'idle');
+        this.transition(sessionId, 'idle', `helper exited unexpectedly (code=${code ?? 'null'})`);
         try { this.deps.repo.finalize(sessionId); } catch { /* best-effort */ }
         this.sessions.delete(sessionId);
       }
@@ -157,16 +160,16 @@ export class RecordingManager {
   }
 
   on(event: 'level', cb: (sessionId: string, peakDb: number) => void): void;
-  on(event: 'state-change', cb: (sessionId: string, state: RecordingState) => void): void;
+  on(event: 'state-change', cb: (sessionId: string, state: RecordingState, reason?: string) => void): void;
   on(event: 'level' | 'state-change', cb: any): void {
     if (event === 'level') this.listeners.level.add(cb);
     else this.listeners.stateChange.add(cb);
   }
 
-  private transition(sessionId: string, state: RecordingState): void {
+  private transition(sessionId: string, state: RecordingState, reason?: string): void {
     const s = this.sessions.get(sessionId);
     if (s) { s.state = state; }
-    for (const cb of this.listeners.stateChange) cb(sessionId, state);
+    for (const cb of this.listeners.stateChange) cb(sessionId, state, reason);
   }
 
   private handleLine(sessionId: string, line: string): void {

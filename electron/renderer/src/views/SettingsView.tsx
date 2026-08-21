@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../ipc/client';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
+import { AppNav, type NavTarget } from '../components/AppNav';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
 
 interface Settings {
   lmStudioUrl: string;
@@ -48,10 +51,12 @@ type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
 
 export function SettingsView({
-  onBack,
+  onNav,
   onRunSetupAgain,
 }: {
-  onBack: () => void;
+  /** Shared nav tabs (Library / Weekly / Settings) — routes through
+   *  App's history-aware navigate(). 'settings' never arrives. */
+  onNav: (target: NavTarget) => void;
   onRunSetupAgain?: () => void;
 }): JSX.Element {
   const [s, setS] = useState<Settings | null>(null);
@@ -101,10 +106,10 @@ export function SettingsView({
   return (
     <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
       <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted text-sm">
-          ← Back
-        </button>
-        <h1 className="font-semibold">Settings</h1>
+        <AppNav active="settings" onNav={onNav} />
+        {/* Visually redundant with the active nav tab, kept for the
+            accessibility tree / screen-reader page title. */}
+        <h1 className="sr-only">Settings</h1>
         {onRunSetupAgain && (
           <button
             onClick={onRunSetupAgain}
@@ -161,7 +166,10 @@ export function SettingsView({
           <option value="">(choose)</option>
           {models.map((m) => (
             <option key={m} value={m}>
-              {isKnownReasoningModel(m) ? `🧠 ${m}` : m}
+              {/* Plain-text only inside <option>; a suffix reads clearer
+                  than the old 🧠 prefix and survives any platform's
+                  emoji rendering. */}
+              {isKnownReasoningModel(m) ? `${m} (reasoning)` : m}
             </option>
           ))}
         </select>
@@ -176,15 +184,18 @@ export function SettingsView({
             {healthCheck.state === 'checking'
               ? 'Checking whether this model tends to loop on structured tasks…'
               : healthCheck.state === 'loops'
-                ? '⚠ This model looped on a quick extraction test — expect it to fail on real meetings too.'
+                ? 'This model looped on a quick extraction test — expect it to fail on real meetings too.'
                 : '✓ Passed a quick extraction canary.'}
           </div>
         )}
         {s.llmModel && isKnownReasoningModel(s.llmModel) && (
-          <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5">
-            🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below
-            and burn its token budget on chain-of-thought instead of answering — watch for
-            extract/summarize failures that mention a large &ldquo;reasoning&rdquo; word count.
+          <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-start gap-2">
+            <Icon name="brain" className="w-4 h-4 shrink-0 mt-px" />
+            <span>
+              This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below
+              and burn its token budget on chain-of-thought instead of answering — watch for
+              extract/summarize failures that mention a large &ldquo;reasoning&rdquo; word count.
+            </span>
           </div>
         )}
         <div className="text-xs text-ink-muted mt-1">
@@ -1045,6 +1056,9 @@ function SpeakerRosterRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(speaker.displayName);
   const [busy, setBusy] = useState(false);
+  // Pending merge target — non-null while the styled ConfirmDialog (#192)
+  // is open. The old window.confirm here rendered un-themed OS chrome.
+  const [mergeTarget, setMergeTarget] = useState<SpeakerListEntry | null>(null);
 
   async function saveRename(): Promise<void> {
     const name = draft.trim();
@@ -1062,19 +1076,18 @@ function SpeakerRosterRow({
   async function mergeInto(targetId: string): Promise<void> {
     const target = others.find((o) => o.id === targetId);
     if (!target) return;
-    const ok = window.confirm(
-      `Merge "${speaker.displayName}" into "${target.displayName}"?\n\n` +
-      `Their meetings and action items move to "${target.displayName}", ` +
-      `"${speaker.displayName}" is removed from the roster, and the affected ` +
-      'transcripts are rewritten. This can’t be undone.',
-    );
-    if (!ok) return;
+    setMergeTarget(target);
+  }
+
+  async function confirmMerge(): Promise<void> {
+    if (!mergeTarget) return;
     setBusy(true);
     try {
-      await api.speakers.merge(speaker.id, targetId);
+      await api.speakers.merge(speaker.id, mergeTarget.id);
       await onChanged();
     } finally {
       setBusy(false);
+      setMergeTarget(null);
     }
   }
 
@@ -1123,6 +1136,24 @@ function SpeakerRosterRow({
           ))}
         </select>
       )}
+      <ConfirmDialog
+        open={mergeTarget !== null}
+        title={`Merge "${speaker.displayName}" into "${mergeTarget?.displayName ?? ''}"?`}
+        body={
+          <>
+            Their meetings and action items move to{' '}
+            <span className="font-mono text-ink">{mergeTarget?.displayName}</span>,{' '}
+            <span className="font-mono text-ink">{speaker.displayName}</span> is
+            removed from the roster, and the affected transcripts are
+            rewritten. This can&rsquo;t be undone.
+          </>
+        }
+        confirmLabel="Merge"
+        destructive
+        busy={busy}
+        onConfirm={() => void confirmMerge()}
+        onCancel={() => { if (!busy) setMergeTarget(null); }}
+      />
     </li>
   );
 }
