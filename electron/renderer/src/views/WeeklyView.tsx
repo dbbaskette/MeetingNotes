@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
+import { AppNav, type NavTarget } from '../components/AppNav';
 import { fmtDueLabel } from '../lib/due-date';
 import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
 import logoUrl from '../assets/logo.png';
@@ -21,7 +22,9 @@ interface Props {
   /** Open the meeting detail view for the given id when a meeting
    *  row in the list is clicked. */
   onOpenMeeting: (id: string) => void;
-  onBack: () => void;
+  /** Shared nav tabs (Library / Weekly / Settings) — routes through
+   *  App's history-aware navigate(). 'weekly' never arrives. */
+  onNav: (target: NavTarget) => void;
 }
 
 // Mirrors of the IPC types — kept in sync with
@@ -140,7 +143,7 @@ function fmtRange(rangeStart: string, rangeEnd: string, year: number): string {
   return `Week of ${fmt(rangeStart)} – ${fmt(rangeEnd)}, ${year}`;
 }
 
-export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
+export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
   const [week, setWeek] = useState(() => currentIsoWeek());
   const [structured, setStructured] = useState<WeeklyStructured | null>(null);
   const [narrative, setNarrative] = useState<WeeklyNarrativeResult | null>(null);
@@ -296,17 +299,7 @@ export function WeeklyView({ onOpenMeeting, onBack }: Props): JSX.Element {
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
-        <nav className="flex items-center gap-1 ml-4 text-sm">
-          <button
-            onClick={onBack}
-            className="px-3 py-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-sunken transition"
-          >
-            Library
-          </button>
-          <button className="px-3 py-1.5 rounded-md bg-surface-sunken text-ink font-medium">
-            Weekly
-          </button>
-        </nav>
+        <AppNav active="weekly" onNav={onNav} />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <button

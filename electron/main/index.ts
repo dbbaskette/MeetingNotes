@@ -281,9 +281,9 @@ app.whenReady().then(async () => {
   // by then), cleared when the last one ends. app.dock is macOS-only, so
   // guard it for the (hypothetical) non-Mac build.
   const activeRecordings = new Set<string>();
-  recordingManager.on('state-change', (sessionId, state) => {
+  recordingManager.on('state-change', (sessionId, state, reason) => {
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state }));
+      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state, reason }));
     if (state === 'starting' || state === 'recording') activeRecordings.add(sessionId);
     else activeRecordings.delete(sessionId);
     app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');

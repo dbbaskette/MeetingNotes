@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { VuMeter } from './VuMeter';
+import { Icon } from './icons';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import {
   captureSummary, deriveCaptureHealth, type CaptureLevelSource,
@@ -123,7 +124,7 @@ export function LiveRecordingRow({
       )}
       {health.state === 'warning' && !stopping && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-status-warnBg text-status-warnText text-xs font-medium px-3 py-1.5">
-          <span aria-hidden>⚠︎</span>
+          <Icon name="alert-triangle" className="w-3.5 h-3.5 shrink-0" />
           <span className="flex-1">{health.message}</span>
           {(health.warning === 'app-silent' || health.warning === 'all-silent') && (
             <button className="underline underline-offset-2" onClick={() => void restartWithSystemAudio()}>

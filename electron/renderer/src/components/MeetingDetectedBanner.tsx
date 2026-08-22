@@ -7,6 +7,7 @@
 // tabs).
 import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
+import type { RecordingStartInput } from '../App';
 
 export interface BrowserDetected {
   source: 'browser-tab';
@@ -29,7 +30,7 @@ export type Detected = BrowserDetected | NativeAppDetected;
 export function MeetingDetectedBanner({
   onStartRecording,
 }: {
-  onStartRecording: (info: { sessionId: string; label: string }) => void;
+  onStartRecording: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
 }): JSX.Element | null {
   const [detected, setDetected] = useState<Detected | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,10 +56,9 @@ export function MeetingDetectedBanner({
       const targetPid = detected.source === 'browser-tab'
         ? detected.browserPid
         : detected.pid;
-      const { sessionId } = await api.recording.start({
-        targetPid, targetLabel: label, mic: true,
-      }) as { sessionId: string };
-      onStartRecording({ sessionId, label });
+      const input: RecordingStartInput = { targetPid, targetLabel: label, mic: true };
+      const { sessionId } = await api.recording.start(input) as { sessionId: string };
+      onStartRecording({ sessionId, label, startInput: input });
       setDetected(null);
     } catch (e) {
       setError((e as Error).message);

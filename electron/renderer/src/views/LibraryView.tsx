@@ -16,6 +16,9 @@ import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
 import { NeedsAttentionPanel, type RecoveryInboxItem } from '../components/NeedsAttentionPanel';
 import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { AppNav, type NavTarget } from '../components/AppNav';
+import { Icon } from '../components/icons';
 import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import { pruneSelection, partitionSelection } from '../lib/selection';
@@ -39,8 +42,9 @@ interface Props {
     hint: { title?: string; pipelineStage?: string; status?: string },
     opts?: { seekSeconds?: number },
   ) => void;
-  onSettings: () => void;
-  onWeekly: () => void;
+  /** Shared nav tabs (Library / Weekly / Settings) — routes through App's
+   *  history-aware navigate(). 'library' never arrives (already active). */
+  onNav: (target: NavTarget) => void;
   /** Opens the global ⌘K search palette. Surfaced as a hint inside this
    *  view's own inline search box so users discover the faster overlay
    *  instead of assuming this box is the only way to search. */
@@ -64,7 +68,7 @@ const SORT_STORAGE_KEY = 'librarySortKey';
 const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
 
 export function LibraryView({
-  onOpen, onSettings, onWeekly, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
+  onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
   const { meetings, refresh } = useMeetingsStore();
   const [query, setQuery] = useState('');
@@ -359,11 +363,22 @@ export function LibraryView({
     void refresh();
   }
 
-  async function deleteSelected(): Promise<void> {
+  // Bulk delete confirmation (#192). A styled ConfirmDialog replaces the
+  // old native window.confirm; ids are parked here while the dialog is
+  // open so Confirm can act on exactly what the user agreed to.
+  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
+
+  function requestDeleteSelected(): void {
     const ids = selectedAllIds;
     if (ids.length === 0) return;
+    setConfirmDeleteIds(ids);
+  }
+
+  async function deleteSelected(): Promise<void> {
+    const ids = confirmDeleteIds;
+    if (!ids || ids.length === 0) return;
+    setConfirmDeleteIds(null);
     const n = ids.length;
-    if (!window.confirm(`Move ${n} meeting${n === 1 ? '' : 's'} to Recently deleted?`)) return;
     setSelected(new Set());
     // In parallel like the Undo path below — one bad row shouldn't abort the
     // batch, and N serial IPC round-trips made big deletions crawl.
@@ -405,44 +420,20 @@ export function LibraryView({
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
-        <nav className="flex items-center gap-1 ml-4 text-sm">
-          <button
-            className="px-3 py-1.5 rounded-md bg-surface-sunken text-ink font-medium"
-          >
-            Library
-          </button>
-          <button
-            onClick={onWeekly}
-            className="px-3 py-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-sunken transition"
-          >
-            Weekly
-          </button>
-        </nav>
+        <AppNav active="library" onNav={onNav} />
         <div className="flex-1" />
-        <RecordButton onStarted={({ sessionId, label }) => onStartRecording({
-          sessionId, label, startedAt: new Date().toISOString(),
-        })} />
-        <button
-          onClick={onSettings}
-          aria-label="Settings"
-          title="Settings"
-          className="w-9 h-9 rounded-md shrink-0 flex items-center justify-center
-                     text-ink-muted hover:text-ink hover:bg-surface-sunken
-                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40
-                     transition"
-        >
-          <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.36.14.68.36.93.66.24.3.41.65.48 1.02L21 11a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
+        <RecordButton
+          onStarted={({ sessionId, label, startInput }) => onStartRecording({
+            sessionId, label, startInput, startedAt: new Date().toISOString(),
+          })}
+        />
       </header>
 
       {!liveRecording && (
         <div className="shrink-0">
           <MeetingDetectedBanner
-            onStartRecording={({ sessionId, label }) => onStartRecording({
-              sessionId, label, startedAt: new Date().toISOString(),
+            onStartRecording={({ sessionId, label, startInput }) => onStartRecording({
+              sessionId, label, startInput, startedAt: new Date().toISOString(),
             })}
           />
         </div>
@@ -690,8 +681,24 @@ export function LibraryView({
         count={selected.size}
         pendingCount={selectedPendingIds.length}
         onProcess={processSelected}
-        onDelete={deleteSelected}
+        onDelete={requestDeleteSelected}
         onCancel={() => setSelected(new Set())}
+      />
+
+      {/* ── Bulk delete confirmation (#192) ─────────────────────────────── */}
+      <ConfirmDialog
+        open={confirmDeleteIds !== null}
+        title={`Move ${confirmDeleteIds?.length ?? 0} meeting${confirmDeleteIds?.length === 1 ? '' : 's'} to Recently deleted?`}
+        body={
+          <>
+            Each meeting&rsquo;s audio file, transcript, summary, and any exports
+            move to <strong>Recently deleted</strong>, restorable for 30 days.
+          </>
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => void deleteSelected()}
+        onCancel={() => setConfirmDeleteIds(null)}
       />
     </div>
   );
@@ -851,7 +858,9 @@ function LibraryEmpty({
   }
   return (
     <div className="text-center py-16">
-      <div className="text-4xl mb-4 opacity-40">◈</div>
+      <div className="flex justify-center mb-4 opacity-40">
+        <Icon name="mic" className="w-10 h-10" />
+      </div>
       <div className="text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
         Hit <span className="font-semibold text-ink">Record</span>{' '}
         <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">⌘R</kbd>{' '}
@@ -1021,9 +1030,10 @@ function SelectionBar({
             <button
               onClick={onProcess}
               title="Starts processing the pending recordings in the selection"
-              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition"
+              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5"
             >
-              ▶ Process ({pendingCount})
+              <Icon name="play" className="w-3.5 h-3.5" />
+              Process ({pendingCount})
             </button>
           )}
         </div>

@@ -193,8 +193,8 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.recordingLevelEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingLevelEvent, wrapped);
     },
-    onStateChange: (cb: (e: { sessionId: string; state: string }) => void) => {
-      const wrapped = (_e: unknown, payload: { sessionId: string; state: string }): void => cb(payload);
+    onStateChange: (cb: (e: { sessionId: string; state: string; reason?: string }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; state: string; reason?: string }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
     },

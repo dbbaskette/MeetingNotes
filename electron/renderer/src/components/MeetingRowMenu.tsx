@@ -10,6 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 import { useToast } from './Toasts';
+import { ModalShell } from './ModalShell';
 
 export interface MeetingRowMenuProps {
   meeting: { id: string; title: string };
@@ -288,28 +289,5 @@ function DeleteDialog({
         </button>
       </div>
     </ModalShell>
-  );
-}
-
-function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): JSX.Element {
-  // Portal into document.body for the same reason as the dropdown — the
-  // row's `hover:-translate-y-px` transform creates a stacking context that
-  // also redefines the containing block for any descendant `position: fixed`
-  // element. Without the portal, the modal "follows" the row's hover
-  // transform instead of the viewport, producing a 1px jitter / flicker as
-  // the row's hover state toggles while the mouse moves across the overlay.
-  return createPortal(
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-[1001] bg-black/30 flex items-center justify-center p-4"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-surface rounded-xl shadow-pop border border-surface-border p-5 w-full max-w-md"
-      >
-        {children}
-      </div>
-    </div>,
-    document.body,
   );
 }
