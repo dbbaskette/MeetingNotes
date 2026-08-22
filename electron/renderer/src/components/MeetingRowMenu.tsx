@@ -291,5 +291,3 @@ function DeleteDialog({
     </ModalShell>
   );
 }
-
-

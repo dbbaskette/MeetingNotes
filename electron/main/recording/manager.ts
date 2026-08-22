@@ -33,7 +33,7 @@ export class RecordingManager {
   private sessions = new Map<string, SessionEntry>();
   private listeners = {
     level: new Set<(sessionId: string, peakDb: number) => void>(),
-    stateChange: new Set<(sessionId: string, state: RecordingState) => void>(),
+    stateChange: new Set<(sessionId: string, state: RecordingState, reason?: string) => void>(),
   };
 
   constructor(private readonly deps: {
