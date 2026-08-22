@@ -24,6 +24,8 @@ import { recoverOrphans } from './recording/orphan-recovery.js';
 import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
+import { catalogAudio } from './library/catalog.js';
+import { RecordingRecoveryService } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
@@ -42,11 +44,9 @@ import { buildExporterRegistry } from './exporters/registry.js';
 import { GoogleAuth } from './google/auth.js';
 import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters/webhook.js';
 import { Logger } from './logging/logger.js';
-import { createMeetingFolder, meetingFolderPath } from './storage/meeting-folder.js';
+import { meetingFolderPath } from './storage/meeting-folder.js';
 import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { createPeakThrottle } from './lib/peak-throttle.js';
-import { makeSlug, shortId } from './lib/slug.js';
-import { probeAudio } from './library/ffprobe.js';
 import { boundsVisibleOn, sanitizeBounds, type WindowBounds } from './lib/window-bounds.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
@@ -268,12 +268,13 @@ app.whenReady().then(async () => {
   // the meter still catches transients but each window's webContents.send
   // rate drops ~5x. The manager keeps emitting per-line (Electron-free,
   // unit-testable); the throttle lives at the IPC boundary.
-  const levelThrottle = createPeakThrottle(100, (sessionId, peakDb) => {
+  const levelThrottle = createPeakThrottle(100, (key, peakDb) => {
+    const [sessionId, source] = key.split(':') as [string, 'mic' | 'system' | 'mixed'];
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, peakDb }));
+      w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, source, peakDb }));
   });
-  recordingManager.on('level', (sessionId, peakDb) => {
-    levelThrottle.push(sessionId, peakDb);
+  recordingManager.on('level', (sessionId, source, peakDb) => {
+    levelThrottle.push(`${sessionId}:${source}`, peakDb);
   });
   // Dock badge while recording: "REC" whenever at least one session is
   // actively capturing ('starting' counts — the helper is already attached
@@ -354,51 +355,27 @@ app.whenReady().then(async () => {
   const watcher = new LibraryWatcher({
     paths: libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
   });
+  const notifyMeetingAdded = (id: string): void => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
+    }
+  };
+  const catalogRecording = async (audioPath: string) => {
+    const result = await catalogAudio(audioPath, {
+      meetings,
+      libraryRoot,
+      onSlugCollision: (slug, attempt) =>
+        logger.info('library:slug-collision-retry', { slug, attempt }),
+    });
+    if (result.kind === 'added') {
+      logger.info('library:discovered', { id: result.meeting.id, audioPath });
+      notifyMeetingAdded(result.meeting.id);
+    }
+    return result;
+  };
   watcher.onStableFile(async (audioPath) => {
     try {
-      // Dedupe: skip files we've already cataloged. Lets us catalog backlog
-      // on first run and quietly no-op on every restart afterward.
-      if (meetings.findByAudioPath(audioPath)) return;
-      const info = await probeAudio(audioPath);
-      const parsed = parseAudioHijackFilename(audioPath);
-      const dateIso = parsed.startedAtIso?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-      // Retry on the (now extremely rare) UNIQUE(slug) collision rather than
-      // dropping the recording silently.
-      let inserted = false;
-      let id = '';
-      let slug = '';
-      for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
-        id = shortId();
-        slug = makeSlug(dateIso, parsed.autoTitle, id);
-        try {
-          createMeetingFolder(libraryRoot, slug, audioPath);
-          meetings.insert({
-            id, slug,
-            title: parsed.autoTitle,
-            startedAt: parsed.startedAtIso,
-            durationS: info.durationS,
-            audioPath,
-            // Cataloged only. The user picks which to process from the
-            // library — no auto-enqueueing.
-            status: 'pending',
-            pipelineStage: 'discovered',
-          });
-          inserted = true;
-        } catch (e) {
-          if (!String(e).includes('UNIQUE')) throw e;
-          logger.info('library:slug-collision-retry', { slug, attempt });
-        }
-      }
-      if (!inserted) throw new Error('slug collision retry exhausted');
-      logger.info('library:discovered', { id, slug, audioPath });
-      // Tell every open renderer window that a new meeting row exists.
-      // Without this, the Library view stays stale after a Stop because
-      // its post-stop refresh fires before chokidar's stability debounce
-      // — and with no live recording or pending meetings yet in state,
-      // the conditional 3s poll never starts.
-      for (const w of BrowserWindow.getAllWindows()) {
-        w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
-      }
+      await catalogRecording(audioPath);
     } catch (e) {
       // The built-in helper may stop appending samples before it finalizes the
       // M4A's moov atom. Let the finalization change event retry this path.
@@ -407,6 +384,13 @@ app.whenReady().then(async () => {
     }
   });
   await watcher.start();
+
+  const recordingRecovery = new RecordingRecoveryService({
+    sessions: recordingSessionsRepo,
+    meetings,
+    catalog: catalogRecording,
+    reveal: (audioPath) => shell.showItemInFolder(audioPath),
+  });
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
@@ -689,6 +673,7 @@ app.whenReady().then(async () => {
     lmStudio,
     llmSupervisor,
     recordingManager,
+    recordingRecovery,
     appEnumerator,
     helperPath,
     roster,

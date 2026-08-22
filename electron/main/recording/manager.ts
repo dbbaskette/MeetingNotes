@@ -18,6 +18,7 @@ export interface StartResult {
 
 export const SILENCE_TIMEOUT_MS = 5 * 60_000;
 export const SILENCE_THRESHOLD_DB = -50;
+export type RecordingLevelSource = 'mic' | 'system' | 'mixed';
 
 type SpawnFn = (cmd: string, args: string[]) => ChildProcessWithoutNullStreams | any;
 
@@ -32,7 +33,7 @@ interface SessionEntry {
 export class RecordingManager {
   private sessions = new Map<string, SessionEntry>();
   private listeners = {
-    level: new Set<(sessionId: string, peakDb: number) => void>(),
+    level: new Set<(sessionId: string, source: RecordingLevelSource, peakDb: number) => void>(),
     stateChange: new Set<(sessionId: string, state: RecordingState, reason?: string) => void>(),
   };
 
@@ -159,7 +160,7 @@ export class RecordingManager {
     return this.sessions.get(sessionId)?.state ?? 'idle';
   }
 
-  on(event: 'level', cb: (sessionId: string, peakDb: number) => void): void;
+  on(event: 'level', cb: (sessionId: string, source: RecordingLevelSource, peakDb: number) => void): void;
   on(event: 'state-change', cb: (sessionId: string, state: RecordingState, reason?: string) => void): void;
   on(event: 'level' | 'state-change', cb: any): void {
     if (event === 'level') this.listeners.level.add(cb);
@@ -174,11 +175,13 @@ export class RecordingManager {
 
   private handleLine(sessionId: string, line: string): void {
     if (!line.trim().startsWith('{')) return;
-    let payload: { event?: string; peak_db?: number } | undefined;
+    let payload: { event?: string; source?: string; peak_db?: number } | undefined;
     try { payload = JSON.parse(line); } catch { return; }
     if (payload?.event === 'level' && typeof payload.peak_db === 'number') {
+      const source: RecordingLevelSource = payload.source === 'mic' || payload.source === 'system'
+        || payload.source === 'mixed' ? payload.source : 'mixed';
       if (payload.peak_db > SILENCE_THRESHOLD_DB) this.armSilenceTimer(sessionId);
-      for (const cb of this.listeners.level) cb(sessionId, payload.peak_db);
+      for (const cb of this.listeners.level) cb(sessionId, source, payload.peak_db);
     }
   }
 

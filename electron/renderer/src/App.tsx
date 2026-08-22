@@ -402,7 +402,10 @@ function AppInner(): JSX.Element {
       onOpenSearch={() => setSearchOpen(true)}
       liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
-      onRecordingStopped={() => setLiveRecording(null)}
+      onRecordingStopped={(summary) => {
+        setLiveRecording(null);
+        toast.show({ message: summary, durationMs: 5000 });
+      }}
     />
   ) : view.kind === 'detail' ? (
     <MeetingDetailView
@@ -443,7 +446,11 @@ function AppInner(): JSX.Element {
               sessionId={liveRecording!.sessionId}
               label={liveRecording!.label}
               startedAt={liveRecording!.startedAt}
-              onStopped={() => setLiveRecording(null)}
+              onStopped={(summary) => {
+                setLiveRecording(null);
+                toast.show({ message: summary, durationMs: 5000 });
+              }}
+              onRestarted={setLiveRecording}
             />
           </div>
         )}

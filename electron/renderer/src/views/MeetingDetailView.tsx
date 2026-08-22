@@ -22,6 +22,7 @@ import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
+import { speakerReviewLayout } from '../lib/speaker-review-layout';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -46,7 +47,11 @@ interface MeetingDetail {
   summaryMd: string | null;
   audioPath: string;
   userIdentified: boolean;
-  speakers: { localLabel: string; rosterId: string | null; displayName: string | null }[];
+  speakers: {
+    localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null;
+    state: 'unknown' | 'probable' | 'confirmed'; needsReview: boolean;
+    segmentCount: number; durationS: number; lineCount: number;
+  }[];
   actionItems: {
     id: string;
     text: string;
@@ -2615,6 +2620,10 @@ function SpeakersPanel({
   // Bump on every assign/unlink so the roster dropdown re-fetches (newly-
   // created entries appear immediately).
   const [version, setVersion] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkRosterId, setBulkRosterId] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -2629,6 +2638,31 @@ function SpeakersPanel({
     // the parent's polling, which may have stopped after 'done').
     setVersion((v) => v + 1);
     await onReload();
+  }
+
+  const selectedImpact = meeting.speakers
+    .filter((speaker) => selected.has(speaker.localLabel))
+    .reduce((sum, speaker) => sum + speaker.lineCount, 0);
+  function toggleSelected(label: string): void {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label); else next.add(label);
+      return next;
+    });
+  }
+  async function bulkAssign(): Promise<void> {
+    if (!bulkRosterId || selected.size === 0) return;
+    setBulkBusy(true); setBulkError(null);
+    try {
+      await api.speakers.assignBulk({ meetingId: meeting.id, localLabels: [...selected], rosterId: bulkRosterId });
+      setSelected(new Set());
+      setBulkRosterId('');
+      await reloadMeeting();
+    } catch (error) {
+      setBulkError((error as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   return (
@@ -2648,6 +2682,33 @@ function SpeakersPanel({
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="rounded-lg border border-brand-indigo/30 bg-brand-indigo/5 p-2 space-y-1.5">
+          <div className="text-[11px] font-medium text-ink">
+            {selected.size} voice{selected.size === 1 ? '' : 's'} selected · {selectedImpact} transcript line{selectedImpact === 1 ? '' : 's'} will change
+          </div>
+          <div className="flex gap-1.5">
+            <select
+              value={bulkRosterId}
+              disabled={bulkBusy}
+              onChange={(event) => setBulkRosterId(event.target.value)}
+              className="min-w-0 flex-1 text-xs border border-surface-border rounded-md bg-surface px-2 py-1"
+            >
+              <option value="">Assign all to…</option>
+              {roster.map((entry) => <option key={entry.id} value={entry.id}>{entry.displayName}</option>)}
+            </select>
+            <button
+              disabled={!bulkRosterId || bulkBusy}
+              onClick={() => void bulkAssign()}
+              className="text-xs font-semibold px-2.5 py-1 rounded-md bg-brand-indigo text-white disabled:opacity-40"
+            >
+              {bulkBusy ? 'Assigning…' : 'Assign'}
+            </button>
+          </div>
+          {bulkError && <div className="text-[11px] text-danger">{bulkError}</div>}
+        </div>
+      )}
+
       <div className="space-y-1.5">
         {meeting.speakers.map((sp, i) => (
           <SpeakerRow
@@ -2656,11 +2717,19 @@ function SpeakersPanel({
             localLabel={sp.localLabel}
             displayName={sp.displayName}
             rosterId={sp.rosterId}
+            confidence={sp.confidence}
+            reviewState={sp.state}
+            needsReview={sp.needsReview}
+            durationS={sp.durationS}
+            lineCount={sp.lineCount}
             colorIdx={i}
             roster={roster}
             isOpen={expanded === sp.localLabel}
             onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
             onChanged={reloadMeeting}
+            selectable={sp.needsReview}
+            selected={selected.has(sp.localLabel)}
+            onSelect={() => toggleSelected(sp.localLabel)}
           />
         ))}
       </div>
@@ -2670,20 +2739,30 @@ function SpeakersPanel({
 
 function SpeakerRow({
   meetingId, localLabel, displayName, rosterId, colorIdx, roster,
-  isOpen, onToggle, onChanged,
+  confidence, reviewState, needsReview, durationS, lineCount,
+  isOpen, onToggle, onChanged, selectable, selected, onSelect,
 }: {
   meetingId: string;
   localLabel: string;
   displayName: string | null;
   rosterId: string | null;
+  confidence: number | null;
+  reviewState: 'unknown' | 'probable' | 'confirmed';
+  needsReview: boolean;
+  durationS: number;
+  lineCount: number;
   colorIdx: number;
   roster: RosterEntry[];
   isOpen: boolean;
   onToggle: () => void;
   onChanged: () => void;
+  selectable: boolean;
+  selected: boolean;
+  onSelect: () => void;
 }): JSX.Element {
   const named = rosterId !== null;
   const color = colorForSpeakerIndex(colorIdx);
+  const layout = speakerReviewLayout();
 
   return (
     <div
@@ -2693,20 +2772,42 @@ function SpeakerRow({
         ${isOpen ? 'ring-2 ring-brand-indigo/40' : ''}
       `}
     >
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center gap-2 p-2 text-left"
-        aria-expanded={isOpen}
-      >
+      <div className="flex items-center">
+        {selectable && (
+          <input
+            type="checkbox" checked={selected} onChange={onSelect}
+            aria-label={`Select ${displayName ?? localLabel} for bulk assignment`}
+            className="ml-2 accent-brand-indigo"
+          />
+        )}
+        <button
+          onClick={onToggle}
+          className={layout.button}
+          aria-expanded={isOpen}
+        >
         <div
           className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
           style={{ background: color }}
         >
           {(displayName?.[0] ?? localLabel.replace('SPEAKER_', '').slice(-1) ?? '?').toUpperCase()}
         </div>
-        <div className="flex-1 min-w-0">
+        <div className={layout.details}>
           <div className="font-semibold truncate">{displayName ?? localLabel}</div>
-          {named && <div className="text-[10px] text-ink-muted font-mono">{localLabel}</div>}
+          <div className="text-[10px] text-ink-muted truncate">
+            {named ? `${localLabel} · ` : ''}{fmtSec(durationS)} speaking · {lineCount} line{lineCount === 1 ? '' : 's'}
+          </div>
+          <div className={layout.status}>
+            <span className={`max-w-full text-[10px] px-1.5 py-0.5 rounded-full ${
+              reviewState === 'confirmed' ? 'bg-status-okBg text-status-ok'
+                : reviewState === 'probable' ? 'bg-brand-indigo/10 text-brand-indigo'
+                  : 'bg-status-warnBg text-status-warnText'
+            }`}>
+              {reviewState === 'confirmed' ? 'Confirmed'
+                : reviewState === 'probable' ? `Probably ${displayName ?? ''} ${Math.round((confidence ?? 0) * 100)}%`
+                  : 'Unknown'}
+            </span>
+            {needsReview && <span className="text-[10px] text-status-warnText font-semibold">Needs review</span>}
+          </div>
         </div>
         <svg
           viewBox="0 0 16 16"
@@ -2715,13 +2816,15 @@ function SpeakerRow({
         >
           <path d="M3 6l5 5 5-5" />
         </svg>
-      </button>
+        </button>
+      </div>
       {isOpen && (
         <SpeakerEditor
           meetingId={meetingId}
           localLabel={localLabel}
           rosterId={rosterId}
           roster={roster}
+          lineCount={lineCount}
           onChanged={onChanged}
         />
       )}
@@ -2730,12 +2833,13 @@ function SpeakerRow({
 }
 
 function SpeakerEditor({
-  meetingId, localLabel, rosterId, roster, onChanged,
+  meetingId, localLabel, rosterId, roster, lineCount, onChanged,
 }: {
   meetingId: string;
   localLabel: string;
   rosterId: string | null;
   roster: RosterEntry[];
+  lineCount: number;
   onChanged: () => void;
 }): JSX.Element {
   const [sample, setSample] = useState<{ dataUri: string; startS: number; endS: number } | null>(null);
@@ -2780,6 +2884,8 @@ function SpeakerEditor({
   }, [meetingId, localLabel]);
 
   async function assignExisting(rid: string): Promise<void> {
+    if (rosterId && rid !== rosterId
+      && !window.confirm(`Reassign this voice? ${lineCount} transcript line${lineCount === 1 ? '' : 's'} will change.`)) return;
     setBusy(true); setError(null);
     try {
       await api.speakers.assign({ meetingId, localLabel, mode: 'existing', rosterId: rid });

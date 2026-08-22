@@ -13,13 +13,13 @@ import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
+import { NeedsAttentionPanel, type RecoveryInboxItem } from '../components/NeedsAttentionPanel';
 import { SearchMatches, type SearchHit } from '../components/SearchMatches';
 import { useToast } from '../components/Toasts';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { Icon } from '../components/icons';
 import { api } from '../ipc/client';
-import { awaitingGateMeetings } from '../lib/awaiting-gate';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import { pruneSelection, partitionSelection } from '../lib/selection';
 import {
@@ -53,7 +53,7 @@ interface Props {
    *  LibraryView just reads + notifies on start/stop. */
   liveRecording: LiveRecording | null;
   onStartRecording: (r: LiveRecording) => void;
-  onRecordingStopped: () => void;
+  onRecordingStopped: (summary: string) => void;
 }
 
 type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
@@ -87,6 +87,20 @@ export function LibraryView({
     catch { /* private mode / quota — the choice just doesn't persist */ }
   };
   const toast = useToast();
+  const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
+  const refreshRecovery = useCallback(async () => {
+    try { setRecoveryItems(await api.recovery.list()); }
+    catch { setRecoveryItems([]); }
+  }, []);
+  useEffect(() => { void refreshRecovery(); }, [refreshRecovery]);
+  useEffect(() => {
+    const off = api.recording.onStateChange(({ state }) => {
+      if (state === 'idle' || state === 'error') {
+        window.setTimeout(() => { void refreshRecovery(); }, 800);
+      }
+    });
+    return () => { off(); };
+  }, [refreshRecovery]);
 
   // Recently deleted (trash). Fetched on mount and re-fetched after any
   // row mutation (delete / restore) — the main process purges expired
@@ -126,9 +140,9 @@ export function LibraryView({
   // navigated into a meeting and back (which remounted the view and
   // re-ran meetings:list). Now main pings us the instant the row exists.
   useEffect(() => {
-    const off = api.meetings.onAdded(() => { void refresh(); });
+    const off = api.meetings.onAdded(() => { void refresh(); void refreshRecovery(); });
     return () => { off(); };
-  }, [refresh]);
+  }, [refresh, refreshRecovery]);
 
   // Conditional polling. Gate on ACTUAL pipeline activity — the same
   // signal the bottom status bar shows (currentId / queueLength) — not on
@@ -300,11 +314,6 @@ export function LibraryView({
     };
   }, [meetings, hits, isSearching]);
 
-  // Meetings parked at the speaker-ID gate (status='awaiting_user'). Drives the
-  // app-wide "needs you to name voices" badge below — the per-row amber
-  // treatment already lives in LibraryRow, this is the summary signal.
-  const awaiting = useMemo(() => awaitingGateMeetings(meetings), [meetings]);
-
   // Drop stale selections — a meeting that disappeared from the list
   // (deleted elsewhere, purged) shouldn't stay checked. Status changes
   // are fine now that every row is selectable: a pending row that starts
@@ -436,7 +445,12 @@ export function LibraryView({
             sessionId={liveRecording.sessionId}
             label={liveRecording.label}
             startedAt={liveRecording.startedAt}
-            onStopped={() => { onRecordingStopped(); void refresh(); }}
+            onStopped={(summary) => {
+              onRecordingStopped(summary);
+              void refresh();
+              window.setTimeout(() => { void refreshRecovery(); }, 800);
+            }}
+            onRestarted={onStartRecording}
           />
         </div>
       )}
@@ -450,27 +464,17 @@ export function LibraryView({
         />
       </div>
 
-      {/* App-wide speaker-ID gate summary. Appears whenever ≥1 meeting is
-          parked at the gate; clicking it opens the first one so the user can
-          name voices and unblock the pipeline. The per-row amber edge / "?"
-          avatar already lives in LibraryRow — this is the catalog-level nudge. */}
-      {awaiting.length > 0 && (
-        <div className="shrink-0">
-          <button
-            type="button"
-            onClick={() => onOpen(awaiting[0]!.id, {
-              title: awaiting[0]!.title,
-              pipelineStage: awaiting[0]!.pipelineStage,
-              status: awaiting[0]!.status,
-            })}
-            className="w-full mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-status-warnBg text-status-warnText border border-status-warn/30 text-sm font-medium hover:border-status-warn/60 transition text-left"
-          >
-            <span className="w-2 h-2 rounded-full bg-status-warn shrink-0" />
-            {awaiting.length} meeting{awaiting.length === 1 ? '' : 's'} need you to name voices
-            <span className="ml-auto text-xs text-status-warnText/70">Open →</span>
-          </button>
-        </div>
-      )}
+      <NeedsAttentionPanel
+        meetings={meetings}
+        recovery={recoveryItems}
+        onOpen={(id) => {
+          const meeting = meetings.find((candidate) => candidate.id === id);
+          onOpen(id, meeting ? {
+            title: meeting.title, pipelineStage: meeting.pipelineStage, status: meeting.status,
+          } : {});
+        }}
+        onChanged={async () => { await Promise.all([refresh(), refreshRecovery()]); }}
+      />
 
 
       {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}
