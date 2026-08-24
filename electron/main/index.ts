@@ -222,8 +222,14 @@ app.whenReady().then(async () => {
     sidecarDir,
     onLog: (l) => logger.info('sidecar', { line: l }),
   });
+  // Spawn whisper-server on whatever host:port sttUrl points at — the
+  // hardcoded :8080 default collides with anything already bound there
+  // (e.g. a local nginx), and the stt client above already targets sttUrl.
+  const sttEndpoint = new URL(s.sttUrl);
   const whisperSupervisor = createWhisperSupervisor({
     getModelId: () => settings.get('sttModel'),
+    host: sttEndpoint.hostname,
+    port: Number(sttEndpoint.port) || 8080,
     onLog: (l) => logger.info('whisper', { line: l }),
   });
   // Phase 3 LLM-provider lifecycle. When summaryProvider='external'
