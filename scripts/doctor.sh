@@ -3,9 +3,31 @@
 set -uo pipefail
 
 LM_STUDIO_URL="${LM_STUDIO_URL:-http://localhost:1234}"
-STT_URL="${STT_URL:-http://127.0.0.1:8080}"
+STT_URL="${STT_URL:-}"
 DIAR_URL="${DIAR_URL:-http://127.0.0.1:8765}"
 LIB="${MEETINGNOTES_LIB:-$HOME/Documents/MeetingNotes}"
+
+# Read a settings value from the app DB (JSON-quoted strings come back bare).
+setting() {
+  sqlite3 "$LIB/db.sqlite" "SELECT value FROM settings WHERE key='$1';" 2>/dev/null | tr -d '"'
+}
+
+# The app spawns whisper-server at whatever sttUrl points to — probe the same
+# place rather than assuming :8080 (which may belong to another service).
+if [ -z "$STT_URL" ]; then
+  STT_URL="$(setting sttUrl)"
+  STT_URL="${STT_URL:-http://127.0.0.1:8080}"
+fi
+
+# The LLM endpoint follows summaryProvider: managed lm-studio/ollama modes use
+# fixed ports; 'external' uses the user-configured lmStudioUrl.
+PROVIDER="$(setting summaryProvider)"
+PROVIDER="${PROVIDER:-external}"
+case "$PROVIDER" in
+  ollama)    LLM_URL="http://127.0.0.1:11434" ;;
+  lm-studio) LLM_URL="http://127.0.0.1:1234" ;;
+  *)         LLM_URL="$(setting lmStudioUrl)"; LLM_URL="${LLM_URL:-$LM_STUDIO_URL}" ;;
+esac
 AUDIO_HIJACK_DIR="${AUDIO_HIJACK_DIR:-$HOME/Music/Audio Hijack}"
 
 pass=0; fail=0; warn=0
@@ -47,8 +69,8 @@ elif [ -n "${HF_TOKEN:-}" ]; then
 else
   bad "no HF token found — diarization will fail on first model download (run ./scripts/setup.sh)"
 fi
-if [ -d "$HOME/.cache/huggingface/hub" ]; then
-  ok "HF model cache present (offline diarization will work)"
+if ls -d "$HOME/.cache/huggingface/hub/models--pyannote--"* >/dev/null 2>&1; then
+  ok "pyannote models cached (offline diarization will work)"
 fi
 
 section "Services"
@@ -58,11 +80,13 @@ else
   hmm "whisper-server not currently running at $STT_URL (the app spawns it on first transcribe and shuts it down after 10 min idle)"
 fi
 
-if http_ok "$LM_STUDIO_URL/v1/models"; then
-  models=$(curl -fsS "$LM_STUDIO_URL/v1/models" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -5 | paste -sd, -)
-  ok "LM Studio reachable at $LM_STUDIO_URL (models: ${models:-none loaded})"
+if http_ok "$LLM_URL/v1/models"; then
+  models=$(curl -fsS "$LLM_URL/v1/models" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -5 | paste -sd, -)
+  ok "LLM ($PROVIDER) reachable at $LLM_URL (models: ${models:-none loaded})"
+elif [ "$PROVIDER" = "external" ]; then
+  bad "LLM (external) not reachable at $LLM_URL — start LM Studio/Ollama and enable its server"
 else
-  bad "LM Studio not reachable at $LM_STUDIO_URL — start LM Studio and enable its server"
+  hmm "LLM ($PROVIDER) not currently running at $LLM_URL (managed mode — the app spawns it on first summarize)"
 fi
 
 if http_ok "$DIAR_URL/health" || http_ok "$DIAR_URL/"; then
