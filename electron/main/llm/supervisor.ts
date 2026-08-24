@@ -175,6 +175,11 @@ export class LLMSupervisor {
       spawn: opts.spawn,
       healthProbe: opts.lmStudioProbe ?? modelsListProbe,
       idleShutdownMs: idle,
+      // `lms server start` daemonizes the server and exits 0 within ~1.5s;
+      // without this flag the clean exit read as "died before healthy" and
+      // failed the first summarize after every reboot (cold spawn), even as
+      // the server it launched came up fine one second later.
+      launcherExitsOk: true,
       // LM Studio's CLI startup + GUI handshake is fast (~1–2s),
       // but model load (when an auto-load default is set) can take
       // 10–30s on bigger models.
