@@ -9,6 +9,8 @@ interface SourceItem {
   bundleId: string | null;
   isMeetingApp: boolean;
   isRunningOutput: boolean;
+  isUserApp?: boolean;
+  ownerName?: string | null;
 }
 
 export function SourcePicker({
@@ -35,18 +37,26 @@ export function SourcePicker({
     })();
   }, []);
 
+  // Daemons and unattributed helpers (isUserApp === false) hide behind a
+  // disclosure — the default list reads like System Settings → Sound: real
+  // apps only. Older helper binaries don't emit isUserApp; treat those
+  // sources as apps so nothing disappears after an app-only update.
+  const [showBackground, setShowBackground] = useState(false);
+
   // Two groups:
   //   audible  — meeting apps first (flagged by bundle id), then everything
   //              else CoreAudio says is actively writing to an output.
   //   idle     — registered with the audio daemon but not currently emitting.
   //              Greyed out; clicking a meeting app in this group opens a
   //              confirm modal warning about #33.
-  const { audible, idle } = useMemo(() => {
+  const { audible, idle, background } = useMemo(() => {
     const sortByMeetingFirst = (a: SourceItem, b: SourceItem) =>
       Number(b.isMeetingApp) - Number(a.isMeetingApp);
+    const apps = sources.filter((s) => s.isUserApp !== false);
     return {
-      audible: [...sources.filter((s) => s.isRunningOutput)].sort(sortByMeetingFirst),
-      idle: [...sources.filter((s) => !s.isRunningOutput)].sort(sortByMeetingFirst),
+      audible: [...apps.filter((s) => s.isRunningOutput)].sort(sortByMeetingFirst),
+      idle: [...apps.filter((s) => !s.isRunningOutput)].sort(sortByMeetingFirst),
+      background: sources.filter((s) => s.isUserApp === false),
     };
   }, [sources]);
 
@@ -98,6 +108,32 @@ export function SourcePicker({
               <span className="w-1.5 h-1.5 rounded-full bg-ink-muted/40 shrink-0" title="Not currently playing audio" />
               <span className="flex-1 truncate">{s.name ?? `PID ${s.pid}`}</span>
               {s.isMeetingApp && <span className="text-[10px] text-ink-muted/70 font-semibold">MEETING</span>}
+            </button>
+          ))}
+        </>
+      )}
+
+      {background.length > 0 && (
+        <>
+          <div className="border-t border-surface-border my-1" />
+          <button
+            onClick={() => setShowBackground((v) => !v)}
+            className="w-full text-left px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider text-ink-muted/70 hover:text-ink-muted"
+            aria-expanded={showBackground}
+          >
+            {showBackground ? '▾' : '▸'} Background processes ({background.length})
+          </button>
+          {showBackground && background.map((s) => (
+            <button
+              key={s.pid}
+              onClick={() => pickOrConfirm(s)}
+              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2 text-ink-muted"
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.isRunningOutput ? 'bg-status-ok' : 'bg-ink-muted/40'}`}
+                title={s.isRunningOutput ? 'Currently audible' : 'Not currently playing audio'}
+              />
+              <span className="flex-1 truncate">{s.name ?? `PID ${s.pid}`}</span>
             </button>
           ))}
         </>
