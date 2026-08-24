@@ -234,6 +234,7 @@ app.whenReady().then(async () => {
   const llmSupervisor = new LLMSupervisor({
     getProvider: () => settings.get('summaryProvider'),
     getModelId: () => settings.get('llmModel'),
+    getContextLength: () => settings.get('llmContextLength'),
     onLog: (l) => logger.info('llm', { line: l }),
   });
 
