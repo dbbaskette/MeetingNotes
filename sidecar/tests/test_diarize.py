@@ -15,9 +15,11 @@ def make_fake_annotation():
     return ann
 
 
+@patch("meeting_notes_diarize.diarize._load_audio")
 @patch("meeting_notes_diarize.diarize._get_pipeline")
 @patch("meeting_notes_diarize.diarize._embed_segment")
-def test_diarize_audio_returns_segments_with_embeddings(mock_embed, mock_pipe):
+def test_diarize_audio_returns_segments_with_embeddings(mock_embed, mock_pipe, mock_load_audio):
+    mock_load_audio.return_value = (np.zeros((1, 80_000), dtype=np.float32), 16_000)
     mock_embed.return_value = np.zeros(512, dtype=np.float32)
     pipe = MagicMock(return_value=make_fake_annotation())
     mock_pipe.return_value = pipe
