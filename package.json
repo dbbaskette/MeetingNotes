@@ -1,6 +1,6 @@
 {
   "name": "meeting-notes",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "description": "Local-first meeting notes for macOS — Audio Hijack + LM Studio + pyannote",
   "main": "dist/electron/main/index.js",
   "type": "module",
@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "pretest": "npm rebuild better-sqlite3 --silent",
-    "posttest": "npx -y @electron/rebuild -f -w better-sqlite3 --silent || true",
+    "posttest": "npx -y @electron/rebuild -f -w better-sqlite3 || true",
     "rebuild:electron": "npx -y @electron/rebuild -f -w better-sqlite3",
     "rebuild:node": "npm rebuild better-sqlite3",
     "postinstall": "npx -y @electron/rebuild -f -w better-sqlite3 || true",
@@ -57,7 +57,7 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "undici": "^6.25.0",
+    "undici": "^6.28.0",
     "zod": "^3.23.0",
     "zustand": "^4.5.0"
   }
