@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { registerIpcHandlers } from './handlers.js';
 import { LMStudioError } from '../lm-studio/client.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import { ArtifactCache } from '../library/artifact-cache.js';
 
 // Mock the merge step so speaker rename/merge tests can assert the re-merge
 // fan-out without needing real transcript files on disk.
@@ -35,6 +40,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     },
     exporters: {},
     libraryRoot: '/tmp',
+    artifactCache: new ArtifactCache(),
     llmSupervisor: { ensureReady: async () => {} },
     logger: { info: () => {}, error: () => {} },
     gateNotified: new Set<string>(),
@@ -43,6 +49,123 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
 }
 
 describe('registerIpcHandlers', () => {
+  it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-save-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: { findById: () => ({ id: 'm1', slug: 'slug' }) },
+        speakers: { listForMeeting: () => [] },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const save = handle.mock.calls.find(([channel]) => channel === 'meetings:save-summary')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+
+      const writeFileSync = fsSync.writeFileSync.bind(fsSync);
+      let entriesAtWrite = -1;
+      const write = vi.spyOn(fsSync, 'writeFileSync').mockImplementation((...args) => {
+        entriesAtWrite = artifactCache.stats().entries;
+        return writeFileSync(...args);
+      });
+      try {
+        expect(save(null, 'm1', 'New summary')).toBe('New summary');
+      } finally {
+        write.mockRestore();
+      }
+
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+      expect(entriesAtWrite).toBe(0);
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'speakers:rename', 'meetings:set-skip-speaker-id', 'meetings:continue-from-speaker-id',
+  ])('%s remerges with the shared cache and refreshes transcript bytes', async (channel) => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rename-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'transcript.raw.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, text: 'Hi.' }],
+      }));
+      await fs.writeFile(path.join(folder, 'diarization.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00' }],
+      }));
+      await fs.writeFile(path.join(folder, 'transcript.md'), '[Alice 00:00] Hi.');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      // Exercise the actual writer for this integration test; other tests only
+      // need the mocked fan-out because they have no transcript files.
+      const actual = await vi.importActual<typeof import('../pipeline/stages/merging.js')>('../pipeline/stages/merging.js');
+      vi.mocked(remergeTranscript).mockImplementationOnce(actual.remergeTranscript);
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug', pipelineStage: 'awaiting_speaker_id' }),
+          updateSkipSpeakerId: () => {}, updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: {
+          rename: () => {},
+          meetingIdsForSpeaker: () => ['m1'],
+          listForMeeting: () => [{ localLabel: 'SPEAKER_00', displayName: 'Bobby' }],
+        },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get-transcript')![1];
+      const mutate = handle.mock.calls.find(([registered]) => registered === channel)![1];
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Alice 00:00] Hi.');
+
+      if (channel === 'speakers:rename') mutate(null, 'speaker-1', 'Bobby');
+      else mutate(null, 'm1', true);
+
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Bobby 00:00] Hi.');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rerun invalidates the shared cache before artifacts are recreated', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rerun-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug' }),
+          updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: { listForMeeting: () => [] },
+        actionItems: { listByMeeting: () => [], deleteForMeeting: () => {} },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const rerun = handle.mock.calls.find(([channel]) => channel === 'meetings:rerun')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+      rerun(null, 'm1', 'summarizing');
+      await fs.writeFile(summaryPath, 'New summary');
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('registers all known channels', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as any;
@@ -50,6 +173,8 @@ describe('registerIpcHandlers', () => {
     const channels = handle.mock.calls.map((c) => c[0]);
     expect(channels).toContain('meetings:list');
     expect(channels).toContain('meetings:get');
+    expect(channels).toContain('meetings:get-transcript');
+    expect(channels).toContain('meetings:get-speaker-review');
     // Light detail-view status poll (no transcript/summary file reads).
     expect(channels).toContain('meetings:get-status');
     expect(channels).toContain('export:run');
@@ -77,6 +202,148 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('speakers:merge');
     expect(channels).toContain('speakers:assign-bulk');
     expect(channels).toContain('recovery:list');
+  });
+
+  it('loads only the summary into the async meeting shell', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-artifact-shell-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const summaryPath = path.join(folder, 'summary.md');
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    const diarizationPath = path.join(folder, 'diarization.json');
+    await Promise.all([
+      fs.writeFile(summaryPath, '# Summary\nDecision recorded.'),
+      fs.writeFile(transcriptPath, 'x'.repeat(2 * 1024 * 1024)),
+      fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] })),
+      fs.writeFile(diarizationPath, JSON.stringify({ segments: [] })),
+    ]);
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: {
+        listAll: () => [],
+        findById: (id: string) => id === 'm1' ? {
+          id, slug: 'design-sync', title: 'Design sync', startedAt: null, durationS: null,
+          pipelineStage: 'done', status: 'done', errorMessage: null, stageStartedAt: null,
+          skipSpeakerId: false, audioPath: '/audio/design-sync.m4a',
+        } : null,
+      },
+      speakers: {
+        list: () => [],
+        listForMeeting: () => [{
+          localLabel: 'SPEAKER_00', rosterSpeakerId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        }],
+      },
+    }));
+    const get = handle.mock.calls.find((call) => call[0] === 'meetings:get')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<Record<string, unknown> | null>;
+
+    const shell = await get(null, 'm1');
+
+    expect(shell).toMatchObject({ summaryMd: '# Summary\nDecision recorded.' });
+    expect(shell).not.toHaveProperty('transcriptMd');
+    expect(shell).not.toHaveProperty('rawTranscriptText');
+    expect(shell?.speakers).toEqual([{
+      localLabel: 'SPEAKER_00', rosterId: 'spk-alice', displayName: 'Alice', confidence: 1,
+    }]);
+    expect(readText).toHaveBeenCalledWith(summaryPath);
+    expect(readText).not.toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).not.toHaveBeenCalledWith(rawPath);
+    expect(readJson).not.toHaveBeenCalledWith(diarizationPath);
+  });
+
+  it('loads transcript markdown and early raw preview through the transcript artifact handler', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-transcript-artifact-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    await Promise.all([
+      fs.writeFile(transcriptPath, 'Alice: Decision recorded.'),
+      fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] })),
+    ]);
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+    }));
+    const getTranscript = handle.mock.calls.find((call) => call[0] === 'meetings:get-transcript')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ transcriptMd: string | null; rawTranscriptText: string | null } | null>;
+
+    await expect(getTranscript(null, 'm1')).resolves.toEqual({
+      transcriptMd: 'Alice: Decision recorded.', rawTranscriptText: 'Early raw preview',
+    });
+    expect(readText).toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).toHaveBeenCalledWith(rawPath);
+  });
+
+  it('loads speaker review metadata through the speaker-review artifact handler', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-review-artifact-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    const diarizationPath = path.join(folder, 'diarization.json');
+    await Promise.all([
+      fs.writeFile(rawPath, JSON.stringify({ segments: [{ start: 0, end: 4, text: 'Decision recorded.' }] })),
+      fs.writeFile(diarizationPath, JSON.stringify({ segments: [{ start: 0, end: 4, speaker: 'SPEAKER_00' }] })),
+    ]);
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      libraryRoot,
+      artifactCache: { readText: async () => null, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+      speakers: {
+        list: () => [],
+        listForMeeting: () => [{
+          localLabel: 'SPEAKER_00', rosterSpeakerId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        }],
+      },
+    }));
+    const getSpeakerReview = handle.mock.calls.find((call) => call[0] === 'meetings:get-speaker-review')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ speakers: unknown[] } | null>;
+
+    await expect(getSpeakerReview(null, 'm1')).resolves.toEqual({
+      speakers: [{
+        localLabel: 'SPEAKER_00', rosterId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        state: 'confirmed', needsReview: true, segmentCount: 1, durationS: 4, lineCount: 1,
+      }],
+    });
+    expect(readJson).toHaveBeenCalledWith(rawPath);
+    expect(readJson).toHaveBeenCalledWith(diarizationPath);
+  });
+
+  it('returns null for unknown meeting IDs from every detail-artifact handler', async () => {
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      meetings: { listAll: () => [], findById: () => null },
+    }));
+    const handler = (channel: string) => handle.mock.calls.find((call) => call[0] === channel)![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<unknown>;
+
+    await expect(handler('meetings:get')(null, 'missing')).resolves.toBeNull();
+    await expect(handler('meetings:get-transcript')(null, 'missing')).resolves.toBeNull();
+    await expect(handler('meetings:get-speaker-review')(null, 'missing')).resolves.toBeNull();
   });
 
   it('speakers:assign-bulk links every label and re-merges once', () => {

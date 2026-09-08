@@ -23,6 +23,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 import { speakerReviewLayout } from '../lib/speaker-review-layout';
+import { createDetailArtifacts, mergeSpeakerReview, type DetailArtifactState, type DetailSpeaker } from '../lib/detail-artifacts';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -47,11 +48,7 @@ interface MeetingDetail {
   summaryMd: string | null;
   audioPath: string;
   userIdentified: boolean;
-  speakers: {
-    localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null;
-    state: 'unknown' | 'probable' | 'confirmed'; needsReview: boolean;
-    segmentCount: number; durationS: number; lineCount: number;
-  }[];
+  speakers: DetailSpeaker[];
   actionItems: {
     id: string;
     text: string;
@@ -64,6 +61,8 @@ interface MeetingDetail {
   }[];
   models: { stt?: string; llm?: string };
 }
+
+type MeetingShell = Omit<MeetingDetail, 'transcriptMd' | 'rawTranscriptText'>;
 
 // User-facing pipeline step model lives in lib/pipeline-steps so the
 // LibraryRow chip and the StageTimeline below agree on counts and labels.
@@ -79,14 +78,54 @@ export function MeetingDetailView({
   seekSeconds?: number;
   /** Row hints captured at click-time so the loading skeleton can
    *  paint with real values (title, current pipeline stage) instead
-   *  of "Loading…" placeholders. The full meetings:get IPC pulls
-   *  hundreds of KB of transcript markdown for long meetings — the
-   *  hint lets us paint the chrome immediately and only the body
-   *  shows skeleton bars while the IPC resolves. */
+   *  of "Loading…" placeholders while the lightweight shell resolves. */
   hint?: { title?: string; pipelineStage?: string; status?: string };
 }): JSX.Element {
-  const [m, setM] = useState<MeetingDetail | null>(null);
+  const [shell, setShell] = useState<MeetingShell | null>(null);
+  const [, setArtifactVersion] = useState(0);
+  const [artifacts] = useState(() => createDetailArtifacts({
+    transcript: async (meetingId: string) => {
+      const result = await api.meetings.getTranscript(meetingId);
+      if (result === null) throw new Error('Meeting is no longer available.');
+      return result;
+    },
+    speakerReview: async (meetingId: string) => {
+      const result = await api.meetings.getSpeakerReview(meetingId);
+      if (result === null) throw new Error('Meeting is no longer available.');
+      return result;
+    },
+  }, () => setArtifactVersion((version) => version + 1)));
+  useEffect(() => {
+    artifacts.selectMeeting(id);
+    return () => artifacts.selectMeeting(null);
+  }, [artifacts, id]);
+  const transcript = artifacts.get('transcript');
+  const speakerReview = artifacts.get('speakerReview');
+  // Shell refreshes must never erase optional content already on screen.
+  const m: MeetingDetail | null = shell?.id === id ? {
+    ...shell,
+    transcriptMd: transcript.data?.transcriptMd ?? null,
+    rawTranscriptText: transcript.data?.rawTranscriptText ?? null,
+    speakers: mergeSpeakerReview(shell.speakers, speakerReview.data?.speakers),
+  } : null;
   const [tab, setTab] = useState<Tab>('summary');
+  useEffect(() => {
+    if (shell?.id === id && (tab === 'transcript' || seekSeconds !== undefined)) {
+      void artifacts.request(id, 'transcript');
+    }
+  }, [artifacts, id, shell?.id, tab, seekSeconds]);
+  useEffect(() => {
+    if (shell?.id !== id) return;
+    // Two frames put the optional review request after the first shell paint.
+    let nextFrame: number | undefined;
+    const frame = requestAnimationFrame(() => {
+      nextFrame = requestAnimationFrame(() => { void artifacts.request(id, 'speakerReview'); });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (nextFrame !== undefined) cancelAnimationFrame(nextFrame);
+    };
+  }, [artifacts, id, shell?.id]);
   // Provenance jump (#provenance): when the user clicks "Show source" on an
   // action item, we switch to the Summary tab and ask SummaryPanel to
   // highlight the bullet whose text matches `quote`. `nonce` lets re-clicking
@@ -186,7 +225,8 @@ export function MeetingDetailView({
     const apply = (): void => seekTo(seekSeconds);
     if (el.readyState >= 1) apply();
     else el.addEventListener('loadedmetadata', apply, { once: true });
-  }, [seekSeconds]);
+    return () => el.removeEventListener('loadedmetadata', apply);
+  }, [seekSeconds, id, m?.id, seekTo]);
 
   // Summary edit session (#A2). Lives HERE, not in SummaryPanel: the panel
   // is conditionally rendered (`tab === 'summary' && …`), so a tab switch
@@ -259,11 +299,8 @@ export function MeetingDetailView({
     setKick((k) => k + 1);
   };
 
-  // Last live-state snapshot from either the full load or the light poll.
-  // The 2s processing poll only pays for the heavy meetings:get (which
-  // reads transcript.md / summary.md / transcript.raw.json off disk) when
-  // one of these actually changed — a stage advance triggers a full load,
-  // which is also what makes the transcript preview appear.
+  // A changed live-state snapshot refreshes the shell and only the optional
+  // artifacts already requested. Unchanged 2s polls remain DB-only.
   const lastLiveStateRef = useRef<{
     pipelineStage: string; status: string; errorMessage: string | null;
   } | null>(null);
@@ -272,9 +309,11 @@ export function MeetingDetailView({
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     async function load(): Promise<void> {
-      const d = (await api.meetings.get(id)) as MeetingDetail;
+      const d = (await api.meetings.get(id)) as MeetingShell | null;
       if (!alive) return;
-      setM(d);
+      setShell(d);
+      if (d === null) return;
+      void artifacts.refresh(id);
       lastLiveStateRef.current = {
         pipelineStage: d.pipelineStage,
         status: d.status,
@@ -286,8 +325,8 @@ export function MeetingDetailView({
         timer = setTimeout(poll, 2000);
       }
     }
-    // Light poll tick: DB-only status snapshot. Falls back to the full
-    // load the moment stage/status/error changed (or the meeting vanished
+    // Light poll tick: DB-only status snapshot. Refreshes the shell
+    // the moment stage/status/error changed (or the meeting vanished
     // — load()'s null handling is the same either way).
     async function poll(): Promise<void> {
       let st: Awaited<ReturnType<typeof api.meetings.getStatus>>;
@@ -309,8 +348,8 @@ export function MeetingDetailView({
         || st.status !== last.status
         || st.errorMessage !== last.errorMessage;
       if (changed) {
-        // Stage advanced / failed / finished — refresh everything,
-        // including the transcript preview for the newly-written files.
+        // Stage advanced / failed / finished — refresh the shell and
+        // previously requested artifacts, including any raw preview.
         // load() reschedules polling itself while still processing.
         await load();
         return;
@@ -318,7 +357,7 @@ export function MeetingDetailView({
       // No state change: keep the cheap live fields (eta, counts) fresh
       // without re-shipping the transcript, and keep polling.
       const snap = st;
-      setM((prev) => (prev === null ? prev : {
+      setShell((prev) => (prev === null || prev.id !== id ? prev : {
         ...prev,
         title: snap.title,
         stageStartedAt: snap.stageStartedAt,
@@ -335,7 +374,7 @@ export function MeetingDetailView({
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [id, kick]);
+  }, [artifacts, id, kick]);
 
   if (!m)
     return <DetailSkeleton hint={hint} onBack={onBack} />;
@@ -441,10 +480,13 @@ export function MeetingDetailView({
             onSummaryDraft={setSummaryDraft}
             summarySaved={summarySaved}
             onSummaryBaseline={setSummarySaved}
+            transcriptState={transcript}
+            onRetryTranscript={() => void artifacts.request(id, 'transcript')}
           />
         </div>
         <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
-        <div className="order-3 min-w-0 lg:overflow-y-auto"><RightRail meeting={m} onReload={reload} /></div>
+        <div className="order-3 min-w-0 lg:overflow-y-auto"><RightRail meeting={m} onReload={reload}
+          speakerReviewState={speakerReview} onRetrySpeakerReview={() => void artifacts.request(id, 'speakerReview')} /></div>
       </div>
 
       {/* Audio player pinned to the bottom of the card. Lives outside the
@@ -1157,9 +1199,30 @@ function LeftRail({
   );
 }
 
+function ArtifactFeedback({ label, state, onRetry }: {
+  label: string;
+  state: DetailArtifactState<unknown>;
+  onRetry: () => void;
+}): JSX.Element | null {
+  if (state.error) return (
+    <div role="alert" className="mb-2 flex items-center gap-2 text-xs text-danger">
+      <span className="min-w-0">Could not load {label}: {state.error}</span>
+      <button type="button" onClick={onRetry} disabled={state.loading}
+        className="shrink-0 font-semibold underline disabled:opacity-40">Retry</button>
+    </div>
+  );
+  if (state.loading && state.data === undefined) return (
+    <div role="status" className="mb-2 flex items-center gap-1.5 text-xs text-ink-muted">
+      <MiniSpinner /> Loading {label}…
+    </div>
+  );
+  return null;
+}
+
 function CenterPane({
   meeting, tab, onTab, currentTime, onSeek, onReload, onShowSource, provenance,
   summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
+  transcriptState, onRetryTranscript,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
@@ -1177,6 +1240,8 @@ function CenterPane({
   onSummaryDraft: (v: string) => void;
   summarySaved: string;
   onSummaryBaseline: (v: string) => void;
+  transcriptState: DetailArtifactState<unknown>;
+  onRetryTranscript: () => void;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
@@ -1217,12 +1282,15 @@ function CenterPane({
           />
         )}
         {tab === 'transcript' && (
-          <TranscriptPanel
-            meeting={meeting}
-            showRaw={showRaw}
-            currentTime={currentTime}
-            onSeek={onSeek}
-          />
+          <>
+            <ArtifactFeedback label="transcript" state={transcriptState} onRetry={onRetryTranscript} />
+            {transcriptState.data !== undefined && <TranscriptPanel
+              meeting={meeting}
+              showRaw={showRaw}
+              currentTime={currentTime}
+              onSeek={onSeek}
+            />}
+          </>
         )}
         {tab === 'actions' && <ActionItemsPanel meeting={meeting} onReload={onReload} onShowSource={onShowSource} />}
       </div>
@@ -2224,7 +2292,12 @@ function MarkdownEditor({
   );
 }
 
-function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: () => Promise<void> }): JSX.Element {
+function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview }: {
+  meeting: MeetingDetail;
+  onReload: () => Promise<void>;
+  speakerReviewState: DetailArtifactState<unknown>;
+  onRetrySpeakerReview: () => void;
+}): JSX.Element {
   // Two-step export: clicking a destination opens a modal listing every action
   // item with a checkbox, so the user can opt out of the ones that aren't
   // theirs (LLMs love to turn "somebody should do X" into an action item
@@ -2287,6 +2360,7 @@ function RightRail({ meeting, onReload }: { meeting: MeetingDetail; onReload: ()
 
   return (
     <div className="border-l border-surface-border p-4 space-y-3">
+      <ArtifactFeedback label="speaker review" state={speakerReviewState} onRetry={onRetrySpeakerReview} />
       <SpeakersPanel meeting={meeting} onReload={onReload} />
       <div className="pt-3 border-t border-surface-border space-y-2">
         <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex items-center justify-between">
@@ -2642,7 +2716,7 @@ function SpeakersPanel({
 
   const selectedImpact = meeting.speakers
     .filter((speaker) => selected.has(speaker.localLabel))
-    .reduce((sum, speaker) => sum + speaker.lineCount, 0);
+    .reduce((sum, speaker) => sum + (speaker.lineCount ?? 0), 0);
   function toggleSelected(label: string): void {
     setSelected((current) => {
       const next = new Set(current);
@@ -2727,7 +2801,7 @@ function SpeakersPanel({
             isOpen={expanded === sp.localLabel}
             onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
             onChanged={reloadMeeting}
-            selectable={sp.needsReview}
+            selectable={sp.needsReview ?? false}
             selected={selected.has(sp.localLabel)}
             onSelect={() => toggleSelected(sp.localLabel)}
           />
@@ -2747,10 +2821,10 @@ function SpeakerRow({
   displayName: string | null;
   rosterId: string | null;
   confidence: number | null;
-  reviewState: 'unknown' | 'probable' | 'confirmed';
-  needsReview: boolean;
-  durationS: number;
-  lineCount: number;
+  reviewState?: 'unknown' | 'probable' | 'confirmed';
+  needsReview?: boolean;
+  durationS?: number;
+  lineCount?: number;
   colorIdx: number;
   roster: RosterEntry[];
   isOpen: boolean;
@@ -2793,10 +2867,10 @@ function SpeakerRow({
         </div>
         <div className={layout.details}>
           <div className="font-semibold truncate">{displayName ?? localLabel}</div>
-          <div className="text-[10px] text-ink-muted truncate">
+          {durationS !== undefined && lineCount !== undefined && <div className="text-[10px] text-ink-muted truncate">
             {named ? `${localLabel} · ` : ''}{fmtSec(durationS)} speaking · {lineCount} line{lineCount === 1 ? '' : 's'}
-          </div>
-          <div className={layout.status}>
+          </div>}
+          {reviewState !== undefined && <div className={layout.status}>
             <span className={`max-w-full text-[10px] px-1.5 py-0.5 rounded-full ${
               reviewState === 'confirmed' ? 'bg-status-okBg text-status-ok'
                 : reviewState === 'probable' ? 'bg-brand-indigo/10 text-brand-indigo'
@@ -2807,7 +2881,7 @@ function SpeakerRow({
                   : 'Unknown'}
             </span>
             {needsReview && <span className="text-[10px] text-status-warnText font-semibold">Needs review</span>}
-          </div>
+          </div>}
         </div>
         <svg
           viewBox="0 0 16 16"
@@ -2839,7 +2913,7 @@ function SpeakerEditor({
   localLabel: string;
   rosterId: string | null;
   roster: RosterEntry[];
-  lineCount: number;
+  lineCount?: number;
   onChanged: () => void;
 }): JSX.Element {
   const [sample, setSample] = useState<{ dataUri: string; startS: number; endS: number } | null>(null);
@@ -2884,8 +2958,10 @@ function SpeakerEditor({
   }, [meetingId, localLabel]);
 
   async function assignExisting(rid: string): Promise<void> {
+    const impact = lineCount === undefined ? 'Transcript lines for this voice will change.'
+      : `${lineCount} transcript line${lineCount === 1 ? '' : 's'} will change.`;
     if (rosterId && rid !== rosterId
-      && !window.confirm(`Reassign this voice? ${lineCount} transcript line${lineCount === 1 ? '' : 's'} will change.`)) return;
+      && !window.confirm(`Reassign this voice? ${impact}`)) return;
     setBusy(true); setError(null);
     try {
       await api.speakers.assign({ meetingId, localLabel, mode: 'existing', rosterId: rid });
