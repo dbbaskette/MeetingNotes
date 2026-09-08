@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
+import { VirtualMeetingList } from '../components/VirtualMeetingList';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
@@ -273,18 +274,6 @@ export function LibraryView({
   const selectionMeetings = isSearching ? searchMeetings : meetings;
 
   const listRef = useRef<HTMLDivElement>(null);
-  const loadMoreRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (isSearching || !hasMore || loadingMore || refreshing || error) return;
-    const target = loadMoreRef.current;
-    const root = listRef.current;
-    if (!target || !root) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) void loadMore();
-    }, { root, rootMargin: '300px' });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [isSearching, hasMore, loadingMore, refreshing, error, loadMore, meetings.length]);
   useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [libFilter, sortKey, isSearching]);
 
   // Drop stale selections — a meeting that disappeared from the list
@@ -608,6 +597,32 @@ export function LibraryView({
               </div>
             );
           };
+          // The key resets browse scroll on a new filter/sort, while refreshes
+          // and appended pages preserve the existing viewport and focused row.
+          if (!isSearching) return (
+            <VirtualMeetingList
+              key={`${libFilter}:${sortKey}`}
+              items={browseList}
+              renderRow={(m) => renderRow(m, false)}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              refreshing={refreshing}
+              error={error}
+              loadMore={loadMore}
+              className={selected.size > 0 ? 'pb-28' : 'pb-8'}
+              footer={error ? (
+                <LibraryRetryRow message={error} onRetry={() => void retry()} />
+              ) : (
+                <div className="py-3 text-center text-xs text-ink-muted">
+                  {loadingMore ? <span role="status">Loading more meetings…</span> : hasMore ? (
+                    <button type="button" className="px-3 py-1.5 rounded-lg border border-surface-border hover:text-ink" onClick={() => void loadMore()}>
+                      Load more ({meetings.length} of {total})
+                    </button>
+                  ) : <span>{meetings.length} of {total} meetings</span>}
+                </div>
+              )}
+            />
+          );
           return (
             <div
               ref={listRef}
@@ -617,42 +632,23 @@ export function LibraryView({
                 selected.size > 0 ? 'pb-28' : 'pb-8'
               }`}
             >
-              {isSearching ? (
-                <>
-                  {titleMatches.length > 0 && (
-                    <SearchSectionHeader
-                      label="Title matches"
-                      count={titleMatches.length}
-                    />
-                  )}
-                  {titleMatches.map((m) => renderRow(m, false))}
-                  {contentMatches.length > 0 && (
-                    <SearchSectionHeader
-                      label="Mentioned in"
-                      count={contentMatches.length}
-                      sort={contentSort}
-                      onSortChange={setContentSort}
-                    />
-                  )}
-                  {contentMatches.map((m) => renderRow(m, true))}
-                  {searchError && <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
-                </>
-              ) : (
-                <>
-                  {browseList.map((m) => renderRow(m, false))}
-                  {error ? (
-                    <LibraryRetryRow message={error} onRetry={() => void retry()} />
-                  ) : (
-                    <div ref={loadMoreRef} className="py-3 text-center text-xs text-ink-muted">
-                      {loadingMore ? <span role="status">Loading more meetings…</span> : hasMore ? (
-                        <button type="button" className="px-3 py-1.5 rounded-lg border border-surface-border hover:text-ink" onClick={() => void loadMore()}>
-                          Load more ({meetings.length} of {total})
-                        </button>
-                      ) : <span>{meetings.length} of {total} meetings</span>}
-                    </div>
-                  )}
-                </>
+              {titleMatches.length > 0 && (
+                <SearchSectionHeader
+                  label="Title matches"
+                  count={titleMatches.length}
+                />
               )}
+              {titleMatches.map((m) => renderRow(m, false))}
+              {contentMatches.length > 0 && (
+                <SearchSectionHeader
+                  label="Mentioned in"
+                  count={contentMatches.length}
+                  sort={contentSort}
+                  onSortChange={setContentSort}
+                />
+              )}
+              {contentMatches.map((m) => renderRow(m, true))}
+              {searchError && <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
             </div>
           );
         })()}

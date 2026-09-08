@@ -105,7 +105,7 @@ export const LibraryRow = memo(function LibraryRow({
       onClick={handleRowClick}
       className={`
         group relative ${bg} border border-surface-border rounded-xl
-        px-4 py-3 flex items-center gap-4 cursor-pointer transition
+        min-h-[64px] px-4 py-3 flex items-center gap-4 cursor-pointer transition
         hover:border-brand-indigo/60 hover:shadow-pop
         before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2
         before:w-[3px] before:rounded-r-full ${edge}
