@@ -1,10 +1,57 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runMerging } from './merging.js';
+import { ArtifactCache } from '../../library/artifact-cache.js';
 
 describe('runMerging', () => {
+  it('invalidates transcript and review sources before writing despite unchanged fingerprints', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-merge-cache-'));
+    try {
+      const folder = path.join(dir, 'meetings', 'slug');
+      fs.mkdirSync(folder, { recursive: true });
+      const transcriptPath = path.join(folder, 'transcript.md');
+      const rawPath = path.join(folder, 'transcript.raw.json');
+      const diarPath = path.join(folder, 'diarization.json');
+      const oldRaw = JSON.stringify({ segments: [{ start: 0, end: 1, text: 'Hi.' }] });
+      const newRaw = JSON.stringify({ segments: [{ start: 0, end: 1, text: 'Yo.' }] });
+      const oldDiar = JSON.stringify({ segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00' }] });
+      const newDiar = JSON.stringify({ segments: [{ start: 0, end: 1, speaker: 'SPEAKER_01' }] });
+      fs.writeFileSync(transcriptPath, '[SPEAKER_00 00:00] Hi.');
+      fs.writeFileSync(rawPath, oldRaw);
+      fs.writeFileSync(diarPath, oldDiar);
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: fs.statSync(filePath).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      await Promise.all([transcriptPath, rawPath, diarPath].map((filePath) => artifactCache.readText(filePath)));
+      fs.writeFileSync(rawPath, newRaw);
+      fs.writeFileSync(diarPath, newDiar);
+      const writeFileSync = fs.writeFileSync.bind(fs);
+      let entriesAtWrite = -1;
+      const write = vi.spyOn(fs, 'writeFileSync').mockImplementation((...args) => {
+        entriesAtWrite = artifactCache.stats().entries;
+        return writeFileSync(...args);
+      });
+      try {
+        await runMerging({ meetingId: 'm' }, {
+          libraryRoot: dir, artifactCache,
+          meetings: { findById: () => ({ slug: 'slug' }) },
+          speakers: { listForMeeting: () => [] },
+          settings: { get: () => '' }, logger: { info: () => {} },
+        } as any);
+      } finally {
+        write.mockRestore();
+      }
+      expect(await artifactCache.readText(transcriptPath)).toBe('[SPEAKER_01 00:00] Yo.');
+      expect(await artifactCache.readText(rawPath)).toBe(newRaw);
+      expect(await artifactCache.readText(diarPath)).toBe(newDiar);
+      expect(entriesAtWrite).toBe(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reads transcript.raw.json + diarization.json, writes transcript.md', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-m-'));
     const f = path.join(dir, 'meetings', 'slug');
@@ -31,6 +78,7 @@ describe('runMerging', () => {
     );
     const ctx: any = {
       libraryRoot: dir,
+      artifactCache: new ArtifactCache(),
       meetings: { findById: () => ({ slug: 'slug' }) },
       speakers: { listForMeeting: () => [] },
       logger: { info: () => {} },
@@ -66,6 +114,7 @@ describe('runMerging', () => {
     );
     const ctx: any = {
       libraryRoot: dir,
+      artifactCache: new ArtifactCache(),
       meetings: { findById: () => ({ slug: 'slug' }) },
       speakers: {
         // SPEAKER_00 → named, SPEAKER_01 → still anonymous (rosterId but no
@@ -107,6 +156,7 @@ describe('runMerging', () => {
     );
     const ctx: any = {
       libraryRoot: dir,
+      artifactCache: new ArtifactCache(),
       meetings: { findById: () => ({ slug: 'slug' }) },
       speakers: { listForMeeting: () => [] },
       logger: { info: () => {} },
@@ -134,6 +184,7 @@ describe('runMerging', () => {
     // No diarization.json on disk.
     const ctx: any = {
       libraryRoot: dir,
+      artifactCache: new ArtifactCache(),
       meetings: { findById: () => ({ slug: 'slug' }) },
       speakers: { listForMeeting: () => [] },
       logger: { info: () => {} },

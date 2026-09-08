@@ -320,6 +320,7 @@ app.whenReady().then(async () => {
 
   const ctx = {
     libraryRoot,
+    artifactCache,
     lmStudio,
     stt,
     diarization,

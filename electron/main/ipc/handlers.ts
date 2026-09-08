@@ -378,7 +378,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const meeting = s.meetings.findById(parsed.id);
     if (meeting) {
       const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-      clearArtifactsFromStage(folder, parsed.fromStage);
+      clearArtifactsFromStage(folder, parsed.fromStage, s.artifactCache);
     }
     if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
     if (shouldClearSpeakerLinks(parsed.fromStage)) s.speakers.unlinkMeeting(parsed.id);
@@ -415,7 +415,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         // before flipping the skip switch — they may have labeled some but
         // not all voices, and they still deserve names in the transcript.
         try {
-          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
+          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName') });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
         // Leaving the gate — forget the notified flag so a future re-entry alerts.
         clearGateNotified(id, s.gateNotified);
@@ -439,7 +439,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // bumping the stage — the whole point of the gate is giving the user a
     // chance to replace SPEAKER_00 with real names in the final output.
     try {
-      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
+      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName') });
     } catch { /* see note above */ }
     // Advance manually to 'summarizing' so the pipeline's linear loop picks up
     // on the right side of the gate. (We don't flip skipSpeakerId — the user
@@ -459,7 +459,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     fs.mkdirSync(folder, { recursive: true });
-    fs.writeFileSync(path.join(folder, 'summary.md'), markdown);
+    const summaryPath = path.join(folder, 'summary.md');
+    s.artifactCache.invalidate(summaryPath);
+    fs.writeFileSync(summaryPath, markdown);
     return markdown;
   });
 
@@ -567,6 +569,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
           libraryRoot: s.libraryRoot,
           meetings: s.meetings,
           speakers: s.speakers,
+          artifactCache: s.artifactCache,
           userName: s.settings.get('userName'),
         });
       } catch { /* see note above */ }

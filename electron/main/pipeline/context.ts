@@ -9,9 +9,11 @@ import type { SettingsRepo } from '../storage/settings-repo.js';
 import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Logger } from '../logging/logger.js';
+import type { ArtifactCache } from '../library/artifact-cache.js';
 
 export interface PipelineContext {
   libraryRoot: string;
+  artifactCache: ArtifactCache;
   /** Chat/LLM endpoint (LM Studio). */
   lmStudio: LMStudioClient;
   /** Whisper STT endpoint (whisper.cpp's whisper-server or compatible). */

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { registerIpcHandlers } from './handlers.js';
 import { LMStudioError } from '../lm-studio/client.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import { ArtifactCache } from '../library/artifact-cache.js';
 
 // Mock the merge step so speaker rename/merge tests can assert the re-merge
 // fan-out without needing real transcript files on disk.
@@ -38,7 +40,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     },
     exporters: {},
     libraryRoot: '/tmp',
-    artifactCache: { readText: async () => null, readJson: async () => null },
+    artifactCache: new ArtifactCache(),
     llmSupervisor: { ensureReady: async () => {} },
     logger: { info: () => {}, error: () => {} },
     gateNotified: new Set<string>(),
@@ -47,6 +49,123 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
 }
 
 describe('registerIpcHandlers', () => {
+  it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-save-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: { findById: () => ({ id: 'm1', slug: 'slug' }) },
+        speakers: { listForMeeting: () => [] },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const save = handle.mock.calls.find(([channel]) => channel === 'meetings:save-summary')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+
+      const writeFileSync = fsSync.writeFileSync.bind(fsSync);
+      let entriesAtWrite = -1;
+      const write = vi.spyOn(fsSync, 'writeFileSync').mockImplementation((...args) => {
+        entriesAtWrite = artifactCache.stats().entries;
+        return writeFileSync(...args);
+      });
+      try {
+        expect(save(null, 'm1', 'New summary')).toBe('New summary');
+      } finally {
+        write.mockRestore();
+      }
+
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+      expect(entriesAtWrite).toBe(0);
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'speakers:rename', 'meetings:set-skip-speaker-id', 'meetings:continue-from-speaker-id',
+  ])('%s remerges with the shared cache and refreshes transcript bytes', async (channel) => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rename-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'transcript.raw.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, text: 'Hi.' }],
+      }));
+      await fs.writeFile(path.join(folder, 'diarization.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00' }],
+      }));
+      await fs.writeFile(path.join(folder, 'transcript.md'), '[Alice 00:00] Hi.');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      // Exercise the actual writer for this integration test; other tests only
+      // need the mocked fan-out because they have no transcript files.
+      const actual = await vi.importActual<typeof import('../pipeline/stages/merging.js')>('../pipeline/stages/merging.js');
+      vi.mocked(remergeTranscript).mockImplementationOnce(actual.remergeTranscript);
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug', pipelineStage: 'awaiting_speaker_id' }),
+          updateSkipSpeakerId: () => {}, updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: {
+          rename: () => {},
+          meetingIdsForSpeaker: () => ['m1'],
+          listForMeeting: () => [{ localLabel: 'SPEAKER_00', displayName: 'Bobby' }],
+        },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get-transcript')![1];
+      const mutate = handle.mock.calls.find(([registered]) => registered === channel)![1];
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Alice 00:00] Hi.');
+
+      if (channel === 'speakers:rename') mutate(null, 'speaker-1', 'Bobby');
+      else mutate(null, 'm1', true);
+
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Bobby 00:00] Hi.');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rerun invalidates the shared cache before artifacts are recreated', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rerun-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as any, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug' }),
+          updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: { listForMeeting: () => [] },
+        actionItems: { listByMeeting: () => [], deleteForMeeting: () => {} },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const rerun = handle.mock.calls.find(([channel]) => channel === 'meetings:rerun')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+      rerun(null, 'm1', 'summarizing');
+      await fs.writeFile(summaryPath, 'New summary');
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('registers all known channels', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as any;
