@@ -59,12 +59,15 @@ export class ArtifactCache {
   }
 
   async readJson<T>(filePath: string): Promise<T | null> {
-    const source = await this.readSource(filePath);
+    const key = path.resolve(filePath);
+    const source = await this.readSource(key);
     if (source === null) return null;
     try {
       return JSON.parse(source) as T;
-    } catch {
-      return null;
+    } catch (error) {
+      // Drop the malformed source without evicting a newer, different read.
+      if (this.entries.get(key)?.source === source) this.removeEntry(key);
+      throw error;
     }
   }
 
@@ -120,7 +123,8 @@ export class ArtifactCache {
       bytes: 0,
       lastUsed: ++this.clock,
     };
-    const inFlight = this.load(key, entry);
+    // Register before loading, including paths that settle without any I/O.
+    const inFlight = Promise.resolve().then(() => this.load(key, entry));
     entry.inFlight = inFlight;
     this.entries.set(key, entry);
     return inFlight;
@@ -132,8 +136,13 @@ export class ArtifactCache {
       this.readCount++;
       try {
         source = await this.readFile(key);
-      } catch {
-        source = null;
+      } catch (error) {
+        if (!isMissingFile(error)) {
+          if (this.entries.get(key) === entry) this.removeEntry(key);
+          throw error;
+        }
+        // The file disappeared after stat; do not retain the successful fingerprint.
+        entry.fingerprint = null;
       }
     }
 
@@ -155,8 +164,9 @@ export class ArtifactCache {
     try {
       const stat = await this.statFile(filePath);
       return `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissingFile(error)) return null;
+      throw error;
     }
   }
 
@@ -194,4 +204,8 @@ export class ArtifactCache {
 
 function isWithin(filePath: string, folder: string): boolean {
   return filePath === folder || filePath.startsWith(`${folder}${path.sep}`);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }

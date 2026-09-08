@@ -24,20 +24,24 @@ function put(path: string, content: string, times = 1): void {
   stats.set(path, file);
 }
 
+function fileError(code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(code), { code });
+}
+
 function makeCache(options: ConstructorParameters<typeof ArtifactCache>[0] = {}) {
   const readFile = options.readFile ?? (async (path: string) => {
     reads.set(path, (reads.get(path) ?? 0) + 1);
     const file = files.get(path);
-    if (!file) throw new Error('ENOENT');
+    if (!file) throw fileError('ENOENT');
     return file.content;
   });
   return new ArtifactCache({
     ...options,
-    stat: async (path: string) => {
+    stat: options.stat ?? (async (path: string) => {
       const file = stats.get(path);
-      if (!file) throw new Error('ENOENT');
+      if (!file) throw fileError('ENOENT');
       return file;
-    },
+    }),
     readFile,
   });
 }
@@ -101,6 +105,75 @@ describe('ArtifactCache', () => {
     files.delete(file);
     await expect(cache.readText(file)).resolves.toBeNull();
     expect(reads.get(file)).toBe(1);
+  });
+
+  it('settles a missing-file entry before returning null', async () => {
+    const file = '/library/missing.md';
+    const cache = makeCache();
+
+    await expect(cache.readText(file)).resolves.toBeNull();
+    expect(cache.stats()).toMatchObject({ entries: 1, inFlight: 0, retainedBytes: 0, reads: 0 });
+    await expect(cache.readText(file)).resolves.toBeNull();
+    expect(cache.stats()).toMatchObject({ hits: 1, inFlight: 0 });
+  });
+
+  it('rejects a shared transient read failure and retries with the same fingerprint', async () => {
+    const file = '/library/summary.md';
+    put(file, 'summary');
+    const failure = fileError('EIO');
+    let attempts = 0;
+    const cache = makeCache({
+      readFile: async () => {
+        if (++attempts === 1) throw failure;
+        return 'summary';
+      },
+    });
+
+    await expect(Promise.allSettled([cache.readText(file), cache.readText(file)])).resolves.toEqual([
+      { status: 'rejected', reason: failure },
+      { status: 'rejected', reason: failure },
+    ]);
+    expect(attempts).toBe(1);
+    expect(cache.stats()).toMatchObject({ entries: 0, inFlight: 0, retainedBytes: 0 });
+    await expect(cache.readText(file)).resolves.toBe('summary');
+    await expect(cache.readText(file)).resolves.toBe('summary');
+    expect(attempts).toBe(2);
+    expect(cache.stats()).toMatchObject({ entries: 1, inFlight: 0, reads: 2 });
+  });
+
+  it('rejects non-ENOENT stat failures and allows a later retry', async () => {
+    const file = '/library/summary.md';
+    put(file, 'summary');
+    const failure = fileError('EACCES');
+    let attempts = 0;
+    const cache = makeCache({
+      stat: async () => {
+        if (++attempts === 1) throw failure;
+        return stats.get(file)!;
+      },
+    });
+
+    await expect(cache.readText(file)).rejects.toBe(failure);
+    expect(cache.stats()).toMatchObject({ entries: 0, inFlight: 0, reads: 0 });
+    await expect(cache.readText(file)).resolves.toBe('summary');
+    expect(reads.get(file)).toBe(1);
+  });
+
+  it('returns null if a file disappears during a read without retaining its old fingerprint', async () => {
+    const file = '/library/summary.md';
+    put(file, 'summary');
+    let attempts = 0;
+    const cache = makeCache({
+      readFile: async () => {
+        if (++attempts === 1) throw fileError('ENOENT');
+        return 'summary';
+      },
+    });
+
+    await expect(cache.readText(file)).resolves.toBeNull();
+    expect(cache.stats().inFlight).toBe(0);
+    await expect(cache.readText(file)).resolves.toBe('summary');
+    expect(attempts).toBe(2);
   });
 
   it('reloads after explicit path and folder invalidation', async () => {
@@ -180,15 +253,59 @@ describe('ArtifactCache', () => {
     expect(reads.get(file)).toBe(2);
   });
 
-  it('parses JSON only for readJson and returns null for malformed JSON', async () => {
+  it('does not evict a newer entry when an invalidated read rejects', async () => {
+    const file = '/library/summary.md';
+    put(file, 'old');
+    let rejectOld!: (error: Error) => void;
+    const oldRead = new Promise<string>((_, reject) => { rejectOld = reject; });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    let attempts = 0;
+    const cache = makeCache({
+      readFile: async () => {
+        if (++attempts === 1) {
+          markStarted();
+          return oldRead;
+        }
+        return 'new';
+      },
+    });
+
+    const stale = cache.readText(file);
+    await started;
+    cache.invalidate(file);
+    await expect(cache.readText(file)).resolves.toBe('new');
+    const failure = fileError('EIO');
+    rejectOld(failure);
+    await expect(stale).rejects.toBe(failure);
+    await expect(cache.readText(file)).resolves.toBe('new');
+    expect(attempts).toBe(2);
+    expect(cache.stats()).toMatchObject({ entries: 1, inFlight: 0, retainedBytes: 3 });
+  });
+
+  it('parses JSON only for readJson and shares the cached text source', async () => {
     const file = '/library/diarization.json';
     put(file, '{"speaker":"A"}');
     const cache = makeCache();
 
+    await expect(cache.readText(file)).resolves.toBe('{"speaker":"A"}');
     await expect(cache.readJson<{ speaker: string }>(file)).resolves.toEqual({ speaker: 'A' });
     expect(reads.get(file)).toBe(1);
-    put(file, 'not json', 2);
-    await expect(cache.readJson(file)).resolves.toBeNull();
+  });
+
+  it('rejects malformed JSON and reloads corrected content with the same fingerprint', async () => {
+    const file = '/library/diarization.json';
+    put(file, '{"speaker": A }');
+    const cache = makeCache();
+
+    await expect(cache.readText(file)).resolves.toBe('{"speaker": A }');
+    await expect(cache.readJson(file)).rejects.toBeInstanceOf(SyntaxError);
+    expect(cache.stats()).toMatchObject({ entries: 0, inFlight: 0, retainedBytes: 0 });
+    // Same source length and timestamps: recovery must not rely on a new fingerprint.
+    put(file, '{"speaker":"A"}');
+    await expect(cache.readJson<{ speaker: string }>(file)).resolves.toEqual({ speaker: 'A' });
+    await expect(cache.readJson<{ speaker: string }>(file)).resolves.toEqual({ speaker: 'A' });
+    expect(reads.get(file)).toBe(2);
   });
 
   it('evicts settled least-recently-used entries over the injected byte budget', async () => {
