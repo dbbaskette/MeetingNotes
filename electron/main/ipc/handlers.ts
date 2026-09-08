@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { IPC_CHANNELS } from './contracts.js';
-import type { MeetingsRepo } from '../storage/meetings-repo.js';
+import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
+  type MeetingSummary, type MeetingSummaryPage } from './contracts.js';
+import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
@@ -116,6 +117,35 @@ function unidentifiedCount(rows: { rosterId: string | null }[]): number {
   return rows.filter((r) => r.rosterId === null).length;
 }
 
+function meetingSummary(
+  s: IpcServices,
+  m: MeetingRow,
+  links: ReturnType<SpeakersRepo['listForMeeting']>,
+  actionItemsCount: number,
+): MeetingSummary {
+  const speakers = links.map((sp) => ({
+    localLabel: sp.localLabel, rosterId: sp.rosterSpeakerId,
+    displayName: sp.displayName, confidence: sp.confidence,
+  }));
+  const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
+  return {
+    id: m.id, slug: m.slug, title: m.title,
+    startedAt: m.startedAt, durationS: m.durationS,
+    pipelineStage: m.pipelineStage, status: m.status,
+    errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
+    unidentifiedCount: unidentifiedCount(speakers), actionItemsCount,
+    stageEtaMs: eta?.etaMs ?? null, stageEtaRough: eta?.rough ?? false, speakers,
+  };
+}
+
+function scopedMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSummary[] {
+  if (rows.length === 0) return [];
+  const ids = rows.map((m) => m.id);
+  const speakers = s.speakers.listForMeetings(ids);
+  const counts = s.actionItems.countsForMeetings(ids);
+  return rows.map((m) => meetingSummary(s, m, speakers.get(m.id) ?? [], counts.get(m.id) ?? 0));
+}
+
 async function speakerReviewForFolder(
   folder: string,
   links: ReturnType<typeof listMeetingSpeakers>,
@@ -187,33 +217,24 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // O(N) queries — LibraryView polls every 3s.
     const speakersByMeeting = s.speakers.listForAllMeetings();
     const counts = s.actionItems.countsByMeeting();
-    return s.meetings.listAll().map((m) => {
-      const speakers = (speakersByMeeting.get(m.id) ?? []).map((sp) => ({
-        localLabel: sp.localLabel,
-        rosterId: sp.rosterSpeakerId,
-        displayName: sp.displayName,
-        confidence: sp.confidence,
-      }));
-      const eta = stageEtaForMeeting(
-        s.stageDurations,
-        m.pipelineStage,
-        () => transcriptChars(s.libraryRoot, m.slug),
-      );
-      return {
-        id: m.id, slug: m.slug, title: m.title,
-        startedAt: m.startedAt, durationS: m.durationS,
-        pipelineStage: m.pipelineStage, status: m.status,
-        errorMessage: m.errorMessage,
-        stageStartedAt: m.stageStartedAt,
-        skipSpeakerId: m.skipSpeakerId,
-        unidentifiedCount: unidentifiedCount(speakers),
-        actionItemsCount: counts.get(m.id) ?? 0,
-        stageEtaMs: eta?.etaMs ?? null,
-        stageEtaRough: eta?.rough ?? false,
-        speakers,
-      };
-    });
+    return s.meetings.listAll().map((m) => meetingSummary(s, m, speakersByMeeting.get(m.id) ?? [], counts.get(m.id) ?? 0));
   });
+
+  ipc.handle(IPC_CHANNELS.meetingsListPage, (_e, input: unknown): MeetingSummaryPage => {
+    const query = MeetingListQuerySchema.parse(input);
+    const page = s.meetings.listPage(query);
+    const counts = s.meetings.counts();
+    return { items: scopedMeetingSummaries(s, page.rows), nextCursor: page.nextCursor,
+      total: counts[query.filter], counts };
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsGetMany, (_e, input: unknown): MeetingSummary[] => {
+    const ids = MeetingIdsSchema.parse(input);
+    return scopedMeetingSummaries(s, s.meetings.findByIds(ids));
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown): string[] =>
+    s.meetings.listIds(MeetingListFilterSchema.parse(input)));
 
   ipc.handle(IPC_CHANNELS.meetingsGet, async (_e, id: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');

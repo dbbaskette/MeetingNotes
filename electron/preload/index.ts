@@ -7,12 +7,36 @@ interface RecoveryItem {
 }
 let recoveryRequest = 0;
 
+// Keep these structural types local: importing main contracts makes the CJS
+// compiler emit main-process modules again.
+type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+type MeetingListQuery = {
+  filter: MeetingListFilter;
+  sort: 'newest' | 'oldest' | 'longest' | 'title';
+  cursor?: string;
+  pageSize?: number;
+};
+type MeetingSummary = {
+  id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
+  pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
+  unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
+  stageEtaRough: boolean; skipSpeakerId: boolean;
+  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[];
+};
+type MeetingSummaryPage = {
+  items: MeetingSummary[]; nextCursor: string | null; total: number;
+  counts: { all: number; pending: number; processing: number; done: number; failed: number };
+};
+
 // Inlined to keep the preload (CJS) and main (ESM) builds independent — sharing
 // a compiled module across both modes causes the file in dist/ to flip between
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
+  meetingsListPage: 'meetings:list-page',
+  meetingsGetMany: 'meetings:get-many',
+  meetingsListIds: 'meetings:list-ids',
   meetingsGet: 'meetings:get',
   meetingsGetTranscript: 'meetings:get-transcript',
   meetingsGetSpeakerReview: 'meetings:get-speaker-review',
@@ -101,6 +125,14 @@ const IPC_CHANNELS = {
 const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
+    /** Live keyset page; restart after changing filters/sorts or refreshing. */
+    listPage: (query: MeetingListQuery) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsListPage, query) as Promise<MeetingSummaryPage>,
+    /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted. */
+    getMany: (ids: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
+    listIds: (filter: MeetingListFilter) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter) as Promise<string[]>,
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
     getTranscript: (id: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsGetTranscript, id) as Promise<{

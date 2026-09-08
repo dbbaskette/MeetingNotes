@@ -20,6 +20,18 @@ beforeEach(() => {
 });
 
 describe('ActionItemsRepo', () => {
+  it('counts only requested meetings across batches without duplicate counts', () => {
+    for (const id of ['last', 'outside']) meetings.insert({ id, slug: id, title: id, startedAt: null,
+      durationS: null, audioPath: `/${id}`, status: 'done', pipelineStage: 'done' });
+    repo.create(meetingId, { text: 'One' });
+    repo.create(meetingId, { text: 'Two' });
+    repo.create('last', { text: 'Last' });
+    repo.create('outside', { text: 'Excluded' });
+    const ids = [meetingId, ...Array.from({ length: 900 }, (_, i) => `missing-${i}`), 'last', meetingId];
+    expect(repo.countsForMeetings(ids)).toEqual(new Map([[meetingId, 2], ['last', 1]]));
+    expect(repo.countsForMeetings([])).toEqual(new Map());
+  });
+
   it('replace + listByMeeting', () => {
     repo.replaceForMeeting(meetingId, [
       { text: 'a', owner: null, due_date: null },

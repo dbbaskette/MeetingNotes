@@ -61,6 +61,21 @@ export class ActionItemsRepo {
     return out;
   }
 
+  /** Scoped summary aggregation; bind at most 900 IDs per statement. */
+  countsForMeetings(meetingIds: string[]): Map<string, number> {
+    const ids = [...new Set(meetingIds)];
+    const out = new Map<string, number>();
+    for (let i = 0; i < ids.length; i += 900) {
+      const chunk = ids.slice(i, i + 900);
+      const rows = this.db.prepare(`
+        SELECT meeting_id, COUNT(*) AS n FROM action_items
+        WHERE meeting_id IN (${chunk.map(() => '?').join(',')}) GROUP BY meeting_id
+      `).all(...chunk) as { meeting_id: string; n: number }[];
+      for (const r of rows) out.set(r.meeting_id, r.n);
+    }
+    return out;
+  }
+
   deleteForMeeting(meetingId: string): void {
     this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?').run(meetingId);
   }

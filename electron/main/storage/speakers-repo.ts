@@ -163,6 +163,34 @@ export class SpeakersRepo {
     return out;
   }
 
+  /** Scoped summary links; no all-library join and at most 900 bound IDs. */
+  listForMeetings(meetingIds: string[]): ReturnType<SpeakersRepo['listForAllMeetings']> {
+    const ids = [...new Set(meetingIds)];
+    const out: ReturnType<SpeakersRepo['listForAllMeetings']> = new Map();
+    for (let i = 0; i < ids.length; i += 900) {
+      const chunk = ids.slice(i, i + 900);
+      const rows = this.db.prepare(`
+        SELECT ms.meeting_id, ms.local_label, ms.roster_speaker_id, ms.confidence, sp.display_name
+        FROM meeting_speakers ms
+        LEFT JOIN speakers sp ON sp.id = ms.roster_speaker_id
+        WHERE ms.meeting_id IN (${chunk.map(() => '?').join(',')})
+        ORDER BY ms.meeting_id, ms.local_label
+      `).all(...chunk) as Record<string, unknown>[];
+      for (const r of rows) {
+        const id = r.meeting_id as string;
+        const list = out.get(id) ?? [];
+        list.push({
+          localLabel: r.local_label as string,
+          rosterSpeakerId: (r.roster_speaker_id as string) ?? null,
+          displayName: (r.display_name as string) ?? null,
+          confidence: (r.confidence as number) ?? null,
+        });
+        out.set(id, list);
+      }
+    }
+    return out;
+  }
+
   listForMeeting(meetingId: string): {
     localLabel: string;
     rosterSpeakerId: string | null;
