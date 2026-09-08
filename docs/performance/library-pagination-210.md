@@ -61,6 +61,10 @@ The real `hydrateAttentionMeetings` helper queries three status-ID snapshots and
 
 Global attention therefore grows with the actionable set (200 → 2,000 summaries here), not the visible 50-row page; it takes three ID queries plus one/two get-many calls. Its panel is not virtualized. A 1,000-row loaded prefix causes 20 page queries **and 20 global count queries** per refresh; at 1,000 total meetings this is slower than the old single full-list call. Loaded renderer state can grow to the whole library. All-matching selection ID snapshots and selected-summary hydration also grow with the selected set. These costs are deliberately preserved for global semantics and are not described as bounded by page size.
 
+Pipeline/arrival/mutation notifications now invalidate a lifecycle-owned attention controller rather than starting parallel full snapshots. It retains one outstanding operation and one latest pending invalidation, stops obsolete ID/hydration work at IPC boundaries, and publishes only the latest result. The deterministic 100-notification/2,000-actionable-ID regression holds the first hydration batch unresolved: it observes six ID queries (two snapshots), three 1,000-ID hydration calls (one obsolete batch plus two latest batches), maximum hydration concurrency one, and one latest publication. Ordinary refresh calls deduplicate without forcing another snapshot. Cleanup also stops future batches; a failed ID query cannot release the controller while its sibling queries are outstanding.
+
+The paged store likewise distinguishes ordinary refresh from semantic invalidation. Notifications during a loaded-prefix refresh discard the obsolete chain and coalesce into one trailing fresh rebuild, keeping the previous rows/counts until the latest prefix is ready. A refresh also waits for an obsolete load-more IPC before starting its replacement chain. Terminal and arrival regressions each inject 100 invalidations after page one has been collected while page two is unresolved, and require the final rows/counts without relying on another polling tick.
+
 ## Query-plan evidence and index decision
 
 The test captures SQL and bound parameters from the actual repositories, then emits `EXPLAIN QUERY PLAN` details with its results:
@@ -80,6 +84,23 @@ Migration 16 is tested separately by dropping/recreating only that index in the 
 | 10000 | 0.863 [0.811, 0.901] | 0.092 [0.090, 0.095] | 0.771 ms | 0.094 ms |
 
 The index benefit exceeds even the sum of both full observed ranges, so it remains. This removes sorting; the lexicographic OR cursor can still scan earlier index entries on deep pages. No constant-cost deep seek, title/oldest/longest sort speedup, or index write/storage benefit is claimed.
+
+### Near-end continuation evidence (final-review rerun)
+
+The opt-in benchmark now walks real 50-row cursors to 100 rows before the end **outside the measured samples**, then repeats that exact continuation seven times. At 10,000 rows this is the cursor after row 9,900, returning rows 9,901–9,950; at 1,000 rows it is after row 900. Each measured operation still includes the real page handler, global counts, scoped enrichment and JSON serialization. This final rerun was performed separately from builds/UI fixtures; previous tables above retain the original measurements rather than mixing runs.
+
+| Meetings / rows before cursor | Warm wall ms, median [min, max] | Query + row mapping ms | Counts ms | Enrichment ms | JSON bytes |
+|---|---|---|---|---|---:|
+| 1,000 / 900 | 0.462 [0.453, 0.486] | 0.161 [0.159, 0.173] | 0.085 [0.084, 0.089] | 0.178 [0.176, 0.195] | 36,342 |
+| 10,000 / 9,900 | 1.367 [1.336, 1.434] | 0.404 [0.385, 0.452] | 0.754 [0.745, 0.773] | 0.180 [0.173, 0.209] | 35,219 |
+
+The seven 10,000-row continuation wall times were 1.417, 1.336, 1.408, 1.434, 1.365, 1.362, and 1.367 ms. Every call returned 50 summaries, enriched 200 speaker links and 150 action rows, and issued one global count query. The emitted actual SQL/parameters use status rank 4, a null started-at sort value, ID `meeting-07871`, and limit 51. Its actual plan is:
+
+```text
+SEARCH meetings USING INDEX idx_meetings_browse_newest (deleted_at=?)
+```
+
+There is no temporary sort and no cursor-key range seek in that plan: cost remains proportional to earlier live index entries that the OR predicate may examine, plus global counts. The same rerun's 10,000-row first-page query median was 0.176 ms [0.105, 0.187], versus 0.404 ms [0.385, 0.452] near the end. The deep-query increase is measurable, although overall handler ranges overlap (first page 1.283 ms [1.054, 1.371]). The measured worst near-end handler sample, 1.434 ms, is acceptable for a 50-row continuation on this 10,000-row synthetic library; it does **not** establish constant-cost scaling or a latency guarantee at larger sizes/concurrent writes. No new index was attempted or added: there is no measured candidate improvement beyond variance to justify one.
 
 ## Renderer fixture
 
@@ -119,6 +140,6 @@ The partial-index numbers above are historical Task 1 measurements, not directly
 
 ## Verification and limits
 
-Renderer type checking, strict fixture type checking, production build, whitespace diff check, the opt-in database benchmark, both isolated UI fixtures, and the complete isolated single-worker suite pass. The suite reports 113 files passed / 2 skipped, 885 tests passed / 5 skipped; the timing fixtures account for opt-in skips. Production output is 519.01 kB JS (153.22 kB gzip) and 59.68 kB CSS (10.02 kB gzip); Vite retains its existing >500 kB chunk warning. Electron's native better-sqlite3 ABI is restored and verified separately after Node tests.
+Renderer type checking, strict fixture type checking, production build, whitespace diff check, the opt-in database benchmark, both isolated UI fixtures, and the complete isolated single-worker suite pass. After the final-review fixes, the suite reports 113 files passed / 2 skipped, 896 tests passed / 5 skipped; the timing fixtures account for opt-in skips. Production output is 519.70 kB JS (153.56 kB gzip) and 59.68 kB CSS (10.02 kB gzip); Vite retains its existing >500 kB chunk warning. Electron's native better-sqlite3 ABI is restored and verified separately after Node tests.
 
 This is a synthetic, single-machine, low-noise snapshot, not a production latency guarantee. The database benchmark excludes IPC structured cloning, actual renderer transport, audio/transcript content, OS-cold I/O, real stage-duration history, and concurrent pipeline writes. JSON bytes are a consistent payload proxy, not Electron wire bytes. The fixture uses development React/Vite (including development CSP warnings), not the packaged application, and fixed heights/window sizes are not coverage of every zoom/accessibility setting. Status/sort updates are live, not a database snapshot; the store rebuilds loaded cursors on refresh, but changes between pages can still move rows. Search is explicitly capped at 100 hits and remains non-virtual. No live-data or network integration behavior is asserted by the synthetic mutation bridge.

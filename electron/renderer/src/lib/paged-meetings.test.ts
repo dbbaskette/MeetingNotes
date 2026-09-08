@@ -161,12 +161,72 @@ describe('paged meetings', () => {
     await first;
     const more = store.getState().loadMore();
     const refresh = store.getState().refresh();
+    expect(requests).toHaveLength(2); // Wait for the old IPC, even though its result is obsolete.
     requests[1]!.result.resolve(page([row('stale')]));
     await more;
     expect(store.getState().items.map((m) => m.id)).toEqual(['a']);
     requests[2]!.result.resolve(page([row('fresh')]));
     await refresh;
     expect(store.getState().items.map((m) => m.id)).toEqual(['fresh']);
+  });
+
+  it.each(['terminal', 'arrival'] as const)('coalesces %s events during an unresolved prefix refresh into one fresh chain', async (event) => {
+    const { store, requests } = harness();
+    const initialRows = [row('active', { status: 'processing' }), row('older')];
+    const first = store.getState().refresh();
+    requests[0]!.result.resolve(page([initialRows[0]!], 'initial-next'));
+    await first;
+    const more = store.getState().loadMore();
+    requests[1]!.result.resolve(page([initialRows[1]!], 'initial-end'));
+    await more;
+    const previous = store.getState().items;
+    const refresh = store.getState().refresh();
+    requests[2]!.result.resolve(page([initialRows[0]!], 'stale-next'));
+    await Promise.resolve();
+    expect(requests[3]!.query.cursor).toBe('stale-next');
+    // Terminal events may also stop polling. No subsequent tick rescues this.
+    for (let i = 0; i < 100; i++) expect(store.getState().invalidate()).toBe(refresh);
+    expect(requests).toHaveLength(4); // Never overlap the unresolved page.
+    requests[3]!.result.resolve(page([row('stale-tail')], 'stale-end'));
+    await Promise.resolve();
+    expect(store.getState().items).toBe(previous); // No mixed-version publication.
+    expect(store.getState().refreshing).toBe(true);
+    expect(requests[4]!.query.cursor).toBeUndefined();
+    const newest = event === 'terminal' ? row('active') : row('arrived', { status: 'pending' });
+    const counts = { all: event === 'arrival' ? 3 : 2, pending: event === 'arrival' ? 1 : 0, processing: 0, done: 2, failed: 0 };
+    requests[4]!.result.resolve({ ...page([newest], 'fresh-next'), total: counts.all, counts });
+    await Promise.resolve();
+    expect(requests[5]!.query.cursor).toBe('fresh-next');
+    requests[5]!.result.resolve({ ...page([row('older')]), total: counts.all, counts });
+    await refresh;
+    expect(requests).toHaveLength(6);
+    expect(store.getState()).toMatchObject({ items: [newest, row('older')], total: counts.all, counts, refreshing: false });
+  });
+
+  it('discards a queued invalidation after the query generation changes', async () => {
+    const { store, requests } = harness();
+    const old = store.getState().refresh();
+    store.getState().invalidate();
+    const changed = store.getState().setQuery({ filter: 'failed', sort: 'title' });
+    requests[0]!.result.resolve(page([row('obsolete')], 'obsolete-next'));
+    await old;
+    expect(requests).toHaveLength(2);
+    expect(store.getState().loadingInitial).toBe(true);
+    requests[1]!.result.resolve(page([row('current')]));
+    await changed;
+    expect(store.getState().items.map((m) => m.id)).toEqual(['current']);
+  });
+
+  it('runs a trailing invalidation even when the obsolete refresh fails', async () => {
+    const { store, requests } = harness();
+    const refreshing = store.getState().refresh();
+    store.getState().invalidate();
+    requests[0]!.result.reject(new Error('obsolete failure'));
+    await Promise.resolve();
+    expect(store.getState().error).toBeNull();
+    requests[1]!.result.resolve(page([row('latest')]));
+    await refreshing;
+    expect(store.getState().items.map((m) => m.id)).toEqual(['latest']);
   });
 
   it('preserves rows and cursor on page errors, then retries the failed page', async () => {

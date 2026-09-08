@@ -21,6 +21,7 @@ export interface PagedMeetingsState {
   error: string | null;
   setQuery: (query: MeetingQuery) => Promise<void>;
   refresh: () => Promise<void>;
+  invalidate: () => Promise<void>;
   loadMore: () => Promise<void>;
   retry: () => Promise<void>;
 }
@@ -51,6 +52,7 @@ export function createPagedMeetings(fetchPage: FetchPage) {
   };
   return createStore<PagedMeetingsState>()((set, get) => {
     let generation = 0;
+    let invalidation = 0;
     let cursor: string | null = null;
     let pageCount = 0;
     let initialRequest: Promise<void> | null = null;
@@ -62,28 +64,46 @@ export function createPagedMeetings(fetchPage: FetchPage) {
       const current = ++generation;
       const query = get().query;
       const pagesToLoad = Math.max(1, pageCount);
+      const previousMore = moreRequest;
       moreRequest = null;
       set({ loadingInitial: get().items.length === 0, loadingMore: false, refreshing: true, error: null });
       initialRequest = (async () => {
         try {
-          let nextCursor: string | null = null;
-          let result!: MeetingPage;
-          let loadedPages = 0;
-          const rows: MeetingSummary[] = [];
-          do {
-            result = await requestPage({ ...query, ...(nextCursor ? { cursor: nextCursor } : {}) });
+          // Ignore the obsolete continuation, but let its IPC settle before
+          // starting the replacement chain so invalidations never overlap it.
+          if (previousMore) {
+            await previousMore;
             if (current !== generation) return;
-            rows.push(...result.items);
-            nextCursor = result.nextCursor;
-            loadedPages++;
-          } while (nextCursor && loadedPages < pagesToLoad);
-          cursor = nextCursor;
-          pageCount = loadedPages;
-          set({ items: recycleMeetings(get().items, uniqueRows(rows)), counts: result.counts, total: result.total, hasMore: cursor !== null });
-        } catch (error) {
-          if (current !== generation) return;
-          failedOperation = 'refresh';
-          set({ error: error instanceof Error ? error.message : 'Unable to load meetings.' });
+          }
+          // Ordinary refresh calls share this whole operation. Mutations
+          // invalidate its snapshot and request one fresh trailing chain.
+          let revision: number;
+          do {
+            revision = invalidation;
+            try {
+              let nextCursor: string | null = null;
+              let result!: MeetingPage;
+              let loadedPages = 0;
+              const rows: MeetingSummary[] = [];
+              do {
+                result = await requestPage({ ...query, ...(nextCursor ? { cursor: nextCursor } : {}) });
+                if (current !== generation) return;
+                if (revision !== invalidation) break;
+                rows.push(...result.items);
+                nextCursor = result.nextCursor;
+                loadedPages++;
+              } while (nextCursor && loadedPages < pagesToLoad);
+              if (revision !== invalidation) continue;
+              cursor = nextCursor;
+              pageCount = loadedPages;
+              set({ items: recycleMeetings(get().items, uniqueRows(rows)), counts: result.counts, total: result.total, hasMore: cursor !== null });
+            } catch (error) {
+              if (current !== generation) return;
+              if (revision !== invalidation) continue;
+              failedOperation = 'refresh';
+              set({ error: error instanceof Error ? error.message : 'Unable to load meetings.' });
+            }
+          } while (current === generation && revision !== invalidation);
         } finally {
           if (current === generation) {
             initialRequest = null;
@@ -127,6 +147,10 @@ export function createPagedMeetings(fetchPage: FetchPage) {
       items: [], counts: { all: 0, pending: 0, processing: 0, done: 0, failed: 0 },
       total: 0, hasMore: false, loadingInitial: false, loadingMore: false, refreshing: false, error: null,
       refresh, loadMore,
+      invalidate() {
+        invalidation++;
+        return refresh();
+      },
       retry: () => failedOperation === 'loadMore' ? loadMore() : refresh(),
       setQuery(query) {
         const next = normalizeQuery(query);

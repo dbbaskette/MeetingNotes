@@ -31,7 +31,7 @@ import {
   LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
 import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLibrarySearchHydration } from '../lib/library-search';
-import { hydrateAttentionMeetings } from '../lib/meeting-hydration';
+import { createAttentionController } from '../lib/meeting-hydration';
 import { recycleMeetings } from '../lib/meetings-recycle';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
@@ -76,7 +76,7 @@ export function LibraryView({
 }: Props): JSX.Element {
   const {
     items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
-    refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, loadMore, retry,
+    refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
   } = useMeetingsStore();
   const [query, setQuery] = useState('');
   const [searchRevision, setSearchRevision] = useState(0);
@@ -99,22 +99,20 @@ export function LibraryView({
   // first page is loaded. Only actionable status IDs are hydrated, in capped
   // batches; buildNeedsAttention distinguishes speaker gates from processing.
   const [attentionMeetings, setAttentionMeetings] = useState<MeetingSummary[]>([]);
-  const attentionGeneration = useRef(0);
-  const refreshAttention = useCallback(async () => {
-    const generation = ++attentionGeneration.current;
-    try {
-      const rows = await hydrateAttentionMeetings(api.meetings);
-      if (generation === attentionGeneration.current) setAttentionMeetings((prev) => recycleMeetings(prev, rows));
-    } catch { /* retain the previous actionable rows until the next refresh */ }
-  }, []);
+  const [attention] = useState(() => createAttentionController(api.meetings,
+    (rows) => setAttentionMeetings((prev) => recycleMeetings(prev, rows))));
   const refresh = useCallback(async () => {
-    await Promise.all([refreshPages(), refreshAttention()]);
+    await Promise.all([refreshPages(), attention.refresh()]);
     setSearchRevision((revision) => revision + 1);
-  }, [refreshPages, refreshAttention]);
+  }, [refreshPages, attention]);
+  const invalidate = useCallback(async () => {
+    await Promise.all([invalidatePages(), attention.invalidate()]);
+    setSearchRevision((revision) => revision + 1);
+  }, [invalidatePages, attention]);
   useEffect(() => {
-    void refreshAttention();
-    return () => { attentionGeneration.current++; };
-  }, [refreshAttention]);
+    void attention.start();
+    return () => attention.stop();
+  }, [attention]);
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
   const recoveryGeneration = useRef(0);
   const refreshRecovery = useCallback(async () => {
@@ -168,10 +166,10 @@ export function LibraryView({
       setPipelineStatus(s);
       // Queue motion is itself a reason to refresh — current meeting
       // moved, etc. Cheaper than waiting for the next poll tick.
-      void refresh();
+      void invalidate();
     });
     return () => { cancelled = true; off(); };
-  }, [refresh]);
+  }, [invalidate]);
 
   // Push-refresh when main catalogs a freshly arrived recording. Stop()
   // resolves before chokidar's stability debounce fires, so the post-stop
@@ -180,9 +178,9 @@ export function LibraryView({
   // navigated into a meeting and back (which remounted the view and
   // refreshed the first page). Now main pings us the instant the row exists.
   useEffect(() => {
-    const off = api.meetings.onAdded(() => { void refresh(); void refreshRecovery(); });
+    const off = api.meetings.onAdded(() => { void invalidate(); void refreshRecovery(); });
     return () => { off(); };
-  }, [refresh, refreshRecovery]);
+  }, [invalidate, refreshRecovery]);
 
   // Conditional polling. Gate on ACTUAL pipeline activity — the same
   // signal the bottom status bar shows (currentId / queueLength) — not on
@@ -325,9 +323,9 @@ export function LibraryView({
   }, []);
 
   const rowChanged = useCallback((): void => {
-    void refresh();
+    void invalidate();
     void refreshTrash();
-  }, [refresh, refreshTrash]);
+  }, [invalidate, refreshTrash]);
 
   const [confirmation, setConfirmation] = useState<ReturnType<typeof selectionConfirmation> | null>(null);
   const mounted = useRef(true);
@@ -390,14 +388,14 @@ export function LibraryView({
             // Only successful deletions are undoable — never touch failed IDs.
             const restored = (await Promise.all(result.succeededIds.map((id) => api.meetings.undoDelete(id).catch(() => false)))).filter(Boolean).length;
             if (restored < n) toast.show({ message: `Restored ${restored} of ${n} — the rest were already purged.`, variant: 'error' });
-            void refresh();
+            void invalidate();
             void refreshTrash();
           },
         } : undefined,
       });
     } finally {
       librarySelection.getState().endOperation();
-      void refresh();
+      void invalidate();
       if (action === 'delete') void refreshTrash();
     }
   }
@@ -440,7 +438,7 @@ export function LibraryView({
             startedAt={liveRecording.startedAt}
             onStopped={(summary) => {
               onRecordingStopped(summary);
-              void refresh();
+              void invalidate();
               window.setTimeout(() => { void refreshRecovery(); }, 800);
             }}
             onRestarted={onStartRecording}
@@ -452,7 +450,7 @@ export function LibraryView({
         <QueueBanner
           status={pipelineStatus}
           meetings={attentionMeetings}
-          onChanged={() => void refresh()}
+          onChanged={() => void invalidate()}
           toast={toast}
         />
       </div>
@@ -466,7 +464,7 @@ export function LibraryView({
             title: meeting.title, pipelineStage: meeting.pipelineStage, status: meeting.status,
           } : {});
         }}
-        onChanged={async () => { await Promise.all([refresh(), refreshRecovery()]); }}
+        onChanged={async () => { await Promise.all([invalidate(), refreshRecovery()]); }}
       />
 
 
@@ -723,7 +721,7 @@ export function LibraryView({
             } else {
               toast.show({ message: 'Too late — this meeting has already been purged.', variant: 'error' });
             }
-            void refresh();
+            void invalidate();
             void refreshTrash();
           }}
         />

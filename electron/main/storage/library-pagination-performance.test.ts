@@ -169,6 +169,22 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
         for (let run = 1; run <= WARM_RUNS; run++) await measure(`refresh-prefix-${prefix}`, run, 'warm', () => store.getState().refresh(), true);
         expect(store.getState().items).toHaveLength(prefix);
       }
+      // Walk the real cursor chain to the last 1% (last 100 rows for 10k).
+      // Discovery is deliberately outside all measured samples. Reuse this
+      // exact continuation for seven warm handler/enrichment/JSON timings.
+      const nearEndRepo = new MeetingsRepo(db);
+      let nearEndCursor: string | null = null;
+      let rowsBeforeCursor = 0;
+      while (rowsBeforeCursor < count - 100) {
+        const result = nearEndRepo.listPage({ ...FIRST_PAGE, ...(nearEndCursor ? { cursor: nearEndCursor } : {}) });
+        rowsBeforeCursor += result.rows.length;
+        nearEndCursor = result.nextCursor;
+        expect(nearEndCursor).not.toBeNull();
+      }
+      const nearEndQuery = { ...FIRST_PAGE, cursor: nearEndCursor! };
+      for (let run = 1; run <= WARM_RUNS; run++) {
+        await measure('new-near-end-page', run, 'warm', () => invoke('meetings:list-page', nearEndQuery));
+      }
       // Isolate migration 16 against precisely the same first-page query.
       // Creation/drop are outside timing; no candidate index touches user DBs.
       const indexMeasurements: Array<{ indexed: boolean; run: number; queryMs: number }> = [];
@@ -186,7 +202,7 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
       }
       db.exec(indexSql);
       // Capture the actual SQL and parameters emitted by the repositories.
-      const plans: Array<{ sql: string; detail: string[] }> = [];
+      const plans: Array<{ sql: string; params: unknown[]; detail: string[] }> = [];
       const traced = new Proxy(db, { get(target, key) {
         if (key !== 'prepare') return Reflect.get(target, key);
         return (sql: string) => {
@@ -194,7 +210,7 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
           return new Proxy(statement, { get(stmt, method) {
             if (method !== 'all' && method !== 'get') return Reflect.get(stmt, method);
             return (...params: any[]) => {
-              plans.push({ sql, detail: (target.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map((row) => row.detail) });
+              plans.push({ sql, params, detail: (target.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as { detail: string }[]).map((row) => row.detail) });
               return stmt[method](...params);
             };
           } });
@@ -204,6 +220,8 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
       tracedRepo.listAll();
       const first = tracedRepo.listPage(FIRST_PAGE);
       tracedRepo.listPage({ ...FIRST_PAGE, cursor: first.nextCursor! });
+      tracedRepo.listPage(nearEndQuery);
+      const nearEndPlan = plans[plans.length - 1]!;
       tracedRepo.listPage({ ...FIRST_PAGE, sort: 'title' });
       tracedRepo.counts();
       const ids = first.rows.map((row) => row.id);
@@ -211,7 +229,7 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
       new ActionItemsRepo(traced).countsForMeetings(ids);
       for (const sample of samples) {
         if (sample.mode === 'old-full-list') { expect(sample.summaries).toBe(count); expect(sample.speakerRows).toBe(count * 4); }
-        if (sample.mode === 'new-first-page') { expect(sample.summaries).toBe(50); expect(sample.speakerRows).toBe(200); expect(sample.actionRows).toBe(150); }
+        if (sample.mode === 'new-first-page' || sample.mode === 'new-near-end-page') { expect(sample.summaries).toBe(50); expect(sample.speakerRows).toBe(200); expect(sample.actionRows).toBe(150); }
         if (sample.mode === 'global-attention') expect(sample.summaries).toBe(count / 5);
       }
       console.log('MN_LIBRARY_BENCH_RESULT=' + JSON.stringify({
@@ -219,6 +237,7 @@ describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchm
           sqlite: db.prepare('SELECT sqlite_version() AS version').get() },
         fixture: { seed: SEED, meetings: count, speakersPerMeeting: 4, actionsPerMeeting: 3, actionableFraction: 0.2, warmRuns: WARM_RUNS },
         summary: summarize(samples), samples, indexMeasurements, plans,
+        nearEnd: { rowsBeforeCursor, query: nearEndQuery, plan: nearEndPlan },
       }, null, 2));
     } finally {
       if (db.open) db.close();
