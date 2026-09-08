@@ -95,6 +95,7 @@ export const IPC_CHANNELS = {
   recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',
   recoveryTrim: 'recovery:trim',
+  recoveryPreview: 'recovery:preview',
   recoveryReveal: 'recovery:reveal',
   recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
