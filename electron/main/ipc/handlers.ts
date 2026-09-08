@@ -51,6 +51,7 @@ import type { Logger } from '../logging/logger.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
+import type { ArtifactCache } from '../library/artifact-cache.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -76,6 +77,7 @@ export interface IpcServices {
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
   googleAuth: GoogleAuth;
+  artifactCache: ArtifactCache;
   /** Process-lifetime set of meetings we've already alerted about entering the
    *  speaker-ID gate (see pipeline/gate-alert.ts). Cleared here on the three
    *  unblock paths so a genuine re-entry into the gate notifies again. */
@@ -114,7 +116,25 @@ function unidentifiedCount(rows: { rosterId: string | null }[]): number {
   return rows.filter((r) => r.rosterId === null).length;
 }
 
-function speakerReviewForFolder(
+async function speakerReviewForFolder(
+  folder: string,
+  links: ReturnType<typeof listMeetingSpeakers>,
+  artifactCache: ArtifactCache,
+): Promise<Map<string, SpeakerReviewMetadata>> {
+  const [diar, raw] = await Promise.all([
+    artifactCache.readJson<{ segments?: DiarizationSegment[] }>(path.join(folder, 'diarization.json')),
+    artifactCache.readJson<{ segments?: Array<{ start: number; end: number; text: string; source?: 'voice' | 'system' }> }>(
+      path.join(folder, 'transcript.raw.json'),
+    ),
+  ]);
+  return buildSpeakerReviewMetadata({
+    links, diarization: diar?.segments ?? [], transcript: raw?.segments ?? [],
+  });
+}
+
+/** Existing synchronous bulk-assignment accounting needs the line count before
+ * it can answer. Detail loading itself uses the async cached helper above. */
+function speakerReviewForFolderSync(
   folder: string,
   links: ReturnType<typeof listMeetingSpeakers>,
 ): Map<string, SpeakerReviewMetadata> {
@@ -195,13 +215,12 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     });
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsGet, (_e, id: string) => {
+  ipc.handle(IPC_CHANNELS.meetingsGet, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
     const m = s.meetings.findById(id);
     if (!m) return null;
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
-    const read = (p: string) => fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
     const speakers = listMeetingSpeakers(s.speakers, id);
-    const speakerReview = speakerReviewForFolder(folder, speakers);
     const settingsSnapshot = s.settings.getAll();
     const items = s.actionItems.listByMeeting(id);
     // Owner identity for the per-item `isMine` flag — drives the task-app
@@ -214,19 +233,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
         : null,
     };
-    // Show a raw (speaker-less) preview as soon as the whisper step completes,
-    // before merge produces transcript.md. Gives the user something to read
-    // while diarization is still running.
-    let rawTranscriptText: string | null = null;
-    const rawJson = read(path.join(folder, 'transcript.raw.json'));
-    if (rawJson) {
-      try {
-        const parsed = JSON.parse(rawJson) as { text?: string };
-        if (typeof parsed.text === 'string' && parsed.text.length > 0) {
-          rawTranscriptText = parsed.text;
-        }
-      } catch { /* ignore */ }
-    }
     const eta = stageEtaForMeeting(
       s.stageDurations,
       m.pipelineStage,
@@ -240,18 +246,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       actionItemsCount: items.length,
       stageEtaMs: eta?.etaMs ?? null,
       stageEtaRough: eta?.rough ?? false,
-      speakers: speakers.map((speaker) => ({
-        ...speaker,
-        ...(speakerReview.get(speaker.localLabel) ?? {
-          state: speaker.rosterId ? ((speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
-          needsReview: !speaker.rosterId, segmentCount: 0, durationS: 0, lineCount: 0,
-        }),
-      })),
+      speakers,
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
-      transcriptMd: read(path.join(folder, 'transcript.md')),
-      rawTranscriptText,
-      summaryMd: read(path.join(folder, 'summary.md')),
+      summaryMd: await s.artifactCache.readText(path.join(folder, 'summary.md')),
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
@@ -263,11 +261,46 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     };
   });
 
+  ipc.handle(IPC_CHANNELS.meetingsGetTranscript, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
+    const meeting = s.meetings.findById(id);
+    if (!meeting) return null;
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const [transcriptMd, raw] = await Promise.all([
+      s.artifactCache.readText(path.join(folder, 'transcript.md')),
+      s.artifactCache.readJson<{ text?: string }>(path.join(folder, 'transcript.raw.json')),
+    ]);
+    return {
+      transcriptMd,
+      rawTranscriptText: typeof raw?.text === 'string' && raw.text.length > 0 ? raw.text : null,
+    };
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsGetSpeakerReview, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
+    const meeting = s.meetings.findById(id);
+    if (!meeting) return null;
+    const speakers = listMeetingSpeakers(s.speakers, id);
+    const review = await speakerReviewForFolder(
+      meetingFolderPath(s.libraryRoot, meeting.slug), speakers, s.artifactCache,
+    );
+    return {
+      speakers: speakers.map((speaker) => ({
+        ...speaker,
+        ...(review.get(speaker.localLabel) ?? {
+          state: speaker.rosterId ? ((speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
+          needsReview: !speaker.rosterId, segmentCount: 0, durationS: 0, lineCount: 0,
+        }),
+      })),
+    };
+  });
+
   // Light status poll for the detail view's 2s processing loop. Mirrors the
   // per-row shape of meetings:list (DB + learned eta only) — deliberately no
   // transcript/summary/raw-json file reads, which is what makes meetings:get
   // heavy for long meetings.
-  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: string) => {
+  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
     const m = s.meetings.findById(id);
     if (!m) return null;
     const speakers = listMeetingSpeakers(s.speakers, id);
@@ -647,7 +680,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const labels = [...new Set(parsed.localLabels)];
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const links = listMeetingSpeakers(s.speakers, parsed.meetingId);
-    const metadata = speakerReviewForFolder(folder, links);
+    const metadata = speakerReviewForFolderSync(folder, links);
     let diarization: DiarizationSegment[] = [];
     try {
       diarization = (JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] }).segments ?? [];

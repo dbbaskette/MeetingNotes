@@ -55,6 +55,7 @@ import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
 import { shouldNotifyGate } from './pipeline/gate-alert.js';
+import { ArtifactCache } from './library/artifact-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -184,6 +185,7 @@ app.whenReady().then(async () => {
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
+  const artifactCache = new ArtifactCache();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -689,6 +691,7 @@ app.whenReady().then(async () => {
     weeklyAggregator,
     logger,
     googleAuth,
+    artifactCache,
     gateNotified,
   });
 

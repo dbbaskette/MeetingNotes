@@ -14,6 +14,8 @@ let recoveryRequest = 0;
 const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsGetTranscript: 'meetings:get-transcript',
+  meetingsGetSpeakerReview: 'meetings:get-speaker-review',
   meetingsGetStatus: 'meetings:get-status',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
@@ -100,6 +102,25 @@ const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
+    getTranscript: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetTranscript, id) as Promise<{
+        transcriptMd: string | null;
+        rawTranscriptText: string | null;
+      } | null>,
+    getSpeakerReview: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetSpeakerReview, id) as Promise<{
+        speakers: {
+          localLabel: string;
+          rosterId: string | null;
+          displayName: string | null;
+          confidence: number | null;
+          state: 'unknown' | 'probable' | 'confirmed';
+          needsReview: boolean;
+          segmentCount: number;
+          durationS: number;
+          lineCount: number;
+        }[];
+      } | null>,
     /** Light status snapshot for processing polls — DB fields + eta only,
      *  no transcript/summary file reads. The detail view polls this every
      *  2s while processing and only re-fetches the full `get` payload when

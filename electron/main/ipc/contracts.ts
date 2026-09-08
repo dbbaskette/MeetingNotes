@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const MeetingSpeakerSchema = z.object({
+export const MeetingSpeakerSchema = z.object({
   localLabel: z.string(),
   rosterId: z.string().nullable(),
   displayName: z.string().nullable(),
@@ -34,15 +34,18 @@ export const MeetingSummarySchema = z.object({
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
+export const ReviewedSpeakerSchema = MeetingSpeakerSchema.extend({
+  state: z.enum(['unknown', 'probable', 'confirmed']),
+  needsReview: z.boolean(),
+  segmentCount: z.number(),
+  durationS: z.number(),
+  lineCount: z.number(),
+});
+export type ReviewedSpeaker = z.infer<typeof ReviewedSpeakerSchema>;
+
+/** Lightweight detail shell. Transcript and speaker-review artifacts are
+ * intentionally absent; load them from their dedicated endpoints on demand. */
 export const MeetingDetailSchema = MeetingSummarySchema.extend({
-  speakers: z.array(MeetingSpeakerSchema.extend({
-    state: z.enum(['unknown', 'probable', 'confirmed']),
-    needsReview: z.boolean(),
-    segmentCount: z.number(),
-    durationS: z.number(),
-    lineCount: z.number(),
-  })),
-  transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
   /** True when the user has set Settings → "You are…" (userSpeakerId).
@@ -63,9 +66,22 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
 });
 export type MeetingDetail = z.infer<typeof MeetingDetailSchema>;
 
+export const MeetingTranscriptSchema = z.object({
+  transcriptMd: z.string().nullable(),
+  rawTranscriptText: z.string().nullable(),
+});
+export type MeetingTranscript = z.infer<typeof MeetingTranscriptSchema>;
+
+export const MeetingSpeakerReviewSchema = z.object({
+  speakers: z.array(ReviewedSpeakerSchema),
+});
+export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
+
 export const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
   meetingsGet: 'meetings:get',
+  meetingsGetTranscript: 'meetings:get-transcript',
+  meetingsGetSpeakerReview: 'meetings:get-speaker-review',
   /** Light status poll for the detail view while a meeting is processing.
    *  Returns only the DB-backed live fields (stage/status/error/eta/counts)
    *  — never the transcript/summary markdown that meetings:get reads off
