@@ -15,7 +15,7 @@ function makeCtx(chat: (input: unknown) => Promise<string>): { ctx: any; folder:
     meetings: { findById: () => ({ slug: 'slug' }) },
     actionItems: { replaceForMeeting: vi.fn() },
     settings: { get: () => 'llama-3.1-8b' },
-    logger: { info: () => {} },
+    logger: { info: () => {}, warn: vi.fn() },
   };
   return { ctx, folder };
 }
@@ -55,6 +55,45 @@ describe('runExtracting', () => {
     );
     expect(missing.ctx.lmStudio.chat).not.toHaveBeenCalled();
     expect(empty.ctx.lmStudio.chat).not.toHaveBeenCalled();
+  });
+
+  it('retries once warmer when extraction returns zero items but the summary has bullets', async () => {
+    let calls = 0;
+    const { ctx, folder } = makeCtx(async () => {
+      calls += 1;
+      return calls === 1 ? 'Sure! Here are the items you asked for.' // unparseable
+        : '[{"text":"Send update","owner":"Dan","due_date":"2026-04-22"}]';
+    });
+    fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
+    await runExtracting({ meetingId: 'm' }, ctx);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(2);
+    const second = ctx.lmStudio.chat.mock.calls[1]![0] as { temperature: number };
+    expect(second.temperature).toBeGreaterThan(0);
+    expect(ctx.logger.warn).toHaveBeenCalledWith('extract:zero-items-retry', { meetingId: 'm' });
+    const written = JSON.parse(fs.readFileSync(path.join(folder, 'action-items.json'), 'utf8'));
+    expect(written).toHaveLength(1);
+  });
+
+  it('logs a suspect warning when both attempts return zero items', async () => {
+    const { ctx, folder } = makeCtx(async () => '[]');
+    fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
+    await runExtracting({ meetingId: 'm' }, ctx);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(2);
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      'extract:zero-items-suspect',
+      expect.objectContaining({ meetingId: 'm' }),
+    );
+  });
+
+  it('accepts an empty result without retry when the summary has no real Action Items', async () => {
+    const { ctx, folder } = makeCtx(async () => '[]');
+    fs.writeFileSync(
+      path.join(folder, 'summary.md'),
+      '## Overview\nQuick chat.\n\n## Action Items\n- None',
+    );
+    await runExtracting({ meetingId: 'm' }, ctx);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(1);
+    expect(ctx.logger.warn).not.toHaveBeenCalled();
   });
 
   it('attaches source_quote by matching items to the summary bullets', async () => {
