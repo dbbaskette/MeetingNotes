@@ -275,6 +275,23 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE recording_sessions ADD COLUMN dismissed_at TEXT;
     `,
   },
+  {
+    version: 16,
+    // Paginated Library (#210): equality on deleted_at followed by the exact
+    // status/newest/ID order avoids a full live-library temporary sort.
+    // The 10k-row fixture reduced warm first-page queries from 0.43–0.93ms
+    // to 0.09–0.13ms. A partial-index candidate was not selected by SQLite.
+    // Keep the CASE expression in sync with MeetingsRepo's status ranking.
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_meetings_browse_newest ON meetings (
+        deleted_at,
+        CASE status WHEN 'pending' THEN 0 WHEN 'awaiting_user' THEN 1
+          WHEN 'processing' THEN 2 WHEN 'failed' THEN 3 WHEN 'done' THEN 4 ELSE 9 END,
+        started_at DESC,
+        id ASC
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
