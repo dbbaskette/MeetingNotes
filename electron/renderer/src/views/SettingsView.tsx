@@ -601,6 +601,24 @@ function DiagnosticsSection(): JSX.Element {
   );
 }
 
+/** Log timestamps arrive as UTC ISO strings. Slicing the raw string showed
+ *  UTC digits that read as local time, and dropped the date entirely — so
+ *  yesterday's 05:28 error sorted above today's 03:59 one and the panel
+ *  looked shuffled. Render local time, and prefix the date once an entry
+ *  isn't from today. */
+function formatLogTs(ts: string | null | undefined): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts.slice(11, 19);
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const hms = d.toTimeString().slice(0, 8);
+  return sameDay ? hms : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${hms}`;
+}
+
 function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
   const levelCls =
     entry.level === 'error'
@@ -610,7 +628,7 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
-  const time = entry.ts ? entry.ts.slice(11, 19) : '—';
+  const time = formatLogTs(entry.ts);
   const dataStr =
     entry.data && Object.keys(entry.data).length > 0
       ? JSON.stringify(entry.data)
