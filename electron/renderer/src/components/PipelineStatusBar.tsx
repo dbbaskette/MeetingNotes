@@ -5,7 +5,7 @@
 // view that happens to render it. A thin shell over the pure `status-bar`
 // module — all the string/visibility logic is unit-tested there.
 import { useEffect, useMemo, useState } from 'react';
-import { startPipelineHydration } from '../lib/pipeline-hydration';
+import { createPipelineHydration } from '../lib/pipeline-hydration';
 import { recycleMeetings } from '../lib/meetings-recycle';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import { useElapsed } from '../lib/useElapsed';
@@ -43,9 +43,11 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
     return () => { cancelled = true; off(); };
   }, []);
 
-  useEffect(() => startPipelineHydration(status, api.meetings.getMany, (rows) => {
+  const [hydration] = useState(() => createPipelineHydration(api.meetings.getMany, (rows) => {
     setMeetings((previous) => recycleMeetings(previous, rows));
-  }), [status]);
+  }));
+  useEffect(() => { hydration.update(status); }, [hydration, status]);
+  useEffect(() => () => hydration.stop(), [hydration]);
 
   // Memoized: useElapsed re-renders this bar every second while processing,
   // and deriveStatusBar scans the whole meetings array each call.

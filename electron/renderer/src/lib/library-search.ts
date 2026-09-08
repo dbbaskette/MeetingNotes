@@ -15,6 +15,30 @@ export async function hydrateLibrarySearch(query: string, api: {
   return { hits, meetings };
 }
 
+/** Keep the capped result set live while the Library has pipeline activity.
+ * Only summaries are refreshed: hit ordering/snippets still belong to the
+ * original search response. Cleanup invalidates unresolved old-query polls. */
+export function startLibrarySearchHydration(
+  hits: SearchHit[],
+  getMany: (ids: string[]) => Promise<MeetingSummary[]>,
+  onRows: (rows: MeetingSummary[]) => void,
+): () => void {
+  const ids = [...new Set(hits.map((hit) => hit.meetingId))];
+  let cancelled = false;
+  let busy = false;
+  const refresh = async (): Promise<void> => {
+    if (cancelled || busy) return;
+    busy = true;
+    try {
+      const rows = await hydrateMeetingIds(ids, getMany);
+      if (!cancelled) onRows(rows);
+    } catch { /* retain current results and retry on the next active tick */ }
+    finally { busy = false; }
+  };
+  const timer = setInterval(() => { void refresh(); }, 3000);
+  return () => { cancelled = true; clearInterval(timer); };
+}
+
 export function groupLibrarySearch(
   hits: SearchHit[], meetings: MeetingSummary[], filter: MeetingFilter,
   contentSort: 'recent' | 'count',

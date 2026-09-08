@@ -25,7 +25,7 @@ import { pruneSelection, partitionSelection } from '../lib/selection';
 import {
   LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
-import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT } from '../lib/library-search';
+import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLibrarySearchHydration } from '../lib/library-search';
 import { hydrateAttentionMeetings } from '../lib/meeting-hydration';
 import { recycleMeetings } from '../lib/meetings-recycle';
 import type { MeetingSummary } from '../lib/paged-meetings';
@@ -245,6 +245,16 @@ export function LibraryView({
     }, 150);
     return () => { cancelled = true; window.clearTimeout(t); };
   }, [query, isSearching, searchRevision]);
+
+  // Browse polling cannot update these detached, globally hydrated rows.
+  // Hold a summary-only poll on the same active cadence, including off-page
+  // hits; suspend it while a replacement search result is being hydrated.
+  useEffect(() => {
+    if (!isSearching || !hasMotion || searchPending || hits.length === 0) return;
+    return startLibrarySearchHydration(hits, api.meetings.getMany, (rows) => {
+      setSearchMeetings((previous) => recycleMeetings(previous, rows));
+    });
+  }, [hits, isSearching, hasMotion, searchPending, query, searchRevision]);
 
   // Sort order for the Content section. Reset to 'recent' whenever the
   // query changes so a stale "Most matches" choice doesn't carry over

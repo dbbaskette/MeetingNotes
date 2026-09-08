@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { hydrateLibrarySearch, groupLibrarySearch } from './library-search';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hydrateLibrarySearch, groupLibrarySearch, startLibrarySearchHydration } from './library-search';
 import type { SearchHit } from '../components/SearchMatches';
 import type { MeetingSummary } from './paged-meetings';
 
@@ -12,7 +12,69 @@ const hit = (meetingId: string, source: SearchHit['source'], seconds?: number): 
   meetingId, title: meetingId, source, snippet: `Found ${meetingId}`, ...(seconds === undefined ? {} : { seconds }),
 });
 
+afterEach(() => { vi.useRealTimers(); });
+
 describe('Library global search', () => {
+  it('refreshes off-page search summaries every three seconds without replacing hits or snippets', async () => {
+    vi.useFakeTimers();
+    const hits = [hit('off-page', 'transcript', 42), hit('off-page', 'summary')];
+    let meetings = [row('off-page', 'processing')];
+    const batches: string[][] = [];
+    const stop = startLibrarySearchHydration(hits, async (ids) => {
+      batches.push(ids);
+      return [{ ...row('off-page', 'failed'), pipelineStage: 'summarizing', stageStartedAt: '2026-09-08T10:30:00Z', errorMessage: 'model unavailable' }];
+    }, (rows) => { meetings = rows; });
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(batches).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(batches).toEqual([['off-page']]);
+    expect(meetings[0]).toMatchObject({ status: 'failed', pipelineStage: 'summarizing', stageStartedAt: '2026-09-08T10:30:00Z', errorMessage: 'model unavailable' });
+    const grouped = groupLibrarySearch(hits, meetings, 'all', 'recent');
+    expect(grouped.contentMatches.map((m) => m.id)).toEqual(['off-page']);
+    expect(grouped.counts).toMatchObject({ processing: 0, failed: 1 });
+    expect(grouped.hitsByMeeting.get('off-page')).toEqual(hits);
+    expect(grouped.hitsByMeeting.get('off-page')![0]!.seconds).toBe(42);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(batches).toHaveLength(2);
+    stop();
+  });
+
+  it('retains search rows on poll failure and retries without overlapping slow requests', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    let resolve!: (rows: MeetingSummary[]) => void;
+    let latest = [row('off-page', 'processing')];
+    const stop = startLibrarySearchHydration([hit('off-page', 'title')], async () => {
+      if (++calls === 1) throw new Error('transient');
+      return new Promise<MeetingSummary[]>((done) => { resolve = done; });
+    }, (rows) => { latest = rows; });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(latest[0]!.status).toBe('processing');
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(calls).toBe(2);
+    resolve([row('off-page', 'done')]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(latest[0]!.status).toBe('done');
+    stop();
+  });
+
+  it('ignores an unresolved old-query poll after cleanup and makes no later calls', async () => {
+    vi.useFakeTimers();
+    let resolve!: (rows: MeetingSummary[]) => void;
+    let calls = 0;
+    const published: MeetingSummary[][] = [];
+    const stop = startLibrarySearchHydration([hit('old-query', 'title')], () => {
+      calls++;
+      return new Promise<MeetingSummary[]>((done) => { resolve = done; });
+    }, (rows) => published.push(rows));
+    await vi.advanceTimersByTimeAsync(3000);
+    stop();
+    resolve([row('old-query')]);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(published).toEqual([]);
+    expect(calls).toBe(1);
+  });
+
   it('hydrates every hit ID in first-hit order with a 100-hit global query cap', async () => {
     const calls: unknown[] = [];
     const hits = [hit('outside-page', 'transcript', 15), hit('title', 'title'), hit('outside-page', 'summary')];
