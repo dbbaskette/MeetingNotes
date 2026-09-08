@@ -19,3 +19,19 @@ export function virtualWindow({ count, rowHeight, scrollTop, viewportHeight, ove
   const end = Math.min(count, Math.ceil((top + height) / rowHeight) + extra);
   return { start, end, offset: start * rowHeight, totalHeight };
 }
+
+/** Add only retained owners to the visible slots, preserving DOM order and
+ * stable ID ownership after refresh/reorder. Focus and dialogs may share a pin. */
+export function retainedRowIndexes({ items, start, end, retainedIds }: {
+  items: readonly { id: string }[];
+  start: number;
+  end: number;
+  retainedIds: Iterable<string>;
+}): number[] {
+  const indexes = new Set(Array.from({ length: end - start }, (_, index) => start + index));
+  for (const id of retainedIds) {
+    const index = items.findIndex((item) => item.id === id);
+    if (index >= 0) indexes.add(index);
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
