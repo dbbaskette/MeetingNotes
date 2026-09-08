@@ -460,7 +460,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.recordingManager.state(sessionId);
   });
 
-  ipc.handle(IPC_CHANNELS.recoveryList, () => s.recordingRecovery.list());
+  ipc.handle(IPC_CHANNELS.recoveryList, (event, requestId: unknown) => {
+    if (requestId !== undefined && (typeof requestId !== 'string' || requestId.length > 100)) {
+      throw new Error('invalid recovery request id');
+    }
+    return s.recordingRecovery.list(typeof requestId === 'string' ? (item, index) => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.recoveryItem, { requestId, item, index });
+    } : undefined);
+  });
   ipc.handle(IPC_CHANNELS.recoveryRecover, (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) throw new Error('recovery id required');
     return s.recordingRecovery.recover(id);

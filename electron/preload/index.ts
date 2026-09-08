@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+interface RecoveryItem {
+  id: string; targetLabel: string; startedAt: string; outputPath: string;
+  status: string; reason: 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
+  durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
+}
+let recoveryRequest = 0;
+
 // Inlined to keep the preload (CJS) and main (ESM) builds independent — sharing
 // a compiled module across both modes causes the file in dist/ to flip between
 // formats depending on tsc invocation order. The constants here MUST match
@@ -25,6 +32,7 @@ const IPC_CHANNELS = {
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
   recoveryList: 'recovery:list',
+  recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',
   recoveryTrim: 'recovery:trim',
   recoveryReveal: 'recovery:reveal',
@@ -200,11 +208,21 @@ const api = {
     },
   },
   recovery: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.recoveryList) as Promise<Array<{
-      id: string; targetLabel: string; startedAt: string; outputPath: string;
-      status: string; reason: 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
-      durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
-    }>>,
+    list: async (onProgress?: (items: RecoveryItem[]) => void): Promise<RecoveryItem[]> => {
+      const requestId = String(++recoveryRequest);
+      const items: RecoveryItem[] = [];
+      const listener = (_event: unknown, update: { requestId: string; item: RecoveryItem; index: number }): void => {
+        if (update.requestId !== requestId) return;
+        items[update.index] = update.item;
+        onProgress?.(items.filter(Boolean));
+      };
+      if (onProgress) ipcRenderer.on(IPC_CHANNELS.recoveryItem, listener);
+      try {
+        return await ipcRenderer.invoke(IPC_CHANNELS.recoveryList, onProgress ? requestId : undefined);
+      } finally {
+        if (onProgress) ipcRenderer.off(IPC_CHANNELS.recoveryItem, listener);
+      }
+    },
     recover: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryRecover, id) as Promise<{ meetingId: string }>,
     trim: (id: string, endSeconds: number) =>
       ipcRenderer.invoke(IPC_CHANNELS.recoveryTrim, { id, endSeconds }) as Promise<{ meetingId: string }>,

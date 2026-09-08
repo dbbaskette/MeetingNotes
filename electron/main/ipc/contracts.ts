@@ -92,6 +92,7 @@ export const IPC_CHANNELS = {
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
   recoveryList: 'recovery:list',
+  recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',
   recoveryTrim: 'recovery:trim',
   recoveryReveal: 'recovery:reveal',
