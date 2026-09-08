@@ -7,7 +7,7 @@
 // makes the whole catalog searchable and removes the conceptual split
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { RecordButton } from '../components/RecordButton';
@@ -88,18 +88,28 @@ export function LibraryView({
   };
   const toast = useToast();
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
+  const recoveryGeneration = useRef(0);
   const refreshRecovery = useCallback(async () => {
-    try { setRecoveryItems(await api.recovery.list()); }
-    catch { setRecoveryItems([]); }
+    const generation = ++recoveryGeneration.current;
+    const update = (items: RecoveryInboxItem[]): void => {
+      if (generation === recoveryGeneration.current) setRecoveryItems(items);
+    };
+    try { update(await api.recovery.list(update)); }
+    catch { update([]); }
   }, []);
-  useEffect(() => { void refreshRecovery(); }, [refreshRecovery]);
   useEffect(() => {
+    void refreshRecovery();
+    return () => { recoveryGeneration.current++; };
+  }, [refreshRecovery]);
+  useEffect(() => {
+    let timer: ReturnType<typeof window.setTimeout> | undefined;
     const off = api.recording.onStateChange(({ state }) => {
       if (state === 'idle' || state === 'error') {
-        window.setTimeout(() => { void refreshRecovery(); }, 800);
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => { void refreshRecovery(); }, 800);
       }
     });
-    return () => { off(); };
+    return () => { off(); window.clearTimeout(timer); };
   }, [refreshRecovery]);
 
   // Recently deleted (trash). Fetched on mount and re-fetched after any

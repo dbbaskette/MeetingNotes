@@ -29,6 +29,10 @@ type Probe = (file: string) => Promise<AudioInfo>;
 type Trim = (source: string, destination: string, endSeconds: number) => Promise<void>;
 
 export class RecordingRecoveryService {
+  private readonly probes = new Map<string, { fingerprint: string; duration: Promise<number | null>; expiresAt: number }>();
+  private activeProbes = 0;
+  private readonly probeWaiters: Array<() => void> = [];
+
   constructor(private readonly deps: {
     sessions: RecordingSessionsRepo;
     meetings: MeetingsRepo;
@@ -38,13 +42,55 @@ export class RecordingRecoveryService {
     trim?: Trim;
   }) {}
 
-  async list(): Promise<RecoveryItem[]> {
+  async list(onItem?: (item: RecoveryItem, index: number) => void): Promise<RecoveryItem[]> {
+    const sessions = this.deps.sessions.findRecoverable().filter(
+      (session) => !this.deps.meetings.findByAudioPath(session.outputPath),
+    );
+    const paths = new Set(sessions.flatMap((session) => {
+      const stems = deriveStemPaths(session.outputPath);
+      return [session.outputPath, stems.voice, stems.system];
+    }));
+    for (const file of this.probes.keys()) if (!paths.has(file)) this.probes.delete(file);
     const items: RecoveryItem[] = [];
-    for (const session of this.deps.sessions.findRecoverable()) {
-      if (this.deps.meetings.findByAudioPath(session.outputPath)) continue;
-      items.push(await this.inspect(session));
-    }
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(4, sessions.length) }, async () => {
+      while (next < sessions.length) {
+        const index = next++;
+        const item = await this.inspect(sessions[index]!);
+        items[index] = item;
+        onItem?.(item, index);
+      }
+    }));
     return items;
+  }
+
+  private async probeDuration(file: string, fingerprint: string): Promise<number | null> {
+    const cached = this.probes.get(file);
+    if (cached?.fingerprint === fingerprint && cached.expiresAt > Date.now()) return cached.duration;
+    const duration = (async () => {
+      // A released slot is handed directly to its waiter, so new callers
+      // cannot steal it and exceed the service-wide subprocess limit.
+      if (this.activeProbes >= 4) await new Promise<void>((resolve) => this.probeWaiters.push(resolve));
+      else this.activeProbes++;
+      try {
+        const result = await (this.deps.probe ?? probeAudio)(file);
+        return Number.isFinite(result.durationS) && result.durationS > 0 ? result.durationS : null;
+      } catch { return null; }
+      finally {
+        const waiter = this.probeWaiters.shift();
+        if (waiter) waiter();
+        else this.activeProbes--;
+      }
+    })();
+    const entry = { fingerprint, duration, expiresAt: Infinity };
+    this.probes.set(file, entry);
+    // Invalid media and transient ffprobe failures share a null result.
+    // Retry negative results after a short cooldown rather than poisoning
+    // an unchanged recording for the lifetime of the application.
+    void duration.then((result) => {
+      if (result === null) entry.expiresAt = Date.now() + 30_000;
+    });
+    return duration;
   }
 
   async recover(id: string): Promise<{ meetingId: string }> {
@@ -103,15 +149,17 @@ export class RecordingRecoveryService {
   private async inspect(session: RecordingSessionRow): Promise<RecoveryItem> {
     const stems = deriveStemPaths(session.outputPath);
     const candidates = [session.outputPath, stems.voice, stems.system];
-    const sizes = candidates.map((file) => {
-      try { return fs.statSync(file).size; } catch { return 0; }
-    });
-    const durations = await Promise.all(candidates.map(async (file) => {
-      if (!fs.existsSync(file) || sizes[candidates.indexOf(file)] === 0) return null;
-      try {
-        const result = await (this.deps.probe ?? probeAudio)(file);
-        return Number.isFinite(result.durationS) && result.durationS > 0 ? result.durationS : null;
-      } catch { return null; }
+    const stats = await Promise.all(candidates.map(async (file) => {
+      try { return await fs.promises.stat(file); } catch { return null; }
+    }));
+    const sizes = stats.map((stat) => stat?.size ?? 0);
+    const durations = await Promise.all(candidates.map(async (file, index) => {
+      const stat = stats[index];
+      if (!stat?.isFile() || stat.size === 0) {
+        this.probes.delete(file);
+        return null;
+      }
+      return this.probeDuration(file, `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`);
     }));
     const [primaryDuration, voiceDuration, systemDuration] = durations;
     const reason: RecoveryReason = primaryDuration ? 'not-indexed'
