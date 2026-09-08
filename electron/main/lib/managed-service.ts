@@ -74,6 +74,12 @@ export interface ManagedServiceDeps {
   idleShutdownMs?: number;
   /** Max time ensureReady() waits for /health to come up after spawn. */
   startupTimeoutMs?: number;
+  /** The launch command is a LAUNCHER that daemonizes the real server and
+   *  exits 0 (e.g. `lms server start`), unlike daemon-style children
+   *  (`ollama serve`, whisper-server) that stay alive. A clean exit during
+   *  startup then means "keep polling health", not "the service died".
+   *  Non-zero exits still fail fast. */
+  launcherExitsOk?: boolean;
   /** How many cold-start attempts to make before giving up. Each attempt
    *  spawns (or reuses) a process and polls /health for up to
    *  {@link startupAttemptTimeoutMs}. Between attempts a wedged
@@ -144,6 +150,7 @@ async function defaultKillOnPort(port: number): Promise<void> {
 
 export class ManagedService {
   private proc: ChildProcess | null = null;
+  private lastExitCode: number | null = null;
   private restarts = 0;
   private stopped = false;
   private startedAt = 0;
@@ -331,6 +338,7 @@ export class ManagedService {
     proc.on('exit', (code, signal) => {
       const uptime = Date.now() - this.startedAt;
       this.proc = null;
+      this.lastExitCode = code;
       this.deps.onLog?.(
         `${this.deps.name}: exited code=${code} signal=${signal} uptime=${uptime}ms`,
       );
@@ -354,7 +362,11 @@ export class ManagedService {
   ): Promise<'ok' | 'exited' | 'port-conflict' | 'timeout'> {
     const deadline = Date.now() + this.startupAttemptTimeoutMs;
     while (Date.now() < deadline) {
-      if (!this.proc) return 'exited';
+      // Launcher-style commands (lms server start) exit 0 after handing the
+      // real server to the OS — that's success-in-progress, so keep polling
+      // health. Anything else exiting, or a launcher failing (code != 0),
+      // is dead.
+      if (!this.proc && !(this.deps.launcherExitsOk && this.lastExitCode === 0)) return 'exited';
       if (this.portConflict) return 'port-conflict';
       const p = await this.probe(host, port);
       if (p.ok) return 'ok';
