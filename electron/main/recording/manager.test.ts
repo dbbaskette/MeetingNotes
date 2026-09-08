@@ -41,6 +41,40 @@ afterEach(() => {
 });
 
 describe('RecordingManager', () => {
+  it('marks the session row error and clears state when the helper exits before started', async () => {
+    const stdout = new EventEmitter();
+    const proc = new EventEmitter() as any;
+    proc.pid = 4242;
+    proc.stdout = stdout; proc.stdout.setEncoding = () => {};
+    proc.stderr = { on: () => {}, setEncoding: () => {} };
+    proc.kill = vi.fn();
+    queueMicrotask(() => proc.emit('exit', 1)); // dies before "started"
+    const repo = fakeRepo();
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc } as any);
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true } as any))
+      .rejects.toThrow(/exited before started/);
+    // The row must not stay 'recording' — it suppresses auto-detect and
+    // blocks every later meetingnotes://record with "Already recording".
+    expect(repo.markError).toHaveBeenCalled();
+    const sessionId = repo.insert.mock.calls[0][0].id;
+    expect(mgr.state(sessionId)).toBe('idle');
+  });
+
+  it('rejects instead of hanging when spawn itself fails (error event, no exit)', async () => {
+    const stdout = new EventEmitter();
+    const proc = new EventEmitter() as any;
+    proc.pid = undefined; // exactly what node returns for a bad binary path
+    proc.stdout = stdout; proc.stdout.setEncoding = () => {};
+    proc.stderr = { on: () => {}, setEncoding: () => {} };
+    proc.kill = vi.fn();
+    queueMicrotask(() => proc.emit('error', new Error('ENOENT'))); // never 'exit'
+    const repo = fakeRepo();
+    const mgr = new RecordingManager({ helperPath: '/nonexistent', recordingsDir: '/tmp', repo, spawn: () => proc } as any);
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true } as any))
+      .rejects.toThrow(/failed to spawn/);
+    expect(repo.markError).toHaveBeenCalled();
+  });
+
   it('start spawns helper with the right args', async () => {
     const spawned: { cmd: string; args: string[] }[] = [];
     const fakeSpawn = (cmd: string, args: string[]): any => {

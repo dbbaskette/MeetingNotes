@@ -45,4 +45,22 @@ describe('recoverOrphans', () => {
     expect(repo.markOrphaned).not.toHaveBeenCalled();
     expect(repo.finalize).not.toHaveBeenCalled();
   });
+
+  it('treats pid -1 rows (failed spawns) as dead so they get orphaned', async () => {
+    // Rows written after a failed spawn carry helperPid -1. POSIX
+    // kill(-1, 0) succeeds ("signal everything I may signal"), which made
+    // these rows immortal: auto-detect stayed suppressed and every
+    // meetingnotes://record was refused across relaunches. The default
+    // isProcessAlive must short-circuit pid <= 0 without calling kill.
+    const repo = {
+      findOpen: vi.fn(() => [{
+        id: 'r1', helperPid: -1, outputPath: '/nope.m4a',
+        targetLabel: 'X', targetPid: null, startedAt: '', finalizedAt: null, status: 'recording' as const,
+      }]),
+      markOrphaned: vi.fn(), finalize: vi.fn(), markError: vi.fn(),
+      insert: vi.fn(), findOrphaned: vi.fn(() => []),
+    };
+    await recoverOrphans({ repo: repo as any }); // default isProcessAlive on purpose
+    expect(repo.markOrphaned).toHaveBeenCalledWith('r1');
+  });
 });
