@@ -144,12 +144,15 @@ export async function runBulkProcess(
 }
 
 export async function runBulkDelete(
-  input: readonly string[], deleteOne: (id: string) => Promise<void>,
+  input: readonly string[], deleteOne: (id: string) => Promise<boolean>,
 ): Promise<SelectionOperationResult> {
   const ids = [...new Set(input)];
   const results = await Promise.allSettled(ids.map(async (id) => deleteOne(id)));
+  // A fulfilled IPC may be an idempotent no-op. Only newly deleted rows
+  // belong to this operation's count, deselection, and Undo snapshot.
+  const newlyDeleted = results.map((result) => result.status === 'fulfilled' && result.value === true);
   return {
-    succeededIds: ids.filter((_, index) => results[index]!.status === 'fulfilled'),
-    failedIds: ids.filter((_, index) => results[index]!.status === 'rejected'),
+    succeededIds: ids.filter((_, index) => newlyDeleted[index]),
+    failedIds: ids.filter((_, index) => !newlyDeleted[index]),
   };
 }

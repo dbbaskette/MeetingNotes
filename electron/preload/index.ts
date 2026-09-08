@@ -178,8 +178,9 @@ const api = {
      *  but recoverable via `undoDelete` (undo toast or the Library's
      *  "Recently deleted" section) for 30 days. After the retention
      *  window, a periodic purge job in the main process hard-deletes the
-     *  files and the row. */
-    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<void>,
+     *  files and the row. Returns true only for a new soft deletion; false
+     *  means the row was already deleted/missing and must not enter Undo. */
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<boolean>,
     /** Restore a soft-deleted meeting. Returns true if the files were
      *  moved back and the row's deleted_at cleared; false if the
      *  retention window already expired. */

@@ -179,6 +179,35 @@ describe('paginated meeting summaries', () => {
     expect(meetings.findById('retry')?.status).toBe('pending');
     expect(enqueued).toEqual(['next']);
   });
+
+  it('distinguishes a new B deletion from an earlier A deletion so bulk Undo restores only B', () => {
+    const libraryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-delete-accounting-'));
+    try {
+      for (const id of ['A', 'B']) {
+        const audioPath = path.join(libraryRoot, `${id}.m4a`);
+        fsSync.writeFileSync(audioPath, id);
+        meetings.insert({ id, slug: id, title: id, startedAt: null, durationS: 60, audioPath, status: 'done', pipelineStage: 'done' });
+      }
+      registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+        baseServices({ meetings, speakers, actionItems, libraryRoot }));
+      // Selected A/B, then A was deleted through the single-row action.
+      expect(invoke('meetings:delete', 'A')).toBe(true);
+      const originalADeletion = meetings.findById('A')?.deletedAt;
+      const ids = ['A', 'B', 'missing'];
+      const newlyDeleted = ids.map((id) => invoke('meetings:delete', id));
+      expect(newlyDeleted).toEqual([false, true, false]);
+      expect(meetings.findById('A')?.deletedAt).toBe(originalADeletion);
+      const undoIds = ids.filter((_, index) => newlyDeleted[index] === true);
+      expect(undoIds).toEqual(['B']);
+      for (const id of undoIds) expect(invoke('meetings:undo-delete', id)).toBe(true);
+      expect(meetings.findById('A')?.deletedAt).toBeTruthy();
+      expect(meetings.findById('B')?.deletedAt).toBeNull();
+      expect(fsSync.existsSync(path.join(libraryRoot, 'A.m4a'))).toBe(false);
+      expect(fsSync.readFileSync(path.join(libraryRoot, 'B.m4a'), 'utf8')).toBe('B');
+    } finally {
+      fsSync.rmSync(libraryRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function baseServices(overrides: Record<string, unknown> = {}): any {

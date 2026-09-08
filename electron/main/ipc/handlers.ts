@@ -350,10 +350,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.meetings.updateTitle(id, title.slice(0, 500));
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsDelete, (_e, id: unknown) => {
+  ipc.handle(IPC_CHANNELS.meetingsDelete, (_e, id: unknown): boolean => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
-    if (!m || m.deletedAt) return; // already gone or already soft-deleted — idempotent
+    if (!m || m.deletedAt) return false; // idempotent no-op, not a new deletion
     // Soft-delete: move files to the per-meeting trash dir, stamp
     // deleted_at on the row. The undo path (meetingsUndoDelete) moves
     // everything back. Purge expired entries on startup + on a timer.
@@ -364,6 +364,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       });
     } catch { /* partial move is fine; restore will recover what it can */ }
     s.meetings.softDelete(id);
+    return true;
   });
 
   ipc.handle(IPC_CHANNELS.meetingsUndoDelete, (_e, id: unknown) => {

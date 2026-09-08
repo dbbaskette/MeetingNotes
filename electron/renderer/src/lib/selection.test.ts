@@ -154,9 +154,36 @@ describe('bulk delete result retention', () => {
     const result = await runBulkDelete(['p1', 'd1', 'p2'], async (id) => {
       if (id === 'd1') throw new Error('locked');
       deleted.push(id);
+      return true;
     });
     expect(deleted).toEqual(['p1', 'p2']);
     expect(result).toEqual({ succeededIds: ['p1', 'p2'], failedIds: ['d1'] });
+  });
+
+  it('does not count or undo an earlier row deletion in a retained A/B snapshot', async () => {
+    const store = createLibrarySelection();
+    store.getState().selectLoaded([{ id: 'A' }, { id: 'B' }]);
+    // A was deleted separately through its row menu after both were selected.
+    const deleted = new Set(['A']);
+    const result = await runBulkDelete([...store.getState().selected], async (id) => {
+      if (deleted.has(id)) return false;
+      deleted.add(id);
+      return true;
+    });
+    expect(result).toEqual({ succeededIds: ['B'], failedIds: ['A'] });
+    expect(result.succeededIds.length).toBe(1);
+    store.getState().removeSucceeded(result.succeededIds);
+    expect([...store.getState().selected]).toEqual(['A']);
+    for (const id of result.succeededIds) deleted.delete(id);
+    expect([...deleted]).toEqual(['A']);
+  });
+
+  it('retains both false no-ops and rejected deletions as not deleted', async () => {
+    const result = await runBulkDelete(['missing', 'uncertain', 'new'], async (id) => {
+      if (id === 'uncertain') throw new Error('IPC disconnected');
+      return id === 'new';
+    });
+    expect(result).toEqual({ succeededIds: ['new'], failedIds: ['missing', 'uncertain'] });
   });
 });
 
