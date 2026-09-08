@@ -213,7 +213,16 @@ export class Pipeline {
         // with stage='summarizing', which re-enters this loop past the gate.
         if (s === 'awaiting_speaker_id') {
           const fresh = this.deps.ctx.meetings.findById(meetingId);
-          if (!fresh?.skipSpeakerId) {
+          // Gate only when a voice actually needs the user: at least one
+          // detected speaker without a roster link (the matcher's own
+          // confidence threshold decides linkage). Meetings where every
+          // voice auto-matched — the recurring-colleagues case — and
+          // zero-voice recordings flow straight through, keeping the
+          // "name voices once and they're recognized" promise.
+          const unresolved = this.deps.ctx.speakers
+            .listForMeeting(meetingId)
+            .some((l) => !l.rosterSpeakerId);
+          if (!fresh?.skipSpeakerId && unresolved) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
             // Notify subscribers that this meeting is now blocked on the user.
