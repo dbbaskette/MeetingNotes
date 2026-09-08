@@ -5,7 +5,9 @@
 // view that happens to render it. A thin shell over the pure `status-bar`
 // module — all the string/visibility logic is unit-tested there.
 import { useEffect, useMemo, useState } from 'react';
-import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
+import { startPipelineHydration } from '../lib/pipeline-hydration';
+import { recycleMeetings } from '../lib/meetings-recycle';
+import type { MeetingSummary } from '../lib/paged-meetings';
 import { useElapsed } from '../lib/useElapsed';
 import {
   deriveStatusBar,
@@ -19,7 +21,7 @@ interface Props {
 }
 
 export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
-  const { meetings, refresh } = useMeetingsStore();
+  const [meetings, setMeetings] = useState<MeetingSummary[]>([]);
   const [status, setStatus] = useState<PipelineStatusSnapshot>({
     paused: false, currentId: null, queueLength: 0, queueIds: [],
   });
@@ -29,22 +31,25 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
   // Same pull-then-subscribe pattern LibraryView uses, so the bar is live even
   // from views that don't poll meetings themselves.
   useEffect(() => {
-    void (async () => setStatus(await api.pipeline.status()))();
+    let cancelled = false;
+    let receivedEvent = false;
+    void api.pipeline.status().then((snapshot) => {
+      if (!cancelled && !receivedEvent) setStatus(snapshot);
+    }).catch(() => { /* the next pushed status can recover */ });
     const off = api.pipeline.onStatusChange((s) => {
+      receivedEvent = true;
       setStatus(s);
-      void refresh();
     });
-    return () => { off(); };
-  }, [refresh]);
+    return () => { cancelled = true; off(); };
+  }, []);
+
+  useEffect(() => startPipelineHydration(status, api.meetings.getMany, (rows) => {
+    setMeetings((previous) => recycleMeetings(previous, rows));
+  }), [status]);
 
   // Memoized: useElapsed re-renders this bar every second while processing,
   // and deriveStatusBar scans the whole meetings array each call.
   const model = useMemo(() => deriveStatusBar(meetings, status), [meetings, status]);
-
-  // Keep title/stage/ETA fresh from Settings/Weekly/detail (LibraryView's
-  // poll only runs while it's mounted). Shared + ref-counted with the
-  // Library's hold, so on the Library view this adds zero extra IPC.
-  useMeetingsPoll(!!(model && model.kind === 'processing' && model.meetingId));
 
   const elapsed = useElapsed(model?.stageStartedAt ?? null, model?.kind === 'processing');
 

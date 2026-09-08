@@ -23,8 +23,12 @@ import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import { pruneSelection, partitionSelection } from '../lib/selection';
 import {
-  LIBRARY_SORT_OPTIONS, libraryComparator, sanitizeSortKey, type LibrarySortKey,
+  LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
+import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT } from '../lib/library-search';
+import { hydrateAttentionMeetings } from '../lib/meeting-hydration';
+import { recycleMeetings } from '../lib/meetings-recycle';
+import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shouldPollLibrary } from '../lib/poll-gate';
 import { shortcutMod } from '../lib/shortcut';
@@ -62,16 +66,15 @@ type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
  *  not worth an IPC round-trip to the settings repo. */
 const SORT_STORAGE_KEY = 'librarySortKey';
 
-// From the user's perspective `awaiting_user` is just "still in flight" —
-// the pipeline hasn't reached `done`, it's just paused for input. So the
-// Processing filter and counter both bucket awaiting_user with processing.
-const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
-
 export function LibraryView({
   onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
-  const { meetings, refresh } = useMeetingsStore();
+  const {
+    items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
+    refreshing, error, setQuery: setPageQuery, refresh: refreshPages, loadMore, retry,
+  } = useMeetingsStore();
   const [query, setQuery] = useState('');
+  const [searchRevision, setSearchRevision] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
   // Browse-mode sort. Persisted per machine in localStorage; sanitize on
@@ -87,6 +90,26 @@ export function LibraryView({
     catch { /* private mode / quota — the choice just doesn't persist */ }
   };
   const toast = useToast();
+  // Needs Attention remains global even when browse is filtered or only its
+  // first page is loaded. Only actionable status IDs are hydrated, in capped
+  // batches; buildNeedsAttention distinguishes speaker gates from processing.
+  const [attentionMeetings, setAttentionMeetings] = useState<MeetingSummary[]>([]);
+  const attentionGeneration = useRef(0);
+  const refreshAttention = useCallback(async () => {
+    const generation = ++attentionGeneration.current;
+    try {
+      const rows = await hydrateAttentionMeetings(api.meetings);
+      if (generation === attentionGeneration.current) setAttentionMeetings((prev) => recycleMeetings(prev, rows));
+    } catch { /* retain the previous actionable rows until the next refresh */ }
+  }, []);
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshPages(), refreshAttention()]);
+    setSearchRevision((revision) => revision + 1);
+  }, [refreshPages, refreshAttention]);
+  useEffect(() => {
+    void refreshAttention();
+    return () => { attentionGeneration.current++; };
+  }, [refreshAttention]);
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
   const recoveryGeneration = useRef(0);
   const refreshRecovery = useCallback(async () => {
@@ -130,17 +153,19 @@ export function LibraryView({
     paused: false, currentId: null, queueLength: 0, queueIds: [],
   });
   useEffect(() => {
-    void (async () => {
-      const s = await api.pipeline.status();
-      setPipelineStatus(s);
-    })();
+    let cancelled = false;
+    let receivedEvent = false;
+    void api.pipeline.status().then((snapshot) => {
+      if (!cancelled && !receivedEvent) setPipelineStatus(snapshot);
+    }).catch(() => { /* the next pushed status can recover */ });
     const off = api.pipeline.onStatusChange((s) => {
+      receivedEvent = true;
       setPipelineStatus(s);
       // Queue motion is itself a reason to refresh — current meeting
       // moved, etc. Cheaper than waiting for the next poll tick.
       void refresh();
     });
-    return () => { off(); };
+    return () => { cancelled = true; off(); };
   }, [refresh]);
 
   // Push-refresh when main catalogs a freshly arrived recording. Stop()
@@ -148,7 +173,7 @@ export function LibraryView({
   // refresh in LiveRecordingRow happens too early to see the new row.
   // Without this subscription the Library stayed stale until the user
   // navigated into a meeting and back (which remounted the view and
-  // re-ran meetings:list). Now main pings us the instant the row exists.
+  // refreshed the first page). Now main pings us the instant the row exists.
   useEffect(() => {
     const off = api.meetings.onAdded(() => { void refresh(); void refreshRecovery(); });
     return () => { off(); };
@@ -170,7 +195,12 @@ export function LibraryView({
     () => shouldPollLibrary(pipelineStatus, !!liveRecording),
     [pipelineStatus, liveRecording],
   );
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void setPageQuery({ filter: libFilter, sort: sortKey });
+  }, [libFilter, sortKey, setPageQuery]);
+  // A remount can reuse the same query after changes in the detail view.
+  // The initial request is shared when setPageQuery just started it above.
+  useEffect(() => { void refreshPages(); }, [refreshPages]);
   useMeetingsPoll(hasMotion);
   useEffect(() => {
     const onVisible = (): void => {
@@ -180,42 +210,41 @@ export function LibraryView({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
-  // Full-content search. When the query is short we stay in the fast
-  // in-memory path (title contains); at 2+ chars we hit the same IPC the
+  // Full-content search. At 2+ chars we hit the same global IPC the
   // Cmd+K palette uses, which ripgreps summary.md + transcript.md across
   // the library. Debounced so a fast typist doesn't fire one IPC per
   // keystroke.
   const isSearching = query.trim().length >= 2;
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searchMeetings, setSearchMeetings] = useState<MeetingSummary[]>([]);
   const [searchPending, setSearchPending] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const previousSearchQuery = useRef('');
   useEffect(() => {
-    if (!isSearching) { setHits([]); setSearchPending(false); return; }
+    if (!isSearching || previousSearchQuery.current !== query.trim()) {
+      setHits([]);
+      setSearchMeetings([]);
+    }
+    previousSearchQuery.current = query.trim();
+    setSearchError(null);
+    if (!isSearching) { setSearchPending(false); return; }
     let cancelled = false;
     setSearchPending(true);
     const t = window.setTimeout(async () => {
       try {
-        const r = (await api.search.query(query.trim(), 100)) as SearchHit[];
-        if (!cancelled) setHits(r);
+        const result = await hydrateLibrarySearch(query, { query: api.search.query, getMany: api.meetings.getMany });
+        if (!cancelled) {
+          setHits(result.hits);
+          setSearchMeetings(result.meetings);
+        }
+      } catch (error) {
+        if (!cancelled) setSearchError(error instanceof Error ? error.message : 'Unable to search meetings.');
       } finally {
         if (!cancelled) setSearchPending(false);
       }
     }, 150);
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, [query, isSearching]);
-
-  // Group hits by meetingId, preserving the server's score-ordering: the
-  // first time we see a meetingId fixes its position in the list, and
-  // every subsequent hit for the same meeting gets appended to that
-  // meeting's snippet stack.
-  const hitsByMeeting = useMemo(() => {
-    const m = new Map<string, SearchHit[]>();
-    for (const h of hits) {
-      const arr = m.get(h.meetingId);
-      if (arr) arr.push(h);
-      else m.set(h.meetingId, [h]);
-    }
-    return m;
-  }, [hits]);
+  }, [query, isSearching, searchRevision]);
 
   // Sort order for the Content section. Reset to 'recent' whenever the
   // query changes so a stale "Most matches" choice doesn't carry over
@@ -223,120 +252,44 @@ export function LibraryView({
   const [contentSort, setContentSort] = useState<'recent' | 'count'>('recent');
   useEffect(() => { setContentSort('recent'); }, [query]);
 
-  // Apply the filter chip to a candidate list. Lifted out so both the
-  // Title and Content buckets get the same treatment without duplication.
-  // Memoized on libFilter so the dependent memos below have a stable
-  // reference and don't recompute on every render.
-  const applyFilter = useCallback((list: typeof meetings): typeof meetings => (
-    libFilter === 'all'
-      ? list
-      : libFilter === 'pending'
-        ? list.filter((m) => m.status === 'pending')
-        : libFilter === 'processing'
-          ? list.filter((m) => isInFlight(m.status))
-          : list.filter((m) => m.status === libFilter)
-  ), [libFilter]);
+  // Browse rows are already filtered/ordered by the server's cursor query.
+  // Re-sorting a loaded subset here would break cross-page ordering.
+  const browseList = meetings;
+  const { titleMatches, contentMatches, hitsByMeeting, counts: searchCounts } = useMemo(
+    () => groupLibrarySearch(hits, searchMeetings, libFilter, contentSort),
+    [hits, searchMeetings, libFilter, contentSort],
+  );
+  const libCounts = isSearching ? searchCounts : counts;
+  const selectionMeetings = isSearching ? searchMeetings : meetings;
 
-  // Browse mode (no active query): status buckets keep their fixed
-  // precedence (pending floats first, then awaiting, processing, failed,
-  // done); the sort dropdown re-orders within each bucket. 'newest' is
-  // the previous hardcoded behavior.
-  const browseList = useMemo(() => {
-    if (isSearching) return [];
-    return [...applyFilter(meetings)].sort(libraryComparator(sortKey));
-  }, [meetings, isSearching, applyFilter, sortKey]);
-
-  // Search mode buckets: a meeting with a title hit goes in the Title
-  // section ONLY (cleaner than showing it in both — the user can click
-  // through to find the specific snippet). Everything else with at least
-  // one summary/transcript hit goes in Content.
-  const { titleMatches, contentMatches } = useMemo(() => {
-    if (!isSearching) return { titleMatches: [], contentMatches: [] };
-    const byId = new Map(meetings.map((m) => [m.id, m]));
-    const titleIds = new Set<string>();
-    const contentIds = new Set<string>();
-    for (const h of hits) {
-      if (h.source === 'title') titleIds.add(h.meetingId);
-    }
-    for (const h of hits) {
-      if (h.source !== 'title' && !titleIds.has(h.meetingId)) {
-        contentIds.add(h.meetingId);
-      }
-    }
-    const titleMeetings: typeof meetings = [];
-    const contentMeetings: typeof meetings = [];
-    // Preserve server's discovery order for the title bucket — first
-    // appearance wins.
-    const seenTitle = new Set<string>();
-    const seenContent = new Set<string>();
-    for (const h of hits) {
-      const m = byId.get(h.meetingId);
-      if (!m) continue;
-      if (titleIds.has(h.meetingId) && !seenTitle.has(h.meetingId)) {
-        seenTitle.add(h.meetingId);
-        titleMeetings.push(m);
-      } else if (contentIds.has(h.meetingId) && !seenContent.has(h.meetingId)) {
-        seenContent.add(h.meetingId);
-        contentMeetings.push(m);
-      }
-    }
-    // Content section: sort by date (most recent first) with hit-count
-    // as tiebreaker, OR by hit-count alone when the user toggles.
-    const hitCount = (id: string): number => (hitsByMeeting.get(id) ?? []).filter((h) => h.source !== 'title').length;
-    const sortedContent = [...contentMeetings].sort((a, b) => {
-      if (contentSort === 'count') {
-        const diff = hitCount(b.id) - hitCount(a.id);
-        if (diff !== 0) return diff;
-        return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-      }
-      const dateDiff = (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-      if (dateDiff !== 0) return dateDiff;
-      return hitCount(b.id) - hitCount(a.id);
-    });
-    return {
-      titleMatches: applyFilter(titleMeetings),
-      contentMatches: applyFilter(sortedContent),
-    };
-  }, [meetings, hits, isSearching, applyFilter, contentSort, hitsByMeeting]);
-
-  // In search mode chip counts switch to "meetings with at least one
-  // hit in this status" — a chip that drops to zero is a visible signal
-  // that no matches exist in that bucket. Browse mode keeps raw totals.
-  const libCounts = useMemo(() => {
-    if (!isSearching) {
-      return {
-        all: meetings.length,
-        pending: meetings.filter((m) => m.status === 'pending').length,
-        processing: meetings.filter((m) => isInFlight(m.status)).length,
-        done: meetings.filter((m) => m.status === 'done').length,
-        failed: meetings.filter((m) => m.status === 'failed').length,
-      };
-    }
-    const matched = new Set<string>();
-    for (const h of hits) matched.add(h.meetingId);
-    const hitMeetings = meetings.filter((m) => matched.has(m.id));
-    return {
-      all: hitMeetings.length,
-      pending: hitMeetings.filter((m) => m.status === 'pending').length,
-      processing: hitMeetings.filter((m) => isInFlight(m.status)).length,
-      done: hitMeetings.filter((m) => m.status === 'done').length,
-      failed: hitMeetings.filter((m) => m.status === 'failed').length,
-    };
-  }, [meetings, hits, isSearching]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isSearching || !hasMore || loadingMore || refreshing || error) return;
+    const target = loadMoreRef.current;
+    const root = listRef.current;
+    if (!target || !root) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+    }, { root, rootMargin: '300px' });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isSearching, hasMore, loadingMore, refreshing, error, loadMore, meetings.length]);
+  useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [libFilter, sortKey, isSearching]);
 
   // Drop stale selections — a meeting that disappeared from the list
   // (deleted elsewhere, purged) shouldn't stay checked. Status changes
   // are fine now that every row is selectable: a pending row that starts
   // processing stays selected, it just falls out of the Process target.
   useEffect(() => {
-    setSelected((prev) => pruneSelection(prev, meetings));
-  }, [meetings]);
+    if (!loadingInitial && !searchPending) setSelected((prev) => pruneSelection(prev, selectionMeetings));
+  }, [selectionMeetings, loadingInitial, searchPending]);
 
   // What the two bulk actions would act on. Process only touches pending
   // rows within the selection; Delete touches everything selected.
   const { pendingIds: selectedPendingIds, allIds: selectedAllIds } = useMemo(
-    () => partitionSelection(selected, meetings),
-    [selected, meetings],
+    () => partitionSelection(selected, selectionMeetings),
+    [selected, selectionMeetings],
   );
 
   // Row callbacks are hoisted + stable (useCallback) so the memoized
@@ -468,17 +421,17 @@ export function LibraryView({
       <div className="shrink-0">
         <QueueBanner
           status={pipelineStatus}
-          meetings={meetings}
+          meetings={attentionMeetings}
           onChanged={() => void refresh()}
           toast={toast}
         />
       </div>
 
       <NeedsAttentionPanel
-        meetings={meetings}
+        meetings={attentionMeetings}
         recovery={recoveryItems}
         onOpen={(id) => {
-          const meeting = meetings.find((candidate) => candidate.id === id);
+          const meeting = attentionMeetings.find((candidate) => candidate.id === id);
           onOpen(id, meeting ? {
             title: meeting.title, pipelineStage: meeting.pipelineStage, status: meeting.status,
           } : {});
@@ -593,14 +546,25 @@ export function LibraryView({
           </div>
         </div>
 
+        {isSearching && (
+          <p className="shrink-0 mb-2 text-[11px] text-ink-muted">
+            Searching the entire Library. Showing up to {LIBRARY_SEARCH_LIMIT} matching hits; refine your search for more specific results.
+          </p>
+        )}
+
         {(() => {
           const totalShown = isSearching
             ? titleMatches.length + contentMatches.length
             : browseList.length;
           if (totalShown === 0) {
+            if (isSearching ? searchPending : loadingInitial) {
+              return <div role="status" className="py-10 text-center text-sm text-ink-muted">{isSearching ? 'Searching…' : 'Loading meetings…'}</div>;
+            }
+            const failure = isSearching ? searchError : error;
+            if (failure) return <LibraryRetryRow message={failure} onRetry={isSearching ? () => setSearchRevision((revision) => revision + 1) : () => void retry()} />;
             return (
               <LibraryEmpty
-                hasAny={libCounts.all > 0}
+                hasAny={counts.all > 0}
                 filter={libFilter}
                 query={query}
               />
@@ -636,6 +600,7 @@ export function LibraryView({
           };
           return (
             <div
+              ref={listRef}
               className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 space-y-2 ${
                 // Extra clearance while the selection pill is docked over the
                 // bottom of the list, so the last rows can scroll above it.
@@ -660,9 +625,23 @@ export function LibraryView({
                     />
                   )}
                   {contentMatches.map((m) => renderRow(m, true))}
+                  {searchError && <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
                 </>
               ) : (
-                browseList.map((m) => renderRow(m, false))
+                <>
+                  {browseList.map((m) => renderRow(m, false))}
+                  {error ? (
+                    <LibraryRetryRow message={error} onRetry={() => void retry()} />
+                  ) : (
+                    <div ref={loadMoreRef} className="py-3 text-center text-xs text-ink-muted">
+                      {loadingMore ? <span role="status">Loading more meetings…</span> : hasMore ? (
+                        <button type="button" className="px-3 py-1.5 rounded-lg border border-surface-border hover:text-ink" onClick={() => void loadMore()}>
+                          Load more ({meetings.length} of {total})
+                        </button>
+                      ) : <span>{meetings.length} of {total} meetings</span>}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );
@@ -715,6 +694,15 @@ export function LibraryView({
 }
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
+
+function LibraryRetryRow({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
+  return (
+    <div role="alert" className="py-4 text-center text-sm text-ink-muted">
+      <span>{message}</span>{' '}
+      <button type="button" className="font-semibold text-brand-indigo underline" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
 
 /** Muted "Recently deleted (N)" affordance at the bottom of the Library.
  *  Collapsed by default; expanding lists the trashed meetings with a

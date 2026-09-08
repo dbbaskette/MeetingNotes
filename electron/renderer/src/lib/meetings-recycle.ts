@@ -18,6 +18,8 @@ export interface MeetingRowLike {
   durationS: number | null;
   pipelineStage: string;
   status: string;
+  errorMessage?: string | null;
+  skipSpeakerId?: boolean;
   stageStartedAt: string | null;
   stageEtaMs: number | null;
   stageEtaRough: boolean;
@@ -40,6 +42,8 @@ function rowsEqual(a: MeetingRowLike, b: MeetingRowLike): boolean {
     a.durationS !== b.durationS ||
     a.pipelineStage !== b.pipelineStage ||
     a.status !== b.status ||
+    a.errorMessage !== b.errorMessage ||
+    a.skipSpeakerId !== b.skipSpeakerId ||
     a.stageStartedAt !== b.stageStartedAt ||
     a.stageEtaMs !== b.stageEtaMs ||
     a.stageEtaRough !== b.stageEtaRough ||
