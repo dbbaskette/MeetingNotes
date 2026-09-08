@@ -23,7 +23,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
 import { speakerReviewLayout } from '../lib/speaker-review-layout';
-import { createDetailArtifacts, type DetailArtifactState } from '../lib/detail-artifacts';
+import { createDetailArtifacts, mergeSpeakerReview, type DetailArtifactState, type DetailSpeaker } from '../lib/detail-artifacts';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -48,11 +48,7 @@ interface MeetingDetail {
   summaryMd: string | null;
   audioPath: string;
   userIdentified: boolean;
-  speakers: {
-    localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null;
-    state?: 'unknown' | 'probable' | 'confirmed'; needsReview?: boolean;
-    segmentCount?: number; durationS?: number; lineCount?: number;
-  }[];
+  speakers: DetailSpeaker[];
   actionItems: {
     id: string;
     text: string;
@@ -110,7 +106,7 @@ export function MeetingDetailView({
     ...shell,
     transcriptMd: transcript.data?.transcriptMd ?? null,
     rawTranscriptText: transcript.data?.rawTranscriptText ?? null,
-    speakers: speakerReview.data?.speakers ?? shell.speakers,
+    speakers: mergeSpeakerReview(shell.speakers, speakerReview.data?.speakers),
   } : null;
   const [tab, setTab] = useState<Tab>('summary');
   useEffect(() => {

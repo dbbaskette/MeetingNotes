@@ -4,6 +4,39 @@ export interface DetailArtifactState<T> {
   error: string | null;
 }
 
+export interface DetailSpeaker {
+  localLabel: string;
+  rosterId: string | null;
+  displayName: string | null;
+  confidence: number | null;
+  state?: 'unknown' | 'probable' | 'confirmed';
+  needsReview?: boolean;
+  segmentCount?: number;
+  durationS?: number;
+  lineCount?: number;
+}
+
+/** The shell owns membership and identity; retained review data can only
+ * enrich those speakers, never restore removed links or hide new ones. */
+export function mergeSpeakerReview(shell: DetailSpeaker[], review?: DetailSpeaker[]): DetailSpeaker[] {
+  const byLabel = new Map(review?.map((speaker) => [speaker.localLabel, speaker]));
+  return shell.map((speaker) => {
+    const cached = byLabel.get(speaker.localLabel);
+    if (!cached) return speaker;
+    // Counts belong to the local voice, but review badges describe a
+    // particular roster assignment/confidence and become stale on mutation.
+    const compatibleIdentity = cached.rosterId === speaker.rosterId
+      && cached.confidence === speaker.confidence;
+    return {
+      ...speaker,
+      segmentCount: cached.segmentCount,
+      durationS: cached.durationS,
+      lineCount: cached.lineCount,
+      ...(compatibleIdentity ? { state: cached.state, needsReview: cached.needsReview } : {}),
+    };
+  });
+}
+
 /** Per-detail request generations. Refreshes retain content but supersede
  * pending reads; switching meetings also invalidates every old completion. */
 export function createDetailArtifacts<T extends Record<string, unknown>>(

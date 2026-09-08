@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDetailArtifacts } from './detail-artifacts';
+import { createDetailArtifacts, mergeSpeakerReview, type DetailSpeaker } from './detail-artifacts';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -90,5 +90,75 @@ describe('detail artifact generations', () => {
       await pending;
       expect(artifacts.get('transcript')).toMatchObject({ data: 'new stage', loading: false, error: null });
     }
+  });
+});
+
+describe('shell-authoritative speaker review', () => {
+  it('keeps updated shell identities and membership after a rejected review refresh', async () => {
+    const oldSpeakers: DetailSpeaker[] = [
+      { localLabel: 'A', rosterId: 'old', displayName: 'Old name', confidence: 1,
+        state: 'confirmed', needsReview: false, segmentCount: 4, durationS: 12, lineCount: 3 },
+      { localLabel: 'removed', rosterId: null, displayName: null, confidence: null,
+        state: 'unknown', needsReview: true, segmentCount: 1, durationS: 2, lineCount: 1 },
+      { localLabel: 'C', rosterId: 'stable', displayName: 'Stable name', confidence: 1,
+        state: 'confirmed', needsReview: false, segmentCount: 2, durationS: 8, lineCount: 2 },
+    ];
+    const refresh = deferred<{ speakers: DetailSpeaker[] }>();
+    const responses = [Promise.resolve({ speakers: oldSpeakers }), refresh.promise];
+    const artifacts = createDetailArtifacts({ speakerReview: () => responses.shift()! });
+    artifacts.selectMeeting('meeting');
+    await artifacts.request('meeting', 'speakerReview');
+    const updatedShell: DetailSpeaker[] = [
+      { localLabel: 'A', rosterId: 'new', displayName: 'New name', confidence: 0.9 },
+      { localLabel: 'newly-detected', rosterId: null, displayName: null, confidence: null },
+      { localLabel: 'C', rosterId: 'stable', displayName: 'Renamed stable speaker', confidence: 1 },
+    ];
+    const pending = artifacts.refresh('meeting');
+    refresh.reject(new Error('Review unavailable'));
+    await pending;
+
+    expect(artifacts.get('speakerReview').error).toBe('Review unavailable');
+    expect(mergeSpeakerReview(updatedShell, artifacts.get('speakerReview').data?.speakers)).toEqual([
+      { localLabel: 'A', rosterId: 'new', displayName: 'New name', confidence: 0.9,
+        segmentCount: 4, durationS: 12, lineCount: 3 },
+      { localLabel: 'newly-detected', rosterId: null, displayName: null, confidence: null },
+      { localLabel: 'C', rosterId: 'stable', displayName: 'Renamed stable speaker', confidence: 1,
+        state: 'confirmed', needsReview: false, segmentCount: 2, durationS: 8, lineCount: 2 },
+    ]);
+  });
+
+  it('does not hide newly detected shell speakers behind a cached empty review', async () => {
+    const refresh = deferred<{ speakers: DetailSpeaker[] }>();
+    const responses = [Promise.resolve({ speakers: [] as DetailSpeaker[] }), refresh.promise];
+    const artifacts = createDetailArtifacts({ speakerReview: () => responses.shift()! });
+    artifacts.selectMeeting('meeting');
+    await artifacts.request('meeting', 'speakerReview');
+    const pending = artifacts.refresh('meeting');
+    refresh.reject(new Error('Review unavailable'));
+    await pending;
+    expect(mergeSpeakerReview([
+      { localLabel: 'new', rosterId: null, displayName: null, confidence: null },
+    ], artifacts.get('speakerReview').data?.speakers)).toEqual([
+      { localLabel: 'new', rosterId: null, displayName: null, confidence: null },
+    ]);
+  });
+
+  it('does not retain identity-dependent review badges after unlink or confidence changes', () => {
+    const reviewed: DetailSpeaker = {
+      localLabel: 'A', rosterId: 'person', displayName: 'Person', confidence: 1,
+      state: 'confirmed', needsReview: false, segmentCount: 4, durationS: 12, lineCount: 3,
+    };
+    expect(mergeSpeakerReview([
+      { localLabel: 'A', rosterId: null, displayName: null, confidence: null },
+    ], [reviewed])).toEqual([
+      { localLabel: 'A', rosterId: null, displayName: null, confidence: null,
+        segmentCount: 4, durationS: 12, lineCount: 3 },
+    ]);
+    expect(mergeSpeakerReview([
+      { localLabel: 'A', rosterId: 'person', displayName: 'Person', confidence: 0.7 },
+    ], [reviewed])).toEqual([
+      { localLabel: 'A', rosterId: 'person', displayName: 'Person', confidence: 0.7,
+        segmentCount: 4, durationS: 12, lineCount: 3 },
+    ]);
   });
 });
