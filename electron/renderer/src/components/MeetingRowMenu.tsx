@@ -6,11 +6,12 @@
 // each row. Clicks bubble-stop so they don't also toggle the surrounding
 // row (select / open detail). The refresh callback is fired after each
 // mutation so the containing list re-queries.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 import { useToast } from './Toasts';
 import { ModalShell } from './ModalShell';
+import { RowDialogRetention } from './RowDialogRetention';
 
 export interface MeetingRowMenuProps {
   meeting: { id: string; title: string };
@@ -25,11 +26,20 @@ type ModalKind = null | 'rename' | 'delete';
 export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
+  const retainDialog = useContext(RowDialogRetention);
   const [anchor, setAnchor] = useState<
     { top?: number; bottom?: number; right: number } | null
   >(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // A dialog still belongs to this row when clicking its non-focusable
+  // heading/body blurs all controls. Retain its owner until it actually closes.
+  useLayoutEffect(() => {
+    if (modal === null || !retainDialog) return;
+    retainDialog(meeting.id, true);
+    return () => retainDialog(meeting.id, false);
+  }, [modal, meeting.id, retainDialog]);
 
   // Position the popover relative to the trigger button via viewport
   // coordinates. The menu renders in a portal on document.body because the

@@ -8,8 +8,10 @@
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from 'zustand';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
+import { VirtualMeetingList } from '../components/VirtualMeetingList';
 import { RecordButton } from '../components/RecordButton';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
@@ -21,10 +23,17 @@ import { AppNav, type NavTarget } from '../components/AppNav';
 import { Icon } from '../components/icons';
 import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
-import { pruneSelection, partitionSelection } from '../lib/selection';
 import {
-  LIBRARY_SORT_OPTIONS, libraryComparator, sanitizeSortKey, type LibrarySortKey,
+  librarySelection, hydrateSelection, runBulkDelete, runBulkProcess,
+  selectionConfirmation, selectionScope,
+} from '../lib/selection';
+import {
+  LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
+import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLibrarySearchHydration } from '../lib/library-search';
+import { createAttentionController } from '../lib/meeting-hydration';
+import { recycleMeetings } from '../lib/meetings-recycle';
+import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shouldPollLibrary } from '../lib/poll-gate';
 import { shortcutMod } from '../lib/shortcut';
@@ -62,17 +71,16 @@ type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
  *  not worth an IPC round-trip to the settings repo. */
 const SORT_STORAGE_KEY = 'librarySortKey';
 
-// From the user's perspective `awaiting_user` is just "still in flight" —
-// the pipeline hasn't reached `done`, it's just paused for input. So the
-// Processing filter and counter both bucket awaiting_user with processing.
-const isInFlight = (s: string): boolean => s === 'processing' || s === 'awaiting_user';
-
 export function LibraryView({
   onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
-  const { meetings, refresh } = useMeetingsStore();
+  const {
+    items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
+    refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
+  } = useMeetingsStore();
   const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [searchRevision, setSearchRevision] = useState(0);
+  const { selected, resolving: resolvingSelection, busy: bulkBusy, mode: selectionMode } = useStore(librarySelection);
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
   // Browse-mode sort. Persisted per machine in localStorage; sanitize on
   // read so a corrupt/stale value degrades to the default instead of
@@ -87,6 +95,24 @@ export function LibraryView({
     catch { /* private mode / quota — the choice just doesn't persist */ }
   };
   const toast = useToast();
+  // Needs Attention remains global even when browse is filtered or only its
+  // first page is loaded. Only actionable status IDs are hydrated, in capped
+  // batches; buildNeedsAttention distinguishes speaker gates from processing.
+  const [attentionMeetings, setAttentionMeetings] = useState<MeetingSummary[]>([]);
+  const [attention] = useState(() => createAttentionController(api.meetings,
+    (rows) => setAttentionMeetings((prev) => recycleMeetings(prev, rows))));
+  const refresh = useCallback(async () => {
+    await Promise.all([refreshPages(), attention.refresh()]);
+    setSearchRevision((revision) => revision + 1);
+  }, [refreshPages, attention]);
+  const invalidate = useCallback(async () => {
+    await Promise.all([invalidatePages(), attention.invalidate()]);
+    setSearchRevision((revision) => revision + 1);
+  }, [invalidatePages, attention]);
+  useEffect(() => {
+    void attention.start();
+    return () => attention.stop();
+  }, [attention]);
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
   const recoveryGeneration = useRef(0);
   const refreshRecovery = useCallback(async () => {
@@ -130,29 +156,31 @@ export function LibraryView({
     paused: false, currentId: null, queueLength: 0, queueIds: [],
   });
   useEffect(() => {
-    void (async () => {
-      const s = await api.pipeline.status();
-      setPipelineStatus(s);
-    })();
+    let cancelled = false;
+    let receivedEvent = false;
+    void api.pipeline.status().then((snapshot) => {
+      if (!cancelled && !receivedEvent) setPipelineStatus(snapshot);
+    }).catch(() => { /* the next pushed status can recover */ });
     const off = api.pipeline.onStatusChange((s) => {
+      receivedEvent = true;
       setPipelineStatus(s);
       // Queue motion is itself a reason to refresh — current meeting
       // moved, etc. Cheaper than waiting for the next poll tick.
-      void refresh();
+      void invalidate();
     });
-    return () => { off(); };
-  }, [refresh]);
+    return () => { cancelled = true; off(); };
+  }, [invalidate]);
 
   // Push-refresh when main catalogs a freshly arrived recording. Stop()
   // resolves before chokidar's stability debounce fires, so the post-stop
   // refresh in LiveRecordingRow happens too early to see the new row.
   // Without this subscription the Library stayed stale until the user
   // navigated into a meeting and back (which remounted the view and
-  // re-ran meetings:list). Now main pings us the instant the row exists.
+  // refreshed the first page). Now main pings us the instant the row exists.
   useEffect(() => {
-    const off = api.meetings.onAdded(() => { void refresh(); void refreshRecovery(); });
+    const off = api.meetings.onAdded(() => { void invalidate(); void refreshRecovery(); });
     return () => { off(); };
-  }, [refresh, refreshRecovery]);
+  }, [invalidate, refreshRecovery]);
 
   // Conditional polling. Gate on ACTUAL pipeline activity — the same
   // signal the bottom status bar shows (currentId / queueLength) — not on
@@ -170,7 +198,12 @@ export function LibraryView({
     () => shouldPollLibrary(pipelineStatus, !!liveRecording),
     [pipelineStatus, liveRecording],
   );
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void setPageQuery({ filter: libFilter, sort: sortKey });
+  }, [libFilter, sortKey, setPageQuery]);
+  // A remount can reuse the same query after changes in the detail view.
+  // The initial request is shared when setPageQuery just started it above.
+  useEffect(() => { void refreshPages(); }, [refreshPages]);
   useMeetingsPoll(hasMotion);
   useEffect(() => {
     const onVisible = (): void => {
@@ -180,42 +213,51 @@ export function LibraryView({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
-  // Full-content search. When the query is short we stay in the fast
-  // in-memory path (title contains); at 2+ chars we hit the same IPC the
+  // Full-content search. At 2+ chars we hit the same global IPC the
   // Cmd+K palette uses, which ripgreps summary.md + transcript.md across
   // the library. Debounced so a fast typist doesn't fire one IPC per
   // keystroke.
   const isSearching = query.trim().length >= 2;
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searchMeetings, setSearchMeetings] = useState<MeetingSummary[]>([]);
   const [searchPending, setSearchPending] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const previousSearchQuery = useRef('');
   useEffect(() => {
-    if (!isSearching) { setHits([]); setSearchPending(false); return; }
+    if (!isSearching || previousSearchQuery.current !== query.trim()) {
+      setHits([]);
+      setSearchMeetings([]);
+    }
+    previousSearchQuery.current = query.trim();
+    setSearchError(null);
+    if (!isSearching) { setSearchPending(false); return; }
     let cancelled = false;
     setSearchPending(true);
     const t = window.setTimeout(async () => {
       try {
-        const r = (await api.search.query(query.trim(), 100)) as SearchHit[];
-        if (!cancelled) setHits(r);
+        const result = await hydrateLibrarySearch(query, { query: api.search.query, getMany: api.meetings.getMany });
+        if (!cancelled) {
+          setHits(result.hits);
+          setSearchMeetings(result.meetings);
+        }
+      } catch (error) {
+        if (!cancelled) setSearchError(error instanceof Error ? error.message : 'Unable to search meetings.');
       } finally {
         if (!cancelled) setSearchPending(false);
       }
     }, 150);
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, [query, isSearching]);
+  }, [query, isSearching, searchRevision]);
 
-  // Group hits by meetingId, preserving the server's score-ordering: the
-  // first time we see a meetingId fixes its position in the list, and
-  // every subsequent hit for the same meeting gets appended to that
-  // meeting's snippet stack.
-  const hitsByMeeting = useMemo(() => {
-    const m = new Map<string, SearchHit[]>();
-    for (const h of hits) {
-      const arr = m.get(h.meetingId);
-      if (arr) arr.push(h);
-      else m.set(h.meetingId, [h]);
-    }
-    return m;
-  }, [hits]);
+  // Browse polling cannot update these detached, globally hydrated rows.
+  // Hold a summary-only poll on the same active cadence, including off-page
+  // hits; suspend it while a replacement search result is being hydrated.
+  useEffect(() => {
+    if (!isSearching || !hasMotion || searchPending || hits.length === 0) return;
+    return startLibrarySearchHydration(hits, api.meetings.getMany, (rows) => {
+      setSearchMeetings((previous) => recycleMeetings(previous, rows));
+    });
+  }, [hits, isSearching, hasMotion, searchPending, query, searchRevision]);
 
   // Sort order for the Content section. Reset to 'recent' whenever the
   // query changes so a stale "Most matches" choice doesn't carry over
@@ -223,200 +265,139 @@ export function LibraryView({
   const [contentSort, setContentSort] = useState<'recent' | 'count'>('recent');
   useEffect(() => { setContentSort('recent'); }, [query]);
 
-  // Apply the filter chip to a candidate list. Lifted out so both the
-  // Title and Content buckets get the same treatment without duplication.
-  // Memoized on libFilter so the dependent memos below have a stable
-  // reference and don't recompute on every render.
-  const applyFilter = useCallback((list: typeof meetings): typeof meetings => (
-    libFilter === 'all'
-      ? list
-      : libFilter === 'pending'
-        ? list.filter((m) => m.status === 'pending')
-        : libFilter === 'processing'
-          ? list.filter((m) => isInFlight(m.status))
-          : list.filter((m) => m.status === libFilter)
-  ), [libFilter]);
-
-  // Browse mode (no active query): status buckets keep their fixed
-  // precedence (pending floats first, then awaiting, processing, failed,
-  // done); the sort dropdown re-orders within each bucket. 'newest' is
-  // the previous hardcoded behavior.
-  const browseList = useMemo(() => {
-    if (isSearching) return [];
-    return [...applyFilter(meetings)].sort(libraryComparator(sortKey));
-  }, [meetings, isSearching, applyFilter, sortKey]);
-
-  // Search mode buckets: a meeting with a title hit goes in the Title
-  // section ONLY (cleaner than showing it in both — the user can click
-  // through to find the specific snippet). Everything else with at least
-  // one summary/transcript hit goes in Content.
-  const { titleMatches, contentMatches } = useMemo(() => {
-    if (!isSearching) return { titleMatches: [], contentMatches: [] };
-    const byId = new Map(meetings.map((m) => [m.id, m]));
-    const titleIds = new Set<string>();
-    const contentIds = new Set<string>();
-    for (const h of hits) {
-      if (h.source === 'title') titleIds.add(h.meetingId);
-    }
-    for (const h of hits) {
-      if (h.source !== 'title' && !titleIds.has(h.meetingId)) {
-        contentIds.add(h.meetingId);
-      }
-    }
-    const titleMeetings: typeof meetings = [];
-    const contentMeetings: typeof meetings = [];
-    // Preserve server's discovery order for the title bucket — first
-    // appearance wins.
-    const seenTitle = new Set<string>();
-    const seenContent = new Set<string>();
-    for (const h of hits) {
-      const m = byId.get(h.meetingId);
-      if (!m) continue;
-      if (titleIds.has(h.meetingId) && !seenTitle.has(h.meetingId)) {
-        seenTitle.add(h.meetingId);
-        titleMeetings.push(m);
-      } else if (contentIds.has(h.meetingId) && !seenContent.has(h.meetingId)) {
-        seenContent.add(h.meetingId);
-        contentMeetings.push(m);
-      }
-    }
-    // Content section: sort by date (most recent first) with hit-count
-    // as tiebreaker, OR by hit-count alone when the user toggles.
-    const hitCount = (id: string): number => (hitsByMeeting.get(id) ?? []).filter((h) => h.source !== 'title').length;
-    const sortedContent = [...contentMeetings].sort((a, b) => {
-      if (contentSort === 'count') {
-        const diff = hitCount(b.id) - hitCount(a.id);
-        if (diff !== 0) return diff;
-        return (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-      }
-      const dateDiff = (b.startedAt ?? '').localeCompare(a.startedAt ?? '');
-      if (dateDiff !== 0) return dateDiff;
-      return hitCount(b.id) - hitCount(a.id);
-    });
-    return {
-      titleMatches: applyFilter(titleMeetings),
-      contentMatches: applyFilter(sortedContent),
-    };
-  }, [meetings, hits, isSearching, applyFilter, contentSort, hitsByMeeting]);
-
-  // In search mode chip counts switch to "meetings with at least one
-  // hit in this status" — a chip that drops to zero is a visible signal
-  // that no matches exist in that bucket. Browse mode keeps raw totals.
-  const libCounts = useMemo(() => {
-    if (!isSearching) {
-      return {
-        all: meetings.length,
-        pending: meetings.filter((m) => m.status === 'pending').length,
-        processing: meetings.filter((m) => isInFlight(m.status)).length,
-        done: meetings.filter((m) => m.status === 'done').length,
-        failed: meetings.filter((m) => m.status === 'failed').length,
-      };
-    }
-    const matched = new Set<string>();
-    for (const h of hits) matched.add(h.meetingId);
-    const hitMeetings = meetings.filter((m) => matched.has(m.id));
-    return {
-      all: hitMeetings.length,
-      pending: hitMeetings.filter((m) => m.status === 'pending').length,
-      processing: hitMeetings.filter((m) => isInFlight(m.status)).length,
-      done: hitMeetings.filter((m) => m.status === 'done').length,
-      failed: hitMeetings.filter((m) => m.status === 'failed').length,
-    };
-  }, [meetings, hits, isSearching]);
-
-  // Drop stale selections — a meeting that disappeared from the list
-  // (deleted elsewhere, purged) shouldn't stay checked. Status changes
-  // are fine now that every row is selectable: a pending row that starts
-  // processing stays selected, it just falls out of the Process target.
-  useEffect(() => {
-    setSelected((prev) => pruneSelection(prev, meetings));
-  }, [meetings]);
-
-  // What the two bulk actions would act on. Process only touches pending
-  // rows within the selection; Delete touches everything selected.
-  const { pendingIds: selectedPendingIds, allIds: selectedAllIds } = useMemo(
-    () => partitionSelection(selected, meetings),
-    [selected, meetings],
+  // Browse rows are already filtered/ordered by the server's cursor query.
+  // Re-sorting a loaded subset here would break cross-page ordering.
+  const browseList = meetings;
+  const { titleMatches, contentMatches, hitsByMeeting, counts: searchCounts } = useMemo(
+    () => groupLibrarySearch(hits, searchMeetings, libFilter, contentSort),
+    [hits, searchMeetings, libFilter, contentSort],
   );
+  const libCounts = isSearching ? searchCounts : counts;
+  const scope = selectionScope({
+    isSearching, filter: libFilter, loaded: meetings,
+    searchResults: [...titleMatches, ...contentMatches], total,
+  });
+  const selectionUniverse = isSearching ? `search:${query.trim()}:${libFilter}` : `browse:${libFilter}`;
+  const scopeReady = isSearching
+    ? !searchPending && previousSearchQuery.current === query.trim()
+    : !loadingInitial && pageQuery.filter === libFilter;
+  useEffect(() => () => librarySelection.getState().cancelResolution(), [selectionUniverse]);
+
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [libFilter, sortKey, isSearching]);
+
+  // Loaded pages never prune selection. Hydrate its exact IDs for status-only
+  // partitioning, including off-page rows while the pipeline is moving.
+  const [pendingSnapshot, setPendingSnapshot] = useState<{ selection: Set<string>; ids: string[] } | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let inflight = false;
+    const hydrate = async (): Promise<void> => {
+      if (inflight) return;
+      inflight = true;
+      try {
+        const result = await hydrateSelection(selected, api.meetings.getMany);
+        if (!cancelled) {
+          setPendingSnapshot({ selection: selected, ids: result.pendingIds });
+          setSelectionError(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPendingSnapshot(null);
+          setSelectionError('Unable to check selected meetings. Retry Process to check again.');
+        }
+      } finally { inflight = false; }
+    };
+    void hydrate();
+    const timer = hasMotion && selected.size > 0 ? window.setInterval(() => void hydrate(), 3000) : undefined;
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selected, meetings, searchMeetings, searchRevision, hasMotion]);
+  const selectedPendingCount = pendingSnapshot?.selection === selected ? pendingSnapshot.ids.length : null;
 
   // Row callbacks are hoisted + stable (useCallback) so the memoized
   // LibraryRow doesn't see a fresh closure on every render — per-row
   // arrows here would put all 100+ rows back on the 3 s poll treadmill.
   const toggleSelect = useCallback((id: string): void => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    if (!librarySelection.getState().busy) librarySelection.getState().toggle(id);
   }, []);
 
   const rowChanged = useCallback((): void => {
-    void refresh();
+    void invalidate();
     void refreshTrash();
-  }, [refresh, refreshTrash]);
+  }, [invalidate, refreshTrash]);
 
-  async function processSelected(): Promise<void> {
-    // Only the pending rows within the selection — a selected done/failed
-    // meeting is a Delete candidate, not a Process one.
-    const ids = selectedPendingIds;
-    if (ids.length === 0) return;
-    setSelected(new Set());
-    await api.meetings.startMany(ids);
-    // Explicit confirmation — the row immediately re-sorts (pending → processing
-    // moves it down the list to the in-flight bucket), which users often read
-    // as "nothing happened". A toast makes the action unambiguous.
-    toast.show({
-      message: `Processing ${ids.length} recording${ids.length === 1 ? '' : 's'}…`,
-      durationMs: 4000,
-    });
-    void refresh();
+  const [confirmation, setConfirmation] = useState<ReturnType<typeof selectionConfirmation> | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  async function selectMatching(): Promise<void> {
+    try {
+      await librarySelection.getState().selectMatching(selectionUniverse, () => scope.resolveIds(api.meetings.listIds));
+    } catch {
+      toast.show({ message: 'Unable to select matching meetings. Your previous selection is unchanged.', variant: 'error' });
+    }
   }
 
-  // Bulk delete confirmation (#192). A styled ConfirmDialog replaces the
-  // old native window.confirm; ids are parked here while the dialog is
-  // open so Confirm can act on exactly what the user agreed to.
-  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
+  async function requestProcessSelected(): Promise<void> {
+    const state = librarySelection.getState();
+    if (state.selected.size === 0 || !state.beginOperation()) return;
+    const snapshot = state.selected;
+    try {
+      // Refresh off-page statuses immediately before freezing the confirmation.
+      const { pendingIds } = await hydrateSelection(snapshot, api.meetings.getMany);
+      if (!mounted.current) return;
+      setPendingSnapshot({ selection: snapshot, ids: pendingIds });
+      setSelectionError(null);
+      if (pendingIds.length > 0) setConfirmation(selectionConfirmation('process', pendingIds));
+      else toast.show({ message: 'No selected recordings are pending.', durationMs: 4000 });
+    } catch {
+      toast.show({ message: 'Unable to check selected meetings. Nothing was started; retry Process.', variant: 'error' });
+    } finally { librarySelection.getState().endOperation(); }
+  }
 
   function requestDeleteSelected(): void {
-    const ids = selectedAllIds;
-    if (ids.length === 0) return;
-    setConfirmDeleteIds(ids);
+    const state = librarySelection.getState();
+    if (!state.busy && state.selected.size > 0) setConfirmation(selectionConfirmation('delete', [...state.selected]));
   }
 
-  async function deleteSelected(): Promise<void> {
-    const ids = confirmDeleteIds;
-    if (!ids || ids.length === 0) return;
-    setConfirmDeleteIds(null);
-    const n = ids.length;
-    setSelected(new Set());
-    // In parallel like the Undo path below — one bad row shouldn't abort the
-    // batch, and N serial IPC round-trips made big deletions crawl.
-    await Promise.allSettled(ids.map((id) => api.meetings.delete(id)));
-    // One toast for the whole batch; Undo restores everything at once.
-    toast.show({
-      message: `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`,
-      action: {
-        label: 'Undo',
-        onClick: async () => {
-          const results = await Promise.all(
-            ids.map((id) => api.meetings.undoDelete(id).catch(() => false)),
-          );
-          const restored = results.filter(Boolean).length;
-          if (restored < n) {
-            toast.show({
-              message: `Restored ${restored} of ${n} — the rest were already purged.`,
-              variant: 'error',
-            });
-          }
-          void refresh();
-          void refreshTrash();
-        },
-      },
-      durationMs: 10_000,
-    });
-    void refresh();
-    void refreshTrash();
+  async function applyConfirmation(): Promise<void> {
+    if (!confirmation || !librarySelection.getState().beginOperation()) return;
+    const { action, ids } = confirmation;
+    setConfirmation(null);
+    try {
+      const result = action === 'process'
+        ? await runBulkProcess(ids, api.meetings.startManyDetailed)
+        : await runBulkDelete(ids, api.meetings.delete);
+      librarySelection.getState().removeSucceeded(result.succeededIds);
+      const n = result.succeededIds.length;
+      const failed = result.failedIds.length;
+      const message = action === 'process'
+        ? `Processing ${n} recording${n === 1 ? '' : 's'}…`
+        : `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`;
+      toast.show({
+        message: message + (failed > 0 ? ` ${failed} not ${action === 'process' ? 'started' : 'deleted'}; still selected for retry.` : ''),
+        variant: failed > 0 ? 'error' : 'default',
+        durationMs: action === 'delete' ? 10_000 : 4000,
+        action: action === 'delete' && n > 0 ? {
+          label: 'Undo',
+          onClick: async () => {
+            // Only successful deletions are undoable — never touch failed IDs.
+            const restored = (await Promise.all(result.succeededIds.map((id) => api.meetings.undoDelete(id).catch(() => false)))).filter(Boolean).length;
+            if (restored < n) toast.show({ message: `Restored ${restored} of ${n} — the rest were already purged.`, variant: 'error' });
+            void invalidate();
+            void refreshTrash();
+          },
+        } : undefined,
+      });
+    } finally {
+      librarySelection.getState().endOperation();
+      void invalidate();
+      if (action === 'delete') void refreshTrash();
+    }
   }
 
   return (
@@ -457,7 +438,7 @@ export function LibraryView({
             startedAt={liveRecording.startedAt}
             onStopped={(summary) => {
               onRecordingStopped(summary);
-              void refresh();
+              void invalidate();
               window.setTimeout(() => { void refreshRecovery(); }, 800);
             }}
             onRestarted={onStartRecording}
@@ -468,22 +449,22 @@ export function LibraryView({
       <div className="shrink-0">
         <QueueBanner
           status={pipelineStatus}
-          meetings={meetings}
-          onChanged={() => void refresh()}
+          meetings={attentionMeetings}
+          onChanged={() => void invalidate()}
           toast={toast}
         />
       </div>
 
       <NeedsAttentionPanel
-        meetings={meetings}
+        meetings={attentionMeetings}
         recovery={recoveryItems}
         onOpen={(id) => {
-          const meeting = meetings.find((candidate) => candidate.id === id);
+          const meeting = attentionMeetings.find((candidate) => candidate.id === id);
           onOpen(id, meeting ? {
             title: meeting.title, pipelineStage: meeting.pipelineStage, status: meeting.status,
           } : {});
         }}
-        onChanged={async () => { await Promise.all([refresh(), refreshRecovery()]); }}
+        onChanged={async () => { await Promise.all([invalidate(), refreshRecovery()]); }}
       />
 
 
@@ -593,14 +574,52 @@ export function LibraryView({
           </div>
         </div>
 
+        {isSearching && (
+          <p className="shrink-0 mb-2 text-[11px] text-ink-muted">
+            Searching the entire Library. Showing up to {LIBRARY_SEARCH_LIMIT} matching hits; refine your search for more specific results.
+          </p>
+        )}
+
+        <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs">
+          <button
+            type="button"
+            disabled={!scopeReady || scope.loadedIds.length === 0 || bulkBusy || resolvingSelection}
+            className="text-ink-muted hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => librarySelection.getState().selectLoaded(scope.loadedIds.map((id) => ({ id })))}
+          >
+            Select all loaded
+          </button>
+          {scopeReady && scope.matchingCount !== null && (
+            <button
+              type="button"
+              disabled={bulkBusy || resolvingSelection}
+              className="text-brand-indigo hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => void selectMatching()}
+            >
+              {resolvingSelection ? 'Selecting…' : `Select all ${scope.matchingCount} matching`}
+            </button>
+          )}
+          {selected.size > 0 && (
+            <span className="text-[11px] text-ink-muted">
+              {selectionMode === 'all-matching' ? 'Matching snapshot' : 'Selection'} stays fixed across pages, filters, and search.
+            </span>
+          )}
+        </div>
+        {selected.size > 0 && selectionError && <p role="status" className="shrink-0 mb-2 text-xs text-danger-text">{selectionError}</p>}
+
         {(() => {
           const totalShown = isSearching
             ? titleMatches.length + contentMatches.length
             : browseList.length;
           if (totalShown === 0) {
+            if (isSearching ? searchPending : loadingInitial) {
+              return <div role="status" className="py-10 text-center text-sm text-ink-muted">{isSearching ? 'Searching…' : 'Loading meetings…'}</div>;
+            }
+            const failure = isSearching ? searchError : error;
+            if (failure) return <LibraryRetryRow message={failure} onRetry={isSearching ? () => setSearchRevision((revision) => revision + 1) : () => void retry()} />;
             return (
               <LibraryEmpty
-                hasAny={libCounts.all > 0}
+                hasAny={counts.all > 0}
                 filter={libFilter}
                 query={query}
               />
@@ -634,36 +653,58 @@ export function LibraryView({
               </div>
             );
           };
+          // The key resets browse scroll on a new filter/sort, while refreshes
+          // and appended pages preserve the existing viewport and focused row.
+          if (!isSearching) return (
+            <VirtualMeetingList
+              key={`${libFilter}:${sortKey}`}
+              items={browseList}
+              renderRow={(m) => renderRow(m, false)}
+              hasMore={hasMore}
+              loadingMore={loadingMore}
+              refreshing={refreshing}
+              error={error}
+              loadMore={loadMore}
+              className={selected.size > 0 ? 'pb-28' : 'pb-8'}
+              footer={error ? (
+                <LibraryRetryRow message={error} onRetry={() => void retry()} />
+              ) : (
+                <div className="py-3 text-center text-xs text-ink-muted">
+                  {loadingMore ? <span role="status">Loading more meetings…</span> : hasMore ? (
+                    <button type="button" className="px-3 py-1.5 rounded-lg border border-surface-border hover:text-ink" onClick={() => void loadMore()}>
+                      Load more ({meetings.length} of {total})
+                    </button>
+                  ) : <span>{meetings.length} of {total} meetings</span>}
+                </div>
+              )}
+            />
+          );
           return (
             <div
+              ref={listRef}
               className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 space-y-2 ${
                 // Extra clearance while the selection pill is docked over the
                 // bottom of the list, so the last rows can scroll above it.
                 selected.size > 0 ? 'pb-28' : 'pb-8'
               }`}
             >
-              {isSearching ? (
-                <>
-                  {titleMatches.length > 0 && (
-                    <SearchSectionHeader
-                      label="Title matches"
-                      count={titleMatches.length}
-                    />
-                  )}
-                  {titleMatches.map((m) => renderRow(m, false))}
-                  {contentMatches.length > 0 && (
-                    <SearchSectionHeader
-                      label="Mentioned in"
-                      count={contentMatches.length}
-                      sort={contentSort}
-                      onSortChange={setContentSort}
-                    />
-                  )}
-                  {contentMatches.map((m) => renderRow(m, true))}
-                </>
-              ) : (
-                browseList.map((m) => renderRow(m, false))
+              {titleMatches.length > 0 && (
+                <SearchSectionHeader
+                  label="Title matches"
+                  count={titleMatches.length}
+                />
               )}
+              {titleMatches.map((m) => renderRow(m, false))}
+              {contentMatches.length > 0 && (
+                <SearchSectionHeader
+                  label="Mentioned in"
+                  count={contentMatches.length}
+                  sort={contentSort}
+                  onSortChange={setContentSort}
+                />
+              )}
+              {contentMatches.map((m) => renderRow(m, true))}
+              {searchError && <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
             </div>
           );
         })()}
@@ -680,7 +721,7 @@ export function LibraryView({
             } else {
               toast.show({ message: 'Too late — this meeting has already been purged.', variant: 'error' });
             }
-            void refresh();
+            void invalidate();
             void refreshTrash();
           }}
         />
@@ -689,32 +730,43 @@ export function LibraryView({
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
       <SelectionBar
         count={selected.size}
-        pendingCount={selectedPendingIds.length}
-        onProcess={processSelected}
+        pendingCount={selectedPendingCount}
+        busy={bulkBusy || resolvingSelection}
+        onProcess={() => void requestProcessSelected()}
         onDelete={requestDeleteSelected}
-        onCancel={() => setSelected(new Set())}
+        onCancel={() => librarySelection.getState().clear()}
       />
 
       {/* ── Bulk delete confirmation (#192) ─────────────────────────────── */}
       <ConfirmDialog
-        open={confirmDeleteIds !== null}
-        title={`Move ${confirmDeleteIds?.length ?? 0} meeting${confirmDeleteIds?.length === 1 ? '' : 's'} to Recently deleted?`}
+        open={confirmation !== null}
+        title={confirmation?.title ?? ''}
         body={
-          <>
+          confirmation?.action === 'delete' ? <>
             Each meeting&rsquo;s audio file, transcript, summary, and any exports
             move to <strong>Recently deleted</strong>, restorable for 30 days.
-          </>
+          </> : <>Only these {confirmation?.ids.length ?? 0} selected pending recordings will be queued. Other selected meetings will stay selected.</>
         }
-        confirmLabel="Delete"
-        destructive
-        onConfirm={() => void deleteSelected()}
-        onCancel={() => setConfirmDeleteIds(null)}
+        confirmLabel={confirmation?.action === 'delete' ? 'Delete' : 'Process'}
+        destructive={confirmation?.action === 'delete'}
+        busy={bulkBusy}
+        onConfirm={() => void applyConfirmation()}
+        onCancel={() => setConfirmation(null)}
       />
     </div>
   );
 }
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
+
+function LibraryRetryRow({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
+  return (
+    <div role="alert" className="py-4 text-center text-sm text-ink-muted">
+      <span>{message}</span>{' '}
+      <button type="button" className="font-semibold text-brand-indigo underline" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
 
 /** Muted "Recently deleted (N)" affordance at the bottom of the Library.
  *  Collapsed by default; expanding lists the trashed meetings with a
@@ -993,12 +1045,13 @@ function QueueBanner({
 }
 
 function SelectionBar({
-  count, pendingCount, onProcess, onDelete, onCancel,
+  count, pendingCount, busy, onProcess, onDelete, onCancel,
 }: {
   count: number;
   /** How many of the selected rows are pending — the Process target.
    *  Process is hidden when it's zero (nothing to start). */
-  pendingCount: number;
+  pendingCount: number | null;
+  busy: boolean;
   onProcess: () => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -1026,24 +1079,27 @@ function SelectionBar({
           <div className="flex-1" />
           <button
             onClick={onCancel}
+            disabled={busy}
             className="text-sm text-surface/70 hover:text-surface px-3 py-1.5 rounded-lg hover:bg-surface/10 transition"
           >
             Cancel
           </button>
           <button
             onClick={onDelete}
+            disabled={busy}
             className="text-sm font-semibold bg-danger-solid text-white px-4 py-1.5 rounded-lg hover:opacity-90 transition"
           >
             Delete ({count})
           </button>
-          {pendingCount > 0 && (
+          {(pendingCount === null || pendingCount > 0) && (
             <button
               onClick={onProcess}
+              disabled={busy}
               title="Starts processing the pending recordings in the selection"
               className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5"
             >
               <Icon name="play" className="w-3.5 h-3.5" />
-              Process ({pendingCount})
+              {pendingCount === null ? 'Check & process' : `Process (${pendingCount})`}
             </button>
           )}
         </div>

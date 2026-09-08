@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import os from 'node:os';
@@ -7,6 +7,10 @@ import { registerIpcHandlers } from './handlers.js';
 import { LMStudioError } from '../lm-studio/client.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { ArtifactCache } from '../library/artifact-cache.js';
+import { openDb } from '../storage/db.js';
+import { MeetingsRepo } from '../storage/meetings-repo.js';
+import { SpeakersRepo } from '../storage/speakers-repo.js';
+import { ActionItemsRepo } from '../storage/action-items-repo.js';
 
 // Mock the merge step so speaker rename/merge tests can assert the re-merge
 // fan-out without needing real transcript files on disk.
@@ -17,6 +21,193 @@ vi.mock('../pipeline/stages/merging.js', () => ({
 
 beforeEach(() => {
   vi.mocked(remergeTranscript).mockClear();
+});
+
+describe('paginated meeting summaries', () => {
+  let db: ReturnType<typeof openDb>;
+  let meetings: MeetingsRepo;
+  let speakers: SpeakersRepo;
+  let actionItems: ActionItemsRepo;
+  let handlers: Map<string, (...args: any[]) => any>;
+  const insert = (id: string, status = 'done') => meetings.insert({
+    id, slug: id, title: id, startedAt: '2026-09-01T12:00:00Z', durationS: 60,
+    audioPath: `/audio/${id}`, status, pipelineStage: 'done',
+  });
+  const invoke = (channel: string, input?: unknown) => {
+    const handler = handlers.get(channel);
+    expect(handler, `${channel} must be registered`).toBeTypeOf('function');
+    return handler!(null, input);
+  };
+  beforeEach(() => {
+    db = openDb(':memory:');
+    meetings = new MeetingsRepo(db);
+    speakers = new SpeakersRepo(db);
+    actionItems = new ActionItemsRepo(db);
+    handlers = new Map();
+    registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+      baseServices({ meetings, speakers, actionItems }));
+  });
+  afterEach(() => db.close());
+
+  it('defaults to 50, caps at 100, and returns library-wide counts with a filtered total', () => {
+    for (let i = 0; i < 105; i++) insert(`done-${String(i).padStart(3, '0')}`);
+    insert('pending', 'pending');
+    insert('gate', 'awaiting_user');
+    insert('processing', 'processing');
+    insert('failed', 'failed');
+    insert('deleted');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const query = { filter: 'done', sort: 'newest' };
+    const first = invoke('meetings:list-page', query);
+    expect(first.items).toHaveLength(50);
+    expect(first.total).toBe(105);
+    expect(first.counts).toEqual({ all: 109, pending: 1, processing: 2, done: 105, failed: 1 });
+    const capped = invoke('meetings:list-page', { ...query, pageSize: 1000 });
+    expect(capped.items).toHaveLength(100);
+    const last = invoke('meetings:list-page', { ...query, cursor: capped.nextCursor });
+    expect(last.items.map((m: any) => m.id)).toEqual(['done-100', 'done-101', 'done-102', 'done-103', 'done-104']);
+    expect(last.nextCursor).toBeNull();
+    expect(invoke('meetings:list-ids', 'processing')).toEqual(['gate', 'processing']);
+  });
+
+  it.each([
+    { filter: 'bogus', sort: 'newest' }, { filter: 'all', sort: 'DROP TABLE meetings' },
+    { filter: 'all', sort: 'newest', pageSize: 0 }, { filter: 'all', sort: 'newest', pageSize: 1.5 },
+    { filter: 'all', sort: 'newest', pageSize: Infinity }, { filter: 'all', sort: 'newest', pageSize: '50' },
+    { filter: 'all', sort: 'newest', cursor: '' }, { filter: 'all', sort: 'newest', cursor: 'not-json' },
+    { filter: 'all', sort: 'newest', cursor: null },
+    { filter: 'all', sort: 'newest', cursor: Buffer.from(JSON.stringify({ v: 1, statusRank: 4, id: 'x', sortValue: { sort: 'title', values: ['x', null] } })).toString('base64url') },
+    { filter: 'all', sort: 'newest', cursor: Buffer.from(JSON.stringify({ v: 1, statusRank: 4, id: 'x', sortValue: { sort: 'newest', values: [42] } })).toString('base64url') },
+  ])('rejects invalid query input before repository work: %j', (query) => {
+    expect(handlers.has('meetings:list-page')).toBe(true);
+    const page = vi.spyOn(meetings, 'listPage');
+    expect(() => invoke('meetings:list-page', query)).toThrow();
+    expect(page).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid ID filters and hydration inputs, including over-limit duplicates', () => {
+    expect(handlers.has('meetings:list-ids')).toBe(true);
+    expect(handlers.has('meetings:get-many')).toBe(true);
+    const find = vi.spyOn(meetings, 'findByIds');
+    const listIds = vi.spyOn(meetings, 'listIds');
+    expect(() => invoke('meetings:list-ids', 'awaiting_user')).toThrow();
+    expect(listIds).not.toHaveBeenCalled();
+    for (const input of [null, 'm1', [''], [1], Array(1001).fill('m1')]) {
+      expect(() => invoke('meetings:get-many', input)).toThrow();
+    }
+    expect(find).not.toHaveBeenCalled();
+    expect(invoke('meetings:get-many', Array(1000).fill('missing'))).toEqual([]);
+    expect(find).toHaveBeenLastCalledWith(['missing']);
+  });
+
+  it('enriches only page/hydrated IDs, preserves summary shape and first-occurrence order', () => {
+    for (const id of ['a', 'b', 'outside', 'deleted']) insert(id);
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const rosterId = speakers.create({ displayName: 'Alex' });
+    speakers.linkToMeeting('a', 'SPEAKER_00', rosterId, 1);
+    speakers.linkToMeeting('a', 'SPEAKER_01', null, 0);
+    speakers.linkToMeeting('outside', 'SPEAKER_00', null, 0);
+    actionItems.create('a', { text: 'One' });
+    actionItems.create('a', { text: 'Two' });
+    actionItems.create('outside', { text: 'Excluded' });
+    const legacy = invoke('meetings:list');
+    const allSpeakers = vi.spyOn(speakers, 'listForAllMeetings');
+    const allCounts = vi.spyOn(actionItems, 'countsByMeeting');
+    const scopedSpeakers = vi.spyOn(speakers, 'listForMeetings');
+    const scopedCounts = vi.spyOn(actionItems, 'countsForMeetings');
+    const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
+    expect(page.items).toEqual([legacy.find((m: any) => m.id === 'a')]);
+    expect(page.items[0]).toMatchObject({ unidentifiedCount: 1, actionItemsCount: 2, stageEtaMs: null, stageEtaRough: false });
+    expect(scopedSpeakers).toHaveBeenLastCalledWith(['a']);
+    expect(scopedCounts).toHaveBeenLastCalledWith(['a']);
+    const hydrated = invoke('meetings:get-many', ['b', 'missing', 'a', 'b', 'deleted']);
+    expect(hydrated.map((m: any) => m.id)).toEqual(['b', 'a']);
+    expect(hydrated[1]).toEqual(page.items[0]);
+    expect(scopedSpeakers).toHaveBeenLastCalledWith(['b', 'a']);
+    expect(scopedCounts).toHaveBeenLastCalledWith(['b', 'a']);
+    expect(allSpeakers).not.toHaveBeenCalled();
+    expect(allCounts).not.toHaveBeenCalled();
+    scopedSpeakers.mockClear(); scopedCounts.mockClear();
+    expect(invoke('meetings:get-many', [])).toEqual([]);
+    expect(scopedSpeakers).not.toHaveBeenCalled();
+    expect(scopedCounts).not.toHaveBeenCalled();
+  });
+
+  it('starts only exact pending snapshot IDs and returns failures without aborting later items', () => {
+    for (const id of ['first', 'locked', 'last', 'later', 'deleted']) insert(id, 'pending');
+    insert('done');
+    insert('processing', 'processing');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const update = meetings.updateStatus.bind(meetings);
+    vi.spyOn(meetings, 'updateStatus').mockImplementation((id, status) => {
+      if (id === 'locked') throw new Error('locked');
+      update(id, status);
+    });
+    expect(invoke('meetings:start-many-detailed', ['first', 'locked', 'done', 'deleted', 'missing', 'processing', 'last', 'first'])).toEqual({
+      startedIds: ['first', 'last'], failedIds: ['locked', 'done', 'deleted', 'missing', 'processing'],
+    });
+    expect(meetings.findById('first')?.status).toBe('processing');
+    expect(meetings.findById('last')?.status).toBe('processing');
+    expect(meetings.findById('locked')?.status).toBe('pending');
+    expect(meetings.findById('later')?.status).toBe('pending');
+    expect(meetings.findById('done')?.status).toBe('done');
+  });
+
+  it('validates detailed batch IDs before any status mutation and preserves numeric legacy startMany', () => {
+    insert('pending', 'pending');
+    const update = vi.spyOn(meetings, 'updateStatus');
+    for (const input of [null, 'pending', [''], [1], ['pending', 1], Array(1001).fill('pending')]) {
+      expect(() => invoke('meetings:start-many-detailed', input)).toThrow();
+    }
+    expect(update).not.toHaveBeenCalled();
+    expect(invoke('meetings:start-many-detailed', [])).toEqual({ startedIds: [], failedIds: [] });
+    expect(invoke('meetings:start-many', ['pending', 'missing'])).toBe(1);
+  });
+
+  it('keeps an enqueue failure pending and retryable while starting subsequent IDs', () => {
+    insert('retry', 'pending');
+    insert('next', 'pending');
+    const enqueued: string[] = [];
+    registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+      baseServices({ meetings, speakers, actionItems, pipeline: {
+        enqueue: (id: string) => {
+          if (id === 'retry') throw new Error('queue unavailable');
+          enqueued.push(id);
+        },
+      } }));
+    expect(invoke('meetings:start-many-detailed', ['retry', 'next'])).toEqual({ startedIds: ['next'], failedIds: ['retry'] });
+    expect(meetings.findById('retry')?.status).toBe('pending');
+    expect(enqueued).toEqual(['next']);
+  });
+
+  it('distinguishes a new B deletion from an earlier A deletion so bulk Undo restores only B', () => {
+    const libraryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-delete-accounting-'));
+    try {
+      for (const id of ['A', 'B']) {
+        const audioPath = path.join(libraryRoot, `${id}.m4a`);
+        fsSync.writeFileSync(audioPath, id);
+        meetings.insert({ id, slug: id, title: id, startedAt: null, durationS: 60, audioPath, status: 'done', pipelineStage: 'done' });
+      }
+      registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+        baseServices({ meetings, speakers, actionItems, libraryRoot }));
+      // Selected A/B, then A was deleted through the single-row action.
+      expect(invoke('meetings:delete', 'A')).toBe(true);
+      const originalADeletion = meetings.findById('A')?.deletedAt;
+      const ids = ['A', 'B', 'missing'];
+      const newlyDeleted = ids.map((id) => invoke('meetings:delete', id));
+      expect(newlyDeleted).toEqual([false, true, false]);
+      expect(meetings.findById('A')?.deletedAt).toBe(originalADeletion);
+      const undoIds = ids.filter((_, index) => newlyDeleted[index] === true);
+      expect(undoIds).toEqual(['B']);
+      for (const id of undoIds) expect(invoke('meetings:undo-delete', id)).toBe(true);
+      expect(meetings.findById('A')?.deletedAt).toBeTruthy();
+      expect(meetings.findById('B')?.deletedAt).toBeNull();
+      expect(fsSync.existsSync(path.join(libraryRoot, 'A.m4a'))).toBe(false);
+      expect(fsSync.readFileSync(path.join(libraryRoot, 'B.m4a'), 'utf8')).toBe('B');
+    } finally {
+      fsSync.rmSync(libraryRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function baseServices(overrides: Record<string, unknown> = {}): any {

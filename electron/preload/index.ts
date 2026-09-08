@@ -7,12 +7,36 @@ interface RecoveryItem {
 }
 let recoveryRequest = 0;
 
+// Keep these structural types local: importing main contracts makes the CJS
+// compiler emit main-process modules again.
+type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+type MeetingListQuery = {
+  filter: MeetingListFilter;
+  sort: 'newest' | 'oldest' | 'longest' | 'title';
+  cursor?: string;
+  pageSize?: number;
+};
+type MeetingSummary = {
+  id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
+  pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
+  unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
+  stageEtaRough: boolean; skipSpeakerId: boolean;
+  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[];
+};
+type MeetingSummaryPage = {
+  items: MeetingSummary[]; nextCursor: string | null; total: number;
+  counts: { all: number; pending: number; processing: number; done: number; failed: number };
+};
+
 // Inlined to keep the preload (CJS) and main (ESM) builds independent — sharing
 // a compiled module across both modes causes the file in dist/ to flip between
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
+  meetingsListPage: 'meetings:list-page',
+  meetingsGetMany: 'meetings:get-many',
+  meetingsListIds: 'meetings:list-ids',
   meetingsGet: 'meetings:get',
   meetingsGetTranscript: 'meetings:get-transcript',
   meetingsGetSpeakerReview: 'meetings:get-speaker-review',
@@ -24,6 +48,7 @@ const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
@@ -101,6 +126,14 @@ const IPC_CHANNELS = {
 const api = {
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
+    /** Live keyset page; restart after changing filters/sorts or refreshing. */
+    listPage: (query: MeetingListQuery) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsListPage, query) as Promise<MeetingSummaryPage>,
+    /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted. */
+    getMany: (ids: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
+    listIds: (filter: MeetingListFilter) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter) as Promise<string[]>,
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
     getTranscript: (id: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsGetTranscript, id) as Promise<{
@@ -145,8 +178,9 @@ const api = {
      *  but recoverable via `undoDelete` (undo toast or the Library's
      *  "Recently deleted" section) for 30 days. After the retention
      *  window, a periodic purge job in the main process hard-deletes the
-     *  files and the row. */
-    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<void>,
+     *  files and the row. Returns true only for a new soft deletion; false
+     *  means the row was already deleted/missing and must not enter Undo. */
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<boolean>,
     /** Restore a soft-deleted meeting. Returns true if the files were
      *  moved back and the row's deleted_at cleared; false if the
      *  retention window already expired. */
@@ -155,6 +189,10 @@ const api = {
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
     startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
+    /** Pending-only snapshot operation. At most 1,000 raw IDs per batch;
+     * missing, deleted, non-pending, and failed items remain retryable. */
+    startManyDetailed: (ids: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsStartManyDetailed, ids) as Promise<{ startedIds: string[]; failedIds: string[] }>,
     // Toggles the per-meeting speaker-ID gate. When `skip` is true and the
     // meeting is currently parked at `awaiting_speaker_id`, the main process
     // also re-enqueues it so the pipeline sails past the gate immediately.

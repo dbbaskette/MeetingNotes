@@ -14,6 +14,7 @@ export const MeetingSummarySchema = z.object({
   startedAt: z.string().nullable(),
   durationS: z.number().nullable(),
   pipelineStage: z.string(),
+  stageStartedAt: z.string().nullable(),
   status: z.string(),
   /** When status === 'failed', the error string from the stage that threw
    *  (e.g. "whisper: not ready ..."). Null otherwise. Powers the failure
@@ -33,6 +34,58 @@ export const MeetingSummarySchema = z.object({
   speakers: z.array(MeetingSpeakerSchema),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
+
+export const MeetingListFilterSchema = z.enum(['all', 'pending', 'processing', 'done', 'failed']);
+export const MeetingListSortSchema = z.enum(['newest', 'oldest', 'longest', 'title']);
+export type MeetingListFilter = z.infer<typeof MeetingListFilterSchema>;
+export type MeetingListSort = z.infer<typeof MeetingListSortSchema>;
+
+const MeetingCursorSchema = z.object({
+  v: z.literal(1),
+  statusRank: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(9)]),
+  id: z.string().min(1),
+  sortValue: z.discriminatedUnion('sort', [
+    z.object({ sort: z.literal('newest'), values: z.tuple([z.string().nullable()]) }),
+    z.object({ sort: z.literal('oldest'), values: z.tuple([z.string().nullable()]) }),
+    z.object({ sort: z.literal('longest'), values: z.tuple([z.number().finite().nullable(), z.string().nullable()]) }),
+    z.object({ sort: z.literal('title'), values: z.tuple([z.string(), z.string().nullable()]) }),
+  ]),
+});
+
+/** Validate the complete opaque cursor before repository work. The repository
+ * also validates direct callers; neither path interpolates cursor values. */
+export const MeetingListQuerySchema = z.object({
+  filter: MeetingListFilterSchema,
+  sort: MeetingListSortSchema,
+  pageSize: z.number().int().positive().default(50).transform((size) => Math.min(size, 100)),
+  cursor: z.string().min(1).optional(),
+}).superRefine((query, ctx) => {
+  if (query.cursor === undefined) return;
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(query.cursor)) throw new Error();
+    const bytes = Buffer.from(query.cursor, 'base64url');
+    if (bytes.toString('base64url') !== query.cursor) throw new Error();
+    const cursor = MeetingCursorSchema.parse(JSON.parse(bytes.toString('utf8')));
+    if (cursor.sortValue.sort !== query.sort) throw new Error();
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cursor'], message: 'Invalid meeting cursor' });
+  }
+});
+export type MeetingListQuery = z.input<typeof MeetingListQuerySchema>;
+
+/** Cap the raw input before deduplicating; large selections must batch. */
+export const MeetingIdsSchema = z.array(z.string().min(1)).max(1000)
+  .transform((ids) => [...new Set(ids)]);
+export interface MeetingStartManyResult { startedIds: string[]; failedIds: string[] }
+export const MeetingCountsSchema = z.object({
+  all: z.number(), pending: z.number(), processing: z.number(), done: z.number(), failed: z.number(),
+});
+export type MeetingCounts = z.infer<typeof MeetingCountsSchema>;
+export const MeetingSummaryPageSchema = z.object({
+  items: z.array(MeetingSummarySchema), nextCursor: z.string().nullable(),
+  total: z.number(), counts: MeetingCountsSchema,
+});
+export type MeetingSummaryPage = z.infer<typeof MeetingSummaryPageSchema>;
 
 export const ReviewedSpeakerSchema = MeetingSpeakerSchema.extend({
   state: z.enum(['unknown', 'probable', 'confirmed']),
@@ -79,6 +132,9 @@ export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
 
 export const IPC_CHANNELS = {
   meetingsList: 'meetings:list',
+  meetingsListPage: 'meetings:list-page',
+  meetingsGetMany: 'meetings:get-many',
+  meetingsListIds: 'meetings:list-ids',
   meetingsGet: 'meetings:get',
   meetingsGetTranscript: 'meetings:get-transcript',
   meetingsGetSpeakerReview: 'meetings:get-speaker-review',
@@ -98,6 +154,7 @@ export const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
