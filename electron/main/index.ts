@@ -1,8 +1,11 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { recoveryMediaHandler } from './recording/recovery-media.js';
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
@@ -391,6 +394,7 @@ app.whenReady().then(async () => {
     catalog: catalogRecording,
     reveal: (audioPath) => shell.showItemInFolder(audioPath),
   });
+  protocol.handle('recovery-audio', recoveryMediaHandler(recordingRecovery));
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 

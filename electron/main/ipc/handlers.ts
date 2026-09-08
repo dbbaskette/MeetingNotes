@@ -474,9 +474,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
   ipc.handle(IPC_CHANNELS.recoveryTrim, (_e, input: unknown) => {
     if (!input || typeof input !== 'object') throw new Error('invalid recovery trim');
-    const { id, endSeconds } = input as { id?: unknown; endSeconds?: unknown };
-    if (typeof id !== 'string' || typeof endSeconds !== 'number') throw new Error('invalid recovery trim');
-    return s.recordingRecovery.trim(id, endSeconds);
+    const { id, endSeconds, startSeconds = 0 } = input as { id?: unknown; endSeconds?: unknown; startSeconds?: unknown };
+    if (typeof id !== 'string' || !id || typeof endSeconds !== 'number' || typeof startSeconds !== 'number') throw new Error('invalid recovery trim');
+    return s.recordingRecovery.trim(id, endSeconds, startSeconds);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryPreview, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    const preview = await s.recordingRecovery.preview(id);
+    return { ...preview, url: `recovery-audio://preview?id=${encodeURIComponent(id)}` };
   });
   ipc.handle(IPC_CHANNELS.recoveryReveal, (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) throw new Error('recovery id required');

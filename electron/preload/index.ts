@@ -35,6 +35,7 @@ const IPC_CHANNELS = {
   recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',
   recoveryTrim: 'recovery:trim',
+  recoveryPreview: 'recovery:preview',
   recoveryReveal: 'recovery:reveal',
   recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
@@ -224,8 +225,9 @@ const api = {
       }
     },
     recover: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryRecover, id) as Promise<{ meetingId: string }>,
-    trim: (id: string, endSeconds: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.recoveryTrim, { id, endSeconds }) as Promise<{ meetingId: string }>,
+    trim: (id: string, endSeconds: number, startSeconds = 0) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recoveryTrim, { id, endSeconds, startSeconds }) as Promise<{ meetingId: string }>,
+    preview: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryPreview, id) as Promise<{ url: string; durationS: number }>,
     reveal: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryReveal, id) as Promise<void>,
     dismiss: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryDismiss, id) as Promise<void>,
   },

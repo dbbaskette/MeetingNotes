@@ -2,6 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import type { MeetingsRepo } from '../storage/meetings-repo.js';
 import type { RecordingSessionRow, RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 import { deriveStemPaths } from '../lib/stem-paths.js';
@@ -26,9 +28,10 @@ export interface RecoveryItem {
 }
 
 type Probe = (file: string) => Promise<AudioInfo>;
-type Trim = (source: string, destination: string, endSeconds: number) => Promise<void>;
+type Trim = (source: string, destination: string, endSeconds: number, startSeconds: number) => Promise<void>;
 
 export class RecordingRecoveryService {
+  private readonly busy = new Set<string>();
   private readonly probes = new Map<string, { fingerprint: string; duration: Promise<number | null>; expiresAt: number }>();
   private activeProbes = 0;
   private readonly probeWaiters: Array<() => void> = [];
@@ -94,6 +97,16 @@ export class RecordingRecoveryService {
   }
 
   async recover(id: string): Promise<{ meetingId: string }> {
+    return this.exclusive(id, () => this.recoverCopy(id));
+  }
+
+  private async exclusive<T>(id: string, action: () => Promise<T>): Promise<T> {
+    if (this.busy.has(id)) throw new Error('This recording is already being recovered.');
+    this.busy.add(id);
+    try { return await action(); } finally { this.busy.delete(id); }
+  }
+
+  private async recoverCopy(id: string): Promise<{ meetingId: string }> {
     const session = this.requireSession(id);
     const item = await this.inspect(session);
     if (!item.canRecover) throw new Error('This recording does not contain recoverable audio.');
@@ -113,19 +126,37 @@ export class RecordingRecoveryService {
     return { meetingId: result.meeting.id };
   }
 
-  async trim(id: string, endSeconds: number): Promise<{ meetingId: string }> {
-    if (!Number.isFinite(endSeconds) || endSeconds <= 0) throw new Error('Trim length must be positive.');
+  async preview(id: string): Promise<{ url: string; durationS: number }> {
+    const session = this.requireSession(id);
+    const item = await this.inspect(session);
+    if (!item.canRecover || item.durationS === null) throw new Error('No playable audio was found. Try opening the recording in Finder.');
+    return { url: pathToFileURL(this.sourceFor(session, item)).href, durationS: item.durationS };
+  }
+
+  private sourceFor(session: RecordingSessionRow, item: RecoveryItem): string {
+    const stems = deriveStemPaths(session.outputPath);
+    return item.reason === 'microphone-only' ? stems.voice
+      : item.reason === 'system-only' ? stems.system : session.outputPath;
+  }
+
+  async trim(id: string, endSeconds: number, startSeconds = 0): Promise<{ meetingId: string }> {
+    return this.exclusive(id, () => this.trimCopy(id, endSeconds, startSeconds));
+  }
+
+  private async trimCopy(id: string, endSeconds: number, startSeconds: number): Promise<{ meetingId: string }> {
+    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
+      throw new Error('Choose a start at or after zero and an end after the start.');
+    }
     const session = this.requireSession(id);
     const item = await this.inspect(session);
     if (!item.canTrim) throw new Error('This recording cannot be trimmed.');
-    const stems = deriveStemPaths(session.outputPath);
-    const source = item.reason === 'microphone-only' ? stems.voice
-      : item.reason === 'system-only' ? stems.system : session.outputPath;
+    if (item.durationS === null || endSeconds > item.durationS) throw new Error('The selected range exceeds the recording duration.');
+    const source = this.sourceFor(session, item);
     const destination = this.recoveredPath(session.outputPath, 'trimmed');
-    const trim = this.deps.trim ?? (async (src, dest, end) => {
-      await pExecFile(ffmpegPath(), ['-y', '-i', src, '-t', String(end), '-c', 'copy', dest]);
+    const trim = this.deps.trim ?? (async (src, dest, end, start) => {
+      await pExecFile(ffmpegPath(), ['-nostdin', '-n', '-ss', String(start), '-i', src, '-t', String(end - start), '-c', 'copy', dest]);
     });
-    await trim(source, destination, Math.min(endSeconds, item.durationS ?? endSeconds));
+    await trim(source, destination, endSeconds, startSeconds);
     const result = await this.deps.catalog(destination);
     this.deps.sessions.dismissRecovery(id);
     return { meetingId: result.meeting.id };
@@ -136,6 +167,7 @@ export class RecordingRecoveryService {
   }
 
   dismiss(id: string): void {
+    if (this.busy.has(id)) throw new Error('Wait for recovery to finish before dismissing.');
     this.requireSession(id);
     this.deps.sessions.dismissRecovery(id);
   }
@@ -177,8 +209,6 @@ export class RecordingRecoveryService {
   private recoveredPath(original: string, suffix: string): string {
     const ext = path.extname(original) || '.m4a';
     const base = original.slice(0, original.length - path.extname(original).length);
-    let candidate = `${base}.recovered-${suffix}${ext}`;
-    if (fs.existsSync(candidate)) candidate = `${base}.recovered-${suffix}-${Date.now()}${ext}`;
-    return candidate;
+    return `${base}.recovered-${suffix}-${randomUUID()}${ext}`;
   }
 }

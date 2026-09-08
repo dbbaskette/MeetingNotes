@@ -102,7 +102,7 @@ export function LibraryView({
     return () => { recoveryGeneration.current++; };
   }, [refreshRecovery]);
   useEffect(() => {
-    let timer: ReturnType<typeof window.setTimeout> | undefined;
+    let timer: number | undefined;
     const off = api.recording.onStateChange(({ state }) => {
       if (state === 'idle' || state === 'error') {
         window.clearTimeout(timer);
