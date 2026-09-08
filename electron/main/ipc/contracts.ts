@@ -76,6 +76,7 @@ export type MeetingListQuery = z.input<typeof MeetingListQuerySchema>;
 /** Cap the raw input before deduplicating; large selections must batch. */
 export const MeetingIdsSchema = z.array(z.string().min(1)).max(1000)
   .transform((ids) => [...new Set(ids)]);
+export interface MeetingStartManyResult { startedIds: string[]; failedIds: string[] }
 export const MeetingCountsSchema = z.object({
   all: z.number(), pending: z.number(), processing: z.number(), done: z.number(), failed: z.number(),
 });
@@ -153,6 +154,7 @@ export const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',

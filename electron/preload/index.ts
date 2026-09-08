@@ -48,6 +48,7 @@ const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
@@ -187,6 +188,10 @@ const api = {
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
     startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
+    /** Pending-only snapshot operation. At most 1,000 raw IDs per batch;
+     * missing, deleted, non-pending, and failed items remain retryable. */
+    startManyDetailed: (ids: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsStartManyDetailed, ids) as Promise<{ startedIds: string[]; failedIds: string[] }>,
     // Toggles the per-meeting speaker-ID gate. When `skip` is true and the
     // meeting is currently parked at `awaiting_speaker_id`, the main process
     // also re-enqueues it so the pipeline sails past the gate immediately.

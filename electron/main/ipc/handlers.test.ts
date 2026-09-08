@@ -132,6 +132,53 @@ describe('paginated meeting summaries', () => {
     expect(scopedSpeakers).not.toHaveBeenCalled();
     expect(scopedCounts).not.toHaveBeenCalled();
   });
+
+  it('starts only exact pending snapshot IDs and returns failures without aborting later items', () => {
+    for (const id of ['first', 'locked', 'last', 'later', 'deleted']) insert(id, 'pending');
+    insert('done');
+    insert('processing', 'processing');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const update = meetings.updateStatus.bind(meetings);
+    vi.spyOn(meetings, 'updateStatus').mockImplementation((id, status) => {
+      if (id === 'locked') throw new Error('locked');
+      update(id, status);
+    });
+    expect(invoke('meetings:start-many-detailed', ['first', 'locked', 'done', 'deleted', 'missing', 'processing', 'last', 'first'])).toEqual({
+      startedIds: ['first', 'last'], failedIds: ['locked', 'done', 'deleted', 'missing', 'processing'],
+    });
+    expect(meetings.findById('first')?.status).toBe('processing');
+    expect(meetings.findById('last')?.status).toBe('processing');
+    expect(meetings.findById('locked')?.status).toBe('pending');
+    expect(meetings.findById('later')?.status).toBe('pending');
+    expect(meetings.findById('done')?.status).toBe('done');
+  });
+
+  it('validates detailed batch IDs before any status mutation and preserves numeric legacy startMany', () => {
+    insert('pending', 'pending');
+    const update = vi.spyOn(meetings, 'updateStatus');
+    for (const input of [null, 'pending', [''], [1], ['pending', 1], Array(1001).fill('pending')]) {
+      expect(() => invoke('meetings:start-many-detailed', input)).toThrow();
+    }
+    expect(update).not.toHaveBeenCalled();
+    expect(invoke('meetings:start-many-detailed', [])).toEqual({ startedIds: [], failedIds: [] });
+    expect(invoke('meetings:start-many', ['pending', 'missing'])).toBe(1);
+  });
+
+  it('keeps an enqueue failure pending and retryable while starting subsequent IDs', () => {
+    insert('retry', 'pending');
+    insert('next', 'pending');
+    const enqueued: string[] = [];
+    registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+      baseServices({ meetings, speakers, actionItems, pipeline: {
+        enqueue: (id: string) => {
+          if (id === 'retry') throw new Error('queue unavailable');
+          enqueued.push(id);
+        },
+      } }));
+    expect(invoke('meetings:start-many-detailed', ['retry', 'next'])).toEqual({ startedIds: ['next'], failedIds: ['retry'] });
+    expect(meetings.findById('retry')?.status).toBe('pending');
+    expect(enqueued).toEqual(['next']);
+  });
 });
 
 function baseServices(overrides: Record<string, unknown> = {}): any {

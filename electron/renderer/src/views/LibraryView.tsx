@@ -8,6 +8,7 @@
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useStore } from 'zustand';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { VirtualMeetingList } from '../components/VirtualMeetingList';
@@ -22,7 +23,10 @@ import { AppNav, type NavTarget } from '../components/AppNav';
 import { Icon } from '../components/icons';
 import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
-import { pruneSelection, partitionSelection } from '../lib/selection';
+import {
+  librarySelection, hydrateSelection, runBulkDelete, runBulkProcess,
+  selectionConfirmation, selectionScope,
+} from '../lib/selection';
 import {
   LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
 } from '../lib/library-sort';
@@ -72,11 +76,11 @@ export function LibraryView({
 }: Props): JSX.Element {
   const {
     items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
-    refreshing, error, setQuery: setPageQuery, refresh: refreshPages, loadMore, retry,
+    refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, loadMore, retry,
   } = useMeetingsStore();
   const [query, setQuery] = useState('');
   const [searchRevision, setSearchRevision] = useState(0);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { selected, resolving: resolvingSelection, busy: bulkBusy, mode: selectionMode } = useStore(librarySelection);
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
   // Browse-mode sort. Persisted per machine in localStorage; sanitize on
   // read so a corrupt/stale value degrades to the default instead of
@@ -271,36 +275,53 @@ export function LibraryView({
     [hits, searchMeetings, libFilter, contentSort],
   );
   const libCounts = isSearching ? searchCounts : counts;
-  const selectionMeetings = isSearching ? searchMeetings : meetings;
+  const scope = selectionScope({
+    isSearching, filter: libFilter, loaded: meetings,
+    searchResults: [...titleMatches, ...contentMatches], total,
+  });
+  const selectionUniverse = isSearching ? `search:${query.trim()}:${libFilter}` : `browse:${libFilter}`;
+  const scopeReady = isSearching
+    ? !searchPending && previousSearchQuery.current === query.trim()
+    : !loadingInitial && pageQuery.filter === libFilter;
+  useEffect(() => () => librarySelection.getState().cancelResolution(), [selectionUniverse]);
 
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [libFilter, sortKey, isSearching]);
 
-  // Drop stale selections — a meeting that disappeared from the list
-  // (deleted elsewhere, purged) shouldn't stay checked. Status changes
-  // are fine now that every row is selectable: a pending row that starts
-  // processing stays selected, it just falls out of the Process target.
+  // Loaded pages never prune selection. Hydrate its exact IDs for status-only
+  // partitioning, including off-page rows while the pipeline is moving.
+  const [pendingSnapshot, setPendingSnapshot] = useState<{ selection: Set<string>; ids: string[] } | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
   useEffect(() => {
-    if (!loadingInitial && !searchPending) setSelected((prev) => pruneSelection(prev, selectionMeetings));
-  }, [selectionMeetings, loadingInitial, searchPending]);
-
-  // What the two bulk actions would act on. Process only touches pending
-  // rows within the selection; Delete touches everything selected.
-  const { pendingIds: selectedPendingIds, allIds: selectedAllIds } = useMemo(
-    () => partitionSelection(selected, selectionMeetings),
-    [selected, selectionMeetings],
-  );
+    let cancelled = false;
+    let inflight = false;
+    const hydrate = async (): Promise<void> => {
+      if (inflight) return;
+      inflight = true;
+      try {
+        const result = await hydrateSelection(selected, api.meetings.getMany);
+        if (!cancelled) {
+          setPendingSnapshot({ selection: selected, ids: result.pendingIds });
+          setSelectionError(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setPendingSnapshot(null);
+          setSelectionError('Unable to check selected meetings. Retry Process to check again.');
+        }
+      } finally { inflight = false; }
+    };
+    void hydrate();
+    const timer = hasMotion && selected.size > 0 ? window.setInterval(() => void hydrate(), 3000) : undefined;
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selected, meetings, searchMeetings, searchRevision, hasMotion]);
+  const selectedPendingCount = pendingSnapshot?.selection === selected ? pendingSnapshot.ids.length : null;
 
   // Row callbacks are hoisted + stable (useCallback) so the memoized
   // LibraryRow doesn't see a fresh closure on every render — per-row
   // arrows here would put all 100+ rows back on the 3 s poll treadmill.
   const toggleSelect = useCallback((id: string): void => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    if (!librarySelection.getState().busy) librarySelection.getState().toggle(id);
   }, []);
 
   const rowChanged = useCallback((): void => {
@@ -308,67 +329,77 @@ export function LibraryView({
     void refreshTrash();
   }, [refresh, refreshTrash]);
 
-  async function processSelected(): Promise<void> {
-    // Only the pending rows within the selection — a selected done/failed
-    // meeting is a Delete candidate, not a Process one.
-    const ids = selectedPendingIds;
-    if (ids.length === 0) return;
-    setSelected(new Set());
-    await api.meetings.startMany(ids);
-    // Explicit confirmation — the row immediately re-sorts (pending → processing
-    // moves it down the list to the in-flight bucket), which users often read
-    // as "nothing happened". A toast makes the action unambiguous.
-    toast.show({
-      message: `Processing ${ids.length} recording${ids.length === 1 ? '' : 's'}…`,
-      durationMs: 4000,
-    });
-    void refresh();
+  const [confirmation, setConfirmation] = useState<ReturnType<typeof selectionConfirmation> | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  async function selectMatching(): Promise<void> {
+    try {
+      await librarySelection.getState().selectMatching(selectionUniverse, () => scope.resolveIds(api.meetings.listIds));
+    } catch {
+      toast.show({ message: 'Unable to select matching meetings. Your previous selection is unchanged.', variant: 'error' });
+    }
   }
 
-  // Bulk delete confirmation (#192). A styled ConfirmDialog replaces the
-  // old native window.confirm; ids are parked here while the dialog is
-  // open so Confirm can act on exactly what the user agreed to.
-  const [confirmDeleteIds, setConfirmDeleteIds] = useState<string[] | null>(null);
+  async function requestProcessSelected(): Promise<void> {
+    const state = librarySelection.getState();
+    if (state.selected.size === 0 || !state.beginOperation()) return;
+    const snapshot = state.selected;
+    try {
+      // Refresh off-page statuses immediately before freezing the confirmation.
+      const { pendingIds } = await hydrateSelection(snapshot, api.meetings.getMany);
+      if (!mounted.current) return;
+      setPendingSnapshot({ selection: snapshot, ids: pendingIds });
+      setSelectionError(null);
+      if (pendingIds.length > 0) setConfirmation(selectionConfirmation('process', pendingIds));
+      else toast.show({ message: 'No selected recordings are pending.', durationMs: 4000 });
+    } catch {
+      toast.show({ message: 'Unable to check selected meetings. Nothing was started; retry Process.', variant: 'error' });
+    } finally { librarySelection.getState().endOperation(); }
+  }
 
   function requestDeleteSelected(): void {
-    const ids = selectedAllIds;
-    if (ids.length === 0) return;
-    setConfirmDeleteIds(ids);
+    const state = librarySelection.getState();
+    if (!state.busy && state.selected.size > 0) setConfirmation(selectionConfirmation('delete', [...state.selected]));
   }
 
-  async function deleteSelected(): Promise<void> {
-    const ids = confirmDeleteIds;
-    if (!ids || ids.length === 0) return;
-    setConfirmDeleteIds(null);
-    const n = ids.length;
-    setSelected(new Set());
-    // In parallel like the Undo path below — one bad row shouldn't abort the
-    // batch, and N serial IPC round-trips made big deletions crawl.
-    await Promise.allSettled(ids.map((id) => api.meetings.delete(id)));
-    // One toast for the whole batch; Undo restores everything at once.
-    toast.show({
-      message: `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`,
-      action: {
-        label: 'Undo',
-        onClick: async () => {
-          const results = await Promise.all(
-            ids.map((id) => api.meetings.undoDelete(id).catch(() => false)),
-          );
-          const restored = results.filter(Boolean).length;
-          if (restored < n) {
-            toast.show({
-              message: `Restored ${restored} of ${n} — the rest were already purged.`,
-              variant: 'error',
-            });
-          }
-          void refresh();
-          void refreshTrash();
-        },
-      },
-      durationMs: 10_000,
-    });
-    void refresh();
-    void refreshTrash();
+  async function applyConfirmation(): Promise<void> {
+    if (!confirmation || !librarySelection.getState().beginOperation()) return;
+    const { action, ids } = confirmation;
+    setConfirmation(null);
+    try {
+      const result = action === 'process'
+        ? await runBulkProcess(ids, api.meetings.startManyDetailed)
+        : await runBulkDelete(ids, api.meetings.delete);
+      librarySelection.getState().removeSucceeded(result.succeededIds);
+      const n = result.succeededIds.length;
+      const failed = result.failedIds.length;
+      const message = action === 'process'
+        ? `Processing ${n} recording${n === 1 ? '' : 's'}…`
+        : `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`;
+      toast.show({
+        message: message + (failed > 0 ? ` ${failed} not ${action === 'process' ? 'started' : 'deleted'}; still selected for retry.` : ''),
+        variant: failed > 0 ? 'error' : 'default',
+        durationMs: action === 'delete' ? 10_000 : 4000,
+        action: action === 'delete' && n > 0 ? {
+          label: 'Undo',
+          onClick: async () => {
+            // Only successful deletions are undoable — never touch failed IDs.
+            const restored = (await Promise.all(result.succeededIds.map((id) => api.meetings.undoDelete(id).catch(() => false)))).filter(Boolean).length;
+            if (restored < n) toast.show({ message: `Restored ${restored} of ${n} — the rest were already purged.`, variant: 'error' });
+            void refresh();
+            void refreshTrash();
+          },
+        } : undefined,
+      });
+    } finally {
+      librarySelection.getState().endOperation();
+      void refresh();
+      if (action === 'delete') void refreshTrash();
+    }
   }
 
   return (
@@ -551,6 +582,33 @@ export function LibraryView({
           </p>
         )}
 
+        <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs">
+          <button
+            type="button"
+            disabled={!scopeReady || scope.loadedIds.length === 0 || bulkBusy || resolvingSelection}
+            className="text-ink-muted hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => librarySelection.getState().selectLoaded(scope.loadedIds.map((id) => ({ id })))}
+          >
+            Select all loaded
+          </button>
+          {scopeReady && scope.matchingCount !== null && (
+            <button
+              type="button"
+              disabled={bulkBusy || resolvingSelection}
+              className="text-brand-indigo hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => void selectMatching()}
+            >
+              {resolvingSelection ? 'Selecting…' : `Select all ${scope.matchingCount} matching`}
+            </button>
+          )}
+          {selected.size > 0 && (
+            <span className="text-[11px] text-ink-muted">
+              {selectionMode === 'all-matching' ? 'Matching snapshot' : 'Selection'} stays fixed across pages, filters, and search.
+            </span>
+          )}
+        </div>
+        {selected.size > 0 && selectionError && <p role="status" className="shrink-0 mb-2 text-xs text-danger-text">{selectionError}</p>}
+
         {(() => {
           const totalShown = isSearching
             ? titleMatches.length + contentMatches.length
@@ -674,26 +732,28 @@ export function LibraryView({
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
       <SelectionBar
         count={selected.size}
-        pendingCount={selectedPendingIds.length}
-        onProcess={processSelected}
+        pendingCount={selectedPendingCount}
+        busy={bulkBusy || resolvingSelection}
+        onProcess={() => void requestProcessSelected()}
         onDelete={requestDeleteSelected}
-        onCancel={() => setSelected(new Set())}
+        onCancel={() => librarySelection.getState().clear()}
       />
 
       {/* ── Bulk delete confirmation (#192) ─────────────────────────────── */}
       <ConfirmDialog
-        open={confirmDeleteIds !== null}
-        title={`Move ${confirmDeleteIds?.length ?? 0} meeting${confirmDeleteIds?.length === 1 ? '' : 's'} to Recently deleted?`}
+        open={confirmation !== null}
+        title={confirmation?.title ?? ''}
         body={
-          <>
+          confirmation?.action === 'delete' ? <>
             Each meeting&rsquo;s audio file, transcript, summary, and any exports
             move to <strong>Recently deleted</strong>, restorable for 30 days.
-          </>
+          </> : <>Only these {confirmation?.ids.length ?? 0} selected pending recordings will be queued. Other selected meetings will stay selected.</>
         }
-        confirmLabel="Delete"
-        destructive
-        onConfirm={() => void deleteSelected()}
-        onCancel={() => setConfirmDeleteIds(null)}
+        confirmLabel={confirmation?.action === 'delete' ? 'Delete' : 'Process'}
+        destructive={confirmation?.action === 'delete'}
+        busy={bulkBusy}
+        onConfirm={() => void applyConfirmation()}
+        onCancel={() => setConfirmation(null)}
       />
     </div>
   );
@@ -987,12 +1047,13 @@ function QueueBanner({
 }
 
 function SelectionBar({
-  count, pendingCount, onProcess, onDelete, onCancel,
+  count, pendingCount, busy, onProcess, onDelete, onCancel,
 }: {
   count: number;
   /** How many of the selected rows are pending — the Process target.
    *  Process is hidden when it's zero (nothing to start). */
-  pendingCount: number;
+  pendingCount: number | null;
+  busy: boolean;
   onProcess: () => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -1020,24 +1081,27 @@ function SelectionBar({
           <div className="flex-1" />
           <button
             onClick={onCancel}
+            disabled={busy}
             className="text-sm text-surface/70 hover:text-surface px-3 py-1.5 rounded-lg hover:bg-surface/10 transition"
           >
             Cancel
           </button>
           <button
             onClick={onDelete}
+            disabled={busy}
             className="text-sm font-semibold bg-danger-solid text-white px-4 py-1.5 rounded-lg hover:opacity-90 transition"
           >
             Delete ({count})
           </button>
-          {pendingCount > 0 && (
+          {(pendingCount === null || pendingCount > 0) && (
             <button
               onClick={onProcess}
+              disabled={busy}
               title="Starts processing the pending recordings in the selection"
               className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5"
             >
               <Icon name="play" className="w-3.5 h-3.5" />
-              Process ({pendingCount})
+              {pendingCount === null ? 'Check & process' : `Process (${pendingCount})`}
             </button>
           )}
         </div>

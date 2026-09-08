@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
-  type MeetingSummary, type MeetingSummaryPage } from './contracts.js';
+  type MeetingSummary, type MeetingSummaryPage, type MeetingStartManyResult } from './contracts.js';
 import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
@@ -410,12 +410,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.pipeline.enqueue(parsed.id);
   });
 
-  const startOne = (id: string): boolean => {
+  const startOne = (id: string, pendingOnly = false): boolean => {
     if (typeof id !== 'string' || id.length === 0) return false;
     const m = s.meetings.findById(id);
     if (!m) return false;
+    if (pendingOnly && (m.deletedAt || m.status !== 'pending')) return false;
     s.meetings.updateStatus(id, 'processing');
-    s.pipeline.enqueue(id);
+    try {
+      s.pipeline.enqueue(id);
+    } catch (error) {
+      // Detailed bulk failures must still be eligible to retry. Preserve the
+      // legacy start/startMany behavior when pendingOnly is not requested.
+      if (pendingOnly) s.meetings.updateStatus(id, m.status);
+      throw error;
+    }
     return true;
   };
 
@@ -493,6 +501,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       if (typeof id === 'string' && startOne(id)) started += 1;
     }
     return started;
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsStartManyDetailed, (_e, input: unknown): MeetingStartManyResult => {
+    const ids = MeetingIdsSchema.parse(input);
+    const result: MeetingStartManyResult = { startedIds: [], failedIds: [] };
+    for (const id of ids) {
+      try {
+        (startOne(id, true) ? result.startedIds : result.failedIds).push(id);
+      } catch {
+        result.failedIds.push(id);
+      }
+    }
+    return result;
   });
 
   // Built-in recording namespace. The renderer asks for a list of audible
