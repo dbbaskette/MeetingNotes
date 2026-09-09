@@ -205,6 +205,45 @@ describe('remote desktop safety and durable imports', () => {
 });
 
 describe('shared-contract transfers', () => {
+  it.each(['fallback', 'rerun'])('fences a delayed status poll after %s before any local stage/status mutation', async (action) => {
+    const s = server(); let delayed = false; let release!: () => void; let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const pending = new Promise<void>(resolve => { entered = resolve; });
+    const wrapped = (async (url: string | URL | Request, init?: RequestInit) => {
+      const response = await s.fetcher(url, init);
+      if (delayed && /\/v1\/jobs\/[a-f0-9-]+$/.test(String(url)) && init?.method === 'GET') {
+        const job = await response.json(); entered(); await gate;
+        return new Response(JSON.stringify({ ...job, phase: 'diarizing', state: 'failed', error: { code: 'TEST_FAILURE', retryable: false } }));
+      }
+      return response;
+    }) as typeof fetch;
+    const f = fixture(undefined, wrapped), id = f.coordinator.start('meeting-fixture'); await f.coordinator.step(id);
+    delayed = true; const poll = f.coordinator.step(id); await pending;
+    if (action === 'fallback') f.coordinator.fallback('meeting-fixture', () => { f.ctx.meetings.updateStage('meeting-fixture', 'extracting'); f.ctx.meetings.updateStatus('meeting-fixture', 'processing'); });
+    else f.coordinator.rerun('meeting-fixture', 'transcribing');
+    const expected = f.ctx.meetings.findById('meeting-fixture')!;
+    release(); await expect(poll).rejects.toThrow('RUN_FENCED');
+    expect(f.ctx.meetings.findById('meeting-fixture')!.pipelineStage).toBe(expected.pipelineStage);
+    expect(f.ctx.meetings.findById('meeting-fixture')!.status).toBe(expected.status);
+    expect(f.repo.get(id)!.phase).toBe('cancelled');
+  });
+  it('reconnects after token expiry without replacing or deleting an accepted job', async () => {
+    const s = server(); let unauthorized = false;
+    const wrapped = (async (url: string | URL | Request, init?: RequestInit) => unauthorized
+      ? new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Reconnect', retryable: false, requestId: 'test' } }), { status: 401 })
+      : s.fetcher(url, init)) as typeof fetch;
+    const f = fixture(undefined, wrapped), id = f.coordinator.start('meeting-fixture'); await f.coordinator.step(id);
+    const accepted = f.repo.get(id)!; unauthorized = true; f.repo.patch(id, { nextAttempt: 0 }); f.coordinator.startLifecycle();
+    await vi.waitFor(() => expect(f.repo.get(id)!.phase).toBe('reconnect_required'));
+    expect(f.ctx.meetings.findById('meeting-fixture')!.status).toBe('processing');
+    f.credentials.set(accepted.configuration.endpoint, accepted.configuration.ownerId, 'rotated-test-token-00000000000000000000000000');
+    unauthorized = false; f.coordinator.retry('meeting-fixture'); await f.coordinator.step(id);
+    const resumed = f.repo.current('meeting-fixture')!;
+    expect(resumed.id).toBe(id); expect(resumed.jobId).toBe(accepted.jobId); expect(resumed.request).toEqual(accepted.request);
+    expect(resumed.sourcePath).toBe(accepted.sourcePath); expect(resumed.deleteRequested).toBe(false);
+    expect(s.calls.filter(c => c.url.endsWith('/v1/jobs'))).toHaveLength(1);
+    expect(s.calls.some(c => c.url.endsWith('/cancellation') || c.init?.method === 'DELETE')).toBe(false);
+  });
   it('reconciles an accepted part after lost response and restart without uploading it twice', async () => {
     const s = server(), f = fixture(undefined, s.fetcher), id = f.coordinator.start('meeting-fixture'); s.loseResponse();
     await expect(f.coordinator.step(id)).rejects.toThrow('Connection lost'); f.db.close();

@@ -138,7 +138,8 @@ export class RemoteCoordinator {
     if (['failed', 'cancelled'].includes(run.phase)) {
       if (run.kind === 'text_generation' && run.phase === 'failed') this.continueFromSpeakerId(meetingId);
       else this.start(meetingId, run.configuration);
-    } else this.repository.patch(run.id, { nextAttempt: 0, failures: 0, error: null });
+    } else this.repository.patch(run.id, { nextAttempt: 0, failures: 0, error: null,
+      ...(run.phase === 'reconnect_required' ? { phase: 'offline' } : {}) });
   }
   rerun(meetingId: string, fromStage: string): void {
     const previous = this.repository.current(meetingId);
@@ -163,16 +164,21 @@ export class RemoteCoordinator {
       const pendingDelete = run.deleteRequested && !run.deletedRemote;
       const effect = run.phase === 'done' ? 'completion' : 'speaker_gate';
       const pendingEffect = run.active && ['done', 'needs_speaker_names'].includes(run.phase) && !this.repository.db.prepare('SELECT 1 FROM remote_effects WHERE run_id=? AND effect=?').get(run.id, effect);
-      if (this.busy.has(run.id) || run.nextAttempt > Date.now() || (!pendingAck && !pendingDelete && !pendingEffect && (!run.active || ['done', 'failed', 'cancelled', 'conflict', 'needs_speaker_names'].includes(run.phase)))) continue;
+      if (this.busy.has(run.id) || run.nextAttempt > Date.now() || (!pendingAck && !pendingDelete && !pendingEffect && (!run.active || ['done', 'failed', 'reconnect_required', 'cancelled', 'conflict', 'needs_speaker_names'].includes(run.phase)))) continue;
       this.busy.add(run.id);
       void this.step(run.id).then(() => { if (!this.controller.signal.aborted) this.repository.patch(run.id, { failures: 0 }); }).catch(error => {
         if (this.controller.signal.aborted) return;
         const current = this.repository.get(run.id); if (!current) return;
+        if (error instanceof RemoteClientError && error.code === 'RUN_FENCED') return;
         const failure = error instanceof RemoteClientError ? error : new RemoteClientError('OFFLINE_OR_CREDENTIALS', true);
+        // Only a terminal server job or explicitly invalidated local source may
+        // create a new execution on Retry. Authentication/protocol failures are
+        // reconciliation failures, not evidence the accepted job failed.
+        const failedPhase = ['SOURCE_CHANGED', 'INTENT_EXPIRED_REVIEW_REQUIRED'].includes(failure.code) ? 'failed' : 'reconnect_required';
         this.repository.patch(run.id, { error: failure.code, failures: current.failures + 1,
-          phase: current.deleteRequested || ['done', 'needs_speaker_names'].includes(current.phase) ? current.phase : failure.retryable ? 'offline' : 'failed',
+          phase: current.deleteRequested || ['done', 'needs_speaker_names'].includes(current.phase) ? current.phase : failure.retryable ? 'offline' : failedPhase,
           nextAttempt: Date.now() + Math.max(failure.retryAfterMs, Math.min(60_000, 5000 * 2 ** Math.min(current.failures, 4))) });
-        if (!failure.retryable && current.active && !current.deleteRequested && !['done', 'needs_speaker_names'].includes(current.phase)) this.ctx.meetings.recordFailure(current.meetingId, failure.code);
+        if (!failure.retryable && failedPhase === 'failed' && current.active && !current.deleteRequested && !['done', 'needs_speaker_names'].includes(current.phase)) this.ctx.meetings.recordFailure(current.meetingId, failure.code);
       }).finally(() => { this.busy.delete(run.id); this.options.changed?.(run.meetingId); });
     }
   }
@@ -255,6 +261,7 @@ export class RemoteCoordinator {
     }
     this.live(id);
     const job = await client.job(run.jobId!);
+    this.live(id);
     if (job.clientRunId !== id || job.kind !== run.kind) throw new RemoteClientError('JOB_IDENTITY_MISMATCH', false);
     this.repository.patch(id, { phase: job.phase });
     if (job.phase === 'diarizing') this.ctx.meetings.updateStage(run.meetingId, 'diarizing');
@@ -264,6 +271,7 @@ export class RemoteCoordinator {
     }
     if (job.state === 'uploading') {
       const upload = await client.upload(run.jobId!);
+      this.live(id);
       if (upload.state === 'verifying' || upload.state === 'complete') return;
       if (upload.partSize !== 16_777_216) throw new RemoteClientError('INVALID_PART_SIZE', false);
       if (await hashFile(run.sourcePath) !== run.request!.source.sha256 || (run.originalPath && await hashFile(run.originalPath) !== run.request!.source.sha256)) throw new RemoteClientError('SOURCE_CHANGED', false);
@@ -288,7 +296,7 @@ export class RemoteCoordinator {
     }
     if (job.state === 'succeeded') {
       this.repository.patch(id, { phase: 'downloading' });
-      const output = await client.result(run.jobId!, run.request!); this.live(id);
+      const output = await client.result(run.jobId!, run.request!, path.join(path.dirname(run.sourcePath), 'downloads')); this.live(id);
       if (run.originalPath && await hashFile(run.originalPath) !== run.request!.source.sha256) throw new RemoteClientError('SOURCE_CHANGED', false);
       this.live(id); this.importer.stage(run, output.result.manifestDigest, output.artifacts); this.importer.publish(id);
     }

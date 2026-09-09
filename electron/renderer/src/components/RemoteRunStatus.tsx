@@ -5,7 +5,7 @@ export function remotePhase(phase: string): string {
   const names: Record<string, string> = { pending_upload: 'Pending upload', uploading: 'Uploading', verifying_upload: 'Verifying upload',
     queued: 'Queued', starting: 'Starting', transcribing: 'Transcribing', diarizing: 'Diarizing', summarizing: 'Summarizing',
     downloading: 'Downloading', downloaded: 'Importing', needs_speaker_names: 'Needs speaker names', done: 'Done',
-    offline: 'Offline / reconnecting', failed: 'Remote error', cancelled: 'Cancelled', conflict: 'Review remote result', retry_wait: 'Retry scheduled', complete: 'Downloading' };
+    offline: 'Offline / reconnecting', reconnect_required: 'Reconnect required', failed: 'Remote error', cancelled: 'Cancelled', conflict: 'Review remote result', retry_wait: 'Retry scheduled', complete: 'Downloading' };
   return names[phase] ?? 'Remote processing';
 }
 export function RemoteRunStatus({ meetingId, onChanged }: { meetingId: string; onChanged: () => void }): JSX.Element | null {
@@ -36,10 +36,10 @@ export function RemoteRunStatus({ meetingId, onChanged }: { meetingId: string; o
     <p className="text-xs text-ink-muted">{status.endpoint}{status.lastContact && ` · Last contact ${new Date(status.lastContact).toLocaleTimeString()}`}</p>
     {status.error && <p className="text-xs text-ink-muted mt-1">{status.error}</p>}
     <div className="flex gap-4 mt-2">
-      {['offline', 'failed', 'cancelled'].includes(status.phase) && <button disabled={busy} className="text-brand-indigo" onClick={() => void action('retry')}>Retry / reconnect</button>}
+      {['offline', 'reconnect_required', 'failed', 'cancelled'].includes(status.phase) && <button disabled={busy} className="text-brand-indigo" onClick={() => void action('retry')}>Retry / reconnect</button>}
       {status.phase === 'conflict' && <button disabled={busy} className="text-brand-indigo" onClick={() => { void api.remote.review(meetingId).then(setReview).catch(e => setMessage(String(e))); }}>Review result</button>}
       {!['done', 'cancelled'].includes(status.phase) && <button disabled={busy} className="text-ink-muted" onClick={() => void action('cancel')}>Cancel remote run</button>}
-      {['offline', 'failed', 'cancelled', 'conflict'].includes(status.phase) && <button disabled={busy} className="text-brand-indigo" onClick={() => void action('local')}>Process locally</button>}
+      {['offline', 'reconnect_required', 'failed', 'cancelled', 'conflict'].includes(status.phase) && <button disabled={busy} className="text-brand-indigo" onClick={() => void action('local')}>Process locally</button>}
     </div>
     {review && <div className="mt-3 space-y-2">
       <p>Your local content changed after submission. Keep it, or explicitly replace the generated artifacts below. The displaced local files are retained beside this remote generation.</p>

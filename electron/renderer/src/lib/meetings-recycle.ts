@@ -11,6 +11,8 @@
  *  MeetingSummary — `rowsEqual` below must compare every field a consumer
  *  can render, or a change in the missed field won't reach the screen. */
 export interface MeetingRowLike {
+  remote?: { runId: string; phase: string; bytesUploaded: number; totalBytes: number | null;
+    lastContact: string | null; error: string | null; endpoint: string } | null;
   id: string;
   slug: string;
   title: string;
@@ -49,6 +51,13 @@ function rowsEqual(a: MeetingRowLike, b: MeetingRowLike): boolean {
     a.stageEtaRough !== b.stageEtaRough ||
     a.unidentifiedCount !== b.unidentifiedCount ||
     a.actionItemsCount !== b.actionItemsCount ||
+    a.remote?.runId !== b.remote?.runId ||
+    a.remote?.phase !== b.remote?.phase ||
+    a.remote?.bytesUploaded !== b.remote?.bytesUploaded ||
+    a.remote?.totalBytes !== b.remote?.totalBytes ||
+    a.remote?.lastContact !== b.remote?.lastContact ||
+    a.remote?.error !== b.remote?.error ||
+    a.remote?.endpoint !== b.remote?.endpoint ||
     a.speakers.length !== b.speakers.length
   ) return false;
   for (let i = 0; i < a.speakers.length; i++) {

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { z } from 'zod';
+import { DurableDownload, DownloadError } from './downloads.js';
 import {
   RemoteCapabilitiesSchema, RemoteJobSchema, RemoteUploadSchema, RemoteUploadUrlsSchema,
   RemoteResultSchema, RemoteErrorSchema, RemoteTranscriptionSchema, RemoteDiarizationSchema,
@@ -52,23 +53,27 @@ async function bounded(response: Response, max: number): Promise<Buffer> {
 export class RemoteClient {
   constructor(readonly endpoint: string, private token: () => string, private signal: AbortSignal,
     private allowLoopback = false, private fetcher: typeof fetch = fetch) { endpointUrl(endpoint, allowLoopback); }
-  private async request(url: string, init: RequestInit, max: number): Promise<Buffer> {
+  private async response<T>(url: string, init: RequestInit, consume: (response: Response) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     const stop = () => controller.abort(); this.signal.addEventListener('abort', stop, { once: true });
     if (this.signal.aborted) stop();
     const timer = setTimeout(stop, 60_000);
     try {
       const response = await this.fetcher(safeTransferUrl(url, this.allowLoopback), { ...init, redirect: 'error', signal: controller.signal });
-      const bytes = await bounded(response, max);
       if (!response.ok) {
+        const bytes = await bounded(response, 100_000);
         let code = `HTTP_${response.status}`, retryable = response.status === 429 || response.status >= 500;
         try { const parsed = RemoteErrorSchema.parse(JSON.parse(bytes.toString())); code = parsed.error.code; retryable = parsed.error.retryable; } catch { /* no provider body in errors */ }
         const retry = response.headers.get('retry-after');
         const delay = retry ? (/^\d+$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now()) : 0;
         throw new RemoteClientError(code, retryable, Math.min(60_000, Math.max(0, delay || 0)));
       }
-      return bytes;
+      try { return await consume(response); }
+      finally { await response.body?.cancel().catch(() => {}); }
     } finally { clearTimeout(timer); this.signal.removeEventListener('abort', stop); }
+  }
+  private request(url: string, init: RequestInit, max: number): Promise<Buffer> {
+    return this.response(url, init, response => bounded(response, max));
   }
   async control<T>(route: string, schema: z.ZodType<T>, method = 'GET', body?: unknown, key?: string): Promise<T> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.token()}` };
@@ -92,7 +97,7 @@ export class RemoteClient {
     if (urls.parts.length !== 1 || urls.parts[0]!.partNumber !== number) throw new RemoteClientError('INVALID_UPLOAD_PART', false);
     await this.request(urls.parts[0]!.url, { method: 'PUT', headers: { 'Content-Length': String(bytes.length) }, body: new Uint8Array(bytes) }, 100_000);
   }
-  async result(id: string, request: RemoteCreateJob): Promise<{ result: RemoteResult; artifacts: Record<string, Buffer> }> {
+  async result(id: string, request: RemoteCreateJob, downloadRoot?: string): Promise<{ result: RemoteResult; artifacts: Record<string, Buffer> }> {
     const result = await this.control(`/jobs/${id}/result`, RemoteResultSchema);
     const m = result.manifest;
     if (m.jobId !== id || m.clientRunId !== request.clientRunId || m.profileId !== request.profileId || m.profileDigest !== request.profileDigest ||
@@ -100,7 +105,12 @@ export class RemoteClient {
     const artifacts: Record<string, Buffer> = {};
     for (const artifact of m.artifacts) {
       const url = result.downloads.find(d => d.name === artifact.name)!.url;
-      const bytes = await this.request(url, {}, artifact.bytes);
+      let bytes: Buffer;
+      try {
+        const download = downloadRoot ? new DurableDownload(downloadRoot, { endpoint: this.endpoint, jobId: id, runId: request.clientRunId,
+          requestDigest: digest(canonical(request)), manifestDigest: result.manifestDigest, name: artifact.name, bytes: artifact.bytes, sha256: artifact.sha256 }) : null;
+        bytes = download ? download.complete() ?? await this.response(url, { headers: download.headers() }, response => download.consume(response)) : await this.request(url, {}, artifact.bytes);
+      } catch (error) { if (error instanceof DownloadError) throw new RemoteClientError(error.code, error.retryable); throw error; }
       if (bytes.length !== artifact.bytes || digest(bytes) !== artifact.sha256) throw new RemoteClientError('ARTIFACT_HASH_MISMATCH', false);
       try {
         const schema = artifact.name === 'text' ? RemoteTextResultSchema : artifact.name === 'transcription' ? RemoteTranscriptionSchema : RemoteDiarizationSchema;

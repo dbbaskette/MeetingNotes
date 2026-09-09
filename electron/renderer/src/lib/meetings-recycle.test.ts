@@ -113,4 +113,17 @@ describe('recycleMeetings', () => {
     expect(recycleMeetings(prev, [row({ id: 'a' })])).toHaveLength(1);
     expect(recycleMeetings([row({ id: 'a' })], [])).toEqual([]);
   });
+  it('recycles equal remote projections but refreshes every remote-only change', () => {
+    const remote = { runId: 'run-a', phase: 'uploading', bytesUploaded: 0, totalBytes: 100,
+      lastContact: null, error: null, endpoint: 'https://remote.example' };
+    const prev = [row({ id: 'a', remote })];
+    expect(recycleMeetings(prev, clone(prev))).toBe(prev);
+    for (const patch of [{ phase: 'queued' }, { phase: 'offline' }, { phase: 'conflict' }, { runId: 'run-b' },
+      { bytesUploaded: 100 }, { totalBytes: 200 }, { lastContact: '2026-09-09T00:00:00Z' }, { error: 'UNAUTHORIZED' }, { endpoint: 'https://other.example' }]) {
+      const next = [row({ id: 'a', remote: { ...remote, ...patch } })];
+      expect(recycleMeetings(prev, next)[0], JSON.stringify(patch)).toBe(next[0]);
+    }
+    const removed = [row({ id: 'a', remote: null })];
+    expect(recycleMeetings(prev, removed)[0]).toBe(removed[0]);
+  });
 });
