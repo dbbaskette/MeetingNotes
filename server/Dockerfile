@@ -6,7 +6,10 @@ COPY server/package*.json server/.npmrc ./
 RUN npm ci --ignore-scripts
 COPY shared /app/shared
 COPY electron/main/pipeline/prompts.ts /app/electron/main/pipeline/prompts.ts
-COPY server /app/server
+COPY server/tsconfig.json ./tsconfig.json
+COPY server/src ./src
+COPY server/tests ./tests
+COPY server/scripts ./scripts
 RUN npm run build && npm prune --omit=dev --ignore-scripts
 
 FROM node:22.23.1-bookworm-slim

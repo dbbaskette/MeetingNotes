@@ -16,6 +16,7 @@
     "sidecar:bundle": "bash sidecar/scripts/build-bundle.sh",
     "test": "vitest run",
     "test:watch": "vitest",
+    "verify:remote-ui": "node scripts/remote-processing-fixture.mjs",
     "pretest": "npm rebuild better-sqlite3 --silent",
     "posttest": "npx -y @electron/rebuild -f -w better-sqlite3 || true",
     "rebuild:electron": "npx -y @electron/rebuild -f -w better-sqlite3",

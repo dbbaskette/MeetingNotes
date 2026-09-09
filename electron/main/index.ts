@@ -2,10 +2,11 @@ import { app, BrowserWindow, ipcMain, nativeTheme, Notification, protocol, safeS
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { recoveryMediaHandler } from './recording/recovery-media.js';
+import { guardedIpc, installWindowBoundary, isTrustedRendererUrl } from './security/window-boundary.js';
 
-protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }]);
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
@@ -99,6 +100,7 @@ let windowBoundsStore: {
   load: () => WindowBounds | null;
   save: (b: WindowBounds) => void;
 } | null = null;
+const trustedRenderers = new Map<number, string>();
 
 async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow> {
   const restored = windowBoundsStore?.load() ?? null;
@@ -126,6 +128,13 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
       nodeIntegration: false,
     },
   });
+  const rendererUrl = isDev
+    ? (process.env.VITE_DEV_URL ?? 'http://localhost:5174')
+    : pathToFileURL(path.join(__dirname, '../../renderer/index.html')).href;
+  const rendererId = win.webContents.id;
+  trustedRenderers.set(rendererId, rendererUrl);
+  win.on('closed', () => trustedRenderers.delete(rendererId));
+  installWindowBoundary(win.webContents, rendererUrl, (url) => shell.openExternal(url));
   // Persist bounds on resize/move (debounced — these fire continuously
   // during a drag) and once more on close so the final position always
   // wins even if it landed inside the debounce window.
@@ -148,8 +157,7 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
       saveBounds();
     });
   }
-  if (isDev) await win.loadURL(process.env.VITE_DEV_URL ?? 'http://localhost:5174');
-  else await win.loadFile(path.join(__dirname, '../../renderer/index.html'));
+  await win.loadURL(rendererUrl);
   return win;
 }
 
@@ -688,7 +696,10 @@ app.whenReady().then(async () => {
     ),
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
-  registerIpcHandlers(ipcMain, {
+  registerIpcHandlers(guardedIpc(ipcMain, event => {
+    const expected = trustedRenderers.get(event.sender.id);
+    return expected !== undefined && isTrustedRendererUrl(event.senderFrame?.url ?? '', expected);
+  }) as typeof ipcMain, {
     remote,
     meetings,
     speakers,

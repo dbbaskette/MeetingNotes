@@ -7,7 +7,11 @@ import { LibraryWatcher } from './watcher.js';
 const dirs: string[] = [];
 afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
 
-async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+// Chokidar's polling worker shares a busy process with 100+ concurrent test
+// files in the full suite. Keep the assertion well above the configured
+// 40/80 ms poll/stability thresholds so host scheduling cannot masquerade as
+// a missed filesystem event; isolated failures still surface quickly.
+async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() >= deadline) throw new Error('condition not met before timeout');

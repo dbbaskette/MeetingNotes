@@ -1,6 +1,6 @@
 # MeetingNotes: local Mac capture with Cloud Foundry processing
 
-Status: proposed design for review; no runtime implementation or deployment.
+Status: approved design history. An experimental runtime is implemented on `codex/cloud-processing-design`; deployment and Tanzu Platform qualification remain pending.
 Date: 2026-09-08. Baseline: main at `6aeaaca`, MeetingNotes 1.12.0.
 Branch: `codex/cloud-processing-design`.
 

@@ -4,8 +4,8 @@
 
 <h1>MeetingNotes</h1>
 
-<p><strong>Record, transcribe, diarize, summarize, and extract action items from any meeting — entirely on your Mac.</strong><br/>
-No cloud. No uploads. No API keys at inference time. No third-party recorder to install.</p>
+<p><strong>Record, transcribe, diarize, summarize, and extract action items from any meeting — locally by default.</strong><br/>
+The published 1.12.0 workflow uses no cloud or inference API keys. This experimental branch also contains an explicit, opt-in remote-processing mode.</p>
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
@@ -13,7 +13,7 @@ No cloud. No uploads. No API keys at inference time. No third-party recorder to 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![100% local](https://img.shields.io/badge/inference-100%25%20local-8b5cf6)](#-privacy--security)
+[![Local by default](https://img.shields.io/badge/inference-local%20by%20default-8b5cf6)](#-privacy--security)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
 </div>
@@ -21,7 +21,7 @@ No cloud. No uploads. No API keys at inference time. No third-party recorder to 
 ---
 
 > [!NOTE]
-> **Everything runs on your machine.** Audio never leaves the device — capture, speech-to-text, speaker diarization, and the LLM summary all happen locally. You bring the models; MeetingNotes orchestrates the rest.
+> **Local remains the default.** In local mode, audio never leaves the device: capture, speech-to-text, speaker diarization, and the LLM summary happen locally. This experimental branch also offers opt-in remote processing, which uploads a selected recording, transcript snapshots, and generated speaker embeddings to an operator-configured service. See [Experimental remote processing](docs/cloud-processing.md).
 
 ## ✨ What it does
 
@@ -62,7 +62,7 @@ Push action items to **Apple Reminders**, **Google Tasks**, or **Google Docs**; 
 <td valign="top">
 
 ### 🔒 Private by design
-No SaaS, no telemetry, no API keys. Sandboxed Electron, zod-validated IPC, gated-model licenses cached offline. Your meetings stay yours.
+No telemetry or required SaaS. Local mode needs no inference API key; experimental remote mode uses your private service and a Keychain-protected token. Sandboxed Electron, zod-validated IPC, gated-model licenses cached offline.
 
 </td>
 </tr>
@@ -78,11 +78,11 @@ No SaaS, no telemetry, no API keys. Sandboxed Electron, zod-validated IPC, gated
 
 ## 🏗️ Architecture
 
-MeetingNotes is an Electron app that orchestrates four local services, spawning each on demand and shutting them down when idle to keep RAM free.
+In its default local mode, MeetingNotes is an Electron app that orchestrates four local services, spawning each on demand and shutting them down when idle to keep RAM free.
 
 ```mermaid
 flowchart LR
-    subgraph mac["🖥️ Your Mac · nothing leaves the device"]
+    subgraph mac["🖥️ Your Mac · default local-processing mode"]
         direction LR
         subgraph app["MeetingNotes.app · Electron"]
             ui["Renderer · React<br/>library · detail · weekly · settings"]
@@ -347,14 +347,14 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 🔒 Privacy & security
 
-- **Local-only inference.** Audio, transcripts, and summaries never leave your Mac. No telemetry, no accounts, no API keys at inference time.
+- **Local by default.** In local mode, audio, transcripts, and summaries never leave your Mac. Experimental remote mode is opt-in and transfers the selected recording, labeled transcript snapshots, and generated embeddings to the configured private service; the local roster and original recording remain on the Mac. See [the remote-processing operator guide](docs/cloud-processing.md).
 - **Sandboxed renderer** — `contextIsolation: true`, `nodeIntegration: false`; the preload exposes a typed API surface only, and every IPC payload is **zod-validated**.
 - **Scoped audio capture** — the Swift helper is codesigned with the audio-input entitlement; TCC scopes your grant to MeetingNotes specifically, and the helper auto-stops if the app dies (no orphaned recorder).
 - **Parameterized SQLite** (`better-sqlite3`, FKs + WAL). The HF token is stored `chmod 600` and needed only for the one-time model download.
 
 ## 📊 Status
 
-**1.12.0** — stable on macOS 14.2+ / Apple Silicon. Recovery inspections are cached and streamed, damaged captures can be previewed and trimmed safely, meeting artifacts load asynchronously on demand, and the Library now uses paginated retrieval with bounded virtual rendering. The full local recording and processing pipeline remains unchanged.
+**1.12.0** — the published stable baseline on macOS 14.2+ / Apple Silicon. Recovery inspections are cached and streamed, damaged captures can be previewed and trimmed safely, meeting artifacts load asynchronously on demand, and the Library uses paginated retrieval with bounded virtual rendering. The separate `codex/cloud-processing-design` branch adds an experimental opt-in remote path; it is not a 1.12.0 release, deployment, installer, or promise of production readiness. The local pipeline remains the default and is unchanged.
 
 ## 📄 License
 

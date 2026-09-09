@@ -2,6 +2,8 @@
 
 This is an independent Node service and worker. The Mac remains the authoritative library. Nothing here deploys a service, reads a local recording library, or silently chooses synthetic inference.
 
+The end-to-end operator procedure, desktop setup, security ledger, rollout and rollback are in [`../docs/cloud-processing.md`](../docs/cloud-processing.md). This service README is the executable protocol and service-runtime reference.
+
 ## Run the complete synthetic storage smoke
 
 From `server/`, with Node 22.15+ and Docker Desktop running:
@@ -75,6 +77,8 @@ Optional admission settings only lower the planned maxima: `MAX_SOURCE_BYTES` â‰
 STT and LLM execute on the configured **server-reachable endpoints**, not on the Mac. They may be separately CF-hosted services or approved inference providers. This package does not host Whisper/LLM weights. Inside the worker, ffmpeg decodes once to bounded mono 16k PCM; STT receives 5-minute PCM chunks to stay below common provider upload caps. Diarization invokes `server/python/diarize.py` on Linux CPU with two torch/OpenMP threads, offline staged models, and explicit per-turn embeddings. It cannot use the macOS frozen bundle or Apple MPS. Supported demuxers are restricted; URL/network playlists are not accepted. Model staging must verify matching weights/checksums/repository commits, licenses, egress, and YAML references; setting a revision string alone does not verify assets.
 
 Docker build context is the repository root: `docker build -f server/Dockerfile -t <approved-image> .`. Pins: Node 22.23.1, Python 3.11 package, ffmpeg 7.1.1, torch/torchaudio 2.5.1 CPU, pyannote.audio 3.3.2, NumPy 1.26.4. Python top-level versions are pinned; a platform-specific fully transitive/hash-locked model environment and image vulnerability scan remain production qualification work. **The full Linux/Python image and real model inference have not been built/benchmarked in this implementation verification.** `manifest.yml` is an unpushed template with separate web/worker processes. It assumes image support and operator-supplied bindings; this service intentionally does not guess arbitrary `VCAP_SERVICES` layouts. Map bindings to the environment contract using the platform's secret mechanism before starting either process.
+
+The root `.dockerignore` is an allowlist for only the service package/build inputs, source/tests/scripts, migrations/Python code, the shared remote contract, and the shared prompt module. The Dockerfile also copies those paths explicitly; host `node_modules`, `.env*`, local libraries, Git data and other workspace content are neither sent in the build context nor copied into an image layer. Keep both controls when adding a build input, and inspect `docker build --no-cache --progress=plain -f server/Dockerfile -t <approved-image> .` before publishing anything. A successful local image build proves packaging onlyâ€”not foundation architecture, vulnerability posture, model staging or inference quality.
 
 MinIO is AGPLv3; review its use/distribution requirements. pyannote.audio code, diarization/segmentation/embedding model repositories, torch, ffmpeg build options and configured STT/LLM providers have separate licensing/terms. Accept gated model terms and verify model cards/revisions in controlled staging; do not bake access tokens into images. No license acceptance or model download was performed here.
 
