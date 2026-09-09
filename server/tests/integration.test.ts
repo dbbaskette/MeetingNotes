@@ -208,6 +208,130 @@ test(
         },
       );
       await t.test(
+        'accepted create intents replay after profile rollout or lower upload limits',
+        async () => {
+          const source = Buffer.from('accepted-before-configuration-change');
+          const body = intent(c, source),
+            stableKey = randomUUID();
+          const accepted = await create(body, stableKey);
+          await upload(accepted.id, source);
+          await finish(accepted.id);
+          await drain();
+          assert.equal((await store.get('test-owner', accepted.id)).state, 'succeeded');
+          const variants = [
+            {
+              config: { ...c, profile: { ...c.profile, digest: hash('new-model-profile') } },
+              newCode: 'PROFILE_CONFLICT',
+              status: 409,
+            },
+            {
+              config: { ...c, MAX_SOURCE_BYTES: source.length - 1 },
+              newCode: 'SOURCE_TOO_LARGE',
+              status: 413,
+            },
+          ];
+          for (const variant of variants) {
+            const rolled = buildApi(variant.config, new Store(c.DATABASE_URL), new Objects(c));
+            try {
+              const replay = await rolled.inject({
+                method: 'POST',
+                url: '/v1/jobs',
+                headers: headers(stableKey),
+                payload: body,
+              });
+              assert.equal(replay.statusCode, 202, replay.body);
+              assert.equal(replay.json().id, accepted.id);
+              assert.equal(replay.json().state, 'succeeded');
+              const conflict = await rolled.inject({
+                method: 'POST',
+                url: '/v1/jobs',
+                headers: headers(stableKey),
+                payload: { ...body, clientRunId: randomUUID() },
+              });
+              assert.equal(conflict.statusCode, 409);
+              assert.equal(conflict.json().error.code, 'IDEMPOTENCY_CONFLICT');
+              const fresh = await rolled.inject({
+                method: 'POST',
+                url: '/v1/jobs',
+                headers: headers(),
+                payload: body,
+              });
+              assert.equal(fresh.statusCode, variant.status);
+              assert.equal(fresh.json().error.code, variant.newCode);
+            } finally {
+              await rolled.close();
+            }
+          }
+          assert.equal(
+            (
+              await store.pool.query(
+                "SELECT count(*)::int AS n FROM jobs WHERE intent->>'clientRunId'=$1",
+                [body.clientRunId],
+              )
+            ).rows[0].n,
+            1,
+          );
+        },
+      );
+      await t.test(
+        'all operation keys survive 90 days from tombstoning rather than original creation',
+        async () => {
+          const body = intent(c, Buffer.from('retention-clock')),
+            stableKey = randomUUID();
+          const job = await create(body, stableKey);
+          await store.remove('test-owner', job.id, randomUUID());
+          // Day 100: created on day 0, deleted on day 30, tombstone expires on day 120.
+          await store.pool.query(
+            "UPDATE jobs SET created_at=now()-interval '100 days',deleted_at=now()-interval '70 days',cleaned_at=now() WHERE id=$1",
+            [job.id],
+          );
+          await store.pool.query(
+            "UPDATE idempotency SET created_at=now()-interval '100 days' WHERE job_id=$1",
+            [job.id],
+          );
+          await store.reap();
+          assert.equal(
+            (
+              await store.pool.query('SELECT count(*)::int AS n FROM idempotency WHERE job_id=$1', [
+                job.id,
+              ])
+            ).rows[0].n,
+            2,
+          );
+          const replay = await app.inject({
+            method: 'POST',
+            url: '/v1/jobs',
+            headers: headers(stableKey),
+            payload: body,
+          });
+          assert.equal(replay.statusCode, 409);
+          assert.equal(replay.json().error.code, 'INTENT_EXPIRED');
+          assert.equal(
+            (await store.pool.query('SELECT count(*)::int AS n FROM jobs WHERE id=$1', [job.id]))
+              .rows[0].n,
+            1,
+          );
+          await store.pool.query(
+            "UPDATE jobs SET deleted_at=now()-interval '91 days' WHERE id=$1",
+            [job.id],
+          );
+          await store.reap();
+          assert.equal(
+            (
+              await store.pool.query('SELECT count(*)::int AS n FROM idempotency WHERE job_id=$1', [
+                job.id,
+              ])
+            ).rows[0].n,
+            0,
+          );
+          assert.equal(
+            (await store.pool.query('SELECT count(*)::int AS n FROM jobs WHERE id=$1', [job.id]))
+              .rows[0].n,
+            0,
+          );
+        },
+      );
+      await t.test(
         'immutable result sizes/hashes and schemas survive audio naming and separate text job',
         async () => {
           const response = await app.inject({
@@ -484,7 +608,12 @@ test(
         assert.equal(limited.statusCode, 429);
         assert.equal(limited.headers['retry-after'], '10');
         await assert.rejects(
-          store.create('limited-owner', randomUUID(), intent(c, Buffer.from('one')), 0),
+          store.create('limited-owner', randomUUID(), intent(c, Buffer.from('one')), {
+            maxQueued: 0,
+            maxSourceBytes: c.MAX_SOURCE_BYTES,
+            profileId: c.profile.id,
+            profileDigest: c.profile.digest,
+          }),
           /CAPACITY_LIMIT/,
         );
       });

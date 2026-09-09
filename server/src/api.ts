@@ -139,11 +139,12 @@ export function buildApi(
   );
   app.post('/v1/jobs', async (r, reply) => {
     const input = RemoteCreateJobSchema.parse(r.body);
-    if (input.source.bytes > config.MAX_SOURCE_BYTES)
-      throw new ServiceError('SOURCE_TOO_LARGE', 413);
-    if (input.profileId !== config.profile.id || input.profileDigest !== config.profile.digest)
-      throw new ServiceError('PROFILE_CONFLICT', 409);
-    const j = await store.create(owner(r), key(r), input, config.MAX_QUEUED_JOBS);
+    const j = await store.create(owner(r), key(r), input, {
+      maxQueued: config.MAX_QUEUED_JOBS,
+      maxSourceBytes: config.MAX_SOURCE_BYTES,
+      profileId: config.profile.id,
+      profileDigest: config.profile.digest,
+    });
     reply.status(202).header('location', `/v1/jobs/${j.id}`);
     return publicJob(j);
   });

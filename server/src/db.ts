@@ -66,7 +66,12 @@ export class Store {
     owner: string,
     key: string,
     input: RemoteCreateJob,
-    maxQueued: number,
+    admission: {
+      maxQueued: number;
+      maxSourceBytes: number;
+      profileId: string;
+      profileDigest: string;
+    },
   ): Promise<JobRow> {
     return this.transaction(async (c) => {
       await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [owner]);
@@ -82,11 +87,21 @@ export class Store {
         if (job.deleted_at) throw new ServiceError('INTENT_EXPIRED', 409);
         return job;
       }
+      // An accepted intent remains replayable across later admission/profile changes.
+      // Only genuinely new work is subject to the current configuration.
+      if (input.source.bytes > admission.maxSourceBytes)
+        throw new ServiceError('SOURCE_TOO_LARGE', 413);
+      if (
+        input.profileId !== admission.profileId ||
+        input.profileDigest !== admission.profileDigest
+      )
+        throw new ServiceError('PROFILE_CONFLICT', 409);
       const count = await c.query(
         "SELECT count(*)::int AS n FROM jobs WHERE owner_id=$1 AND deleted_at IS NULL AND state IN ('uploading','queued','running')",
         [owner],
       );
-      if (count.rows[0].n >= maxQueued) throw new ServiceError('CAPACITY_LIMIT', 429, true);
+      if (count.rows[0].n >= admission.maxQueued)
+        throw new ServiceError('CAPACITY_LIMIT', 429, true);
       const id = randomUUID();
       const job = (
         await c.query(
@@ -249,12 +264,16 @@ export class Store {
       "UPDATE jobs SET deleted_at=now(),intent=NULL,manifest=NULL,manifest_digest=NULL,artifact_keys=NULL,stages='{}',generation=generation+1,revision=revision+1,cleanup_at=now() WHERE deleted_at IS NULL AND ((state='uploading' AND created_at<now()-interval '24 hours') OR completed_at<now()-interval '30 days')",
     );
     await this.pool.query("DELETE FROM rate_limits WHERE window_at<now()-interval '1 day'");
-    await this.pool.query(
-      "DELETE FROM idempotency WHERE created_at<now()-interval '90 days' AND job_id IN (SELECT id FROM jobs WHERE cleaned_at IS NOT NULL AND deleted_at IS NOT NULL)",
-    );
-    await this.pool.query(
-      "DELETE FROM jobs WHERE deleted_at<now()-interval '90 days' AND cleaned_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM idempotency WHERE job_id=jobs.id)",
-    );
+    await this.transaction(async (c) => {
+      const expired = await c.query(
+        "SELECT id FROM jobs WHERE deleted_at<now()-interval '90 days' AND cleaned_at IS NOT NULL FOR UPDATE SKIP LOCKED",
+      );
+      const ids = expired.rows.map((row: { id: string }) => row.id);
+      // All linked operation keys share the tombstone's clock, not creation time.
+      // Remove keys and their content-free job together so retention cannot split.
+      await c.query('DELETE FROM idempotency WHERE job_id=ANY($1::uuid[])', [ids]);
+      await c.query('DELETE FROM jobs WHERE id=ANY($1::uuid[])', [ids]);
+    });
   }
   async close() {
     await this.pool.end();
