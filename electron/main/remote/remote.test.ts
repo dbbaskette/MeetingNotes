@@ -17,6 +17,7 @@ import { RemoteClient, canonical, digest, safeTransferUrl } from './client.js';
 import { RemoteEmbeddings } from './embeddings.js';
 import type { PipelineContext } from '../pipeline/context.js';
 import { recoverPendingMeetings } from '../pipeline/recovery.js';
+import { clearGateNotified, shouldNotifyGate } from '../pipeline/gate-alert.js';
 import { RemoteCapabilitiesSchema, type RemoteCreateJob, type RemoteJob } from '../../../shared/remote-contracts.js';
 
 const token = 'synthetic-test-token-000000000000000000000000';
@@ -62,6 +63,39 @@ function stage(f: ReturnType<typeof fixture>, kind: 'audio_analysis' | 'text_gen
   const id = f.coordinator.start('meeting-fixture'); f.repo.patch(id, { kind });
   f.importer.stage(f.repo.get(id)!, 'b'.repeat(64), kind === 'text_generation' ? textArtifacts : audioArtifacts);
   return id;
+}
+// Two independently clustered analyses: stable persons, deliberately unstable labels.
+function speakerRerun(f: ReturnType<typeof fixture>) {
+  const artifacts = (turns: { speaker: string; embedding: number[]; text: string }[]) => ({
+    transcription: Buffer.from(JSON.stringify({ segments: turns.map((t, i) => ({ start: i * 3, end: i * 3 + 3, text: t.text })) })),
+    diarization: Buffer.from(JSON.stringify({ segments: turns.map((t, i) => ({ start: i * 3, end: i * 3 + 3, speaker: t.speaker, embedding: t.embedding })),
+      num_speakers: turns.length, embeddingIdentity: identity, warnings: [] })),
+  });
+  const firstArtifacts = artifacts([
+    { speaker: 'SPEAKER_00', embedding: [1, 0, 0], text: 'Alice first generation.' },
+    { speaker: 'SPEAKER_01', embedding: [0, 1, 0], text: 'Bob first generation.' },
+    { speaker: 'SPEAKER_02', embedding: [0, 0, 1], text: 'Removed voice.' },
+    { speaker: 'SPEAKER_03', embedding: [-1, 0, 0], text: 'Unenrolled voice.' },
+  ]);
+  const first = f.coordinator.start('meeting-fixture');
+  f.importer.stage(f.repo.get(first)!, 'b'.repeat(64), firstArtifacts); f.importer.publish(first);
+  const people = ['Alice', 'Bob', 'Charlie', 'Dana'].map(displayName => f.ctx.speakers.create({ displayName }));
+  people.forEach((id, i) => f.ctx.speakers.linkToMeeting('meeting-fixture', `SPEAKER_0${i}`, id, 1));
+  for (const i of [0, 1]) f.coordinator.confirmSpeaker('meeting-fixture', `SPEAKER_0${i}`, people[i]!);
+  const oldLinks = f.ctx.speakers.listForMeeting('meeting-fixture');
+  const folder = f.importer.folder('meeting-fixture');
+  const oldTranscript = fs.readFileSync(path.join(folder, 'transcript.md'), 'utf8');
+  const vectors = f.db.prepare('SELECT * FROM remote_roster_embeddings ORDER BY speaker_id').all();
+  f.coordinator.rerun('meeting-fixture', 'transcribing');
+  const second = f.repo.current('meeting-fixture')!.id;
+  const nextArtifacts = artifacts([
+    { speaker: 'SPEAKER_00', embedding: [0, 1, 0], text: 'Bob now speaks first.' },
+    { speaker: 'SPEAKER_01', embedding: [1, 0, 0], text: 'Alice now speaks second.' },
+    { speaker: 'SPEAKER_03', embedding: [0, 0, 1], text: 'A new voice needs naming.' },
+    { speaker: 'SPEAKER_04', embedding: [0.70710678, 0.70710678, 0], text: 'An ambiguous voice needs naming.' },
+  ]);
+  f.importer.stage(f.repo.get(second)!, 'c'.repeat(64), nextArtifacts);
+  return { first, second, people, oldLinks, folder, oldTranscript, firstArtifacts, nextArtifacts, vectors };
 }
 function server() {
   let request: RemoteCreateJob | undefined, job: RemoteJob | undefined;
@@ -178,6 +212,67 @@ describe('remote desktop safety and durable imports', () => {
     expect(embeddings.match({ ...diar, embeddingIdentity: { ...identity, revision: 'different' } }, 'SPEAKER_00')).toBeNull();
     diar.segments[0].embedding = [0, 0, 0]; expect(embeddings.match(diar, 'SPEAKER_00')).toBeNull();
   });
+  it.each([false, true])('uses speaker identity across swapped labels and removes obsolete active clusters (crash replay: %s)', (crash) => {
+    const f = fixture(), r = speakerRerun(f);
+    // Submission/staging never erases the previous assignments or artifacts.
+    expect(f.ctx.speakers.listForMeeting('meeting-fixture')).toEqual(r.oldLinks);
+    if (crash) {
+      expect(() => new RemoteImporter(f.repo, f.ctx, () => { throw new Error('crash'); }).publish(r.second)).toThrow('crash');
+      f.db.close();
+    } else expect(f.importer.publish(r.second).status).toBe('imported');
+    const active = crash ? fixture(f.dir) : f;
+    active.importer.replay();
+    const links = active.ctx.speakers.listForMeeting('meeting-fixture');
+    expect(links.map(s => [s.localLabel, s.rosterSpeakerId, s.displayName])).toEqual([
+      ['SPEAKER_00', r.people[1], 'Bob'], ['SPEAKER_01', r.people[0], 'Alice'],
+      ['SPEAKER_03', null, null], ['SPEAKER_04', null, null],
+    ]);
+    const transcript = fs.readFileSync(path.join(r.folder, 'transcript.md'), 'utf8');
+    expect(transcript).toContain('[Bob 00:00] Bob now speaks first.');
+    expect(transcript).toContain('[Alice 00:03] Alice now speaks second.');
+    expect(transcript).not.toMatch(/Charlie|Dana/);
+    const generation = path.join(r.folder, '.remote-generations', r.second);
+    expect(JSON.parse(fs.readFileSync(path.join(generation, 'previous-database.json'), 'utf8')).speakers).toEqual(r.oldLinks);
+    expect(fs.readFileSync(path.join(generation, 'previous-diarization.json'))).toEqual(r.firstArtifacts.diarization);
+    expect(fs.readFileSync(path.join(generation, 'previous-transcript.md'), 'utf8')).toBe(r.oldTranscript);
+    expect(fs.readFileSync(path.join(r.folder, '.remote-generations', r.first, 'diarization.json'))).toEqual(r.firstArtifacts.diarization);
+    expect(active.ctx.speakers.list()).toHaveLength(4);
+    expect(active.db.prepare('SELECT * FROM remote_roster_embeddings ORDER BY speaker_id').all()).toEqual(r.vectors);
+    const revision = active.db.prepare('SELECT revision FROM remote_revisions WHERE meeting_id=?').get('meeting-fixture');
+    expect(active.importer.publish(r.second).status).toBe('already-imported'); active.importer.replay();
+    expect(active.ctx.speakers.listForMeeting('meeting-fixture')).toEqual(links);
+    expect(active.db.prepare('SELECT revision FROM remote_revisions WHERE meeting_id=?').get('meeting-fixture')).toEqual(revision);
+    const textRun = active.coordinator.continueFromSpeakerId('meeting-fixture');
+    expect(JSON.parse(fs.readFileSync(active.repo.get(textRun)!.sourcePath, 'utf8')).transcript).toBe(transcript);
+  });
+  it('fences speaker edits after analysis submission and preserves them as evidence on explicit replacement', () => {
+    const f = fixture(), r = speakerRerun(f);
+    f.ctx.speakers.linkToMeeting('meeting-fixture', 'SPEAKER_00', r.people[2]!, 1);
+    expect(f.importer.publish(r.second).status).toBe('conflict');
+    const editedLinks = f.ctx.speakers.listForMeeting('meeting-fixture');
+    expect(editedLinks[0]?.displayName).toBe('Charlie');
+    expect(fs.readFileSync(path.join(r.folder, 'transcript.md'), 'utf8')).toBe(r.oldTranscript);
+    const stale = f.importer.review('meeting-fixture');
+    f.ctx.speakers.rename(r.people[2]!, 'Charles');
+    expect(() => f.coordinator.resolve('meeting-fixture', r.second, true, stale.localFingerprint)).toThrow('changed during review');
+    const beforeReplace = f.ctx.speakers.listForMeeting('meeting-fixture');
+    const review = f.importer.review('meeting-fixture');
+    f.coordinator.resolve('meeting-fixture', r.second, true, review.localFingerprint);
+    expect(f.ctx.speakers.listForMeeting('meeting-fixture').map(s => s.displayName)).toEqual(['Bob', 'Alice', null, null]);
+    expect(JSON.parse(fs.readFileSync(path.join(review.generation, 'previous-database.json'), 'utf8')).speakers).toEqual(beforeReplace);
+    expect(f.db.prepare('SELECT * FROM remote_roster_embeddings ORDER BY speaker_id').all()).toEqual(r.vectors);
+    expect(f.importer.publish(r.second).status).toBe('already-imported');
+  });
+  it('does not replay new analysis over speaker edits after a partial publication', () => {
+    const f = fixture(), r = speakerRerun(f);
+    expect(() => new RemoteImporter(f.repo, f.ctx, () => { throw new Error('crash'); }).publish(r.second)).toThrow('crash');
+    f.ctx.speakers.linkToMeeting('meeting-fixture', 'SPEAKER_00', r.people[2]!, 1);
+    f.importer.replay();
+    expect(f.repo.get(r.second)!.phase).toBe('conflict');
+    expect(f.ctx.speakers.listForMeeting('meeting-fixture')[0]?.displayName).toBe('Charlie');
+    expect(fs.readFileSync(path.join(r.folder, 'transcript.md'), 'utf8')).toBe(r.oldTranscript);
+    expect(fs.readFileSync(path.join(r.folder, 'transcript.raw.json'))).toEqual(r.firstArtifacts.transcription);
+  });
   it('keeps manual names and pins text settings while creating a separate bounded object', () => {
     const f = fixture(), audio = stage(f, 'audio_analysis'); f.importer.publish(audio);
     const speaker = f.ctx.speakers.create({ displayName: 'Alice' }); f.ctx.speakers.linkToMeeting('meeting-fixture', 'SPEAKER_00', speaker, 1);
@@ -201,6 +296,41 @@ describe('remote desktop safety and durable imports', () => {
     f.importer.publish(id); f.ctx.meetings.updateSkipSpeakerId('meeting-fixture', true);
     await expect(f.coordinator.step(id)).rejects.toThrow('offline');
     expect(f.repo.current('meeting-fixture')!.kind).toBe('text_generation'); expect(f.inference).not.toHaveBeenCalled();
+  });
+  it.each(['continue', 'skip', 'rerun', 'retry'] as const)('notifies once per remote analysis and re-enables native eligibility after %s', async (transition) => {
+    const f = fixture(undefined, (async () => { throw new Error('offline'); }) as typeof fetch);
+    const notified = new Set(['meeting-fixture']); // a previous local or remote entry
+    const notifications: string[] = [];
+    f.coordinator.onSpeakerGateReset(id => clearGateNotified(id, notified));
+    f.coordinator.onAwaitingSpeakerId(id => { if (shouldNotifyGate(id, notified)) notifications.push(id); });
+    const first = stage(f, 'audio_analysis');
+    expect(notified.has('meeting-fixture')).toBe(false);
+    f.importer.publish(first);
+    for (let i = 0; i < 2; i++) await expect(f.coordinator.step(first)).rejects.toThrow('offline');
+    expect(notifications).toHaveLength(1);
+    // Duplicate Start/Retry of this parked run must not reset its eligibility.
+    expect(f.coordinator.start('meeting-fixture')).toBe(first); f.coordinator.retry('meeting-fixture');
+    expect(notified.has('meeting-fixture')).toBe(true);
+    if (transition === 'continue') {
+      f.coordinator.continueFromSpeakerId('meeting-fixture');
+      expect(notified.has('meeting-fixture')).toBe(false);
+    } else if (transition === 'skip') {
+      f.ctx.meetings.updateSkipSpeakerId('meeting-fixture', true);
+      await expect(f.coordinator.step(first)).rejects.toThrow('offline');
+      expect(f.repo.current('meeting-fixture')!.kind).toBe('text_generation');
+      expect(notified.has('meeting-fixture')).toBe(false);
+      f.ctx.meetings.updateSkipSpeakerId('meeting-fixture', false);
+    }
+    if (transition === 'retry') {
+      f.coordinator.cancel('meeting-fixture'); f.coordinator.retry('meeting-fixture');
+    } else f.coordinator.rerun('meeting-fixture', 'transcribing');
+    const second = f.repo.current('meeting-fixture')!.id;
+    expect(second).not.toBe(first); expect(notified.has('meeting-fixture')).toBe(false);
+    f.importer.stage(f.repo.get(second)!, 'c'.repeat(64), audioArtifacts); f.importer.publish(second);
+    for (let i = 0; i < 2; i++) await expect(f.coordinator.step(second)).rejects.toThrow('offline');
+    expect(notifications).toHaveLength(2);
+    expect(f.db.prepare("SELECT run_id,state FROM remote_effects WHERE effect='speaker_gate' ORDER BY run_id").all())
+      .toEqual([first, second].sort().map(run_id => ({ run_id, state: 'completed' })));
   });
 });
 

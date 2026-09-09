@@ -21,7 +21,7 @@ The published 1.12.0 workflow uses no cloud or inference API keys. This experime
 ---
 
 > [!NOTE]
-> **Local remains the default.** In local mode, audio never leaves the device: capture, speech-to-text, speaker diarization, and the LLM summary happen locally. This experimental branch also offers opt-in remote processing, which uploads a selected recording, transcript snapshots, and generated speaker embeddings to an operator-configured service. See [Experimental remote processing](docs/cloud-processing.md).
+> **Local remains the default.** In local mode, audio never leaves the device: capture, speech-to-text, speaker diarization, and the LLM summary happen locally. This experimental branch also offers opt-in remote processing: the selected recording and labeled transcript snapshots are uploaded to an operator-configured service; generated transcripts, speaker embeddings, summaries, and action items are downloaded. The voice roster stays on the Mac. See [Experimental remote processing](docs/cloud-processing.md).
 
 ## ✨ What it does
 
@@ -347,7 +347,7 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 🔒 Privacy & security
 
-- **Local by default.** In local mode, audio, transcripts, and summaries never leave your Mac. Experimental remote mode is opt-in and transfers the selected recording, labeled transcript snapshots, and generated embeddings to the configured private service; the local roster and original recording remain on the Mac. See [the remote-processing operator guide](docs/cloud-processing.md).
+- **Local by default.** In local mode, audio, transcripts, and summaries never leave your Mac. Experimental remote mode is opt-in: it uploads the selected recording and labeled transcript snapshots to the configured private service, then downloads generated transcripts, embeddings, summaries, and action items. The voice roster and original recording remain on the Mac. See [the remote-processing operator guide](docs/cloud-processing.md).
 - **Sandboxed renderer** — `contextIsolation: true`, `nodeIntegration: false`; the preload exposes a typed API surface only, and every IPC payload is **zod-validated**.
 - **Scoped audio capture** — the Swift helper is codesigned with the audio-input entitlement; TCC scopes your grant to MeetingNotes specifically, and the helper auto-stops if the app dies (no orphaned recorder).
 - **Parameterized SQLite** (`better-sqlite3`, FKs + WAL). The HF token is stored `chmod 600` and needed only for the one-time model download.

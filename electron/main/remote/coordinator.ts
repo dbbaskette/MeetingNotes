@@ -20,11 +20,13 @@ export class RemoteCoordinator {
   private busy = new Set<string>();
   private completion: (meetingId: string) => Promise<void> = async () => {};
   private gate: (meetingId: string) => void = () => {};
+  private resetGate: (meetingId: string) => void = () => {};
   constructor(readonly repository: RemoteRepository, private credentials: RemoteCredentials,
     private ctx: PipelineContext, readonly importer: RemoteImporter,
     private options: { allowLoopback?: boolean; fetcher?: typeof fetch; changed?: (id: string) => void } = {}) {}
   onComplete(callback: (meetingId: string) => Promise<void>): void { this.completion = callback; }
   onAwaitingSpeakerId(callback: (meetingId: string) => void): void { this.gate = callback; }
+  onSpeakerGateReset(callback: (meetingId: string) => void): void { this.resetGate = callback; }
   isRemote(id: string): boolean { return !!this.repository.current(id); }
   usesRemote(): boolean { return this.repository.configuration().mode === 'remote'; }
   configuration() {
@@ -84,6 +86,7 @@ export class RemoteCoordinator {
       if (existing) this.repository.patch(existing.id, { active: false, deleteRequested: true });
       this.repository.save(run); this.ctx.meetings.updateStage(meetingId, 'transcribing'); this.ctx.meetings.updateStatus(meetingId, 'processing');
     })();
+    this.resetGate(meetingId);
     this.options.changed?.(meetingId); return run.id;
   }
   private newRun(meetingId: string, kind: RemoteRun['kind'], configuration: RunConfiguration): RemoteRun {
@@ -114,6 +117,9 @@ export class RemoteCoordinator {
       this.repository.patch(previous.id, { active: false }); this.repository.save(run);
       this.ctx.meetings.updateStage(meetingId, 'summarizing'); this.ctx.meetings.updateStatus(meetingId, 'processing');
     })();
+    // Centralized here so IPC Continue/Skip and automatic skip all reset native
+    // eligibility only after a durable gate exit, not on duplicate requests.
+    this.resetGate(meetingId);
     this.options.changed?.(meetingId); return run.id;
   }
   /** Immediate local fence; network cancellation/deletion is durable best effort, including offline. */
@@ -124,6 +130,7 @@ export class RemoteCoordinator {
     }
     if (!run) return;
     this.repository.patch(run.id, { phase: 'cancelled', active: !deactivate, deleteRequested: true, error: null });
+    this.resetGate(meetingId);
     this.ctx.meetings.updateStatus(meetingId, 'pending'); this.options.changed?.(meetingId);
   }
   confirmSpeaker(meetingId: string, label: string, rosterId: string): void {

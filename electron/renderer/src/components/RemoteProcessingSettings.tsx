@@ -29,7 +29,7 @@ export function RemoteProcessingSettings(): JSX.Element {
       </select>
     </label>
     {mode === 'remote' && <>
-      <p className="text-sm text-ink-muted">Processing uploads the selected recording, transcript, and generated speaker embeddings to your server. Names are sent after speaker review. Your voice roster stays on this Mac. Closing the app does not cancel accepted jobs.</p>
+      <p className="text-sm text-ink-muted">Processing uploads the selected recording and, after speaker review or skip, a labeled transcript to your server. The server generates and returns the transcript, speaker embeddings, summary, and action items. Your voice roster stays on this Mac. Closing the app does not cancel accepted jobs.</p>
       <label className="block text-sm text-ink-muted">Server URL
         <input className="input mt-1" type="url" placeholder="https://meeting-processing.example.com" value={endpoint} onChange={e => setEndpoint(e.target.value)} disabled={busy} />
       </label>

@@ -80,7 +80,8 @@ export class RemoteImporter {
       });
       const names: Record<string, string> = {};
       for (const link of labels) if (link.rosterId) { const speaker = this.ctx.speakers.findById(link.rosterId); if (speaker) names[link.label] = speaker.displayName; }
-      for (const link of this.ctx.speakers.listForMeeting(run.meetingId)) if (link.displayName) names[link.localLabel] = link.displayName;
+      // Cluster labels belong only to this analysis. Prior manual assignments
+      // may carry forward through verified roster embeddings, never label equality.
       outputs['transcript.raw.json'] = JSON.stringify(transcription);
       outputs['diarization.json'] = JSON.stringify(diar);
       outputs['transcript.md'] = mergedToMarkdown(mergeTranscriptWithDiarization(transcription.segments, diar.segments), names);
@@ -137,8 +138,11 @@ export class RemoteImporter {
         for (const item of journal.text.actionItems) this.ctx.actionItems.create(run.meetingId, { text: item.text, ownerName: item.owner, dueDate: item.due_date });
         this.ctx.meetings.updateStage(run.meetingId, 'done'); this.ctx.meetings.updateStatus(run.meetingId, 'done');
       } else {
-        const existing = new Set(this.ctx.speakers.listForMeeting(run.meetingId).map(s => s.localLabel));
-        for (const link of journal.labels) if (!existing.has(link.label)) this.ctx.speakers.linkToMeeting(run.meetingId, link.label, link.rosterId, link.confidence);
+        // The journal's previous-database/previous-diarization files preserve
+        // displaced generation-specific assignments. Replace only active links,
+        // atomically and behind the revision fence; roster vectors/history remain.
+        this.ctx.speakers.unlinkMeeting(run.meetingId);
+        for (const link of journal.labels) this.ctx.speakers.linkToMeeting(run.meetingId, link.label, link.rosterId, link.confidence);
         this.ctx.meetings.updateStage(run.meetingId, 'awaiting_speaker_id'); this.ctx.meetings.updateStatus(run.meetingId, 'awaiting_user');
       }
       this.repo.db.prepare("UPDATE remote_imports SET state='committed' WHERE run_id=?").run(run.id);

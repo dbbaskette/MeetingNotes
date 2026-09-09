@@ -59,7 +59,7 @@ import { boundsVisibleOn, sanitizeBounds, type WindowBounds } from './lib/window
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
-import { shouldNotifyGate } from './pipeline/gate-alert.js';
+import { shouldNotifyGate, clearGateNotified } from './pipeline/gate-alert.js';
 import { ArtifactCache } from './library/artifact-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -576,6 +576,7 @@ app.whenReady().then(async () => {
   };
   pipeline.onAwaitingSpeakerId(notifySpeakerGate);
   remote.onAwaitingSpeakerId(notifySpeakerGate);
+  remote.onSpeakerGateReset((meetingId) => clearGateNotified(meetingId, gateNotified));
 
   // Google account auth (BYO OAuth desktop client). The refresh token is
   // encrypted via the OS keychain (safeStorage); credentials + email live in
