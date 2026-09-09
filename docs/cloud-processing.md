@@ -1,6 +1,6 @@
 # Experimental remote processing: operator guide
 
-This guide covers the optional remote-processing implementation on `codex/cloud-processing-design`, based on MeetingNotes 1.12.0. It is not part of the published 1.12.0 release, not deployed, and not production-qualified. Local processing remains the default. The Mac keeps the authoritative SQLite library, original recording, roster, edits, playback and exports.
+This guide covers the optional remote-processing implementation in MeetingNotes 1.13.0-beta.1, developed on `codex/cloud-processing-design` from the stable 1.12.0 baseline. This is an experimental desktop build, not a deployed or production-qualified remote service. Local processing remains the default. The Mac keeps the authoritative SQLite library, original recording, roster, edits, playback and exports.
 
 Remote mode uploads a selected recording to private object storage, then uploads a labeled transcript snapshot for summary generation. Generated transcripts, speaker embeddings, summaries and action items are downloaded to the Mac; names enter the remote text snapshot after local review or skip. The server never receives a Mac path or the local roster. Closing the app does not cancel an accepted job; choosing **Process locally** explicitly fences/cancels the remote run before enqueueing local work.
 

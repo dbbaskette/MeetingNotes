@@ -338,7 +338,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.13.0-beta.1-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -354,7 +354,7 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.12.0** — the published stable baseline on macOS 14.2+ / Apple Silicon. Recovery inspections are cached and streamed, damaged captures can be previewed and trimmed safely, meeting artifacts load asynchronously on demand, and the Library uses paginated retrieval with bounded virtual rendering. The separate `codex/cloud-processing-design` branch adds an experimental opt-in remote path; it is not a 1.12.0 release, deployment, installer, or promise of production readiness. The local pipeline remains the default and is unchanged.
+**1.13.0-beta.1** — an experimental desktop build on macOS 14.2+ / Apple Silicon, adding opt-in remote processing. **1.12.0 remains the stable baseline.** Recovery inspections are cached and streamed, damaged captures can be previewed and trimmed safely, meeting artifacts load asynchronously on demand, and the Library uses paginated retrieval with bounded virtual rendering. The local pipeline remains the default. This beta does not deploy or qualify a remote service for production; see the [beta notes](docs/releases/v1.13.0-beta.1.md) and [operator guide](docs/cloud-processing.md).
 
 ## 📄 License
 
