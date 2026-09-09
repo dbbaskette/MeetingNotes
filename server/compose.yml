@@ -1,0 +1,21 @@
+name: meetingnotes-remote-synthetic
+services:
+  postgres:
+    image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_USER: synthetic
+      POSTGRES_PASSWORD: synthetic-local-only
+      POSTGRES_DB: meetingnotes_synthetic
+    ports: ['127.0.0.1:55432:5432']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U synthetic -d meetingnotes_synthetic']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: synthetic
+      MINIO_ROOT_PASSWORD: synthetic-local-only
+    ports: ['127.0.0.1:59000:9000', '127.0.0.1:59001:9001']

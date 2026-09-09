@@ -1,0 +1,28 @@
+# Template only. Select cf-context, qualify the foundation and supply secrets first.
+applications:
+  - name: meetingnotes-processing
+    docker:
+      image: ((approved-image))
+    processes:
+      - type: web
+        command: node dist/server/src/api.js
+        instances: 1
+        memory: 1G
+        disk_quota: 2G
+        health-check-type: http
+        health-check-http-endpoint: /healthz
+      - type: worker
+        command: node dist/server/src/worker.js
+        instances: 1
+        memory: 8G
+        disk_quota: 10G
+        health-check-type: process
+    env:
+      NODE_ENV: production
+      PROCESSOR: providers
+      MAX_DURATION_SECONDS: 3600
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    services:
+      - ((postgres-service))
+      - ((object-service))

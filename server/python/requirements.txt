@@ -1,0 +1,6 @@
+# Linux CPU wheels, independent of the macOS frozen sidecar.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchaudio==2.5.1+cpu
+pyannote.audio==3.3.2
+numpy==1.26.4

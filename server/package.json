@@ -1,0 +1,35 @@
+{
+  "name": "meeting-notes-remote",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.15"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "api": "node --import tsx src/api.ts",
+    "worker": "node --import tsx src/worker.ts",
+    "migrate": "node --import tsx src/migrate.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "INTEGRATION=1 node --import tsx --test tests/integration.test.ts",
+    "smoke": "node --import tsx scripts/smoke.ts",
+    "local:setup": "node --import tsx scripts/local.ts setup",
+    "local:api": "node --import tsx scripts/local.ts api",
+    "local:worker": "node --import tsx scripts/local.ts worker"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1128.0",
+    "@aws-sdk/s3-request-presigner": "3.1128.0",
+    "fastify": "5.12.3",
+    "pg": "8.16.3",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.10",
+    "@types/pg": "8.15.5",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}
