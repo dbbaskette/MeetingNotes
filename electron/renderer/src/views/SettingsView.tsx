@@ -6,6 +6,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
+import { RemoteProcessingSettings } from '../components/RemoteProcessingSettings';
 
 interface Settings {
   lmStudioUrl: string;
@@ -69,10 +70,10 @@ export function SettingsView({
   useEffect(() => {
     void (async () => {
       setS((await api.settings.getAll()) as Settings);
-      setModels((await api.models.list()) as string[]);
-      setPerms((await api.permissions.audio()) as AudioPerms);
-      setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
-      setProviders((await api.llm.detectProviders()) as ProviderAvailability);
+      void api.models.list().then(v => setModels(v as string[])).catch(() => {});
+      void api.permissions.audio().then(v => setPerms(v as AudioPerms)).catch(() => {});
+      void api.speakers.list().then(v => setSpeakers(v as SpeakerListEntry[])).catch(() => {});
+      void api.llm.detectProviders().then(v => setProviders(v as ProviderAvailability)).catch(() => {});
     })();
   }, []);
 
@@ -121,6 +122,7 @@ export function SettingsView({
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
+      <RemoteProcessingSettings />
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -1157,4 +1159,3 @@ function SpeakerRosterRow({
     </li>
   );
 }
-

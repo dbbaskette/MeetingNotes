@@ -292,6 +292,36 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 17,
+    up: `
+      CREATE TABLE remote_configuration (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
+      CREATE TABLE remote_credentials (identity TEXT PRIMARY KEY, ciphertext BLOB NOT NULL);
+      CREATE TABLE remote_runs (id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL, active INTEGER NOT NULL,
+        value TEXT NOT NULL);
+      CREATE UNIQUE INDEX remote_active_meeting ON remote_runs(meeting_id) WHERE active=1;
+      CREATE TABLE remote_imports (run_id TEXT PRIMARY KEY, manifest_digest TEXT NOT NULL, state TEXT NOT NULL,
+        journal TEXT NOT NULL);
+      CREATE TABLE remote_effects (run_id TEXT NOT NULL, effect TEXT NOT NULL, state TEXT NOT NULL,
+        PRIMARY KEY(run_id,effect));
+      CREATE TABLE remote_revisions (meeting_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE remote_roster_embeddings (speaker_id TEXT NOT NULL REFERENCES speakers(id) ON DELETE CASCADE,
+        identity TEXT NOT NULL, vector TEXT NOT NULL, PRIMARY KEY(speaker_id,identity));
+      CREATE TRIGGER remote_meeting_edit AFTER UPDATE OF title,audio_path,deleted_at ON meetings BEGIN
+        INSERT INTO remote_revisions VALUES (NEW.id,1) ON CONFLICT(meeting_id) DO UPDATE SET revision=revision+1;
+      END;
+      CREATE TRIGGER remote_speaker_name AFTER UPDATE OF display_name ON speakers BEGIN
+        INSERT INTO remote_revisions SELECT meeting_id,1 FROM meeting_speakers WHERE roster_speaker_id=NEW.id
+          ON CONFLICT(meeting_id) DO UPDATE SET revision=revision+1;
+      END;
+      ${['meeting_speakers', 'action_items'].flatMap(table => ['INSERT', 'UPDATE', 'DELETE'].map(op => `
+        CREATE TRIGGER remote_${table}_${op.toLowerCase()} AFTER ${op} ON ${table} BEGIN
+          INSERT INTO remote_revisions VALUES (${op === 'DELETE' ? 'OLD' : 'NEW'}.meeting_id,1)
+            ON CONFLICT(meeting_id) DO UPDATE SET revision=revision+1;
+        END;
+      `)).join('\n')}
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -8,6 +8,8 @@ export const MeetingSpeakerSchema = z.object({
 });
 
 export const MeetingSummarySchema = z.object({
+  remote: z.object({ runId: z.string(), phase: z.string(), bytesUploaded: z.number(), totalBytes: z.number().nullable(),
+    lastContact: z.string().nullable(), error: z.string().nullable(), endpoint: z.string() }).nullable().optional(),
   id: z.string(),
   slug: z.string(),
   title: z.string(),
@@ -131,6 +133,13 @@ export const MeetingSpeakerReviewSchema = z.object({
 export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
 
 export const IPC_CHANNELS = {
+  remoteConfiguration: 'remote:configuration',
+  remoteTest: 'remote:test',
+  remoteSetMode: 'remote:set-mode',
+  remoteStatus: 'remote:status',
+  remoteAction: 'remote:action',
+  remoteReview: 'remote:review',
+  remoteResolve: 'remote:resolve',
   meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',

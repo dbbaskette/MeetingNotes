@@ -33,6 +33,10 @@ import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
 import { recoverPendingMeetings } from './pipeline/recovery.js';
+import { RemoteRepository } from './remote/repository.js';
+import { RemoteCredentials } from './remote/credentials.js';
+import { RemoteImporter } from './remote/importer.js';
+import { RemoteCoordinator } from './remote/coordinator.js';
 import { runTranscribing } from './pipeline/stages/transcribing.js';
 import { runDiarizing } from './pipeline/stages/diarizing.js';
 import { runMerging } from './pipeline/stages/merging.js';
@@ -351,6 +355,14 @@ app.whenReady().then(async () => {
   // notify once per entry (spec: no nagging). Cleared when a meeting is
   // unblocked — see the IPC handlers.
   const gateNotified = new Set<string>();
+  const remoteRepository = new RemoteRepository(db);
+  const remoteImporter = new RemoteImporter(remoteRepository, ctx);
+  // Complete interrupted publication before any IPC reader or local recovery runs.
+  remoteImporter.replay();
+  const remote = new RemoteCoordinator(remoteRepository, new RemoteCredentials(db, safeStorage), ctx, remoteImporter, {
+    allowLoopback: !app.isPackaged,
+    changed: (id) => { for (const w of BrowserWindow.getAllWindows()) w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id }); },
+  });
 
   // Multi-watch (Option B): the built-in recorder now writes .m4a into
   // <library>/recordings, so that's watched first. We also always watch the
@@ -399,7 +411,7 @@ app.whenReady().then(async () => {
   });
   protocol.handle('recovery-audio', recoveryMediaHandler(recordingRecovery));
 
-  recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
+  recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger, isRemote: (id) => remote.isRemote(id) });
 
   // Broadcast queue state changes to all renderer windows so the
   // pause/resume/clear UI in the LibraryView reflects what's
@@ -535,7 +547,7 @@ app.whenReady().then(async () => {
   // otherwise sits blocked on the user with no proactive signal if they've
   // navigated away. Clicking the notification raises the window and lands on
   // the meeting via the same route a meetingnotes://open deeplink uses.
-  pipeline.onAwaitingSpeakerId((meetingId) => {
+  const notifySpeakerGate = (meetingId: string): void => {
     if (!shouldNotifyGate(meetingId, gateNotified)) return;
     const meeting = meetings.findById(meetingId);
     if (!meeting) return; // deleted between transition and callback — nothing to route to
@@ -553,7 +565,9 @@ app.whenReady().then(async () => {
     } catch (err) {
       logger.error('speaker-gate:notify-failed', { meetingId, err: String(err) });
     }
-  });
+  };
+  pipeline.onAwaitingSpeakerId(notifySpeakerGate);
+  remote.onAwaitingSpeakerId(notifySpeakerGate);
 
   // Google account auth (BYO OAuth desktop client). The refresh token is
   // encrypted via the OS keychain (safeStorage); credentials + email live in
@@ -609,7 +623,7 @@ app.whenReady().then(async () => {
   // actually happens; URL validation happens inside deliverPayload so
   // a misconfigured endpoint surfaces in the Settings card without
   // blocking the meeting's completion.
-  pipeline.onMeetingComplete(async (meetingId) => {
+  const completeMeeting = async (meetingId: string): Promise<void> => {
     if (!settings.get('exporterWebhook')) return;
     const webhook = exporters.webhook;
     if (!webhook || typeof (webhook as { deliverPayload?: unknown }).deliverPayload !== 'function') return;
@@ -652,7 +666,10 @@ app.whenReady().then(async () => {
     if (result.error) {
       logger.error('webhook:auto-fire-failed', { meetingId, error: result.error });
     }
-  });
+  };
+  pipeline.onMeetingComplete(completeMeeting);
+  remote.onComplete(completeMeeting);
+  remote.startLifecycle();
   // Weekly summary aggregator (#weekly). Builds the per-week digest
   // from the existing meetings + action_items tables, with an LLM-
   // narrative cache backed by the weekly_summaries table.
@@ -672,6 +689,7 @@ app.whenReady().then(async () => {
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
+    remote,
     meetings,
     speakers,
     actionItems,
@@ -720,6 +738,7 @@ app.whenReady().then(async () => {
     shuttingDown = true;
     e.preventDefault();
     pipeline.drain();
+    remote.stop();
     void (async () => {
       // Stop any active recordings cleanly so finalize is written, instead of
       // leaving the helper to die on parent-watch (which works but leaves an

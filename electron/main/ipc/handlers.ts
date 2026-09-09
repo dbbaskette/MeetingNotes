@@ -53,8 +53,10 @@ import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
 import type { ArtifactCache } from '../library/artifact-cache.js';
+import type { RemoteCoordinator } from '../remote/coordinator.js';
 
 export interface IpcServices {
+  remote?: RemoteCoordinator;
   meetings: MeetingsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
@@ -130,6 +132,7 @@ function meetingSummary(
   const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
   return {
     id: m.id, slug: m.slug, title: m.title,
+    remote: s.remote?.status(m.id) ?? null,
     startedAt: m.startedAt, durationS: m.durationS,
     pipelineStage: m.pipelineStage, status: m.status,
     errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
@@ -182,6 +185,31 @@ function speakerReviewForFolderSync(
 }
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  const remote = () => { if (!s.remote) throw new Error('Remote processing unavailable'); return s.remote; };
+  const remoteId = z.string().min(1).max(200);
+  ipc.handle(IPC_CHANNELS.remoteConfiguration, () => remote().configuration());
+  ipc.handle(IPC_CHANNELS.remoteTest, async (_e, input: unknown) => {
+    const v = z.object({ endpoint: z.string().max(2048), token: z.string().min(32).max(4096) }).strict().parse(input);
+    try { return await remote().test(v.endpoint, v.token); } catch { throw new Error('Connection test failed. Check the HTTPS server URL, token, and Keychain access.'); }
+  });
+  ipc.handle(IPC_CHANNELS.remoteSetMode, (_e, value: unknown) => remote().setMode(z.enum(['local', 'remote']).parse(value)));
+  ipc.handle(IPC_CHANNELS.remoteStatus, (_e, id: unknown) => remote().status(remoteId.parse(id)));
+  ipc.handle(IPC_CHANNELS.remoteReview, (_e, id: unknown) => remote().importer.review(remoteId.parse(id)));
+  ipc.handle(IPC_CHANNELS.remoteResolve, (_e, input: unknown) => {
+    const v = z.object({ meetingId: remoteId, runId: z.string().uuid(), accept: z.boolean(), localFingerprint: z.string().regex(/^[a-f0-9]{64}$/) }).strict().parse(input);
+    remote().resolve(v.meetingId, v.runId, v.accept, v.localFingerprint);
+  });
+  ipc.handle(IPC_CHANNELS.remoteAction, (_e, input: unknown) => {
+    const v = z.object({ meetingId: remoteId, action: z.enum(['retry', 'cancel', 'local']) }).strict().parse(input);
+    if (v.action === 'retry') { remote().retry(v.meetingId); return; }
+    if (v.action === 'cancel') { remote().cancel(v.meetingId); return; }
+    remote().fallback(v.meetingId, () => {
+      const meeting = s.meetings.findById(v.meetingId); if (!meeting || meeting.deletedAt) throw new Error('Meeting not found');
+      clearArtifactsFromStage(meetingFolderPath(s.libraryRoot, meeting.slug), 'transcribing', s.artifactCache);
+      s.actionItems.deleteForMeeting(v.meetingId); s.speakers.unlinkMeeting(v.meetingId);
+      s.meetings.updateStage(v.meetingId, 'discovered'); s.meetings.updateStatus(v.meetingId, 'processing'); s.pipeline.enqueue(v.meetingId);
+    });
+  });
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
 
   ipc.handle(IPC_CHANNELS.logsTail, (_e, maxEntries?: unknown) => {
@@ -261,6 +289,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     );
     return {
       ...m, slug: m.slug,
+      remote: s.remote?.status(m.id) ?? null,
       stageStartedAt: m.stageStartedAt,
       skipSpeakerId: m.skipSpeakerId,
       unidentifiedCount: unidentifiedCount(speakers),
@@ -333,6 +362,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return {
       id: m.id,
       title: m.title,
+      remote: s.remote?.status(m.id) ?? null,
       pipelineStage: m.pipelineStage,
       status: m.status,
       errorMessage: m.errorMessage,
@@ -354,6 +384,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
     if (!m || m.deletedAt) return false; // idempotent no-op, not a new deletion
+    s.remote?.cancel(id, true);
     // Soft-delete: move files to the per-meeting trash dir, stamp
     // deleted_at on the row. The undo path (meetingsUndoDelete) moves
     // everything back. Purge expired entries on startup + on a timer.
@@ -395,6 +426,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.meetingsRerun, (_e, id: string, fromStage: string) => {
     const parsed = RerunSchema.parse({ id, fromStage });
+    if (s.remote?.isRemote(id)) { s.remote.rerun(id, parsed.fromStage); return; }
     // Clear stale artifacts & DB rows for the stage we're rewinding to, so the
     // UI doesn't keep showing yesterday's bad transcript while the retry runs.
     const meeting = s.meetings.findById(parsed.id);
@@ -415,7 +447,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof id !== 'string' || id.length === 0) return false;
     const m = s.meetings.findById(id);
     if (!m) return false;
+    if (m.deletedAt) return false;
     if (pendingOnly && (m.deletedAt || m.status !== 'pending')) return false;
+    if (s.remote?.isRemote(id)) { s.remote.retry(id); return true; }
+    if (m.status === 'processing') return true;
+    if (m.pipelineStage === 'discovered' && s.remote?.usesRemote()) { s.remote.start(id); return true; }
     s.meetings.updateStatus(id, 'processing');
     try {
       s.pipeline.enqueue(id);
@@ -441,6 +477,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (skip) {
       const m = s.meetings.findById(id);
       if (m?.pipelineStage === 'awaiting_speaker_id') {
+        if (s.remote?.isRemote(id)) { s.remote.continueFromSpeakerId(id); return; }
         // Re-merge transcript.md with whatever identifications the user made
         // before flipping the skip switch — they may have labeled some but
         // not all voices, and they still deserve names in the transcript.
@@ -462,6 +499,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Only meaningful when parked at the gate — guard so an accidental double-
     // click or stale UI state can't re-kick a meeting that's already running.
     if (m.pipelineStage !== 'awaiting_speaker_id') return;
+    if (s.remote?.isRemote(id)) { s.remote.continueFromSpeakerId(id); return; }
     // Leaving the gate — forget the notified flag so a future re-entry alerts.
     clearGateNotified(id, s.gateNotified);
     // Rewrite transcript.md with the user's roster assignments BEFORE
@@ -492,6 +530,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const summaryPath = path.join(folder, 'summary.md');
     s.artifactCache.invalidate(summaryPath);
     fs.writeFileSync(summaryPath, markdown);
+    s.remote?.repository.bumpRevision(id);
     return markdown;
   });
 
@@ -596,6 +635,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {
     const parsed = ConfirmSpeakerSchema.parse(input);
+    if (s.remote?.isRemote(parsed.meetingId)) {
+      const id = s.speakers.findByDisplayName(parsed.displayName)?.id ?? s.speakers.create({ displayName: parsed.displayName });
+      s.remote.confirmSpeaker(parsed.meetingId, parsed.localLabel, id);
+      s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1); return id;
+    }
     const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding: parsed.embedding });
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     return id;
@@ -678,6 +722,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
     if (parsed.mode === 'existing') {
       if (!parsed.rosterId) throw new Error('rosterId required for mode=existing');
+      if (s.remote?.isRemote(parsed.meetingId)) s.remote.confirmSpeaker(parsed.meetingId, parsed.localLabel, parsed.rosterId);
       // Reinforce the roster entry's embedding with this new observation —
       // the speaker sounded close enough for the user to confirm a match,
       // so averaging that into the saved embedding makes future automatic
@@ -690,7 +735,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
             segments: DiarizationSegment[];
           };
           const embedding = averageEmbeddingForLabel(diar.segments, parsed.localLabel);
-          if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+          if (embedding && !s.remote?.isRemote(parsed.meetingId)) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
         } catch { /* roster update is best-effort; don't fail the link */ }
       }
       s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, parsed.rosterId, 1.0);
@@ -701,6 +746,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // mode === 'new': derive the embedding from diarization.json so the
     // renderer never touches raw embeddings.
     if (!parsed.displayName) throw new Error('displayName required for mode=new');
+    if (s.remote?.isRemote(parsed.meetingId)) {
+      const id = s.speakers.findByDisplayName(parsed.displayName)?.id ?? s.speakers.create({ displayName: parsed.displayName });
+      s.remote.confirmSpeaker(parsed.meetingId, parsed.localLabel, id);
+      s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1); remergeMeetings([parsed.meetingId]); return id;
+    }
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const diarPath = path.join(folder, 'diarization.json');
     if (!fs.existsSync(diarPath)) throw new Error('diarization not available yet');
@@ -732,8 +782,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       diarization = (JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] }).segments ?? [];
     } catch { /* assignment itself remains valid without embedding reinforcement */ }
     for (const localLabel of labels) {
+      if (s.remote?.isRemote(parsed.meetingId)) s.remote.confirmSpeaker(parsed.meetingId, localLabel, parsed.rosterId);
       const embedding = averageEmbeddingForLabel(diarization, localLabel);
-      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+      if (embedding && !s.remote?.isRemote(parsed.meetingId)) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
       s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
     }
     remergeMeetings([parsed.meetingId]);
@@ -745,6 +796,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.speakersSuggestions, (_e, meetingId: unknown, localLabel: unknown) => {
     if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
+    if (s.remote?.isRemote(meetingId)) return [];
     const m = s.meetings.findById(meetingId);
     if (!m) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, m.slug);

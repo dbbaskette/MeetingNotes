@@ -23,8 +23,10 @@ import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
 import { MeetingRowMenu } from './MeetingRowMenu';
+import { remotePhase } from './RemoteRunStatus';
 
 interface Meeting {
+  remote?: { phase: string } | null;
   id: string;
   title: string;
   startedAt: string | null;
@@ -246,6 +248,7 @@ const STAGE_CHIP_LABEL: Record<string, string> = {
 // that says "PROCESSING 2/5" matches step 2 of 5 in the detail view.
 
 function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
+  if (meeting.remote) return <span className="text-xs text-brand-indigo shrink-0">Remote · {remotePhase(meeting.remote.phase)}</span>;
   const status = meeting.status;
 
   if (status === 'pending') {

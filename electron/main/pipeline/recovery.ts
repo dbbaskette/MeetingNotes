@@ -10,6 +10,7 @@ export interface RecoveryDeps {
    *  user to explicitly restart. */
   enqueue: (meetingId: string) => void;
   logger: Logger;
+  isRemote?: (meetingId: string) => boolean;
 }
 
 /** On launch, find any meeting that was mid-pipeline when the app
@@ -26,6 +27,7 @@ export function recoverPendingMeetings(deps: RecoveryDeps): void {
   // to satisfy strict-unused-args lints without changing the API.
   void deps.enqueue;
   for (const m of deps.meetings.findResumable()) {
+    if (deps.isRemote?.(m.id)) continue;
     const rolled = previousCompletedOnCrash(m.pipelineStage as Stage);
     if (rolled !== m.pipelineStage) deps.meetings.updateStage(m.id, rolled);
     deps.meetings.updateStatus(m.id, 'pending');

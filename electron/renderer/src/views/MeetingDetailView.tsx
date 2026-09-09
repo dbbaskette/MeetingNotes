@@ -7,6 +7,7 @@ import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { fmtEta, isRunningLong } from '../lib/fmtEta';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
+import { RemoteRunStatus } from '../components/RemoteRunStatus';
 import {
   parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker,
   formatTranscriptForExport, activeLineIndexAt,
@@ -32,6 +33,7 @@ import { createDetailArtifacts, mergeSpeakerReview, type DetailArtifactState, ty
 type Tab = 'summary' | 'transcript' | 'actions';
 
 interface MeetingDetail {
+  remote?: { phase: string } | null;
   id: string;
   title: string;
   startedAt: string | null;
@@ -418,6 +420,7 @@ export function MeetingDetailView({
           one moment in the pipeline where the UI is waiting for a human
           decision; hiding it below 8 pipeline chips hurt the time-to-
           action. Returns null when not parked. */}
+      <RemoteRunStatus meetingId={id} onChanged={() => void reload()} />
       <div className="shrink-0">
         <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
       </div>
@@ -437,7 +440,7 @@ export function MeetingDetailView({
           rerun kick the stages downstream of the rerun point flip back to
           pending so the progress is visible as it happens again. */}
       <div className="shrink-0">
-        <StageTimeline meeting={m} />
+        {!m.remote && <StageTimeline meeting={m} />}
       </div>
 
       {/* Quiet pre-gate skip-toggle row. Returns null when parked — the

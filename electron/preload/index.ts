@@ -6,6 +6,8 @@ interface RecoveryItem {
   durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
 }
 let recoveryRequest = 0;
+type RemoteConfiguration = { mode: 'local' | 'remote'; endpoint: string; testedAt: string | null; profile: string | null; serviceId: string | null; ownerId: string | null };
+type RemoteStatus = { runId: string; phase: string; bytesUploaded: number; totalBytes: number | null; lastContact: string | null; error: string | null; endpoint: string };
 
 // Keep these structural types local: importing main contracts makes the CJS
 // compiler emit main-process modules again.
@@ -17,6 +19,7 @@ type MeetingListQuery = {
   pageSize?: number;
 };
 type MeetingSummary = {
+  remote?: RemoteStatus | null;
   id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
   pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
   unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
@@ -33,6 +36,13 @@ type MeetingSummaryPage = {
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
+  remoteConfiguration: 'remote:configuration',
+  remoteTest: 'remote:test',
+  remoteSetMode: 'remote:set-mode',
+  remoteStatus: 'remote:status',
+  remoteAction: 'remote:action',
+  remoteReview: 'remote:review',
+  remoteResolve: 'remote:resolve',
   meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',
@@ -124,6 +134,15 @@ const IPC_CHANNELS = {
 } as const;
 
 const api = {
+  remote: {
+    configuration: () => ipcRenderer.invoke(IPC_CHANNELS.remoteConfiguration) as Promise<RemoteConfiguration>,
+    test: (endpoint: string, token: string) => ipcRenderer.invoke(IPC_CHANNELS.remoteTest, { endpoint, token }) as Promise<RemoteConfiguration>,
+    setMode: (mode: 'local' | 'remote') => ipcRenderer.invoke(IPC_CHANNELS.remoteSetMode, mode) as Promise<RemoteConfiguration>,
+    status: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.remoteStatus, meetingId) as Promise<RemoteStatus | null>,
+    action: (meetingId: string, action: 'retry' | 'cancel' | 'local') => ipcRenderer.invoke(IPC_CHANNELS.remoteAction, { meetingId, action }) as Promise<void>,
+    review: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.remoteReview, meetingId) as Promise<{ runId: string; kind: string; summary: string | null; generation: string; localFingerprint: string }>,
+    resolve: (meetingId: string, runId: string, accept: boolean, localFingerprint: string) => ipcRenderer.invoke(IPC_CHANNELS.remoteResolve, { meetingId, runId, accept, localFingerprint }) as Promise<void>,
+  },
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     /** Live keyset page; restart after changing filters/sorts or refreshing. */
