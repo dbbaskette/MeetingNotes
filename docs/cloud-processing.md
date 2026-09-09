@@ -100,37 +100,101 @@ Never dump environment or service-binding credentials to validate rotation. A pr
 
 ## Tanzu Platform / Cloud Foundry procedure
 
-No foundation is selected in the current validation session. Read-only `cfctx ls` previously reported `cdc` and `ndc`; no `cf` command has run. An operator must explicitly choose the foundation, org and space. Every later command must reassert that choice in the same shell invocation:
+No foundation is selected in the current validation session. Read-only `cfctx ls` previously reported `cdc` and `ndc`; no `cf` command has run. An operator must explicitly choose the foundation, org and space before using the procedure below. Replace these non-secret values first; do not copy a token, binding, service key or environment dump into the evidence directory.
 
 ```sh
-zsh -ic 'cfctx <chosen> && cf target'
+CF_FOUNDATION=replace-with-explicit-choice
+CF_ORG=replace-with-approved-org
+CF_SPACE=replace-with-approved-space
+CF_POSTGRES_OFFERING=replace-with-postgres-offering
+CF_OBJECT_OFFERING=replace-with-object-offering
+CF_POSTGRES_INSTANCE=replace-with-postgres-instance
+CF_OBJECT_INSTANCE=replace-with-object-instance
+CF_EVIDENCE_DIR=./cf-read-only-evidence-YYYYMMDD
+mkdir -p "$CF_EVIDENCE_DIR"
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "$CF_EVIDENCE_DIR/00-captured-at.txt"
 ```
 
-Before any push, use read-only commands in the chosen context to record:
-
-- foundation API/version, selected org/space and image deployment support;
-- app/task memory, disk, route and service quotas;
-- PostgreSQL and private S3-compatible offerings, TLS endpoints, encryption, lifecycle/versioning, backup retention and legal holds;
-- worker CPU allocation, Linux architecture, ephemeral-disk behavior and maximum termination grace;
-- desktop-to-route and desktop-to-presigned-object HTTPS reachability;
-- approved STT/LLM endpoint reachability, licenses, egress and secret injection;
-- staged diarization/embedding repository revisions, checksums, YAML references and gated-model acceptance.
-
-Create/bind services using foundation-approved plans, then map those bindings through the platform secret mechanism to the explicit variables in `server/README.md`; the service intentionally does not guess `VCAP_SERVICES`. Build and scan an approved immutable image before substituting its registry reference and the two service instance names:
+First select the approved org/space inside the chosen foundation context and capture the effective target. `cf target` changes CLI targeting only; it does not create or update a platform resource. Every command reasserts `cfctx` because each shell is independent.
 
 ```sh
-zsh -ic 'cfctx <chosen> && cf push -f server/manifest.yml \
-  --var approved-image=<registry/image@digest> \
-  --var postgres-service=<postgres-instance> \
-  --var object-service=<object-instance>'
-zsh -ic 'cfctx <chosen> && cf run-task meetingnotes-processing \
-  --command "node dist/server/src/migrate.js" --name migrate-remote-schema --wait'
-zsh -ic 'cfctx <chosen> && cf app meetingnotes-processing'
-zsh -ic 'cfctx <chosen> && cf processes meetingnotes-processing'
-zsh -ic 'cfctx <chosen> && cf logs meetingnotes-processing --recent'
+zsh -ic "cfctx ${CF_FOUNDATION} && cf target -o '${CF_ORG}' -s '${CF_SPACE}' && cf target" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/01-target.txt"
 ```
 
-The manifest values (API 1 GiB, worker 8 GiB/10 GiB disk, one instance each) are hypotheses to measure, not guarantees. Before accepting recordings, run synthetic 5-minute, 60-minute and multi-hour fixtures on the target Linux runtime and record wall time, queue time, model load, CPU allocation, whole process-tree peak RSS, scratch peak, object/database latency, upload renewal, cancellation latency, lease recovery, cleanup backlog and API/worker restarts. Set admission limits from those measurements. A TP deployment, binding check and model-quality run are still pending.
+Then run and capture this read-only preflight before any service creation, binding, push or task. These commands establish the foundation API, CAPI capabilities/stacks, org/space quotas, marketplace plans, existing service bindings and routes without returning binding credentials.
+
+```sh
+zsh -ic "cfctx ${CF_FOUNDATION} && cf api" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/02-api.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf curl /v3/info" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/03-v3-info.json"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf curl /v3/stacks" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/04-stacks.json"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf org '${CF_ORG}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/05-org.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf space '${CF_SPACE}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/06-space.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf quotas" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/07-quotas.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf marketplace" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/08-marketplace.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf marketplace -e '${CF_POSTGRES_OFFERING}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/09-postgres-plans.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf marketplace -e '${CF_OBJECT_OFFERING}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/10-object-plans.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf services" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/11-services-and-bindings.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf routes" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/12-routes.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf domains" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/13-domains.txt"
+```
+
+If the named service instances already exist, capture their plan/state metadata with `cf service`; never use `cf env`, `cf ssh-env`, `cf service-key`, `credhub get`, or a command that prints credentials.
+
+```sh
+zsh -ic "cfctx ${CF_FOUNDATION} && cf service '${CF_POSTGRES_INSTANCE}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/14-postgres-instance.txt"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf service '${CF_OBJECT_INSTANCE}'" \
+  2>&1 | tee "$CF_EVIDENCE_DIR/15-object-instance.txt"
+```
+
+For candidate endpoints supplied through the approved inventory—not discovered by dumping bindings—capture content-free TLS/reachability evidence from the operator workstation. The API must return a successful `/healthz`; the private object endpoint may return 401/403/404 without credentials, but DNS, TLS hostname validation and a completed HTTP response must succeed.
+
+```sh
+REMOTE_API_URL=https://replace-with-approved-api-route
+S3_PUBLIC_ENDPOINT=https://replace-with-approved-object-endpoint
+curl --proto '=https' --tlsv1.2 --fail-with-body --silent --show-error \
+  "$REMOTE_API_URL/healthz" | tee "$CF_EVIDENCE_DIR/16-api-health.txt"
+curl --proto '=https' --tlsv1.2 --silent --show-error --output /dev/null \
+  --write-out 'http_code=%{http_code} remote_ip=%{remote_ip} tls_verify=%{ssl_verify_result}\n' \
+  "$S3_PUBLIC_ENDPOINT/" | tee "$CF_EVIDENCE_DIR/17-object-reachability.txt"
+```
+
+Expected evidence is therefore the `00` capture timestamp plus the `01`–`17` command artifacts: exact API and selected target; `/v3/info` and stack inventory; org/space/quota output sufficient to compare the manifest's API 1 GiB and worker 8 GiB/10 GiB hypotheses; named PostgreSQL/object offerings and plans; service-instance and binding names/status without credentials; current routes/domains; and API/object TLS reachability. Add separately reviewed artifacts for image-deployment support, worker CPU/Linux architecture/termination grace, bucket encryption/lifecycle/versioning/backups/legal holds, inference egress, model licenses and staged model checksums. Hash the evidence files so later review can detect replacement:
+
+```sh
+find "$CF_EVIDENCE_DIR" -type f ! -name SHA256SUMS -exec shasum -a 256 {} + \
+  | sort > "$CF_EVIDENCE_DIR/SHA256SUMS"
+```
+
+Only after the preflight is approved should an operator create/bind services, map bindings through the platform secret mechanism to the explicit variables in `server/README.md`, and run the mutating deployment procedure. The service intentionally does not guess `VCAP_SERVICES`. Build and scan an immutable image before setting these non-secret substitutions:
+
+```sh
+REMOTE_IMAGE=registry.example.invalid/meetingnotes-processing@sha256:replace-with-reviewed-digest
+zsh -ic "cfctx ${CF_FOUNDATION} && cf push -f server/manifest.yml \
+  --var approved-image='${REMOTE_IMAGE}' \
+  --var postgres-service='${CF_POSTGRES_INSTANCE}' \
+  --var object-service='${CF_OBJECT_INSTANCE}'"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf run-task meetingnotes-processing \
+  --command 'node dist/server/src/migrate.js' --name migrate-remote-schema --wait"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf app meetingnotes-processing"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf processes meetingnotes-processing"
+zsh -ic "cfctx ${CF_FOUNDATION} && cf logs meetingnotes-processing --recent"
+```
+
+Before accepting recordings, run synthetic 5-minute, 60-minute and multi-hour fixtures on the target Linux runtime and record wall time, queue time, model load, CPU allocation, whole process-tree peak RSS, scratch peak, object/database latency, upload renewal, cancellation latency, lease recovery, cleanup backlog and API/worker restarts. Set admission limits from those measurements. A TP deployment, binding check and model-quality run are still pending.
 
 ## Retention and deletion operations
 
@@ -156,7 +220,7 @@ Validated with synthetic content as of 2026-09-09:
 - Service unit/integration coverage used real PostgreSQL and MinIO for owner auth, multipart reconciliation, leases/restarts, stale publication, cancellation, acknowledgement, cleanup and retention. The separate service production dependency audit reported zero findings.
 - The real desktop coordinator/importer completed audio upload, SQLite reopen, speaker naming, a separate text job, summary/action import, acknowledgement and deletion against that service. Throwing local-inference spies were not called. Restart, offline/reconnect, lost responses, resumable download, fallback and late-edit/conflict fences have focused tests.
 - The final Node 22 desktop run passed 116 test files with 2 opt-in performance files skipped: 940 tests passed and 5 were skipped. It included the real desktop coordinator/importer against the synthetic service. Main, preload and renderer TypeScript checks passed; the production renderer build completed 359 modules with the existing nonblocking 527.37 kB chunk advisory.
-- The final Electron 30.5.1 fixture saved remote Settings, retried/reconnected, cancelled, rejected and confirmed local fallback, and exercised both keep-local and replace conflict decisions. Its navigation probe kept the privileged window on the app document and routed one synthetic HTTPS link through the injected external-browser handler. Four captures were visually reviewed. In this unsigned normal Electron process, run after `app.whenReady()` with a temporary profile and no `ELECTRON_RUN_AS_NODE`, `safeStorage.isEncryptionAvailable()` returned `false`; no credential write or plaintext fallback was attempted. A signed app in the intended logged-in macOS user session must still prove the Keychain round trip and permission behavior.
+- The final Electron 30.5.1 fixture saved remote Settings, retried/reconnected, cancelled, rejected and confirmed local fallback, and exercised both keep-local and replace conflict decisions. Its navigation probe kept the privileged window on the app document and routed one synthetic HTTPS link through the injected external-browser handler. Four captures were visually reviewed. The isolated Vite document now supplies a restrictive fixture CSP and the final Electron run emitted no insecure-CSP warning. In this unsigned normal Electron process, run after `app.whenReady()` with a temporary profile and no `ELECTRON_RUN_AS_NODE`, `safeStorage.isEncryptionAvailable()` returned `false`; no credential write or plaintext fallback was attempted. A signed app in the intended logged-in macOS user session must still prove the Keychain round trip and permission behavior.
 - The Electron native module was restored and positively loaded after Node tests: Electron 30.5.1, ABI 123, in-memory `SELECT 1` returned `{ok:1}`. The allowlisted Docker context was 181.26 kB; the full service image build could not begin because registry metadata for the pinned Node/ffmpeg bases timed out and neither base was cached.
 
 Not validated: a selected TP foundation/org/space, CF bindings/TLS, a signed-user-session Keychain round trip/permission prompt, a user clicking a native notification (the fixture reported notification support only), sleep/wake, a live microphone/network-loss run, signed installer behavior, Linux/model packaging and licensing, real STT/diarization/LLM quality, multi-hour performance, production token rotation, backup deletion, external webhook exactly-once delivery, deployment or release. Automatic exports are at-most-one local delivery attempt; an ambiguous network outcome requires operator review and a manual retry can duplicate delivery.

@@ -35,6 +35,20 @@ describe('privileged renderer boundary', () => {
     expect(external).toHaveBeenLastCalledWith('https://docs.example.test/help');
   });
 
+  it('reports external-browser failures with a fixed code and never the sensitive URL', async () => {
+    let open: ((details: { url: string }) => { action: 'deny' }) | undefined;
+    const failure = vi.fn();
+    installWindowBoundary({
+      setWindowOpenHandler: handler => { open = handler; },
+      on: () => {},
+    }, 'file:///app/index.html', async () => { throw new Error('contains https://private.example.test/secret'); }, failure);
+    open!({ url: 'https://private.example.test/secret' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(failure).toHaveBeenCalledOnce();
+    expect(failure).toHaveBeenCalledWith('EXTERNAL_NAVIGATION_FAILED');
+    expect(JSON.stringify(failure.mock.calls)).not.toContain('private.example.test');
+  });
+
   it('rejects an IPC invocation before its registered handler sees an untrusted sender', () => {
     const handlers = new Map<string, (...args: any[]) => unknown>();
     const raw = { handle: (channel: string, handler: (...args: any[]) => unknown) => handlers.set(channel, handler) };

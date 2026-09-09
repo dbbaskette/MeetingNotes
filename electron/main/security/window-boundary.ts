@@ -27,10 +27,11 @@ export function installWindowBoundary(
   contents: BoundaryWebContents,
   expectedRendererUrl: string,
   openExternal: (url: string) => Promise<unknown>,
+  onExternalFailure: (code: 'EXTERNAL_NAVIGATION_FAILED') => void = (code) => console.warn(code),
 ): void {
   const external = (value: string): void => {
     const url = safeExternalHttpUrl(value);
-    if (url) void openExternal(url).catch(() => {});
+    if (url) void openExternal(url).catch(() => onExternalFailure('EXTERNAL_NAVIGATION_FAILED'));
   };
   contents.setWindowOpenHandler(({ url }) => {
     if (!isTrustedRendererUrl(url, expectedRendererUrl)) external(url);
