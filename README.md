@@ -356,6 +356,8 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 **1.12.0** — stable on macOS 14.2+ / Apple Silicon. Recovery inspections are cached and streamed, damaged captures can be previewed and trimmed safely, meeting artifacts load asynchronously on demand, and the Library now uses paginated retrieval with bounded virtual rendering. The full local recording and processing pipeline remains unchanged.
 
+See the [1.12.0 release notes](docs/releases/v1.12.0.md) for the complete changes, upgrade guidance, existing installer checksums and known limitations, or the [GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.0). This is a source-only GitHub publication; the existing macOS installer is unchanged. The experimental remote-processing beta is separate and is not part of 1.12.0.
+
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).
