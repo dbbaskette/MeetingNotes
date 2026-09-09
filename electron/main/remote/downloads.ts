@@ -84,7 +84,11 @@ export class DurableDownload {
     const fd = fs.openSync(this.partialPath, 'r+');
     try {
       if (start !== this.offset) {
-        fs.ftruncateSync(fd, 0); fs.fsyncSync(fd); this.offset = 0; this.hasher = createHash('sha256'); this.checkpoint();
+        // Commit the reset before destroying bytes referenced by the old
+        // checkpoint. A crash either side of truncation now reopens at zero;
+        // any remaining old prefix is merely an uncommitted tail to discard.
+        this.offset = 0; this.hasher = createHash('sha256'); this.checkpoint();
+        fs.ftruncateSync(fd, 0); fs.fsyncSync(fd);
       }
       for (;;) {
         const part = await reader.read(); if (part.done) break;

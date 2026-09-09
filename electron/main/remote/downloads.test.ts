@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,6 +48,25 @@ describe('durable artifact download checkpoints', () => {
     const reopened = new DurableDownload(dir, pin);
     expect(await reopened.consume(new Response(new Uint8Array(bytes), { headers: { 'Content-Length': String(bytes.length) } }))).toEqual(bytes);
     expect(fs.statSync(reopened.partialPath).size).toBe(bytes.length);
+  });
+  it.each(['before', 'after'] as const)('recovers a crash %s truncation during HTTP-200 fallback', async crashAt => {
+    const dir = root(), pin = identity(), first = new DurableDownload(dir, pin);
+    await expect(first.consume(interrupted())).rejects.toThrow();
+    const resumed = new DurableDownload(dir, pin), truncate = fs.ftruncateSync;
+    const fault = vi.spyOn(fs, 'ftruncateSync').mockImplementationOnce((fd, length) => {
+      if (crashAt === 'after') { truncate(fd, length); fs.fsyncSync(fd); }
+      throw new Error('simulated fallback crash');
+    });
+    try {
+      await expect(resumed.consume(new Response(new Uint8Array(bytes)))).rejects.toThrow('simulated fallback crash');
+    } finally { fault.mockRestore(); }
+    expect(fs.statSync(resumed.partialPath).size).toBe(crashAt === 'after' ? 0 : 12);
+    // The reset checkpoint must already be durable in either crash window.
+    const recovered = new DurableDownload(dir, pin);
+    expect(recovered.headers().Range).toBeUndefined();
+    expect(fs.statSync(recovered.partialPath).size).toBe(0);
+    expect(await recovered.consume(new Response(new Uint8Array(bytes)))).toEqual(bytes);
+    expect(new DurableDownload(dir, pin).complete()).toEqual(bytes);
   });
   it.each(['bytes 0-20/21', 'bytes 13-74/75', 'bytes 12-99/*', 'garbage'])('rejects invalid Content-Range %s without appending', async range => {
     const dir = root(), pin = identity(), first = new DurableDownload(dir, pin);
