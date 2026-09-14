@@ -124,21 +124,18 @@ The benchmark reports `workerRequired: true` if parse tasks exceed 50 ms in at
 least two rounds, to flag reevaluation on other fixtures/hardware; it does not
 silently change runtime behavior.
 
-Demand loading defers work; it does not make optional artifacts free. The
-speaker-review endpoint still has 67.9–76.0 ms wall time and 66.9–75.1 ms loop
-delay despite only 2.2–2.6 ms total parsing. The existing review builder performs
-transcript/diarization overlap matching (a nested segment scan); a parse-only
-worker would not remove that work. No review-computation optimization is claimed
-or added by this task. The transcript endpoint still transfers a large markdown
-and raw-preview payload when opened. UI-level profiling and review-computation
-optimization remain separate follow-ups.
+The speaker-review endpoint still has overlap matching, now a sorted two-pointer
+pass instead of a nested full scan, plus a single sweep for per-speaker line
+counts. Bulk assign uses the async ArtifactCache path. The transcript endpoint
+returns markdown alone when `transcript.md` exists and only reads the raw
+preview as a fallback.
 
 | Evaluated idea | Verdict | Evidence |
 | --- | --- | --- |
 | Separate initial shell from optional artifacts | Keep the measured claim | Baseline/cold-shell gap exceeds three-run spread; content/payload bytes sharply lower |
 | Source-cache warm shell | Keep byte-read result only | Zero versus 2,014 content bytes; no standalone latency claim |
 | Worker JSON parsing | Not retained | Every parse below 2.42 ms; none above 50 ms |
-| Faster review metadata computation | Not implemented | Optional review remains a long task; parse-only offload does not target its dominant work |
+| Faster review metadata computation | Two-pointer merge + one-pass counts | Nested scan was the long task; parse-only offload does not target it |
 
 ## Verification
 

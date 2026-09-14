@@ -53,6 +53,7 @@ import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
 import type { ArtifactCache } from '../library/artifact-cache.js';
+import { createCountsCache } from '../library/page-counts.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
@@ -146,6 +147,19 @@ function scopedMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSumm
   return rows.map((m) => meetingSummary(s, m, speakers.get(m.id) ?? [], counts.get(m.id) ?? 0));
 }
 
+/** Status-list shape for Needs Attention: skip speaker/action joins and ETA
+ *  file probes. The panel only needs id/title/status/stage/startedAt. */
+function shellMeetingSummaries(rows: MeetingRow[]): MeetingSummary[] {
+  return rows.map((m) => ({
+    id: m.id, slug: m.slug, title: m.title,
+    startedAt: m.startedAt, durationS: m.durationS,
+    pipelineStage: m.pipelineStage, status: m.status,
+    errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
+    unidentifiedCount: 0, actionItemsCount: 0,
+    stageEtaMs: null, stageEtaRough: false, speakers: [],
+  }));
+}
+
 async function speakerReviewForFolder(
   folder: string,
   links: ReturnType<typeof listMeetingSpeakers>,
@@ -162,26 +176,8 @@ async function speakerReviewForFolder(
   });
 }
 
-/** Existing synchronous bulk-assignment accounting needs the line count before
- * it can answer. Detail loading itself uses the async cached helper above. */
-function speakerReviewForFolderSync(
-  folder: string,
-  links: ReturnType<typeof listMeetingSpeakers>,
-): Map<string, SpeakerReviewMetadata> {
-  try {
-    const diar = JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] };
-    const raw = JSON.parse(fs.readFileSync(path.join(folder, 'transcript.raw.json'), 'utf8')) as {
-      segments?: Array<{ start: number; end: number; text: string; source?: 'voice' | 'system' }>;
-    };
-    return buildSpeakerReviewMetadata({
-      links, diarization: diar.segments ?? [], transcript: raw.segments ?? [],
-    });
-  } catch {
-    return new Map();
-  }
-}
-
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  const pageCounts = createCountsCache();
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
 
   ipc.handle(IPC_CHANNELS.logsTail, (_e, maxEntries?: unknown) => {
@@ -223,14 +219,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.meetingsListPage, (_e, input: unknown): MeetingSummaryPage => {
     const query = MeetingListQuerySchema.parse(input);
     const page = s.meetings.listPage(query);
-    const counts = s.meetings.counts();
+    const counts = pageCounts.forQuery(query, () => s.meetings.counts());
     return { items: scopedMeetingSummaries(s, page.rows), nextCursor: page.nextCursor,
       total: counts[query.filter], counts };
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsGetMany, (_e, input: unknown): MeetingSummary[] => {
+  ipc.handle(IPC_CHANNELS.meetingsGetMany, (_e, input: unknown, opts?: unknown): MeetingSummary[] => {
     const ids = MeetingIdsSchema.parse(input);
-    return scopedMeetingSummaries(s, s.meetings.findByIds(ids));
+    const rows = s.meetings.findByIds(ids);
+    const shell = Boolean(opts && typeof opts === 'object' && (opts as { shell?: unknown }).shell === true);
+    return shell ? shellMeetingSummaries(rows) : scopedMeetingSummaries(s, rows);
   });
 
   ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown): string[] =>
@@ -287,12 +285,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const meeting = s.meetings.findById(id);
     if (!meeting) return null;
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-    const [transcriptMd, raw] = await Promise.all([
-      s.artifactCache.readText(path.join(folder, 'transcript.md')),
-      s.artifactCache.readJson<{ text?: string }>(path.join(folder, 'transcript.raw.json')),
-    ]);
+    const transcriptMd = await s.artifactCache.readText(path.join(folder, 'transcript.md'));
+    if (transcriptMd) return { transcriptMd, rawTranscriptText: null };
+    const raw = await s.artifactCache.readJson<{ text?: string }>(path.join(folder, 'transcript.raw.json'));
     return {
-      transcriptMd,
+      transcriptMd: null,
       rawTranscriptText: typeof raw?.text === 'string' && raw.text.length > 0 ? raw.text : null,
     };
   });
@@ -718,7 +715,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     localLabels: z.array(z.string().min(1)).min(1).max(100),
     rosterId: z.string().min(1),
   });
-  ipc.handle(IPC_CHANNELS.speakersAssignBulk, (_e, input: unknown) => {
+  ipc.handle(IPC_CHANNELS.speakersAssignBulk, async (_e, input: unknown) => {
     const parsed = BulkAssignSchema.parse(input);
     const meeting = s.meetings.findById(parsed.meetingId);
     if (!meeting) throw new Error('meeting not found');
@@ -726,11 +723,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const labels = [...new Set(parsed.localLabels)];
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const links = listMeetingSpeakers(s.speakers, parsed.meetingId);
-    const metadata = speakerReviewForFolderSync(folder, links);
-    let diarization: DiarizationSegment[] = [];
-    try {
-      diarization = (JSON.parse(fs.readFileSync(path.join(folder, 'diarization.json'), 'utf8')) as { segments?: DiarizationSegment[] }).segments ?? [];
-    } catch { /* assignment itself remains valid without embedding reinforcement */ }
+    const [metadata, diarFile] = await Promise.all([
+      speakerReviewForFolder(folder, links, s.artifactCache),
+      s.artifactCache.readJson<{ segments?: DiarizationSegment[] }>(path.join(folder, 'diarization.json')),
+    ]);
+    const diarization = diarFile?.segments ?? [];
     for (const localLabel of labels) {
       const embedding = averageEmbeddingForLabel(diarization, localLabel);
       if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);

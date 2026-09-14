@@ -22,7 +22,7 @@ import { speakerColorIndex } from '../lib/speaker-colors';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
-import { speakerReviewLayout } from '../lib/speaker-review-layout';
+import { partitionSpeakerReview, speakerReviewLayout } from '../lib/speaker-review-layout';
 import { createDetailArtifacts, mergeSpeakerReview, type DetailArtifactState, type DetailSpeaker } from '../lib/detail-artifacts';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
@@ -2717,6 +2717,10 @@ function SpeakersPanel({
   const selectedImpact = meeting.speakers
     .filter((speaker) => selected.has(speaker.localLabel))
     .reduce((sum, speaker) => sum + (speaker.lineCount ?? 0), 0);
+  const groupedSpeakers = useMemo(
+    () => partitionSpeakerReview(meeting.speakers.map((speaker, colorIdx) => ({ ...speaker, colorIdx }))),
+    [meeting.speakers],
+  );
   function toggleSelected(label: string): void {
     setSelected((current) => {
       const next = new Set(current);
@@ -2784,7 +2788,10 @@ function SpeakersPanel({
       )}
 
       <div className="space-y-1.5">
-        {meeting.speakers.map((sp, i) => (
+        {groupedSpeakers.needsReview.length > 0 && groupedSpeakers.rest.length > 0 && (
+          <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted">Needs review</div>
+        )}
+        {groupedSpeakers.needsReview.map((sp) => (
           <SpeakerRow
             key={sp.localLabel}
             meetingId={meeting.id}
@@ -2796,7 +2803,32 @@ function SpeakersPanel({
             needsReview={sp.needsReview}
             durationS={sp.durationS}
             lineCount={sp.lineCount}
-            colorIdx={i}
+            colorIdx={sp.colorIdx}
+            roster={roster}
+            isOpen={expanded === sp.localLabel}
+            onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
+            onChanged={reloadMeeting}
+            selectable={sp.needsReview ?? false}
+            selected={selected.has(sp.localLabel)}
+            onSelect={() => toggleSelected(sp.localLabel)}
+          />
+        ))}
+        {groupedSpeakers.rest.length > 0 && groupedSpeakers.needsReview.length > 0 && (
+          <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted pt-1">Named</div>
+        )}
+        {groupedSpeakers.rest.map((sp) => (
+          <SpeakerRow
+            key={sp.localLabel}
+            meetingId={meeting.id}
+            localLabel={sp.localLabel}
+            displayName={sp.displayName}
+            rosterId={sp.rosterId}
+            confidence={sp.confidence}
+            reviewState={sp.state}
+            needsReview={sp.needsReview}
+            durationS={sp.durationS}
+            lineCount={sp.lineCount}
+            colorIdx={sp.colorIdx}
             roster={roster}
             isOpen={expanded === sp.localLabel}
             onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}

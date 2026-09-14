@@ -20,19 +20,38 @@ export function mergeTranscriptWithDiarization(
   whisper: readonly WhisperSegment[],
   diar: readonly DiarSegment[],
 ): MergedSegment[] {
-  return whisper.map((w) => {
-    // Voice-stem segments are always the local user — skip the diarization
-    // lookup entirely. The labelMap at render time converts VOICE_YOU into
-    // the user's name (or the literal "You" when unset).
-    if (w.source === 'voice') return { ...w, speaker: VOICE_SPEAKER_LABEL };
+  if (whisper.length === 0) return [];
+  // Sort once, then walk both sequences by start time so each whisper only
+  // inspects overlapping diar turns. Equal overlap keeps the earlier original
+  // diar index, matching the previous nested-scan tie-break.
+  const sorted = diar.map((segment, index) => ({ segment, index }))
+    .sort((a, b) => a.segment.start - b.segment.start || a.index - b.index);
+  const order = whisper.map((_, index) => index)
+    .sort((a, b) => whisper[a]!.start - whisper[b]!.start);
+  const out: MergedSegment[] = new Array(whisper.length);
+  let cursor = 0;
+  for (const whisperIndex of order) {
+    const w = whisper[whisperIndex]!;
+    if (w.source === 'voice') {
+      out[whisperIndex] = { ...w, speaker: VOICE_SPEAKER_LABEL };
+      continue;
+    }
+    while (cursor < sorted.length && sorted[cursor]!.segment.end <= w.start) cursor++;
     let best: DiarSegment | null = null;
     let bestOverlap = 0;
-    for (const d of diar) {
-      const o = overlap(w, d);
-      if (o > bestOverlap) { bestOverlap = o; best = d; }
+    let bestIndex = Number.POSITIVE_INFINITY;
+    for (let i = cursor; i < sorted.length && sorted[i]!.segment.start < w.end; i++) {
+      const candidate = sorted[i]!;
+      const o = overlap(w, candidate.segment);
+      if (o > bestOverlap || (o === bestOverlap && o > 0 && candidate.index < bestIndex)) {
+        bestOverlap = o;
+        best = candidate.segment;
+        bestIndex = candidate.index;
+      }
     }
-    return { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
-  });
+    out[whisperIndex] = { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
+  }
+  return out;
 }
 
 export function formatTimestamp(sec: number): string {

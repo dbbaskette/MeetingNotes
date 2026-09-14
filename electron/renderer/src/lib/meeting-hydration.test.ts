@@ -185,17 +185,20 @@ describe('attention refresh lifecycle', () => {
   it('retains the published result on failure and allows the next refresh to recover', async () => {
     let fail = false;
     const publications: Array<Array<{ id: string }>> = [];
+    const errors: Array<string | null> = [];
     const controller = createAttentionController({
       listIds: async (filter) => filter === 'pending' ? ['pending'] : [],
       getMany: async (ids) => { if (fail) throw new Error('busy'); return ids.map((id) => ({ id })); },
-    }, (rows) => publications.push(rows));
+    }, (rows) => publications.push(rows), (error) => errors.push(error));
     await controller.start();
     fail = true;
     await controller.invalidate();
     expect(publications).toHaveLength(1);
+    expect(errors).toEqual([null, 'busy']);
     fail = false;
     await controller.refresh();
     expect(publications).toHaveLength(2);
+    expect(errors).toEqual([null, 'busy', null]);
     controller.stop();
   });
 });

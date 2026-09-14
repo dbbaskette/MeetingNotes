@@ -130,8 +130,12 @@ const api = {
     listPage: (query: MeetingListQuery) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsListPage, query) as Promise<MeetingSummaryPage>,
     /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted. */
-    getMany: (ids: string[]) =>
-      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
+    /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted.
+     *  Pass `{ shell: true }` for Needs Attention — skips speaker/action joins. */
+    getMany: (ids: string[], opts?: { shell?: boolean }) =>
+      opts?.shell
+        ? ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids, opts) as Promise<MeetingSummary[]>
+        : ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
     listIds: (filter: MeetingListFilter) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter) as Promise<string[]>,
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),

@@ -27,4 +27,24 @@ describe('buildSpeakerReviewMetadata', () => {
     expect(result.get('SPEAKER_01')).toMatchObject({ state: 'probable', needsReview: false, lineCount: 2, durationS: 6 });
     expect(result.get('SPEAKER_02')).toMatchObject({ state: 'confirmed', needsReview: true, lineCount: 1 });
   });
+
+  it('counts lines and duration once across many speakers instead of rescanning per link', () => {
+    const links = Array.from({ length: 40 }, (_, i) => ({
+      localLabel: `SPEAKER_${String(i).padStart(2, '0')}`,
+      rosterId: i % 2 === 0 ? null : `id-${i}`,
+      displayName: i % 2 === 0 ? null : `Name ${i}`,
+      confidence: i % 2 === 0 ? 0 : 0.9,
+    }));
+    const diarization = links.flatMap((link, i) => [
+      { speaker: link.localLabel, start: i * 4, end: i * 4 + 2 },
+      { speaker: link.localLabel, start: i * 4 + 2, end: i * 4 + 3 },
+    ]);
+    const transcript = links.map((link, i) => ({
+      start: i * 4, end: i * 4 + 1.5, text: link.localLabel,
+    }));
+    const result = buildSpeakerReviewMetadata({ links, diarization, transcript });
+    expect(result.get('SPEAKER_00')).toMatchObject({ lineCount: 1, durationS: 3, segmentCount: 2, needsReview: true });
+    expect(result.get('SPEAKER_01')).toMatchObject({ lineCount: 1, durationS: 3, segmentCount: 2, needsReview: false });
+    expect(result.size).toBe(40);
+  });
 });

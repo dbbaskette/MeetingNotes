@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNeedsAttention } from './needs-attention.js';
+import { buildNeedsAttention, capAttentionGroups, retainInboxOnFailure } from './needs-attention.js';
 
 describe('buildNeedsAttention', () => {
   it('groups actionable work by urgency and oldest first within a group', () => {
@@ -23,5 +23,28 @@ describe('buildNeedsAttention', () => {
       nowMs: Date.now(), recovery: [],
       meetings: [{ id: 'done', title: 'Done', status: 'done', pipelineStage: 'done', startedAt: null }],
     })).toEqual([]);
+  });
+
+  it('caps each group and reports how many items were hidden', () => {
+    const meetings = Array.from({ length: 5 }, (_, i) => ({
+      id: `p${i}`, title: `Pending ${i}`, status: 'pending' as const,
+      pipelineStage: 'discovered', startedAt: `2026-08-12T0${i}:00:00Z`,
+    }));
+    const groups = capAttentionGroups(buildNeedsAttention({
+      nowMs: Date.parse('2026-08-12T16:00:00Z'), recovery: [], meetings,
+    }), 2);
+    expect(groups[0]?.items).toHaveLength(2);
+    expect(groups[0]?.hiddenCount).toBe(3);
+    expect(groups[0]?.totalCount).toBe(5);
+  });
+
+  it('keeps the previous recovery inbox when a refresh fails', () => {
+    const previous = [{ id: 'r1' }];
+    expect(retainInboxOnFailure(previous, new Error('recovery unavailable'))).toEqual({
+      items: previous, error: 'recovery unavailable',
+    });
+    expect(retainInboxOnFailure([], 'busy')).toEqual({
+      items: [], error: 'busy',
+    });
   });
 });

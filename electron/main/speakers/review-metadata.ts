@@ -23,18 +23,28 @@ export function buildSpeakerReviewMetadata(input: {
   transcript: readonly WhisperSegment[];
 }): Map<string, SpeakerReviewMetadata> {
   const merged = mergeTranscriptWithDiarization(input.transcript, input.diarization);
+  const lineCounts = new Map<string, number>();
+  for (const line of merged) {
+    lineCounts.set(line.speaker, (lineCounts.get(line.speaker) ?? 0) + 1);
+  }
+  const diarStats = new Map<string, { segmentCount: number; durationS: number }>();
+  for (const segment of input.diarization) {
+    const stats = diarStats.get(segment.speaker) ?? { segmentCount: 0, durationS: 0 };
+    stats.segmentCount += 1;
+    stats.durationS += Math.max(0, segment.end - segment.start);
+    diarStats.set(segment.speaker, stats);
+  }
   const result = new Map<string, SpeakerReviewMetadata>();
   for (const link of input.links) {
-    const own = input.diarization.filter((segment) => segment.speaker === link.localLabel);
+    const own = diarStats.get(link.localLabel) ?? { segmentCount: 0, durationS: 0 };
     const state: SpeakerReviewState = !link.rosterId ? 'unknown'
       : (link.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable';
-    const segmentCount = own.length;
     result.set(link.localLabel, {
       state,
-      segmentCount,
-      durationS: own.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0),
-      lineCount: merged.filter((line) => line.speaker === link.localLabel).length,
-      needsReview: state === 'unknown' || (link.confidence ?? 0) < 0.8 || segmentCount < 2,
+      segmentCount: own.segmentCount,
+      durationS: own.durationS,
+      lineCount: lineCounts.get(link.localLabel) ?? 0,
+      needsReview: state === 'unknown' || (link.confidence ?? 0) < 0.8 || own.segmentCount < 2,
     });
   }
   return result;

@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 import { shortcutMod } from '../lib/shortcut';
+import { paletteSearchView } from '../lib/palette-search';
 
 export interface PaletteTarget {
   meetingId: string;
@@ -41,13 +42,15 @@ export function SearchPalette({
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Reset state when the palette opens. Focus the input on the next
   // frame so the focus trap doesn't fight the browser's default.
   useEffect(() => {
     if (!open) return;
-    setQ(''); setResults([]); setSelected(0);
+    setQ(''); setResults([]); setSelected(0); setError(null);
     const t = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
   }, [open]);
@@ -56,19 +59,24 @@ export function SearchPalette({
   // that each keystroke doesn't fire an IPC on a big library.
   useEffect(() => {
     if (!open) return;
-    if (q.trim().length < 2) { setResults([]); return; }
+    if (q.trim().length < 2) { setResults([]); setError(null); return; }
     let cancelled = false;
     setLoading(true);
     const t = window.setTimeout(async () => {
       try {
         const r = (await api.search.query(q, 20)) as SearchResult[];
-        if (!cancelled) { setResults(r); setSelected(0); }
+        if (!cancelled) { setResults(r); setSelected(0); setError(null); }
+      } catch (caught) {
+        if (!cancelled) {
+          setResults([]);
+          setError(caught instanceof Error ? caught.message : String(caught));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }, 150);
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, [q, open]);
+  }, [q, open, retryToken]);
 
   function openResult(r: SearchResult, withTimestamp: boolean): void {
     onOpenMeeting({
@@ -122,29 +130,52 @@ export function SearchPalette({
           </kbd>
         </div>
         <div className="max-h-[60vh] overflow-y-auto">
-          {q.trim().length < 2 && (
-            <div className="px-4 py-6 text-xs text-ink-muted">
-              Type at least 2 characters to search titles, summaries, and
-              transcripts. <kbd className="font-mono">Enter</kbd> opens;
-              {' '}<kbd className="font-mono">{shortcutMod()}+Enter</kbd> jumps to the
-              matched timestamp.
-            </div>
-          )}
-          {q.trim().length >= 2 && !loading && results.length === 0 && (
-            <div className="px-4 py-6 text-sm text-ink-muted italic">
-              No matches for <span className="text-ink font-semibold">“{q}”</span>.
-            </div>
-          )}
-          {results.map((r, i) => (
-            <ResultRow
-              key={`${r.meetingId}-${r.source}-${i}`}
-              result={r}
-              query={q}
-              active={i === selected}
-              onHover={() => setSelected(i)}
-              onClick={(e) => openResult(r, e.metaKey || e.ctrlKey)}
-            />
-          ))}
+          {(() => {
+            const view = paletteSearchView({ query: q, loading, error, results });
+            if (view.kind === 'hint') {
+              return (
+                <div className="px-4 py-6 text-xs text-ink-muted">
+                  Type at least 2 characters to search titles, summaries, and
+                  transcripts. <kbd className="font-mono">Enter</kbd> opens;
+                  {' '}<kbd className="font-mono">{shortcutMod()}+Enter</kbd> jumps to the
+                  matched timestamp.
+                </div>
+              );
+            }
+            if (view.kind === 'error') {
+              return (
+                <div role="alert" className="px-4 py-6 text-sm text-ink-muted">
+                  Couldn't search: <span className="text-ink">{view.message}</span>
+                  {' '}
+                  <button
+                    type="button"
+                    className="font-semibold text-brand-indigo underline"
+                    onClick={() => setRetryToken((token) => token + 1)}
+                  >
+                    Retry
+                  </button>
+                </div>
+              );
+            }
+            if (view.kind === 'empty') {
+              return (
+                <div className="px-4 py-6 text-sm text-ink-muted italic">
+                  No matches for <span className="text-ink font-semibold">“{view.query}”</span>.
+                </div>
+              );
+            }
+            if (view.kind === 'loading' && results.length === 0) return null;
+            return results.map((r, i) => (
+              <ResultRow
+                key={`${r.meetingId}-${r.source}-${i}`}
+                result={r}
+                query={q}
+                active={i === selected}
+                onHover={() => setSelected(i)}
+                onClick={(e) => openResult(r, e.metaKey || e.ctrlKey)}
+              />
+            ));
+          })()}
         </div>
       </div>
     </div>,

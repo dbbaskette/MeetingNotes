@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { retainedRowIndexes, virtualWindow } from '../lib/virtual-window';
+import { retainedRowIndexes, stepMeetingIndex, virtualWindow } from '../lib/virtual-window';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import { RowDialogRetention } from './RowDialogRetention';
 
@@ -74,6 +74,31 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
     }
   }, [window.end, viewport.height, items.length, hasMore, loadingMore, refreshing, error, loadMore]);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'j' && key !== 'k') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      event.preventDefault();
+      const currentIndex = focusedId === null ? null : items.findIndex((item) => item.id === focusedId);
+      const next = stepMeetingIndex(items.length, currentIndex === -1 ? null : currentIndex, key === 'j' ? 1 : -1);
+      if (next === null) return;
+      const id = items[next]!.id;
+      setFocusedId(id);
+      const top = next * ROW_HEIGHT;
+      const scroll = scrollRef.current;
+      if (!scroll) return;
+      if (top < scroll.scrollTop) scroll.scrollTop = top;
+      else if (top + ROW_HEIGHT > scroll.scrollTop + scroll.clientHeight) {
+        scroll.scrollTop = top + ROW_HEIGHT - scroll.clientHeight;
+      }
+    };
+    globalThis.addEventListener('keydown', onKey);
+    return () => globalThis.removeEventListener('keydown', onKey);
+  }, [items, focusedId]);
+
   const indexes = retainedRowIndexes({
     items, start: window.start, end: window.end,
     retainedIds: focusedId === null ? dialogIds : [...dialogIds, focusedId],
@@ -88,7 +113,7 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
             return (
               <div
                 key={meeting.id}
-                className="absolute left-0 right-0"
+                className={`absolute left-0 right-0 ${focusedId === meeting.id ? 'ring-1 ring-brand-indigo/40 rounded-lg z-[1]' : ''}`}
                 style={{ top: index * ROW_HEIGHT, height: ROW_HEIGHT, paddingBottom: 8 }}
                 onFocusCapture={() => { focusRevision.current++; setFocusedId(meeting.id); }}
                 onBlurCapture={() => {
