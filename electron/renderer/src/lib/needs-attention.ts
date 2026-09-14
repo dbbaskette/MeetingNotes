@@ -73,6 +73,34 @@ export function buildNeedsAttention(input: {
   });
 }
 
+export const ATTENTION_GROUP_CAP = 8;
+
+export interface CappedAttentionGroup extends AttentionGroup {
+  hiddenCount: number;
+  totalCount: number;
+}
+
+export function capAttentionGroups(
+  groups: AttentionGroup[],
+  cap: number = ATTENTION_GROUP_CAP,
+): CappedAttentionGroup[] {
+  const limit = Math.max(0, cap);
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.slice(0, limit),
+    hiddenCount: Math.max(0, group.items.length - limit),
+    totalCount: group.items.length,
+  }));
+}
+
+/** Recovery/attention fetches must not look empty when the inbox itself failed. */
+export function retainInboxOnFailure<T>(previous: T[], error: unknown): { items: T[]; error: string } {
+  return {
+    items: previous,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
 function formatAge(iso: string | null, nowMs: number): string {
   if (!iso) return 'date unknown';
   const at = Date.parse(iso);

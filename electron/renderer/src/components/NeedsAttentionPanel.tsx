@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { api } from '../ipc/client';
-import { buildNeedsAttention } from '../lib/needs-attention';
+import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
 import { useToast } from './Toasts';
 import { RecoveryRow } from './RecoveryRow';
 
@@ -26,19 +26,21 @@ interface AttentionMeeting {
 }
 
 export function NeedsAttentionPanel({
-  meetings, recovery, onOpen, onChanged,
+  meetings, recovery, error, onRetry, onOpen, onChanged,
 }: {
   meetings: AttentionMeeting[];
   recovery: RecoveryInboxItem[];
+  error?: string | null;
+  onRetry?: () => void;
   onOpen: (id: string) => void;
   onChanged: () => void | Promise<void>;
 }): JSX.Element | null {
   const toast = useToast();
   const groups = useMemo(
-    () => buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }),
+    () => capAttentionGroups(buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }), ATTENTION_GROUP_CAP),
     [meetings, recovery],
   );
-  if (groups.length === 0) return null;
+  if (groups.length === 0 && !error) return null;
 
   const recoveryById = new Map(recovery.map((item) => [item.id, item]));
   async function primaryAction(kind: string, id: string): Promise<void> {
@@ -56,8 +58,19 @@ export function NeedsAttentionPanel({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-status-warn/20">
         <span className="w-2 h-2 rounded-full bg-status-warn" />
         <h2 className="text-sm font-semibold text-ink">Needs attention</h2>
-        <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.items.length, 0)}</span>
+        <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.totalCount, 0)}</span>
       </div>
+      {error && (
+        <div role="alert" className="px-4 py-2.5 text-xs text-danger border-b border-status-warn/20">
+          Couldn't refresh this inbox: {error}
+          {onRetry && (
+            <>
+              {' '}
+              <button type="button" className="font-semibold underline" onClick={onRetry}>Retry</button>
+            </>
+          )}
+        </div>
+      )}
       <div className="max-h-64 overflow-y-auto divide-y divide-surface-border">
         {groups.map((group) => (
           <div key={group.kind} className="px-4 py-2.5">
@@ -85,6 +98,9 @@ export function NeedsAttentionPanel({
                   </div>
                 );
               })}
+              {group.hiddenCount > 0 && (
+                <div className="text-xs text-ink-muted">+{group.hiddenCount} more</div>
+              )}
             </div>
           </div>
         ))}

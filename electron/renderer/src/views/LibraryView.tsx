@@ -32,6 +32,7 @@ import {
 } from '../lib/library-sort';
 import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLibrarySearchHydration } from '../lib/library-search';
 import { createAttentionController } from '../lib/meeting-hydration';
+import { retainInboxOnFailure } from '../lib/needs-attention';
 import { recycleMeetings } from '../lib/meetings-recycle';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
@@ -99,8 +100,15 @@ export function LibraryView({
   // first page is loaded. Only actionable status IDs are hydrated, in capped
   // batches; buildNeedsAttention distinguishes speaker gates from processing.
   const [attentionMeetings, setAttentionMeetings] = useState<MeetingSummary[]>([]);
-  const [attention] = useState(() => createAttentionController(api.meetings,
-    (rows) => setAttentionMeetings((prev) => recycleMeetings(prev, rows))));
+  const [attentionError, setAttentionError] = useState<string | null>(null);
+  const [attention] = useState(() => createAttentionController(
+    {
+      listIds: api.meetings.listIds,
+      getMany: (ids) => api.meetings.getMany(ids, { shell: true }),
+    },
+    (rows) => setAttentionMeetings((prev) => recycleMeetings(prev, rows)),
+    setAttentionError,
+  ));
   const refresh = useCallback(async () => {
     await Promise.all([refreshPages(), attention.refresh()]);
     setSearchRevision((revision) => revision + 1);
@@ -114,14 +122,21 @@ export function LibraryView({
     return () => attention.stop();
   }, [attention]);
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const recoveryGeneration = useRef(0);
   const refreshRecovery = useCallback(async () => {
     const generation = ++recoveryGeneration.current;
     const update = (items: RecoveryInboxItem[]): void => {
-      if (generation === recoveryGeneration.current) setRecoveryItems(items);
+      if (generation === recoveryGeneration.current) {
+        setRecoveryItems(items);
+        setRecoveryError(null);
+      }
     };
     try { update(await api.recovery.list(update)); }
-    catch { update([]); }
+    catch (error) {
+      if (generation !== recoveryGeneration.current) return;
+      setRecoveryError(retainInboxOnFailure([], error).error);
+    }
   }, []);
   useEffect(() => {
     void refreshRecovery();
@@ -458,6 +473,8 @@ export function LibraryView({
       <NeedsAttentionPanel
         meetings={attentionMeetings}
         recovery={recoveryItems}
+        error={recoveryError ?? attentionError}
+        onRetry={() => { void refreshRecovery(); void attention.refresh(); }}
         onOpen={(id) => {
           const meeting = attentionMeetings.find((candidate) => candidate.id === id);
           onOpen(id, meeting ? {

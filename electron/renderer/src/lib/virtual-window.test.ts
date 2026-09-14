@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { retainedRowIndexes, virtualWindow } from './virtual-window';
+import { retainedRowIndexes, stepMeetingIndex, virtualWindow } from './virtual-window';
 
 const base = { count: 1_000, rowHeight: 72, viewportHeight: 700, overscan: 5 };
 
@@ -59,5 +59,16 @@ describe('retainedRowIndexes', () => {
 
   it('tracks retained IDs through reorder and omits removed owners', () => {
     expect(retainedRowIndexes({ items: [{ id: 'b' }, { id: 'c' }, { id: 'a' }], start: 0, end: 1, retainedIds: ['a', 'deleted'] })).toEqual([0, 2]);
+  });
+});
+
+describe('stepMeetingIndex', () => {
+  it('moves j/k through the loaded list and starts at the first row when nothing is focused', () => {
+    expect(stepMeetingIndex(0, null, 1)).toBeNull();
+    expect(stepMeetingIndex(4, null, 1)).toBe(0);
+    expect(stepMeetingIndex(4, null, -1)).toBe(3);
+    expect(stepMeetingIndex(4, 0, 1)).toBe(1);
+    expect(stepMeetingIndex(4, 0, -1)).toBe(0);
+    expect(stepMeetingIndex(4, 3, 1)).toBe(3);
   });
 });

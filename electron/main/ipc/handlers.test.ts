@@ -33,10 +33,10 @@ describe('paginated meeting summaries', () => {
     id, slug: id, title: id, startedAt: '2026-09-01T12:00:00Z', durationS: 60,
     audioPath: `/audio/${id}`, status, pipelineStage: 'done',
   });
-  const invoke = (channel: string, input?: unknown) => {
+  const invoke = (channel: string, input?: unknown, extra?: unknown) => {
     const handler = handlers.get(channel);
     expect(handler, `${channel} must be registered`).toBeTypeOf('function');
-    return handler!(null, input);
+    return extra === undefined ? handler!(null, input) : handler!(null, input, extra);
   };
   beforeEach(() => {
     db = openDb(':memory:');
@@ -131,6 +131,22 @@ describe('paginated meeting summaries', () => {
     expect(invoke('meetings:get-many', [])).toEqual([]);
     expect(scopedSpeakers).not.toHaveBeenCalled();
     expect(scopedCounts).not.toHaveBeenCalled();
+    scopedSpeakers.mockClear(); scopedCounts.mockClear();
+    const shells = invoke('meetings:get-many', ['a', 'b'], { shell: true });
+    expect(shells.map((m: any) => m.id)).toEqual(['a', 'b']);
+    expect(shells[0]).toMatchObject({ speakers: [], actionItemsCount: 0, unidentifiedCount: 0, stageEtaMs: null });
+    expect(scopedSpeakers).not.toHaveBeenCalled();
+    expect(scopedCounts).not.toHaveBeenCalled();
+  });
+
+  it('reuses first-page counts for continuation pages of the same query', () => {
+    for (let i = 0; i < 3; i++) insert(`done-${i}`);
+    const counts = vi.spyOn(meetings, 'counts');
+    const first = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
+    const next = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1, cursor: first.nextCursor });
+    expect(next.items).toHaveLength(1);
+    expect(next.counts).toEqual(first.counts);
+    expect(counts).toHaveBeenCalledTimes(1);
   });
 
   it('starts only exact pending snapshot IDs and returns failures without aborting later items', () => {
@@ -477,7 +493,36 @@ describe('registerIpcHandlers', () => {
     ) => Promise<{ transcriptMd: string | null; rawTranscriptText: string | null } | null>;
 
     await expect(getTranscript(null, 'm1')).resolves.toEqual({
-      transcriptMd: 'Alice: Decision recorded.', rawTranscriptText: 'Early raw preview',
+      transcriptMd: 'Alice: Decision recorded.', rawTranscriptText: null,
+    });
+    expect(readText).toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).not.toHaveBeenCalled();
+  });
+
+  it('loads the raw preview only when transcript markdown is missing', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-transcript-raw-fallback-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    await fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] }));
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as any, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+    }));
+    const getTranscript = handle.mock.calls.find((call) => call[0] === 'meetings:get-transcript')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ transcriptMd: string | null; rawTranscriptText: string | null } | null>;
+
+    await expect(getTranscript(null, 'm1')).resolves.toEqual({
+      transcriptMd: null, rawTranscriptText: 'Early raw preview',
     });
     expect(readText).toHaveBeenCalledWith(transcriptPath);
     expect(readJson).toHaveBeenCalledWith(rawPath);
@@ -537,9 +582,10 @@ describe('registerIpcHandlers', () => {
     await expect(handler('meetings:get-speaker-review')(null, 'missing')).resolves.toBeNull();
   });
 
-  it('speakers:assign-bulk links every label and re-merges once', () => {
+  it('speakers:assign-bulk links every label and re-merges once', async () => {
     const linkToMeeting = vi.fn();
     const handle = vi.fn();
+    const readJson = vi.fn(async () => ({ segments: [] }));
     registerIpcHandlers({ handle } as any, baseServices({
       meetings: { listAll: () => [], findById: () => ({ id: 'm1', slug: 'meeting-1' }) },
       speakers: {
@@ -547,17 +593,19 @@ describe('registerIpcHandlers', () => {
         listForMeeting: () => [],
         linkToMeeting,
       },
+      artifactCache: { readJson, readText: async () => null },
     }));
     const call = handle.mock.calls.find((c) => c[0] === 'speakers:assign-bulk');
-    const handler = call![1] as (event: unknown, input: unknown) => { assigned: number; impactedLines: number };
+    const handler = call![1] as (event: unknown, input: unknown) => Promise<{ assigned: number; impactedLines: number }>;
 
-    const result = handler(null, { meetingId: 'm1', localLabels: ['SPEAKER_00', 'SPEAKER_01'], rosterId: 'spk_a' });
+    const result = await handler(null, { meetingId: 'm1', localLabels: ['SPEAKER_00', 'SPEAKER_01'], rosterId: 'spk_a' });
 
     expect(linkToMeeting.mock.calls).toEqual([
       ['m1', 'SPEAKER_00', 'spk_a', 1],
       ['m1', 'SPEAKER_01', 'spk_a', 1],
     ]);
     expect(vi.mocked(remergeTranscript)).toHaveBeenCalledTimes(1);
+    expect(readJson).toHaveBeenCalled();
     expect(result.assigned).toBe(2);
   });
 

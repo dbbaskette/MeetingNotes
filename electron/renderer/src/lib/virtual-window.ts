@@ -35,3 +35,15 @@ export function retainedRowIndexes({ items, start, end, retainedIds }: {
   }
   return [...indexes].sort((a, b) => a - b);
 }
+
+/** J/K list movement. Nothing focused → j lands on the first row, k on the
+ *  last. Clamps at the ends so the virtual window can scroll the owner in. */
+export function stepMeetingIndex(
+  count: number,
+  current: number | null,
+  delta: 1 | -1,
+): number | null {
+  if (count <= 0) return null;
+  if (current === null) return delta === 1 ? 0 : count - 1;
+  return Math.max(0, Math.min(count - 1, current + delta));
+}

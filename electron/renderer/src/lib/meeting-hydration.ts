@@ -48,6 +48,7 @@ export async function hydrateAttentionMeetings<T extends { id: string }>(api: {
 export function createAttentionController<T extends { id: string }>(
   api: Parameters<typeof hydrateAttentionMeetings<T>>[0],
   publish: (rows: T[]) => void,
+  onError: (error: string | null) => void = () => {},
 ) {
   let active = false;
   let generation = 0;
@@ -64,8 +65,17 @@ export function createAttentionController<T extends { id: string }>(
           const isCurrent = () => active && current === generation;
           try {
             const rows = await hydrateAttentionMeetings(api, isCurrent);
-            if (isCurrent()) publish(rows);
-          } catch { /* retain previous actionable rows; next invalidation retries */ }
+            if (isCurrent()) {
+              publish(rows);
+              onError(null);
+            }
+          } catch (error) {
+            // Retain previous actionable rows; surface the failure so the
+            // inbox is not mistaken for “nothing needs attention.”
+            if (isCurrent()) {
+              onError(error instanceof Error ? error.message : String(error));
+            }
+          }
         } while (active && current !== generation);
       } finally { request = null; }
     })();
