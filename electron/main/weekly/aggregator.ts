@@ -17,90 +17,14 @@ import type { WeeklySummariesRepo } from '../storage/weekly-summaries-repo.js';
 import { isoWeekRange } from '../lib/iso-week.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { extractOverviewRecap } from './recap.js';
+import type { WeeklyTheme, WeeklyMeeting, WeeklyOwnerGroup, WeeklyStructured, WeeklyNarrative, WeeklyData } from '../ipc/contracts.js';
+export type { WeeklyTheme, WeeklyMeeting, WeeklyActionItem, WeeklyOwnerGroup, WeeklyStructured, WeeklyNarrative, WeeklyData } from '../ipc/contracts.js';
 
 // ──────── Public types ────────
 
 /** A topic thread synthesized across the week's meetings. The recall
  *  payload of the weekly view — connects discussions that span multiple
  *  meetings, which clicking into a single meeting can't surface. */
-export interface WeeklyTheme {
-  title: string;
-  /** 2-4 sentences: what was discussed, where it landed, what's open. */
-  detail: string;
-  /** Source meeting titles this thread draws from, for traceability. */
-  meetings: string[];
-}
-
-export interface WeeklyMeeting {
-  id: string;
-  title: string;
-  startedAt: string;
-  durationS: number | null;
-  /** Multi-sentence recap pulled from the meeting's summary Overview, if
-   *  available. Used as the in-list recap for catching up. */
-  highlight: string | null;
-  /** Number of distinct speakers identified in diarization. Null if
-   *  the meeting hasn't been diarized yet. */
-  speakerCount: number | null;
-}
-
-export interface WeeklyActionItem {
-  id: string;
-  meetingId: string;
-  meetingTitle: string;
-  /** Display text. */
-  text: string;
-  /** Resolved owner display name. Falls back to owner_name (free
-   *  text) when no roster speaker is linked. Null = unowned. */
-  ownerLabel: string | null;
-  /** True if the owner matches settings.userSpeakerId — pinned to
-   *  the top of the UI as the "You" group. */
-  isYou: boolean;
-  status: string;
-  dueDate: string | null;
-  /** Source meeting's startedAt. Used by the view to label items
-   *  with "Mon" / "Tue" etc. */
-  meetingStartedAt: string;
-}
-
-export interface WeeklyOwnerGroup {
-  ownerLabel: string;
-  isYou: boolean;
-  items: WeeklyActionItem[];
-}
-
-export interface WeeklyData {
-  isoYear: number;
-  isoWeek: number;
-  /** ISO timestamps for the Mon 00:00 / Sun 23:59 bounds. */
-  rangeStart: string;
-  rangeEnd: string;
-  /** Total meeting time across the week, in seconds. */
-  totalDurationS: number;
-  meetings: WeeklyMeeting[];
-  /** Open action items, grouped by owner. "You" group (if any)
-   *  always appears first. */
-  openActionGroups: WeeklyOwnerGroup[];
-  /** Total open count across all groups (avoids the renderer having
-   *  to re-sum). */
-  openActionCount: number;
-  /** LLM-generated 2-3 paragraph narrative. Empty string when the
-   *  week has no meetings. */
-  narrative: string;
-  /** LLM-synthesized topic threads across the week. */
-  themes: WeeklyTheme[];
-  /** LLM-extracted decisions list. */
-  decisions: string[];
-  /** When the cached narrative + decisions were generated. Empty
-   *  string when no cache exists yet (i.e., narrative === ''). */
-  generatedAt: string;
-  /** True when the week contains at least one meeting whose
-   *  started_at is in the future of "now" (i.e. the user is viewing
-   *  the in-progress current week). The view shows an "in progress"
-   *  badge in this case. */
-  inProgress: boolean;
-}
-
 // ──────── Implementation ────────
 
 export interface AggregatorDeps {
@@ -133,32 +57,6 @@ export interface NarrativeOutput {
 /** What `getStructuredWeek` returns — everything the renderer needs
  *  to lay out the page WITHOUT making an LLM call. Returned in tens
  *  of ms so the page doesn't sit blank while the model thinks. */
-export interface WeeklyStructured {
-  isoYear: number;
-  isoWeek: number;
-  rangeStart: string;
-  rangeEnd: string;
-  totalDurationS: number;
-  meetings: WeeklyMeeting[];
-  openActionGroups: WeeklyOwnerGroup[];
-  openActionCount: number;
-  inProgress: boolean;
-  /** True when the cached narrative is still valid for the current
-   *  input set. Lets the renderer skip the spinner when the second
-   *  IPC call is going to return instantly anyway. */
-  hasFreshCache: boolean;
-}
-
-/** What `getOrGenerateNarrative` returns. */
-export interface WeeklyNarrative {
-  narrative: string;
-  themes: WeeklyTheme[];
-  decisions: string[];
-  generatedAt: string;
-  /** True when the result came from the cache (no LLM call made). */
-  fromCache: boolean;
-}
-
 export class WeeklyAggregator {
   /** In-flight narrative generations, keyed by `${year}:${week}`.
    *  Concurrent callers (e.g. the user clicking the prev arrow twice
@@ -293,6 +191,7 @@ export class WeeklyAggregator {
       this.getOrGenerateNarrative(isoYear, isoWeek),
     ]);
     const { hasFreshCache: _drop, ...structuredOut } = structured;
+    void _drop;
     return {
       ...structuredOut,
       narrative: narrative.narrative,

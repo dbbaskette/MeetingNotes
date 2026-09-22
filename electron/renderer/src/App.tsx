@@ -1,21 +1,22 @@
 // electron/renderer/src/App.tsx
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { LibraryView } from './views/LibraryView';
-import { MeetingDetailView } from './views/MeetingDetailView';
-import { SettingsView } from './views/SettingsView';
-import { WeeklyView } from './views/WeeklyView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost, useToast } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { PipelineStatusBar } from './components/PipelineStatusBar';
 import { Icon } from './components/icons';
-import { OnboardingView } from './views/OnboardingView';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
 import { requestLeave } from './lib/unsaved-guard';
 import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
+
+const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
+const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
+const WeeklyView = lazy(() => import('./views/WeeklyView').then((m) => ({ default: m.WeeklyView })));
+const OnboardingView = lazy(() => import('./views/OnboardingView').then((m) => ({ default: m.OnboardingView })));
 
 type View =
   | { kind: 'library' }
@@ -389,7 +390,7 @@ function AppInner(): JSX.Element {
     };
   }, [toast]);
 
-  const body = onboardStatus === null ? (
+  const activeView = onboardStatus === null ? (
     <div className="p-8 text-sm text-ink-muted">Loading…</div>
   ) : onboardStatus === 'needed' ? (
     <OnboardingView onFinished={() => { setForceOpenSetup(false); setOnboardStatus('done'); }} />
@@ -425,6 +426,7 @@ function AppInner(): JSX.Element {
       onRunSetupAgain={() => { void navigate({ kind: 'library' }); setForceOpenSetup(true); }}
     />
   );
+  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{activeView}</Suspense>;
 
   // Persistent recording banner on views that don't show the LibraryView's
   // inline live row. Keeps the user aware that capture is still going even

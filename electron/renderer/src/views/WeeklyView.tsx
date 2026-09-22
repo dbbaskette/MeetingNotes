@@ -5,10 +5,7 @@
 // meetings + grouped action items + decisions, and lets the user
 // regenerate the LLM narrative or export the whole thing as Markdown.
 //
-// All data shapes mirror the WeeklyData interface in
-// electron/main/weekly/aggregator.ts. We intentionally don't import
-// it from there (main vs renderer module boundary) — the IPC payload
-// is the contract and the types are mirrored locally.
+// Weekly payload shapes are shared through the IPC contract.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
@@ -17,6 +14,7 @@ import { AppNav, type NavTarget } from '../components/AppNav';
 import { fmtDueLabel } from '../lib/due-date';
 import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
 import logoUrl from '../assets/logo.png';
+import type { WeeklyStructured, WeeklyNarrative as WeeklyNarrativeResult } from '../../../main/ipc/contracts';
 
 interface Props {
   /** Open the meeting detail view for the given id when a meeting
@@ -25,67 +23,6 @@ interface Props {
   /** Shared nav tabs (Library / Weekly / Settings) — routes through
    *  App's history-aware navigate(). 'weekly' never arrives. */
   onNav: (target: NavTarget) => void;
-}
-
-// Mirrors of the IPC types — kept in sync with
-// electron/main/weekly/aggregator.ts. We don't import from main
-// across the renderer/main module boundary; the IPC payload is
-// the contract.
-interface WeeklyMeeting {
-  id: string;
-  title: string;
-  startedAt: string;
-  durationS: number | null;
-  highlight: string | null;
-  speakerCount: number | null;
-}
-interface WeeklyActionItem {
-  id: string;
-  meetingId: string;
-  meetingTitle: string;
-  text: string;
-  ownerLabel: string | null;
-  isYou: boolean;
-  status: string;
-  dueDate: string | null;
-  meetingStartedAt: string;
-}
-interface WeeklyOwnerGroup {
-  ownerLabel: string;
-  isYou: boolean;
-  items: WeeklyActionItem[];
-}
-
-/** Fast-path data that paints the page immediately. */
-interface WeeklyStructured {
-  isoYear: number;
-  isoWeek: number;
-  rangeStart: string;
-  rangeEnd: string;
-  totalDurationS: number;
-  meetings: WeeklyMeeting[];
-  openActionGroups: WeeklyOwnerGroup[];
-  openActionCount: number;
-  inProgress: boolean;
-  /** True when the cached narrative will return instantly — used to
-   *  decide whether to show the "drafting" skeleton vs render
-   *  immediately. */
-  hasFreshCache: boolean;
-}
-
-interface WeeklyTheme {
-  title: string;
-  detail: string;
-  meetings: string[];
-}
-
-/** Slow-path payload from the LLM. */
-interface WeeklyNarrativeResult {
-  narrative: string;
-  themes: WeeklyTheme[];
-  decisions: string[];
-  generatedAt: string;
-  fromCache: boolean;
 }
 
 // Local copy of getIsoWeek — small enough that a renderer-side
@@ -248,7 +185,7 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
     }
     const id = setInterval(() => {
       setNarrElapsedMs(Date.now() - narrStartedAt);
-    }, 250);
+    }, 1000);
     return () => clearInterval(id);
   }, [narrState, narrStartedAt]);
 
@@ -363,7 +300,7 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
       <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8">
       {structState === 'error' && (
         <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-xl p-4 mb-6 text-sm">
-          Couldn't load this week: {errorMsg ?? 'unknown error'}
+          Couldn&apos;t load this week: {errorMsg ?? 'unknown error'}
         </div>
       )}
 
@@ -430,7 +367,7 @@ function WeeklyBody({
         <div className="bg-surface rounded-xl shadow-card border border-surface-border p-10 text-center">
           <div className="text-ink-soft mb-1">No meetings captured this week.</div>
           <div className="text-xs text-ink-muted">
-            Record a meeting and it'll show up here once processing finishes.
+            Record a meeting and it&apos;ll show up here once processing finishes.
           </div>
         </div>
       )}
@@ -760,11 +697,11 @@ function NarrativeCard({
 
       {!inProgress && narrState === 'error' && (
         <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-lg p-3 text-sm">
-          <div className="font-medium mb-1">Couldn't draft the narrative.</div>
+          <div className="font-medium mb-1">Couldn&apos;t draft the narrative.</div>
           <div className="text-xs">{narrError ?? 'unknown error'}</div>
           <div className="text-xs mt-2 text-ink-muted">
-            Common causes: LM Studio isn't running, no model is loaded, or the
-            chosen model can't fit the prompt. The structured rollup below still
+            Common causes: LM Studio isn&apos;t running, no model is loaded, or the
+            chosen model can&apos;t fit the prompt. The structured rollup below still
             works — only the Overview card needs the LLM.
           </div>
         </div>

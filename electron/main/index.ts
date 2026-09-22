@@ -409,6 +409,11 @@ app.whenReady().then(async () => {
       w.webContents.send(IPC_CHANNELS.pipelineStatusEvent, status);
     }
   });
+  pipeline.onMeetingStageChange((meetingId) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.meetingStageEvent, meetingId);
+    }
+  });
 
   // Trash purge (UX rec #2 undo-delete + Recently deleted view).
   // Soft-deleted meetings stay recoverable for TRASH_RETENTION_MS (30

@@ -2,12 +2,33 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MarkdownExporter } from './markdown.js';
+import { MarkdownExporter, buildMeetingMarkdown } from './markdown.js';
 
 const dirs: string[] = [];
 afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
 
 describe('MarkdownExporter', () => {
+  it('uses selected rows as the only action-item list', () => {
+    const md = buildMeetingMarkdown({
+      items: [{ id: 'selected', text: 'Selected task', ownerName: null, dueDate: null, status: 'open' }],
+      meetingTitle: 'Review', meetingFolder: '/unused',
+      summaryMd: '## Overview\nKeep this.\n\n## Action Items\n- Stale generated task\n\n## Decisions\nShip it.',
+    });
+    expect(md.match(/## Action Items/g)).toHaveLength(1);
+    expect(md).not.toContain('Stale generated task');
+    expect(md).toContain('Selected task');
+    expect(md).toContain('## Decisions');
+  });
+
+  it('exports notes alone without an empty action-item section', () => {
+    const md = buildMeetingMarkdown({
+      items: [], meetingTitle: 'Review', meetingFolder: '/unused',
+      summaryMd: '## Overview\nKeep this.\n\n## Action Items\n- Stale generated task',
+    });
+    expect(md).toContain('Keep this.');
+    expect(md).not.toContain('Action Items');
+    expect(md).not.toContain('Stale generated task');
+  });
   it('writes a markdown file with items as a checklist', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-md-')); dirs.push(dir);
     const exp = new MarkdownExporter();

@@ -113,6 +113,7 @@ const IPC_CHANNELS = {
   pipelineClear: 'pipeline:clear',
   pipelineStatus: 'pipeline:status',
   pipelineStatusEvent: 'pipeline:status-change',
+  meetingStageEvent: 'meeting:stage-change',
   meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
   logsTail: 'logs:tail',
@@ -521,6 +522,11 @@ const api = {
       }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.pipelineStatusEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.pipelineStatusEvent, wrapped);
+    },
+    onMeetingStageChange: (cb: (meetingId: string) => void) => {
+      const wrapped = (_e: unknown, meetingId: string): void => cb(meetingId);
+      ipcRenderer.on(IPC_CHANNELS.meetingStageEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.meetingStageEvent, wrapped);
     },
   },
   llm: {

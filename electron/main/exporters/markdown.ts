@@ -1,17 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ExportInput, Exporter } from './interface.js';
+import { notesWithoutActionItems } from './document-content.js';
 
 /** Render a meeting as Markdown: title + summary + an action-items checklist.
  *  Shared by the Markdown file exporter and the Google Doc exporter (which
  *  uploads this content to Drive for conversion to a Doc). */
 export function buildMeetingMarkdown(input: ExportInput): string {
   const lines: string[] = [`# ${input.meetingTitle}`, ''];
-  const summary = input.summaryMd?.trim();
+  const summary = notesWithoutActionItems(input.summaryMd ?? '');
   if (summary) {
     lines.push(summary, '');
   }
-  lines.push('## Action Items', '');
+  if (input.items.length > 0) lines.push('## Action Items', '');
   for (const it of input.items) {
     const box = it.status === 'done' ? '[x]' : '[ ]';
     const parts = [it.text];

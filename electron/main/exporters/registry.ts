@@ -1,5 +1,6 @@
 import type { Exporter } from './interface.js';
 import { MarkdownExporter } from './markdown.js';
+import { PdfExporter } from './pdf.js';
 import { AppleRemindersExporter } from './apple-reminders.js';
 import { GoogleTasksStub } from './google-tasks-stub.js';
 import { GoogleTasksExporter, type GoogleAuthLike } from './google-tasks.js';
@@ -21,6 +22,7 @@ export interface ExporterRegistryDeps {
 export function buildExporterRegistry(deps: ExporterRegistryDeps = {}): Record<string, Exporter> {
   const out: Record<string, Exporter> = {
     markdown: new MarkdownExporter(),
+    pdf: new PdfExporter(),
     reminders: new AppleRemindersExporter(),
     'google-tasks': new GoogleTasksStub(),
   };

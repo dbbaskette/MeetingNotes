@@ -32,6 +32,7 @@ export interface PipelineStatus {
 }
 
 export type PipelineStatusListener = (s: PipelineStatus) => void;
+export type MeetingStageListener = (meetingId: string) => void;
 /** Fires when a meeting reaches status='done'. Async listeners are awaited
  *  but their errors are isolated — webhook delivery failures must not
  *  poison the next meeting's run. Issue #79. */
@@ -49,6 +50,7 @@ export class Pipeline {
   private paused = false;
   private currentId: string | null = null;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
+  private readonly stageListeners: Set<MeetingStageListener> = new Set();
   private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
   private readonly gateListeners: Set<SpeakerGateListener> = new Set();
 
@@ -122,6 +124,18 @@ export class Pipeline {
     return () => { this.statusListeners.delete(cb); };
   }
 
+  /** Emits after a persisted stage/status change, including failure. */
+  onMeetingStageChange(cb: MeetingStageListener): () => void {
+    this.stageListeners.add(cb);
+    return () => { this.stageListeners.delete(cb); };
+  }
+
+  private notifyMeeting(meetingId: string): void {
+    for (const cb of this.stageListeners) {
+      try { cb(meetingId); } catch { /* observer failures are isolated */ }
+    }
+  }
+
   /** Subscribe to meeting completions. Fires after the meeting flips to
    *  status='done'. Errors thrown by listeners are logged but don't roll
    *  back the completion. Used by the webhook exporter to push the
@@ -167,6 +181,7 @@ export class Pipeline {
             // user can retry) instead of a bare FAILED pill. The stage that
             // threw is also captured by the rolled-back pipeline_stage.
             this.deps.ctx.meetings.recordFailure(id, String(e));
+            this.notifyMeeting(id);
           }
           this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
         } finally {
@@ -186,7 +201,10 @@ export class Pipeline {
     if (!m) return;
 
     // Re-runs / recovery may put status back to 'processing' before enqueueing.
-    if (m.status === 'failed') this.deps.ctx.meetings.updateStatus(meetingId, 'processing');
+    if (m.status === 'failed') {
+      this.deps.ctx.meetings.updateStatus(meetingId, 'processing');
+      this.notifyMeeting(meetingId);
+    }
 
     let stage = m.pipelineStage as Stage;
 
@@ -194,6 +212,7 @@ export class Pipeline {
     // entry point so a rerun-from-transcribing still produces diarization.
     if (stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing') {
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
+      this.notifyMeeting(meetingId);
       await Promise.all([
         this.timeStage('transcribing', input, m.slug),
         this.timeStage('diarizing', input, m.slug),
@@ -216,6 +235,7 @@ export class Pipeline {
           if (!fresh?.skipSpeakerId) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
+            this.notifyMeeting(meetingId);
             // Notify subscribers that this meeting is now blocked on the user.
             // Per-listener isolation matches notify()/complete-listener loops:
             // a throwing listener must not stop us returning to park the gate.
@@ -233,11 +253,13 @@ export class Pipeline {
           continue;
         }
         this.deps.ctx.meetings.updateStage(meetingId, s);
+        this.notifyMeeting(meetingId);
         await this.timeStage(s as WorkStage, input, m.slug);
       }
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
     this.deps.ctx.meetings.updateStatus(meetingId, 'done');
+    this.notifyMeeting(meetingId);
     for (const cb of this.completeListeners) {
       try {
         await cb(meetingId);

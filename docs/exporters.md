@@ -1,6 +1,10 @@
 # Exporters
 
-MeetingNotes can push the results of a completed meeting to external surfaces. Today: Apple Reminders, Markdown (writes to disk), and a generic webhook.
+MeetingNotes can save meeting notes locally as Markdown or PDF, send selected action items to Apple Reminders or Google Tasks, create a Google Doc, and deliver meeting data to a webhook. Google exports require an account connection; see [Google setup](google-setup.md).
+
+## PDF export
+
+In a meeting's **Export** panel, choose **PDF**. Select the action items to include, or click **None** to save notes without action items. Choose a destination in the macOS Save dialog. The PDF is generated on your Mac from the saved summary and the selected action items; no upload is involved. The summary's own Action Items section is replaced by the selection so items do not appear twice.
 
 ## Webhook exporter
 
@@ -95,7 +99,7 @@ Markdown specials (`_*[]()`) in user-supplied titles, summaries, and action item
 
 - HTTPS only (with the loopback exception above).
 - The bearer secret is stored in the same SQLite settings table as other configuration. Never logged, never echoed in the test-payload preview, and never returned by `settings:get` to the renderer in plaintext if you'd prefer to wipe it after a session (the field is a `<input type="password">` in Settings, but you have to clear it yourself).
-- No PII leaves your machine unless `exporterWebhook` is on and a URL is configured.
+- Markdown and PDF exports are saved locally. Google Tasks and Google Docs send the selected meeting data to Google when you use those buttons. An enabled webhook sends its configured payload to the destination URL.
 
 ### Out of scope (v1)
 
