@@ -31,7 +31,10 @@ describe('GoogleDocExporter', () => {
 
     const exported: string[] = [];
     const out = await new GoogleDocExporter({ auth, fetchImpl }).export(
-      input({ onItemExported: (id) => exported.push(id) }),
+      input({
+        summaryMd: '## Overview\nGreat meeting.\n\n## Action Items\n- Old generated item',
+        onItemExported: (id) => exported.push(id),
+      }),
     );
     expect(out).toBe('https://docs.google.com/document/d/DOC1/edit');
     expect(exported).toEqual(['a']);
@@ -40,6 +43,8 @@ describe('GoogleDocExporter', () => {
     expect(uploadBody).toContain('"parents":["FOLDER1"]');
     expect(uploadBody).toContain('Great meeting.');
     expect(uploadBody).toContain('## Action Items');
+    expect(uploadBody.match(/## Action Items/g)).toHaveLength(1);
+    expect(uploadBody).not.toContain('Old generated item');
   });
 
   it('creates the MeetingNotes folder when missing', async () => {

@@ -1,5 +1,62 @@
 import { z } from 'zod';
 
+/** Weekly payloads cross the main/renderer boundary unchanged. Keep their
+ * shape here instead of maintaining copies in both processes. */
+export interface WeeklyTheme {
+  title: string;
+  detail: string;
+  meetings: string[];
+}
+export interface WeeklyMeeting {
+  id: string;
+  title: string;
+  startedAt: string;
+  durationS: number | null;
+  highlight: string | null;
+  speakerCount: number | null;
+}
+export interface WeeklyActionItem {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  text: string;
+  ownerLabel: string | null;
+  isYou: boolean;
+  status: string;
+  dueDate: string | null;
+  meetingStartedAt: string;
+}
+export interface WeeklyOwnerGroup {
+  ownerLabel: string;
+  isYou: boolean;
+  items: WeeklyActionItem[];
+}
+export interface WeeklyStructured {
+  isoYear: number;
+  isoWeek: number;
+  rangeStart: string;
+  rangeEnd: string;
+  totalDurationS: number;
+  meetings: WeeklyMeeting[];
+  openActionGroups: WeeklyOwnerGroup[];
+  openActionCount: number;
+  inProgress: boolean;
+  hasFreshCache: boolean;
+}
+export interface WeeklyNarrative {
+  narrative: string;
+  themes: WeeklyTheme[];
+  decisions: string[];
+  generatedAt: string;
+  fromCache: boolean;
+}
+export interface WeeklyData extends Omit<WeeklyStructured, 'hasFreshCache'> {
+  narrative: string;
+  themes: WeeklyTheme[];
+  decisions: string[];
+  generatedAt: string;
+}
+
 export const MeetingSpeakerSchema = z.object({
   localLabel: z.string(),
   rosterId: z.string().nullable(),
@@ -261,6 +318,7 @@ export const IPC_CHANNELS = {
   /** Push channel: main broadcasts a new PipelineStatus on every queue
    *  state change (enqueue, dequeue, pause, resume, clear). */
   pipelineStatusEvent: 'pipeline:status-change',
+  meetingStageEvent: 'meeting:stage-change',
   /** Push channel: main broadcasts {id} when the library watcher inserts
    *  a brand-new meeting row (e.g. just after a recording stops and the
    *  .m4a goes stable on disk). Renderer uses it to refresh the Library

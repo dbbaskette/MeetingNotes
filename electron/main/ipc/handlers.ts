@@ -1,7 +1,6 @@
 import type { IpcMain } from 'electron';
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
+import { app, dialog, shell } from 'electron';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
@@ -9,8 +8,7 @@ import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingI
 import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
-import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
-import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
+import type { SettingsRepo } from '../storage/settings-repo.js';
 import { LMStudioError, REASONING_LOOP_MARKER, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { extractActionItemsFromSummary } from '../pipeline/extract-action-items.js';
@@ -25,7 +23,6 @@ import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
-import { storageLocations } from '../lib/storage-paths.js';
 import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
 import { transcriptChars } from '../pipeline/transcript-chars.js';
 import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
@@ -42,12 +39,13 @@ import {
 import { moveToTrash, restoreFromTrash, purgeTrashDir, TRASH_RETENTION_MS } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { clearGateNotified } from '../pipeline/gate-alert.js';
-import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
-import { renderWeeklyMarkdown } from '../weekly/markdown.js';
+import type { WeeklyAggregator } from '../weekly/aggregator.js';
+import { registerWeeklyHandlers } from './weekly-handlers.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
-import { downloadWhisperModel } from '../whisper/download-model.js';
+import { registerSettingsHandlers } from './settings-handlers.js';
 import { ripgrepSearch } from '../search/ripgrep-search.js';
-import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/owner-filter.js';
+import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
+import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
@@ -824,179 +822,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return { count };
   });
 
-  ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {
-    exporter: string;
-    meetingId: string;
-    itemIds?: string[]; // optional subset; omitted = all open items (legacy behavior)
-    outputPath?: string; // optional file path for file-based exporters (markdown)
-  }) => {
-    if (typeof input?.exporter !== 'string' || typeof input?.meetingId !== 'string') throw new Error('invalid args');
-    const meeting = s.meetings.findById(input.meetingId);
-    if (!meeting) throw new Error('meeting not found');
-    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-    const exporter = s.exporters[input.exporter];
-    if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
-    const rows = s.actionItems.listByMeeting(input.meetingId);
-    let selectedRows = Array.isArray(input.itemIds)
-      ? rows.filter((r) => input.itemIds!.includes(r.id))
-      : rows;
-    // Task-app exporters (Reminders, Google Tasks) push into the user's
-    // personal to-do list, so they ONLY ever send items assigned to the
-    // user — never the whole meeting's action items. Enforced here as
-    // defense-in-depth even though the renderer also pre-filters the modal.
-    if (TASK_APP_EXPORTERS.has(input.exporter)) {
-      const userSpeakerId = s.settings.get('userSpeakerId');
-      const me = {
-        userSpeakerId,
-        userDisplayName: userSpeakerId
-          ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
-          : null,
-      };
-      if (!userIsIdentified(me)) {
-        throw new Error('Set who you are in Settings → "You are…" to export your action items.');
-      }
-      selectedRows = selectedRows.filter((r) => r.status !== 'done' && isMyItem(r, me));
-      if (selectedRows.length === 0) {
-        throw new Error("None of this meeting's open action items are assigned to you.");
-      }
-    }
-    const items = selectedRows.map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
-    }));
-    const summaryPath = path.join(folder, 'summary.md');
-    const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
-    // Document exporters (Markdown, Google Doc) render the summary + a
-    // checklist, so they're valid with zero items. Task/integration
-    // exporters only push action items, so an empty set there is a no-op.
-    const DOCUMENT_EXPORTERS = new Set(['markdown', 'google-doc']);
-    if (items.length === 0 && !DOCUMENT_EXPORTERS.has(input.exporter)) {
-      throw new Error('No action items selected');
-    }
-    if (items.length === 0 && !summaryMd) {
-      throw new Error('Nothing to export — this meeting has no summary or action items yet.');
-    }
-    const result = await exporter.export({
-      items, meetingTitle: meeting.title, meetingFolder: folder,
-      summaryMd,
-      outputPath: typeof input.outputPath === 'string' ? input.outputPath : undefined,
-      onItemExported: (id) => s.actionItems.markExported(id, input.exporter),
-    });
-    return result;
-  });
+  registerExportHandlers(ipc, s);
 
-  ipc.handle(IPC_CHANNELS.dialogSave, async (_e, opts: unknown) => {
-    // Thin wrapper over Electron's save dialog so the renderer can prompt
-    // the user for a destination before a file-based export runs. We
-    // intentionally don't write the file here — the exporter does, using
-    // the returned path — so dialog:save stays a pure user-intent query.
-    const parsed = (opts ?? {}) as { defaultPath?: unknown; filters?: unknown };
-    const defaultPath = typeof parsed.defaultPath === 'string' ? parsed.defaultPath : undefined;
-    const filters = Array.isArray(parsed.filters)
-      ? (parsed.filters as { name: string; extensions: string[] }[])
-      : undefined;
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    const result = win
-      ? await dialog.showSaveDialog(win, { defaultPath, filters })
-      : await dialog.showSaveDialog({ defaultPath, filters });
-    if (result.canceled || !result.filePath) return null;
-    return result.filePath;
-  });
-
-  ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
-  ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
-    if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
-    s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
-    if (key === 'theme') {
-      nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
-    }
-    // Toggle each meeting detector live when the user flips its switch —
-    // no need to restart the app. autoDetectMeetings is the object form
-    // post-#78 (browserTabs / nativeApps / silenceMs).
-    if (key === 'autoDetectMeetings') {
-      const cfg = s.settings.get('autoDetectMeetings');
-      if (s.meetingDetector) {
-        if (cfg.browserTabs) s.meetingDetector.start();
-        else s.meetingDetector.stop();
-      }
-      if (s.nativeAppDetector) {
-        if (cfg.nativeApps) s.nativeAppDetector.start();
-        else s.nativeAppDetector.stop();
-      }
-    }
-  });
-
-  ipc.handle(IPC_CHANNELS.settingsRevealStorage, (_e: unknown, key: unknown) => {
-    const rows = storageLocations({
-      libraryRoot: s.settings.get('libraryPath'),
-      home: os.homedir(),
-    });
-    const row = rows.find((r) => r.key === key);
-    if (!row) throw new Error(`unknown storage location: ${String(key)}`);
-    fs.mkdirSync(row.path, { recursive: true });
-    shell.showItemInFolder(row.path);
-  });
-
-  ipc.handle(IPC_CHANNELS.modelsList, async () => {
-    try { return await s.lmStudio.listModels(); }
-    catch { return []; }
-  });
-
-  // Onboarding-wizard handlers (#43). Kept out of the main settings
-  // block because they're only used during first-run setup.
-  ipc.handle(IPC_CHANNELS.onboardingWhisperList, async () => {
-    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
-      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin'))
-      .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
-    if (typeof model !== 'string') throw new Error('invalid model id');
-    // Native streaming download (no shell script). The old path shelled out to
-    // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
-    // so onboarding's model download failed there with "No such file or
-    // directory". downloadWhisperModel validates the id and pulls the ggml
-    // file straight into the whisper-models directory. Progress fans out on
-    // the onboarding:whisper-progress push channel (throttled to ~4/sec in
-    // download-model.ts) so the wizard can render a real progress bar.
-    await downloadWhisperModel(model, {
-      onProgress: (received, total) => {
-        BrowserWindow.getAllWindows().forEach((w) =>
-          w.webContents.send(IPC_CHANNELS.onboardingWhisperProgress, { model, received, total }));
-      },
-    });
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
-    if (typeof token !== 'string' || token.length < 8) throw new Error('invalid token');
-    const dir = path.join(os.homedir(), '.cache', 'huggingface');
-    fs.mkdirSync(dir, { recursive: true });
-    const tokenPath = path.join(dir, 'token');
-    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-    // Set perms explicitly in case writeFileSync's mode arg is honored
-    // only at file creation on some filesystems.
-    try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenStatus, async () => {
-    // Report whether a non-empty token file exists — so the wizard's HF step,
-    // after the user navigates away and back, shows "already saved" rather than
-    // a blank field that looks like the token vanished. We never read the
-    // secret back into the renderer.
-    const tokenPath = path.join(os.homedir(), '.cache', 'huggingface', 'token');
-    let saved = false;
-    try { saved = fs.existsSync(tokenPath) && fs.readFileSync(tokenPath, 'utf8').trim().length > 0; }
-    catch { saved = false; }
-    return { saved };
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
-    if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
-      throw new Error('invalid url');
-    }
-    await shell.openExternal(url);
-  });
+  registerSettingsHandlers(ipc, s);
 
   // Cmd+K global search (#45). Titles are matched in-memory off the DB;
   // summary/transcript content is searched via the bundled ripgrep
@@ -1100,62 +928,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }));
   });
 
-  // Weekly summary (#weekly). Year/week pair identifies an ISO week.
-  // The aggregator handles cache-or-regenerate based on input hash.
-  const validWeek = (y: unknown, w: unknown): { year: number; week: number } | null => {
-    if (typeof y !== 'number' || typeof w !== 'number') return null;
-    if (!Number.isInteger(y) || !Number.isInteger(w)) return null;
-    if (y < 1970 || y > 9999) return null;
-    if (w < 1 || w > 53) return null;
-    return { year: y, week: w };
-  };
-
-  ipc.handle(IPC_CHANNELS.weeklyGet, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getWeek(w.year, w.week);
-  });
-
-  // Fast path: structured data only (meetings + actions + decisions
-  // groups), no LLM call. Used by the WeeklyView's parallel-fetch
-  // pattern so the page paints immediately while the narrative is
-  // still being drafted.
-  ipc.handle(IPC_CHANNELS.weeklyGetStructured, async (_e, year: unknown, week: unknown) => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getStructuredWeek(w.year, w.week);
-  });
-
-  // Slow path: returns the cached narrative if fresh, else triggers
-  // an LLM call. Pass force=true to bypass the cache (Regenerate).
-  ipc.handle(IPC_CHANNELS.weeklyGetNarrative, async (_e, year: unknown, week: unknown, force: unknown) => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getOrGenerateNarrative(w.year, w.week, {
-      force: force === true,
-    });
-  });
-
-  ipc.handle(IPC_CHANNELS.weeklyRegenerate, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.regenerateWeek(w.year, w.week);
-  });
-
-  ipc.handle(IPC_CHANNELS.weeklyExportMarkdown, async (_e, year: unknown, week: unknown): Promise<{ path: string | null; markdown: string }> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    const data = await s.weeklyAggregator.getWeek(w.year, w.week);
-    const markdown = renderWeeklyMarkdown(data);
-    const filename = `weekly-${w.year}-W${String(w.week).padStart(2, '0')}.md`;
-    const result = await dialog.showSaveDialog({
-      defaultPath: filename,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    });
-    if (result.canceled || !result.filePath) return { path: null, markdown };
-    fs.writeFileSync(result.filePath, markdown, 'utf8');
-    return { path: result.filePath, markdown };
-  });
+  registerWeeklyHandlers(ipc, s);
 
   // Phase 3 LLM-provider lifecycle. Settings UI calls this to dim
   // managed-mode options when their CLI isn't installed and to show
