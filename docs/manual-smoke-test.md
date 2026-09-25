@@ -12,7 +12,7 @@ Run before merging significant feature work or releasing. ~10 min total.
 
 ## Meeting groups
 
-- [ ] In **Organized**, confirm named group rows and **Ungrouped** appear in the Library list. Expand/collapse several sections, restart the app, and verify expansion state persists. A meeting appears only inside its assigned group, never twice in the organized list.
+- [ ] In **Organized**, confirm **Ungrouped** appears first, with named groups alphabetically below it, including during grouped search. Expand/collapse several sections, restart the app, and verify expansion state persists. A meeting appears only inside its assigned group, never twice in the organized list.
 - [ ] Create a named group using **+ New group**; check its empty section, rename and delete from its **⋯** menu. Confirm the name updates on assigned rows. Use **View** to focus on one group and **All groups** to return.
 - [ ] Move an existing meeting from its row or detail view, and move several using bulk selection. Check the section count, filtered list, grouped inline search, Undo, and that audio and notes remain in place. Search results should appear only once under the assigned group; clearing search should restore the prior expand/collapse state.
 - [ ] In the move dialog, selecting a destination must **not** move anything until **Move to …** is confirmed. Check the meeting title/current group or bulk preview, a hidden-selection warning where applicable, and the highlighted destination. Searching for a named group must not leave Ungrouped as an unrelated choice; changing the search must clear a prior destination.

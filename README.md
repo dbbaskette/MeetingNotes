@@ -9,7 +9,7 @@ Capture and inference run locally. Optional Google and webhook exports send only
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.12.5-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.12.6-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -188,7 +188,7 @@ If a capture is interrupted, finalized incompletely, or never indexed, open **Ne
 <details>
 <summary><strong>Managing recordings</strong></summary>
 
-The Library opens in **Organized** view: named groups and **Ungrouped** appear as expandable sections in the meeting list. Meetings appear only inside their assigned section. Expand a section to browse its meetings, or choose **View** to focus on that group alone; **All groups** returns to the organized list. Use **All meetings** for a flat, sortable list. Status filters and inline search work in either layout; organized search groups matches by their assigned group, while **⌘K** quick search remains global. Use **+ New group** to create a section, and **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.
+The Library opens in **Organized** view: **Ungrouped** appears first, followed by alphabetically sorted named groups, all as expandable sections in the meeting list. Meetings appear only inside their assigned section. Expand a section to browse its meetings, or choose **View** to focus on that group alone; **All groups** returns to the organized list. Use **All meetings** for a flat, sortable list. Status filters and inline search work in either layout; organized search groups matches by their assigned group, while **⌘K** quick search remains global. Use **+ New group** to create a section, and **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.
 
 Every row and the detail-view header has a **⋯** menu with **Move to group…**, **Rename…**, and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
 </details>
@@ -341,7 +341,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.5-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.6-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -357,9 +357,9 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.12.5 local build** — stable on macOS 14.2+ / Apple Silicon. Moving a meeting now shows its current group, asks you to choose a destination and confirm, and clears successful moves from bulk selection. Partial failures stay selected for retry. The Library retains expandable group sections, group focus, and a flat **All meetings** view. Groups remain metadata only and do not move audio or change processing.
+**1.12.6** — stable on macOS 14.2+ / Apple Silicon. Ungrouped now leads the organized Library, keeping newly recorded meetings easy to find. Group moves show the source and destination, require confirmation, and clear successfully moved meetings from bulk selection while leaving failures selected for retry. Groups remain metadata only and do not move audio or change processing.
 
-The latest published source release is [1.12.4](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.4); see its [release notes](docs/releases/v1.12.4.md) for upgrade guidance and known limitations. The 1.12.5 installer is built locally and is not a GitHub release. The experimental remote-processing beta remains separate.
+See the [1.12.6 release notes](docs/releases/v1.12.6.md) for upgrade guidance and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.6). The 1.12.5 installer was a local build, not a GitHub release. The experimental remote-processing beta remains separate.
 
 ## 📄 License
 
