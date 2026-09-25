@@ -6,9 +6,10 @@ import { Icon } from './icons';
 import type { RecordingStartInput } from '../App';
 
 export function RecordButton({
-  onStarted,
+  onStarted, groupId,
 }: {
   onStarted: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
+  groupId?: string | null;
 }): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function RecordButton({
     setPickerOpen(false);
     setBusy(true); setError(null);
     const input: RecordingStartInput = {
-      targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true,
+      targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true, groupId: src.groupId,
     };
     try {
       const { sessionId } = await api.recording.start(input) as { sessionId: string };
@@ -59,7 +60,7 @@ export function RecordButton({
           </kbd>
         )}
       </button>
-      {pickerOpen && <SourcePicker onPick={pick} onCancel={() => setPickerOpen(false)} />}
+      {pickerOpen && <SourcePicker initialGroupId={groupId} onPick={pick} onCancel={() => setPickerOpen(false)} />}
       {error && <div className="text-xs text-danger mt-1">{error}</div>}
     </div>
   );

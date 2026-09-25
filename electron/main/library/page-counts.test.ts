@@ -16,4 +16,14 @@ describe('createCountsCache', () => {
     expect(cache.forQuery({ filter: 'all', sort: 'newest' }, load)).toBe(counts);
     expect(loads).toBe(3);
   });
+
+  it('never reuses totals across group scopes', () => {
+    const cache = createCountsCache();
+    let loads = 0;
+    const load = () => ({ all: ++loads, pending: 0, processing: 0, done: 0, failed: 0 });
+    expect(cache.forQuery({ filter: 'all', sort: 'newest' }, load).all).toBe(1);
+    expect(cache.forQuery({ filter: 'all', sort: 'newest', groupId: 'group-a', cursor: 'next' }, load).all).toBe(2);
+    expect(cache.forQuery({ filter: 'all', sort: 'newest', groupId: 'group-a', cursor: 'later' }, load).all).toBe(2);
+    expect(cache.forQuery({ filter: 'all', sort: 'newest', groupId: null, cursor: 'next' }, load).all).toBe(3);
+  });
 });

@@ -5,6 +5,7 @@ import type { MeetingSummary } from './paged-meetings';
 
 const row = (id: string, status = 'done', startedAt = '2026-09-08'): MeetingSummary => ({
   id, slug: id, title: id, status, startedAt, durationS: 60, pipelineStage: 'done',
+  groupId: null, groupName: null,
   stageStartedAt: null, stageEtaMs: null, stageEtaRough: false, unidentifiedCount: 0,
   actionItemsCount: 0, speakers: [], errorMessage: null, skipSpeakerId: false,
 });

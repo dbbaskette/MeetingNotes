@@ -26,6 +26,7 @@ export interface PaletteTarget {
 interface SearchResult {
   meetingId: string;
   title: string;
+  groupName?: string | null;
   source: 'title' | 'summary' | 'transcript';
   snippet: string;
   seconds?: number;
@@ -202,6 +203,7 @@ function ResultRow({
     >
       <div className="flex items-center gap-2 text-xs text-ink-muted">
         <span className="font-semibold">{result.title}</span>
+        {result.groupName && <span className="truncate max-w-36 text-[10px] text-brand-indigo" title={result.groupName}>in {result.groupName}</span>}
         <span className="opacity-60">·</span>
         <span className="font-mono text-[10px] tracking-wider uppercase">{result.source}</span>
         {result.seconds !== undefined && (

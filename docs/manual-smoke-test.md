@@ -8,7 +8,14 @@ Run before merging significant feature work or releasing. ~10 min total.
 - [ ] LM Studio open, a chat model loaded (`qwen/qwen3.5-9b` or similar), local server enabled.
 - [ ] HuggingFace token saved at `~/.cache/huggingface/token` (for diarization).
 - [ ] Whisper server running (`scripts/whisper-server.sh status` reports Running).
-- [ ] Latest `.app` built: `npm run dist` produces `release/mac-arm64/MeetingNotes.app`.
+- [ ] Latest installer built: `npm run dist` produces a versioned DMG and ZIP under `release/` (the loose `.app` is removed after packaging).
+
+## Meeting groups (1.12.3)
+
+- [ ] Create a named group in the Library selector; check All, the new empty group, and Ungrouped. Rename it, then confirm its name updates in the selector and any assigned rows.
+- [ ] Move an existing meeting from its row or detail view, and move several using bulk selection. Check the scoped list/count/search, Undo, and that the audio and notes remain in place.
+- [ ] Start a short recording with **Save to group** selected. Confirm the cataloged meeting belongs to that group. Delete the group and confirm the recording remains in Ungrouped.
+- [ ] Check the selector and move dialog with a long name and a narrow window; verify keyboard focus, arrow keys, Enter, and Escape. Confirm Needs Attention, Weekly, and ⌘K still show meetings across groups.
 
 ## Pipeline (existing — should still work)
 

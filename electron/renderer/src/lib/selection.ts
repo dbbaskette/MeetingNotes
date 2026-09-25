@@ -78,9 +78,10 @@ export const librarySelection = createLibrarySelection();
 
 /** Search results here are already hydrated and filtered by the view. Never
  * widen that capped search universe to a browse-filter ID query. */
-export function selectionScope({ isSearching, filter, loaded, searchResults, total }: {
+export function selectionScope({ isSearching, filter, groupId, loaded, searchResults, total }: {
   isSearching: boolean;
   filter: MeetingFilter;
+  groupId?: string | null;
   loaded: readonly { id: string }[];
   searchResults: readonly { id: string }[];
   total: number;
@@ -89,8 +90,9 @@ export function selectionScope({ isSearching, filter, loaded, searchResults, tot
   return {
     loadedIds,
     matchingCount: !isSearching && total > loadedIds.length ? total : null,
-    resolveIds: (listIds: (filter: MeetingFilter) => Promise<string[]>): Promise<string[]> =>
-      isSearching ? Promise.resolve([...loadedIds]) : listIds(filter),
+    resolveIds: (listIds: (filter: MeetingFilter, groupId?: string | null) => Promise<string[]>): Promise<string[]> =>
+      isSearching ? Promise.resolve([...loadedIds])
+        : groupId === undefined ? listIds(filter) : listIds(filter, groupId),
   };
 }
 

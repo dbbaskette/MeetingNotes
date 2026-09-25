@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 
 export interface MeetingRow {
   id: string; slug: string; title: string;
+  groupId: string | null; groupName: string | null;
   startedAt: string | null; durationS: number | null;
   audioPath: string; status: string; pipelineStage: string;
   stageStartedAt: string | null;
@@ -21,6 +22,7 @@ export interface MeetingInsert {
   id: string; slug: string; title: string;
   startedAt: string | null; durationS: number | null;
   audioPath: string; status: string; pipelineStage: string;
+  groupId?: string | null;
 }
 
 export type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
@@ -29,6 +31,8 @@ export type MeetingListSort = 'newest' | 'oldest' | 'longest' | 'title';
 export interface MeetingListQuery {
   filter: MeetingListFilter;
   sort: MeetingListSort;
+  /** undefined = all, null = ungrouped, string = one named group. */
+  groupId?: string | null;
   cursor?: string;
   /** Positive integer; defaults to 50 and caps at 100. */
   pageSize?: number;
@@ -66,6 +70,7 @@ const ID_COLUMN: SortColumn = { sql: 'id', field: 'id', direction: 'ASC', type: 
 
 interface MeetingCursor {
   v: 1;
+  scope?: string;
   statusRank: number;
   // The sort tag rejects reuse with a different sort; values contain every
   // ordered column before the immutable ID, including secondary recency.
@@ -82,7 +87,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function decodeCursor(encoded: string, sort: MeetingListSort): MeetingCursor {
+function scopeKey(groupId: string | null | undefined): string {
+  return groupId === undefined ? 'all' : groupId === null ? 'ungrouped' : `group:${groupId}`;
+}
+
+function groupSql(groupId: string | null | undefined, params: Record<string, SortValue>): string {
+  if (groupId === undefined) return '1';
+  if (groupId === null) return 'group_id IS NULL';
+  if (typeof groupId !== 'string' || !/^[0-9a-f-]{36}$/i.test(groupId)) throw new Error('Invalid group ID');
+  params.groupId = groupId;
+  return 'group_id = @groupId';
+}
+
+function decodeCursor(encoded: string, sort: MeetingListSort, scope: string): MeetingCursor {
   const invalid = () => new Error('Invalid meeting cursor');
   if (typeof encoded !== 'string' || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw invalid();
   const bytes = Buffer.from(encoded, 'base64url');
@@ -92,6 +109,7 @@ function decodeCursor(encoded: string, sort: MeetingListSort): MeetingCursor {
   if (!isRecord(cursor) || cursor.v !== 1
     || ![0, 1, 2, 3, 4, 9].includes(cursor.statusRank as number)
     || typeof cursor.id !== 'string' || cursor.id.length === 0
+    || (cursor.scope ?? 'all') !== scope
     || !isRecord(cursor.sortValue) || cursor.sortValue.sort !== sort
     || !Array.isArray(cursor.sortValue.values)) throw invalid();
   const values = cursor.sortValue.values;
@@ -127,6 +145,8 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     id: r.id as string,
     slug: r.slug as string,
     title: r.title as string,
+    groupId: (r.group_id as string) ?? null,
+    groupName: (r.group_name as string) ?? null,
     startedAt: (r.started_at as string) ?? null,
     durationS: (r.duration_s as number) ?? null,
     audioPath: r.audio_path as string,
@@ -147,9 +167,10 @@ export class MeetingsRepo {
   insert(m: MeetingInsert): void {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO meetings (id, slug, title, started_at, duration_s, audio_path, status, pipeline_stage, created_at, updated_at)
-      VALUES (@id, @slug, @title, @startedAt, @durationS, @audioPath, @status, @pipelineStage, @createdAt, @updatedAt)
-    `).run({ ...m, createdAt: now, updatedAt: now });
+      INSERT INTO meetings (id, slug, title, started_at, duration_s, audio_path, status, pipeline_stage, group_id, created_at, updated_at)
+      VALUES (@id, @slug, @title, @startedAt, @durationS, @audioPath, @status, @pipelineStage,
+        (SELECT id FROM groups WHERE id = @groupId), @createdAt, @updatedAt)
+    `).run({ ...m, groupId: m.groupId ?? null, createdAt: now, updatedAt: now });
   }
 
   findByAudioPath(audioPath: string): MeetingRow | null {
@@ -158,7 +179,8 @@ export class MeetingsRepo {
   }
 
   findById(id: string): MeetingRow | null {
-    const row = this.db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    const row = this.db.prepare(`SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name
+      FROM meetings WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
     return row ? rowToMeeting(row) : null;
   }
 
@@ -167,7 +189,8 @@ export class MeetingsRepo {
     // from all user-facing listings. findById() still returns them for the
     // undo-delete path.
     const rows = this.db.prepare(
-      'SELECT * FROM meetings WHERE deleted_at IS NULL ORDER BY COALESCE(started_at, created_at) DESC',
+      `SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name
+       FROM meetings WHERE deleted_at IS NULL ORDER BY COALESCE(started_at, created_at) DESC`,
     ).all() as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
@@ -186,21 +209,24 @@ export class MeetingsRepo {
     const selectedColumns = SORT_COLUMNS[query.sort];
     const columns = [RANK_COLUMN, ...selectedColumns, ID_COLUMN];
     const params: Record<string, SortValue> = { limit: pageSize + 1 };
-    const cursor = query.cursor === undefined ? null : decodeCursor(query.cursor, query.sort);
+    const group = groupSql(query.groupId, params);
+    const scope = scopeKey(query.groupId);
+    const cursor = query.cursor === undefined ? null : decodeCursor(query.cursor, query.sort, scope);
     const continuation = cursor ? `AND ${afterCursor(columns,
       [cursor.statusRank, ...cursor.sortValue.values, cursor.id], params)}` : '';
     const order = columns.map((column) =>
       `${column.sql} ${column.direction}${column.nullable ? ' NULLS LAST' : ''}`).join(', ');
     const result = this.db.prepare(`
-      SELECT *, ${STATUS_RANK_SQL} AS browse_status_rank FROM meetings
-      WHERE deleted_at IS NULL AND ${filter} ${continuation}
+      SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name,
+        ${STATUS_RANK_SQL} AS browse_status_rank FROM meetings
+      WHERE deleted_at IS NULL AND ${filter} AND ${group} ${continuation}
       ORDER BY ${order} LIMIT @limit
     `).all(params) as Record<string, unknown>[];
     const hasMore = result.length > pageSize;
     const rows = result.slice(0, pageSize);
     const last = rows[rows.length - 1];
     const next: MeetingCursor | null = hasMore && last ? {
-      v: 1, statusRank: last.browse_status_rank as number,
+      v: 1, ...(scope !== 'all' ? { scope } : {}), statusRank: last.browse_status_rank as number,
       sortValue: { sort: query.sort, values: selectedColumns.map((column) => last[column.field] as SortValue) },
       id: last.id as string,
     } : null;
@@ -208,22 +234,26 @@ export class MeetingsRepo {
   }
 
   /** Global live totals, independent of the current browse page/filter. */
-  counts(): MeetingCounts {
+  counts(groupId?: string | null): MeetingCounts {
+    const params: Record<string, SortValue> = {};
+    const group = groupSql(groupId, params);
     return this.db.prepare(`
       SELECT COUNT(*) AS "all",
         COUNT(CASE WHEN status = 'pending' THEN 1 END) AS pending,
         COUNT(CASE WHEN status IN ('awaiting_user', 'processing') THEN 1 END) AS processing,
         COUNT(CASE WHEN status = 'done' THEN 1 END) AS done,
         COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed
-      FROM meetings WHERE deleted_at IS NULL
-    `).get() as MeetingCounts;
+      FROM meetings WHERE deleted_at IS NULL AND ${group}
+    `).get(params) as MeetingCounts;
   }
 
   /** Exact live-ID snapshot for bulk selection, in deterministic ID order. */
-  listIds(filter: MeetingListFilter): string[] {
+  listIds(filter: MeetingListFilter, groupId?: string | null): string[] {
+    const params: Record<string, SortValue> = {};
+    const group = groupSql(groupId, params);
     const rows = this.db.prepare(`
-      SELECT id FROM meetings WHERE deleted_at IS NULL AND ${filterSql(filter)} ORDER BY id ASC
-    `).all() as { id: string }[];
+      SELECT id FROM meetings WHERE deleted_at IS NULL AND ${filterSql(filter)} AND ${group} ORDER BY id ASC
+    `).all(params) as { id: string }[];
     return rows.map((row) => row.id);
   }
 
@@ -236,7 +266,8 @@ export class MeetingsRepo {
       const chunk = uniqueIds.slice(i, i + 900);
       const placeholders = chunk.map(() => '?').join(',');
       const rows = this.db.prepare(
-        `SELECT * FROM meetings WHERE deleted_at IS NULL AND id IN (${placeholders})`,
+        `SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name
+         FROM meetings WHERE deleted_at IS NULL AND id IN (${placeholders})`,
       ).all(...chunk) as Record<string, unknown>[];
       for (const row of rows) {
         const meeting = rowToMeeting(row);
@@ -361,17 +392,19 @@ export class MeetingsRepo {
    *  Cmd+K palette's title tier — pushed down to SQL so a keystroke
    *  doesn't materialize the whole library via listAll(). Parameter-
    *  bound; excludes soft-deleted rows. */
-  searchByTitle(q: string, limit: number): MeetingRow[] {
+  searchByTitle(q: string, limit: number, groupId?: string | null): MeetingRow[] {
     // Escape LIKE metacharacters so the palette matches the user's text
     // literally — "50%" or "q_2" must behave like the old .includes()
     // substring match, not as SQL wildcards.
     const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const params: Record<string, SortValue> = { query: escaped, limit };
+    const group = groupSql(groupId, params);
     const rows = this.db.prepare(`
-      SELECT * FROM meetings
-      WHERE deleted_at IS NULL AND title LIKE '%'||?||'%' ESCAPE '\\' COLLATE NOCASE
+      SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name FROM meetings
+      WHERE deleted_at IS NULL AND ${group} AND title LIKE '%'||@query||'%' ESCAPE '\\' COLLATE NOCASE
       ORDER BY COALESCE(started_at, created_at) DESC
-      LIMIT ?
-    `).all(escaped, limit) as Record<string, unknown>[];
+      LIMIT @limit
+    `).all(params) as Record<string, unknown>[];
     return rows.map(rowToMeeting);
   }
 
@@ -379,16 +412,18 @@ export class MeetingsRepo {
    *  their live meeting rows in one round-trip. Parameter-bound IN list,
    *  chunked to stay under SQLite's default 999-variable limit. Excludes
    *  soft-deleted rows, matching listAll(). */
-  findBySlugs(slugs: string[]): MeetingRow[] {
+  findBySlugs(slugs: string[], groupId?: string | null): MeetingRow[] {
     const CHUNK = 900;
     const out: MeetingRow[] = [];
     for (let i = 0; i < slugs.length; i += CHUNK) {
       const chunk = slugs.slice(i, i + CHUNK);
       const placeholders = chunk.map(() => '?').join(',');
       const rows = this.db.prepare(
-        `SELECT * FROM meetings WHERE deleted_at IS NULL AND slug IN (${placeholders})`,
+        `SELECT meetings.*, (SELECT name FROM groups WHERE id = meetings.group_id) AS group_name
+         FROM meetings WHERE deleted_at IS NULL AND slug IN (${placeholders})`,
       ).all(...chunk) as Record<string, unknown>[];
-      out.push(...rows.map(rowToMeeting));
+      out.push(...rows.map(rowToMeeting).filter((row) =>
+        groupId === undefined || (groupId === null ? row.groupId === null : row.groupId === groupId)));
     }
     return out;
   }

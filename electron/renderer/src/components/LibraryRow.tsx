@@ -27,6 +27,7 @@ import { MeetingRowMenu } from './MeetingRowMenu';
 interface Meeting {
   id: string;
   title: string;
+  groupName?: string | null;
   startedAt: string | null;
   durationS: number | null;
   pipelineStage: string;
@@ -53,6 +54,7 @@ interface Props {
    *  row's checkbox visible during a bulk selection (instead of
    *  hover-only) and makes row clicks toggle instead of open. */
   selectionActive?: boolean;
+  showGroup?: boolean;
 }
 
 function fmtDur(s: number | null): string {
@@ -71,7 +73,7 @@ function fmtDate(iso: string | null): string {
 }
 
 export const LibraryRow = memo(function LibraryRow({
-  meeting, onOpen, onChanged, checked, onToggle, selectionActive,
+  meeting, onOpen, onChanged, checked, onToggle, selectionActive, showGroup,
 }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
@@ -145,6 +147,10 @@ export const LibraryRow = memo(function LibraryRow({
               <span>{fmtDur(meeting.durationS)}</span>
             </>
           )}
+          {showGroup && meeting.groupName && <>
+            <span className="text-surface-border">·</span>
+            <span className="truncate max-w-32" title={meeting.groupName}>{meeting.groupName}</span>
+          </>}
           {meeting.unidentifiedCount > 0 && status === 'done' && (
             <>
               <span className="text-surface-border">·</span>

@@ -8,6 +8,7 @@ import { recoveryMediaHandler } from './recording/recovery-media.js';
 protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
+import { GroupsRepo } from './storage/groups-repo.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
@@ -181,6 +182,7 @@ app.whenReady().then(async () => {
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));
   const meetings = new MeetingsRepo(db);
+  const groups = new GroupsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
@@ -369,6 +371,7 @@ app.whenReady().then(async () => {
   const catalogRecording = async (audioPath: string) => {
     const result = await catalogAudio(audioPath, {
       meetings,
+      sessions: recordingSessionsRepo,
       libraryRoot,
       onSlugCollision: (slug, attempt) =>
         logger.info('library:slug-collision-retry', { slug, attempt }),
@@ -678,6 +681,7 @@ app.whenReady().then(async () => {
   });
   registerIpcHandlers(ipcMain, {
     meetings,
+    groups,
     speakers,
     actionItems,
     stageDurations,

@@ -13,10 +13,11 @@ export function createCountsCache() {
   let last: { key: string; counts: MeetingCounts } | null = null;
   return {
     forQuery(
-      query: { filter: string; sort: string; cursor?: string },
+      query: { filter: string; sort: string; groupId?: string | null; cursor?: string },
       load: () => MeetingCounts,
     ): MeetingCounts {
-      const key = `${query.filter}:${query.sort}`;
+      const scope = query.groupId === undefined ? 'all' : query.groupId === null ? 'ungrouped' : query.groupId;
+      const key = JSON.stringify([query.filter, query.sort, scope]);
       if (query.cursor !== undefined && last?.key === key) return last.counts;
       const counts = load();
       last = { key, counts };

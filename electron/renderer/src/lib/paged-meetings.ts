@@ -28,7 +28,8 @@ export interface PagedMeetingsState {
 
 function normalizeQuery(query: MeetingQuery): MeetingQuery {
   const size = query.pageSize ?? 50;
-  return { filter: query.filter, sort: query.sort, pageSize: Number.isFinite(size) ? Math.max(1, Math.min(100, Math.floor(size))) : 50 };
+  return { filter: query.filter, sort: query.sort, groupId: query.groupId,
+    pageSize: Number.isFinite(size) ? Math.max(1, Math.min(100, Math.floor(size))) : 50 };
 }
 
 function uniqueRows(rows: MeetingSummary[]): MeetingSummary[] {
@@ -155,7 +156,8 @@ export function createPagedMeetings(fetchPage: FetchPage) {
       setQuery(query) {
         const next = normalizeQuery(query);
         const previous = get().query;
-        if (next.filter === previous.filter && next.sort === previous.sort && next.pageSize === previous.pageSize) {
+        if (next.filter === previous.filter && next.sort === previous.sort
+          && next.groupId === previous.groupId && next.pageSize === previous.pageSize) {
           return initialRequest ?? (pageCount === 0 ? refresh() : Promise.resolve());
         }
         generation++;

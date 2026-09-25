@@ -15,9 +15,11 @@ type MeetingListQuery = {
   sort: 'newest' | 'oldest' | 'longest' | 'title';
   cursor?: string;
   pageSize?: number;
+  groupId?: string | null;
 };
 type MeetingSummary = {
   id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
+  groupId: string | null; groupName: string | null;
   pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
   unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
   stageEtaRough: boolean; skipSpeakerId: boolean;
@@ -52,6 +54,11 @@ const IPC_CHANNELS = {
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
+  groupsList: 'groups:list',
+  groupsCreate: 'groups:create',
+  groupsRename: 'groups:rename',
+  groupsDelete: 'groups:delete',
+  groupsAssign: 'groups:assign',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
@@ -137,8 +144,10 @@ const api = {
       opts?.shell
         ? ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids, opts) as Promise<MeetingSummary[]>
         : ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
-    listIds: (filter: MeetingListFilter) =>
-      ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter) as Promise<string[]>,
+    listIds: (filter: MeetingListFilter, groupId?: string | null) =>
+      (groupId === undefined
+        ? ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter)
+        : ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter, groupId)) as Promise<string[]>,
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
     getTranscript: (id: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsGetTranscript, id) as Promise<{
@@ -244,6 +253,21 @@ const api = {
       return () => ipcRenderer.off(IPC_CHANNELS.meetingsAddedEvent, wrapped);
     },
   },
+  groups: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.groupsList) as Promise<{
+      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string }[];
+      allCount: number; ungroupedCount: number;
+    }>,
+    create: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsCreate, name) as Promise<{
+      id: string; name: string; count: number; createdAt: string; updatedAt: string;
+    }>,
+    rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsRename, id, name) as Promise<void>,
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsDelete, id) as Promise<boolean>,
+    assign: (ids: string[], groupId: string | null, expectedGroupId?: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.groupsAssign, { ids, groupId, expectedGroupId }) as Promise<{
+        moved: { id: string; previousGroupId: string | null }[]; failedIds: string[];
+      }>,
+  },
   trash: {
     /** Soft-deleted meetings still inside the retention window, newest
      *  first. The main process purges expired entries before answering,
@@ -257,7 +281,7 @@ const api = {
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
-    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) =>
+    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
     stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
     state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
@@ -441,8 +465,8 @@ const api = {
      *  transcript. Each result carries the meeting id, the matched
      *  snippet, and a `seconds` offset when the hit was on a specific
      *  transcript line (so callers can jump to the timestamp). */
-    query: (q: string, limit?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20) as Promise<{
+    query: (q: string, limit?: number, groupId?: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20, groupId) as Promise<{
         meetingId: string;
         title: string;
         source: 'title' | 'summary' | 'transcript';

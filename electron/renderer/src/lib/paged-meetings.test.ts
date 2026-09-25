@@ -4,6 +4,7 @@ import { createPagedMeetings, type MeetingPage, type MeetingSummary } from './pa
 function row(id: string, patch: Partial<MeetingSummary> = {}): MeetingSummary {
   return {
     id, slug: id, title: id, startedAt: '2026-09-08', durationS: 60,
+    groupId: null, groupName: null,
     pipelineStage: 'done', status: 'done', stageStartedAt: null,
     stageEtaMs: null, stageEtaRough: false, unidentifiedCount: 0,
     actionItemsCount: 0, speakers: [], errorMessage: null, skipSpeakerId: false,

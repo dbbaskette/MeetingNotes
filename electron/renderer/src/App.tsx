@@ -41,6 +41,7 @@ export interface RecordingStartInput {
   targetPid: number | 'system';
   targetLabel: string;
   mic: boolean;
+  groupId?: string | null;
 }
 
 /** Lives at the App level (not inside LibraryView) so navigating between

@@ -14,6 +14,8 @@ export interface MeetingRowLike {
   id: string;
   slug: string;
   title: string;
+  groupId?: string | null;
+  groupName?: string | null;
   startedAt: string | null;
   durationS: number | null;
   pipelineStage: string;
@@ -38,6 +40,8 @@ function rowsEqual(a: MeetingRowLike, b: MeetingRowLike): boolean {
     a.id !== b.id ||
     a.slug !== b.slug ||
     a.title !== b.title ||
+    a.groupId !== b.groupId ||
+    a.groupName !== b.groupName ||
     a.startedAt !== b.startedAt ||
     a.durationS !== b.durationS ||
     a.pipelineStage !== b.pipelineStage ||
