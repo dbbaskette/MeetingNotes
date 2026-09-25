@@ -7,10 +7,10 @@ export const LIBRARY_SEARCH_LIMIT = 100;
 /** Search is global and independent of loaded browse pages. Commit hits and
  * hydrated rows together so sections/counts never see a partial result set. */
 export async function hydrateLibrarySearch(query: string, api: {
-  query: (query: string, limit: number) => Promise<SearchHit[]>;
+  query: (query: string, limit: number, groupId?: string | null) => Promise<SearchHit[]>;
   getMany: (ids: string[]) => Promise<MeetingSummary[]>;
-}): Promise<{ hits: SearchHit[]; meetings: MeetingSummary[] }> {
-  const hits = await api.query(query.trim(), LIBRARY_SEARCH_LIMIT);
+}, groupId?: string | null): Promise<{ hits: SearchHit[]; meetings: MeetingSummary[] }> {
+  const hits = await api.query(query.trim(), LIBRARY_SEARCH_LIMIT, groupId);
   const meetings = await hydrateMeetingIds(hits.map((hit) => hit.meetingId), api.getMany);
   return { hits, meetings };
 }

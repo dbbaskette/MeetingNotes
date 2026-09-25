@@ -9,7 +9,7 @@ Capture and inference run locally. Optional Google and webhook exports send only
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.12.2-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.12.3-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -42,7 +42,7 @@ Local **whisper.cpp** transcription + **pyannote** diarization, then a local LLM
 <td width="33%" valign="top">
 
 ### 🗂️ Organize
-Name voices once and they're recognized across meetings. A **Needs attention** panel gathers recovery, failure, speaker-review, and pending work, while **Weekly** stitches the week into a narrative with cross-meeting themes and your open action items.
+Name voices once and they're recognized across meetings. Put related recordings into optional **groups** within the Library; recordings remain in place on disk. A **Needs attention** panel gathers recovery, failure, speaker-review, and pending work, while **Weekly** stitches the week into a narrative with cross-meeting themes and your open action items.
 
 </td>
 </tr>
@@ -176,19 +176,21 @@ brew install whisper-cpp ffmpeg
 ## 🎬 Recording a meeting
 
 1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
-2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Pick one, or **All system audio** as a catch-all.
+2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Optionally choose **Save to group** (preselected when you are browsing a group), then pick an app or **All system audio** as a catch-all. Choosing the source still starts recording in one click.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
 4. Click **■ Stop** — the new row lands in your library instantly.
 5. Click **▶ Process** to run the pipeline.
 
-Each recording writes up to three AAC files to `~/Music/MeetingNotes/` (mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
+Each recording writes up to three AAC files to the Library's `recordings/` directory (by default `~/Documents/MeetingNotes/recordings/`; mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
 
 If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Finder**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched.
 
 <details>
 <summary><strong>Managing recordings</strong></summary>
 
-Every row and the detail-view header has a **⋯** menu with **Rename…** and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
+Use the Library's group selector to view **All meetings**, a named group, or **Ungrouped**. Status filters and inline search apply within that view; **⌘K** quick search remains global. Use **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.
+
+Every row and the detail-view header has a **⋯** menu with **Move to group…**, **Rename…**, and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
 </details>
 
 ## 🧠 Bring your own model (and reasoning-model resilience)
@@ -339,7 +341,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.2-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.3-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -355,9 +357,9 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.12.2** — stable on macOS 14.2+ / Apple Silicon. Adds local PDF notes export with optional action items, removes duplicate action lists from Markdown and Google Docs, and clarifies export selection and Google connection errors. Secondary views load on demand and meeting detail refreshes on stage events. The full local recording and processing pipeline remains unchanged.
+**1.12.3** — stable on macOS 14.2+ / Apple Silicon. Adds optional meeting groups directly in the Library: create, rename, delete, browse, search, and move recordings individually or in bulk. Choose a group when recording; existing meetings stay ungrouped. Groups are metadata only and do not move audio or change processing.
 
-See the [1.12.2 release notes](docs/releases/v1.12.2.md) for the complete changes, upgrade guidance and known limitations, or the [GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.2). This is a source-only GitHub publication; build the macOS installer locally. The experimental remote-processing beta is separate and is not part of 1.12.2.
+See the [1.12.3 release notes](docs/releases/v1.12.3.md) for the complete changes, upgrade guidance and known limitations, or the [GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.3). This is a source-only GitHub publication; build the macOS installer locally. The experimental remote-processing beta is separate and is not part of 1.12.3.
 
 ## 📄 License
 

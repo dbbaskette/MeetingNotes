@@ -9,6 +9,7 @@ export interface StartInput {
   targetPid: number | 'system';
   targetLabel: string;
   mic: boolean;
+  groupId?: string | null;
 }
 
 export interface StartResult {
@@ -64,11 +65,28 @@ export class RecordingManager {
     if (input.mic) args.push('--mic'); else args.push('--no-mic');
     args.push('--out', outputPath);
 
+    // Persist capture intent before spawning. The helper can create its file
+    // immediately and the watcher may catalog it before start() resolves.
+    this.deps.repo.insert({
+      id: sessionId,
+      helperPid: -1,
+      targetPid: input.targetPid === 'system' ? null : input.targetPid,
+      targetLabel: input.targetLabel,
+      outputPath,
+      groupId: input.groupId ?? null,
+    });
     const spawnFn = this.deps.spawn ?? nodeSpawn;
-    const proc = spawnFn(this.deps.helperPath, args);
-    proc.stdout.setEncoding('utf8');
-    proc.stderr.setEncoding('utf8');
-
+    let proc!: ChildProcessWithoutNullStreams;
+    try {
+      proc = spawnFn(this.deps.helperPath, args);
+      this.deps.repo.updateHelperPid(sessionId, proc.pid ?? -1);
+      proc.stdout.setEncoding('utf8');
+      proc.stderr.setEncoding('utf8');
+    } catch (error) {
+      try { proc?.kill('SIGTERM'); } catch { /* helper may not have spawned */ }
+      this.deps.repo.markError(sessionId);
+      throw error;
+    }
     const entry: SessionEntry = {
       proc,
       outputPath,
@@ -77,13 +95,6 @@ export class RecordingManager {
       stopPromise: null,
     };
     this.sessions.set(sessionId, entry);
-    this.deps.repo.insert({
-      id: sessionId,
-      helperPid: proc.pid ?? -1,
-      targetPid: input.targetPid === 'system' ? null : input.targetPid,
-      targetLabel: input.targetLabel,
-      outputPath,
-    });
 
     // Wait for the started event (helper emits {"event":"started"} when CoreAudio is attached).
     await new Promise<void>((resolve, reject) => {

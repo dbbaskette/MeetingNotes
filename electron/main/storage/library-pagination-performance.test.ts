@@ -71,6 +71,46 @@ function summarize(samples: Sample[]) {
 // No production main/preload, user profile, audio, or network service starts.
 // All filesystem probes performed by ETA point inside this mkdtemp fixture.
 describe.skipIf(process.env.MN_LIBRARY_BENCH !== '1')('Library pagination benchmark (#210)', () => {
+  it('compares group-scoped and unscoped page/count queries at 10k meetings', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-groups-bench-'));
+    const db = openDb(path.join(directory, 'fixture.sqlite'));
+    try {
+      seed(db, 10000);
+      const groupId = '00000000-0000-4000-8000-000000000001';
+      const now = '2026-09-08T12:00:00.000Z';
+      db.prepare('INSERT INTO groups (id, name, name_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(groupId, 'Fixture group', 'fixture group', now, now);
+      db.prepare("UPDATE meetings SET group_id = ? WHERE CAST(SUBSTR(id, -5) AS INTEGER) % 4 = 0").run(groupId);
+      const repo = new MeetingsRepo(db);
+      const measure = (operation: () => unknown): number => {
+        const samples: number[] = [];
+        operation();
+        for (let i = 0; i < WARM_RUNS; i++) {
+          const start = performance.now();
+          operation();
+          samples.push(performance.now() - start);
+        }
+        return samples.sort((a, b) => a - b)[Math.floor(samples.length / 2)]!;
+      };
+      const results = {
+        allPageMs: measure(() => repo.listPage(FIRST_PAGE)),
+        scopedPageMs: measure(() => repo.listPage({ ...FIRST_PAGE, groupId })),
+        allCountsMs: measure(() => repo.counts()),
+        scopedCountsMs: measure(() => repo.counts(groupId)),
+      };
+      expect(repo.listPage({ ...FIRST_PAGE, groupId }).rows).toHaveLength(50);
+      expect(repo.counts(groupId).all).toBe(2500);
+      // A broad limit catches accidental N+1/scanning regressions while
+      // leaving room for noisy CI hosts and differences in query plans.
+      expect(results.scopedPageMs).toBeLessThan(results.allPageMs * 10 + 5);
+      expect(results.scopedCountsMs).toBeLessThan(results.allCountsMs * 10 + 5);
+      console.log('MN_GROUPS_BENCH_RESULT=' + JSON.stringify(results));
+    } finally {
+      db.close();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it.each([1000, 10000])('measures %i fixed-seed meetings, cold connections and seven alternating warm runs', async (count) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-library-bench-'));
     const dbPath = path.join(directory, 'fixture.sqlite');

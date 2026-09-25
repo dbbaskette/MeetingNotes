@@ -9,6 +9,7 @@ import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { ArtifactCache } from '../library/artifact-cache.js';
 import { openDb } from '../storage/db.js';
 import { MeetingsRepo } from '../storage/meetings-repo.js';
+import { GroupsRepo } from '../storage/groups-repo.js';
 import { SpeakersRepo } from '../storage/speakers-repo.js';
 import { ActionItemsRepo } from '../storage/action-items-repo.js';
 
@@ -26,6 +27,7 @@ beforeEach(() => {
 describe('paginated meeting summaries', () => {
   let db: ReturnType<typeof openDb>;
   let meetings: MeetingsRepo;
+  let groups: GroupsRepo;
   let speakers: SpeakersRepo;
   let actionItems: ActionItemsRepo;
   let handlers: Map<string, (...args: any[]) => any>;
@@ -41,11 +43,12 @@ describe('paginated meeting summaries', () => {
   beforeEach(() => {
     db = openDb(':memory:');
     meetings = new MeetingsRepo(db);
+    groups = new GroupsRepo(db);
     speakers = new SpeakersRepo(db);
     actionItems = new ActionItemsRepo(db);
     handlers = new Map();
     registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
-      baseServices({ meetings, speakers, actionItems }));
+      baseServices({ meetings, groups, speakers, actionItems }));
   });
   afterEach(() => db.close());
 
@@ -68,6 +71,52 @@ describe('paginated meeting summaries', () => {
     expect(last.items.map((m: any) => m.id)).toEqual(['done-100', 'done-101', 'done-102', 'done-103', 'done-104']);
     expect(last.nextCursor).toBeNull();
     expect(invoke('meetings:list-ids', 'processing')).toEqual(['gate', 'processing']);
+  });
+
+  it('validates group IPC and applies scoped pages, counts, ID selection, and assignment', () => {
+    insert('one'); insert('two'); insert('free');
+    const group = invoke('groups:create', 'Project Alpha');
+    expect(group.name).toBe('Project Alpha');
+    expect(() => invoke('groups:create', 'project alpha')).toThrow(/already exists/);
+    expect(() => invoke('groups:create', '   ')).toThrow();
+    expect(() => invoke('groups:assign', { ids: ['one', 'two'], groupId: 'bad' })).toThrow();
+    expect(invoke('groups:assign', { ids: ['one', 'two'], groupId: group.id }).moved).toHaveLength(2);
+    const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: group.id });
+    expect(page.items.map((item: any) => item.id).sort()).toEqual(['one', 'two']);
+    expect(page.items[0].groupName).toBe('Project Alpha');
+    expect(page.counts.all).toBe(2);
+    expect(invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: null }).items.map((item: any) => item.id)).toEqual(['free']);
+    expect(invoke('meetings:list-ids', 'all', group.id)).toEqual(['one', 'two']);
+    expect(invoke('groups:list').ungroupedCount).toBe(1);
+    expect(() => invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: 'bad' })).toThrow();
+    invoke('groups:rename', group.id, 'Renamed');
+    expect(invoke('groups:list').groups[0].name).toBe('Renamed');
+    expect(invoke('groups:delete', group.id)).toBe(true);
+    expect(meetings.findById('one')?.groupId).toBeNull();
+  });
+
+  it('scopes content search before the hit limit and annotates the global result', async () => {
+    const root = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-group-search-'));
+    try {
+      const group = groups.create('Project Alpha');
+      for (let i = 0; i < 8; i++) insert(`outside-${i}`);
+      insert('inside');
+      groups.assign(['inside'], group.id);
+      for (const id of [...Array.from({ length: 8 }, (_, i) => `outside-${i}`), 'inside']) {
+        const folder = path.join(root, 'meetings', id);
+        fsSync.mkdirSync(folder, { recursive: true });
+        fsSync.writeFileSync(path.join(folder, 'summary.md'), 'We need to coordinate the next release.\n');
+      }
+      handlers = new Map();
+      registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+        baseServices({ meetings, groups, speakers, actionItems, libraryRoot: root }));
+      const search = handlers.get('search:query')!;
+      const scoped = await search(null, 'coordinate', 1, group.id);
+      expect(scoped.map((hit: any) => hit.meetingId)).toEqual(['inside']);
+      expect(scoped[0].groupName).toBe('Project Alpha');
+      const global = await search(null, 'coordinate', 20);
+      expect(global.some((hit: any) => hit.meetingId === 'outside-0')).toBe(true);
+    } finally { fsSync.rmSync(root, { recursive: true, force: true }); }
   });
 
   it.each([

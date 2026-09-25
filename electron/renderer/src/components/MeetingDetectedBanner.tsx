@@ -8,6 +8,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 import type { RecordingStartInput } from '../App';
+import { GroupPicker } from './GroupPicker';
+import { useGroupsStore } from '../store/groups';
 
 export interface BrowserDetected {
   source: 'browser-tab';
@@ -28,13 +30,17 @@ export interface NativeAppDetected {
 export type Detected = BrowserDetected | NativeAppDetected;
 
 export function MeetingDetectedBanner({
-  onStartRecording,
+  onStartRecording, groupId,
 }: {
   onStartRecording: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
+  groupId?: string | null;
 }): JSX.Element | null {
   const [detected, setDetected] = useState<Detected | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveGroupId, setSaveGroupId] = useState<string | null>(groupId ?? null);
+  const { groups } = useGroupsStore();
+  useEffect(() => { setSaveGroupId(groupId ?? null); }, [groupId]);
 
   useEffect(() => {
     const unsub = api.meetingDetector.onDetected((m) => {
@@ -56,7 +62,7 @@ export function MeetingDetectedBanner({
       const targetPid = detected.source === 'browser-tab'
         ? detected.browserPid
         : detected.pid;
-      const input: RecordingStartInput = { targetPid, targetLabel: label, mic: true };
+      const input: RecordingStartInput = { targetPid, targetLabel: label, mic: true, groupId: saveGroupId };
       const { sessionId } = await api.recording.start(input) as { sessionId: string };
       onStartRecording({ sessionId, label, startInput: input });
       setDetected(null);
@@ -104,6 +110,8 @@ export function MeetingDetectedBanner({
           </div>
         )}
       </div>
+      <GroupPicker value={saveGroupId} onSelect={(choice) => setSaveGroupId(choice ?? null)} compact
+        triggerLabel={`Save to: ${saveGroupId ? groups.find((group) => group.id === saveGroupId)?.name ?? 'Ungrouped' : 'Ungrouped'}`} />
       <button
         onClick={() => void record()}
         disabled={busy}

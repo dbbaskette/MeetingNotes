@@ -12,6 +12,7 @@ import { api } from '../ipc/client';
 import { useToast } from './Toasts';
 import { ModalShell } from './ModalShell';
 import { RowDialogRetention } from './RowDialogRetention';
+import { MoveToGroupDialog } from './MoveToGroupDialog';
 
 export interface MeetingRowMenuProps {
   meeting: { id: string; title: string };
@@ -21,7 +22,7 @@ export interface MeetingRowMenuProps {
   onDeleted?: (id: string) => void;
 }
 
-type ModalKind = null | 'rename' | 'delete';
+type ModalKind = null | 'rename' | 'delete' | 'move';
 
 export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -54,8 +55,8 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
     // For rows near the window bottom, open upward — a downward menu would
     // land under the app status bar / window edge, and since the popover
     // dismisses on scroll there'd be no way to ever reach its items.
-    // 120px ≈ menu height plus the docked status bar, with margin.
-    if (window.innerHeight - rect.bottom < 120) {
+    // Include the group action and clearance for the docked status bar.
+    if (window.innerHeight - rect.bottom < 160) {
       setAnchor({ bottom: window.innerHeight - rect.top + 6, right });
     } else {
       setAnchor({ top: rect.bottom + 6, right });
@@ -124,6 +125,12 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           "
         >
           <button
+            onClick={() => { setOpen(false); setModal('move'); }}
+            className="w-full text-left px-3 py-1.5 text-brand-indigo hover:bg-surface-sunken"
+          >
+            Move to group…
+          </button>
+          <button
             onClick={() => { setOpen(false); setModal('rename'); }}
             className="w-full text-left px-3 py-1.5 hover:bg-surface-sunken"
           >
@@ -145,6 +152,10 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); onChanged(); }}
         />
+      )}
+
+      {modal === 'move' && (
+        <MoveToGroupDialog ids={[meeting.id]} onClose={() => setModal(null)} onChanged={onChanged} />
       )}
 
       {modal === 'delete' && (

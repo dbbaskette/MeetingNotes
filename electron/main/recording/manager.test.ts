@@ -9,6 +9,7 @@ import {
 function fakeRepo(): any {
   return {
     insert: vi.fn(),
+    updateHelperPid: vi.fn(),
     finalize: vi.fn(),
     markError: vi.fn(),
     findOpen: () => [],
@@ -44,6 +45,7 @@ describe('RecordingManager', () => {
   it('start spawns helper with the right args', async () => {
     const spawned: { cmd: string; args: string[] }[] = [];
     const fakeSpawn = (cmd: string, args: string[]): any => {
+      expect(repo.insert).toHaveBeenCalled(); // capture intent is durable before helper starts
       spawned.push({ cmd, args });
       const stdoutCbs: ((c: string) => void)[] = [];
       return {
@@ -66,7 +68,8 @@ describe('RecordingManager', () => {
       spawn: fakeSpawn,
       clock: () => new Date('2026-04-20T19:23:00Z'),
     });
-    const { sessionId } = await mgr.start({ targetPid: 999, targetLabel: 'Zoom', mic: true });
+    const groupId = '6d73201f-33ab-45ba-b021-39140ee219d7';
+    const { sessionId } = await mgr.start({ targetPid: 999, targetLabel: 'Zoom', mic: true, groupId });
     expect(sessionId).toBeTruthy();
     expect(spawned).toHaveLength(1);
     expect(spawned[0]!.cmd).toBe('/bin/meeting-notes-tap');
@@ -75,6 +78,8 @@ describe('RecordingManager', () => {
     expect(spawned[0]!.args).toContain('--mic');
     expect(spawned[0]!.args).toContain('--out');
     expect(repo.insert).toHaveBeenCalled();
+    expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({ groupId, helperPid: -1 }));
+    expect(repo.updateHelperPid).toHaveBeenCalledWith(sessionId, 12345);
   });
 
   it('start with system-audio passes --system-audio', async () => {

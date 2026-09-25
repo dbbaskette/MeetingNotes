@@ -68,6 +68,8 @@ export const MeetingSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
   title: z.string(),
+  groupId: z.string().nullable(),
+  groupName: z.string().nullable(),
   startedAt: z.string().nullable(),
   durationS: z.number().nullable(),
   pipelineStage: z.string(),
@@ -94,11 +96,20 @@ export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
 export const MeetingListFilterSchema = z.enum(['all', 'pending', 'processing', 'done', 'failed']);
 export const MeetingListSortSchema = z.enum(['newest', 'oldest', 'longest', 'title']);
+export const GroupIdSchema = z.string().uuid();
+export const OptionalGroupScopeSchema = GroupIdSchema.nullable().optional();
+export const GroupNameSchema = z.string().trim().min(1).max(80);
+export const AssignGroupSchema = z.object({
+  ids: z.array(z.string().min(1)).max(1000).transform((ids) => [...new Set(ids)]),
+  groupId: GroupIdSchema.nullable(),
+  expectedGroupId: GroupIdSchema.nullable().optional(),
+});
 export type MeetingListFilter = z.infer<typeof MeetingListFilterSchema>;
 export type MeetingListSort = z.infer<typeof MeetingListSortSchema>;
 
 const MeetingCursorSchema = z.object({
   v: z.literal(1),
+  scope: z.string().optional(),
   statusRank: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(9)]),
   id: z.string().min(1),
   sortValue: z.discriminatedUnion('sort', [
@@ -116,6 +127,7 @@ export const MeetingListQuerySchema = z.object({
   sort: MeetingListSortSchema,
   pageSize: z.number().int().positive().default(50).transform((size) => Math.min(size, 100)),
   cursor: z.string().min(1).optional(),
+  groupId: OptionalGroupScopeSchema,
 }).superRefine((query, ctx) => {
   if (query.cursor === undefined) return;
   try {
@@ -123,7 +135,8 @@ export const MeetingListQuerySchema = z.object({
     const bytes = Buffer.from(query.cursor, 'base64url');
     if (bytes.toString('base64url') !== query.cursor) throw new Error();
     const cursor = MeetingCursorSchema.parse(JSON.parse(bytes.toString('utf8')));
-    if (cursor.sortValue.sort !== query.sort) throw new Error();
+    const scope = query.groupId === undefined ? 'all' : query.groupId === null ? 'ungrouped' : `group:${query.groupId}`;
+    if (cursor.sortValue.sort !== query.sort || (cursor.scope ?? 'all') !== scope) throw new Error();
   } catch {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cursor'], message: 'Invalid meeting cursor' });
   }
@@ -215,6 +228,11 @@ export const IPC_CHANNELS = {
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
+  groupsList: 'groups:list',
+  groupsCreate: 'groups:create',
+  groupsRename: 'groups:rename',
+  groupsDelete: 'groups:delete',
+  groupsAssign: 'groups:assign',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',

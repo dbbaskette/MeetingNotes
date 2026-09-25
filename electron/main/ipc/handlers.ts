@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
+  GroupIdSchema, GroupNameSchema, OptionalGroupScopeSchema, AssignGroupSchema,
   type MeetingSummary, type MeetingSummaryPage, type MeetingStartManyResult } from './contracts.js';
 import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
+import type { GroupsRepo } from '../storage/groups-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
@@ -55,6 +57,7 @@ import { createCountsCache } from '../library/page-counts.js';
 
 export interface IpcServices {
   meetings: MeetingsRepo;
+  groups: GroupsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
   stageDurations: StageDurationsRepo;
@@ -129,6 +132,7 @@ function meetingSummary(
   const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
   return {
     id: m.id, slug: m.slug, title: m.title,
+    groupId: m.groupId, groupName: m.groupName,
     startedAt: m.startedAt, durationS: m.durationS,
     pipelineStage: m.pipelineStage, status: m.status,
     errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
@@ -150,6 +154,7 @@ function scopedMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSumm
 function shellMeetingSummaries(rows: MeetingRow[]): MeetingSummary[] {
   return rows.map((m) => ({
     id: m.id, slug: m.slug, title: m.title,
+    groupId: m.groupId, groupName: m.groupName,
     startedAt: m.startedAt, durationS: m.durationS,
     pipelineStage: m.pipelineStage, status: m.status,
     errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
@@ -217,7 +222,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.meetingsListPage, (_e, input: unknown): MeetingSummaryPage => {
     const query = MeetingListQuerySchema.parse(input);
     const page = s.meetings.listPage(query);
-    const counts = pageCounts.forQuery(query, () => s.meetings.counts());
+    const counts = pageCounts.forQuery(query, () => s.meetings.counts(query.groupId));
     return { items: scopedMeetingSummaries(s, page.rows), nextCursor: page.nextCursor,
       total: counts[query.filter], counts };
   });
@@ -229,8 +234,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return shell ? shellMeetingSummaries(rows) : scopedMeetingSummaries(s, rows);
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown): string[] =>
-    s.meetings.listIds(MeetingListFilterSchema.parse(input)));
+  ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown, groupId: unknown): string[] =>
+    s.meetings.listIds(MeetingListFilterSchema.parse(input), OptionalGroupScopeSchema.parse(groupId)));
+
+  ipc.handle(IPC_CHANNELS.groupsList, () => s.groups.listWithCounts());
+  ipc.handle(IPC_CHANNELS.groupsCreate, (_e, name: unknown) => s.groups.create(GroupNameSchema.parse(name)));
+  ipc.handle(IPC_CHANNELS.groupsRename, (_e, id: unknown, name: unknown) => {
+    s.groups.rename(GroupIdSchema.parse(id), GroupNameSchema.parse(name));
+  });
+  ipc.handle(IPC_CHANNELS.groupsDelete, (_e, id: unknown) => s.groups.delete(GroupIdSchema.parse(id)));
+  ipc.handle(IPC_CHANNELS.groupsAssign, (_e, input: unknown) => {
+    const { ids, groupId, expectedGroupId } = AssignGroupSchema.parse(input);
+    return s.groups.assign(ids, groupId, expectedGroupId);
+  });
 
   ipc.handle(IPC_CHANNELS.meetingsGet, async (_e, id: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
@@ -519,10 +535,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.recordingListSources, async () => s.appEnumerator.list());
   ipc.handle(IPC_CHANNELS.recordingStart, async (_e, input: unknown) => {
     if (typeof input !== 'object' || input === null) throw new Error('invalid args');
-    const { targetPid, targetLabel, mic } = input as {
-      targetPid: number | 'system'; targetLabel: string; mic: boolean;
-    };
-    return s.recordingManager.start({ targetPid, targetLabel, mic });
+    const { targetPid, targetLabel, mic, groupId } = z.object({
+      targetPid: z.union([z.literal('system'), z.number().int().positive()]),
+      targetLabel: z.string().min(1).max(200), mic: z.boolean(), groupId: OptionalGroupScopeSchema,
+    }).parse(input);
+    // A group may have been deleted while the picker was open. Capture is
+    // more important than filing; keep the one-click start and ungroup it.
+    const validGroupId = groupId && s.groups.exists(groupId) ? groupId : null;
+    return s.recordingManager.start({ targetPid, targetLabel, mic, groupId: validGroupId });
   });
   ipc.handle(IPC_CHANNELS.recordingStop, async (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
@@ -831,8 +851,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // binary (@vscode/ripgrep) over the library's meetings/ tree. rg
   // parallelizes the walk and matches with SIMD, so even a multi-
   // thousand-meeting library answers each keystroke in tens of ms.
-  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown) => {
+  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown, scopeInput: unknown) => {
     if (typeof query !== 'string') return [];
+    const groupId = OptionalGroupScopeSchema.parse(scopeInput);
     const q = query.trim();
     if (q.length < 2) return [];
     const qLower = q.toLowerCase();
@@ -841,6 +862,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     interface Hit {
       meetingId: string;
       title: string;
+      groupName: string | null;
       source: 'title' | 'summary' | 'transcript';
       snippet: string;
       seconds?: number;
@@ -853,9 +875,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // listAll() snapshot per keystroke. Newest-first, capped at `max` —
     // the final slice keeps at most `max` anyway and titles outrank
     // everything else.
-    for (const m of s.meetings.searchByTitle(q, max)) {
+    for (const m of s.meetings.searchByTitle(q, max, groupId)) {
       hits.push({
-        meetingId: m.id, title: m.title, source: 'title',
+        meetingId: m.id, title: m.title, groupName: m.groupName, source: 'title',
         snippet: m.title, score: 1000,
       });
     }
@@ -880,7 +902,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const hitSlugs = [...new Set(
       rgHits.map((r) => slugFor(r.file)).filter((sl): sl is string => sl !== null),
     )];
-    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs).map((m) => [m.slug, m]));
+    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs, groupId).map((m) => [m.slug, m]));
 
     const summarySeen = new Set<string>(); // slug — caps summary hits at 1/meeting
     for (const r of rgHits) {
@@ -897,6 +919,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         hits.push({
           meetingId: meeting.id,
           title: meeting.title,
+          groupName: meeting.groupName,
           source: 'summary',
           snippet: trimSnippet(r.lineText, qLower, 120),
           score: 500,
@@ -907,6 +930,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         hits.push({
           meetingId: meeting.id,
           title: meeting.title,
+          groupName: meeting.groupName,
           source: 'transcript',
           snippet: speakerLabel
             ? `${speakerLabel}: ${stripTimestampPrefix(r.lineText)}`.slice(0, 200)
@@ -922,7 +946,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // palette where the score gap between tiers dominates).
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, max).map((h) => ({
-      meetingId: h.meetingId, title: h.title, source: h.source,
+      meetingId: h.meetingId, title: h.title, groupName: h.groupName, source: h.source,
       snippet: h.snippet,
       ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
     }));

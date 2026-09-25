@@ -292,6 +292,31 @@ export const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    version: 17,
+    // Meeting groups are organizational metadata only. Audio and meeting
+    // folders stay where they are; deleting a group unassigns recordings.
+    up: `
+      CREATE TABLE groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      ALTER TABLE meetings ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL;
+      ALTER TABLE recording_sessions ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL;
+      CREATE INDEX idx_meetings_group_browse_newest ON meetings (
+        group_id,
+        deleted_at,
+        CASE status WHEN 'pending' THEN 0 WHEN 'awaiting_user' THEN 1
+          WHEN 'processing' THEN 2 WHEN 'failed' THEN 3 WHEN 'done' THEN 4 ELSE 9 END,
+        started_at DESC,
+        id ASC
+      );
+      CREATE INDEX idx_recording_sessions_output_path ON recording_sessions(output_path);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

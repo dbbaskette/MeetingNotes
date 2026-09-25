@@ -13,13 +13,15 @@ import {
 const CONFIRM_STOP_MS = 3000;
 
 export function LiveRecordingRow({
-  sessionId, label, startedAt, onStopped, onRestarted,
+  sessionId, label, startedAt, groupId, onStopped, onRestarted,
 }: {
   sessionId: string;
   label: string;
   startedAt: string;
+  groupId?: string | null;
   onStopped: (summary: string) => void;
-  onRestarted: (recording: { sessionId: string; label: string; startedAt: string }) => void;
+  onRestarted: (recording: { sessionId: string; label: string; startedAt: string;
+    startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null } }) => void;
 }): JSX.Element {
   const elapsed = useElapsed(startedAt, true);
   const [peaks, setPeaks] = useState<Record<CaptureLevelSource, number>>({ mic: -60, system: -60, mixed: -60 });
@@ -73,8 +75,9 @@ export function LiveRecordingRow({
     setRestartError(null);
     try {
       await api.recording.stop(sessionId);
-      const next = await api.recording.start({ targetPid: 'system', targetLabel: 'All system audio', mic: true }) as { sessionId: string };
-      onRestarted({ sessionId: next.sessionId, label: 'All system audio', startedAt: new Date().toISOString() });
+      const startInput = { targetPid: 'system' as const, targetLabel: 'All system audio', mic: true, groupId };
+      const next = await api.recording.start(startInput) as { sessionId: string };
+      onRestarted({ sessionId: next.sessionId, label: 'All system audio', startedAt: new Date().toISOString(), startInput });
     } catch (error) {
       setRestartError(`Could not restart capture: ${(error as Error).message}`);
     } finally {

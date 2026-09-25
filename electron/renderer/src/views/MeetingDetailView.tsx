@@ -6,6 +6,7 @@ import { api } from '../ipc/client';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { fmtEta, isRunningLong } from '../lib/fmtEta';
 import { MeetingRowMenu } from '../components/MeetingRowMenu';
+import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
@@ -28,6 +29,8 @@ type Tab = 'summary' | 'transcript' | 'actions';
 export interface MeetingDetail {
   id: string;
   title: string;
+  groupId: string | null;
+  groupName: string | null;
   startedAt: string | null;
   durationS: number | null;
   pipelineStage: string;
@@ -76,6 +79,7 @@ export function MeetingDetailView({
   hint?: { title?: string; pipelineStage?: string; status?: string };
 }): JSX.Element {
   const [shell, setShell] = useState<MeetingShell | null>(null);
+  const [moveGroupOpen, setMoveGroupOpen] = useState(false);
   const [, setArtifactVersion] = useState(0);
   const [artifacts] = useState(() => createDetailArtifacts({
     transcript: async (meetingId: string) => {
@@ -402,6 +406,12 @@ export function MeetingDetailView({
             the same rename IPC the ⋯ menu uses, without the modal. */}
         <div className="flex-1 min-w-0 text-center px-2">
           <EditableTitle id={m.id} title={m.title} onRenamed={() => void reload()} />
+          <button type="button" title={m.groupName ?? 'Ungrouped'}
+            onClick={() => setMoveGroupOpen(true)}
+            className="mt-0.5 max-w-full inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-brand-indigo focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 rounded px-1">
+            <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M2 5h6l2 2h8v9H2z" /></svg>
+            <span className="truncate">{m.groupName ?? 'Add to group'}</span>
+          </button>
         </div>
         {/* Actions menu: rename/delete from the detail view. When the user
             deletes from here, route back to Library since the detail we're
@@ -414,6 +424,8 @@ export function MeetingDetailView({
           />
         </div>
       </div>
+
+      {moveGroupOpen && <MoveToGroupDialog ids={[m.id]} onClose={() => setMoveGroupOpen(false)} onChanged={() => void reload()} />}
 
       {/* Parked-at-gate banner renders ABOVE the timeline. The gate is the
           one moment in the pipeline where the UI is waiting for a human
