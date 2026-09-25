@@ -406,7 +406,8 @@ export function MeetingDetailView({
             the same rename IPC the ⋯ menu uses, without the modal. */}
         <div className="flex-1 min-w-0 text-center px-2">
           <EditableTitle id={m.id} title={m.title} onRenamed={() => void reload()} />
-          <button type="button" title={m.groupName ?? 'Ungrouped'}
+          <button type="button" title={`Change group (currently ${m.groupName ?? 'Ungrouped'})`}
+            aria-label={`Change group for ${m.title} (currently ${m.groupName ?? 'Ungrouped'})`}
             onClick={() => setMoveGroupOpen(true)}
             className="mt-0.5 max-w-full inline-flex items-center gap-1 text-[11px] text-ink-muted hover:text-brand-indigo focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 rounded px-1">
             <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M2 5h6l2 2h8v9H2z" /></svg>
@@ -418,14 +419,14 @@ export function MeetingDetailView({
             viewing no longer exists. */}
         <div className="relative w-[68px] flex justify-end shrink-0">
           <MeetingRowMenu
-            meeting={{ id: m.id, title: m.title }}
+            meeting={{ id: m.id, title: m.title, groupId: m.groupId, groupName: m.groupName }}
             onChanged={() => void reload()}
             onDeleted={() => onBack()}
           />
         </div>
       </div>
 
-      {moveGroupOpen && <MoveToGroupDialog ids={[m.id]} onClose={() => setMoveGroupOpen(false)} onChanged={() => void reload()} />}
+      {moveGroupOpen && <MoveToGroupDialog ids={[m.id]} meeting={m} onClose={() => setMoveGroupOpen(false)} onChanged={() => void reload()} />}
 
       {/* Parked-at-gate banner renders ABOVE the timeline. The gate is the
           one moment in the pipeline where the UI is waiting for a human

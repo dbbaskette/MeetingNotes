@@ -3,6 +3,16 @@ export interface GroupAssignOutcome {
   failedIds: string[];
 }
 
+/** A confirmed destination resolves every requested ID except an explicit
+ * failure. This includes no-ops already in that group, which should no
+ * longer linger in the Library selection after confirmation. */
+export function completedGroupAssignmentIds(
+  input: readonly string[], result: GroupAssignOutcome,
+): string[] {
+  const failed = new Set(result.failedIds);
+  return [...new Set(input)].filter((id) => !failed.has(id));
+}
+
 /** The IPC validates at most 1,000 raw IDs. Keep large fixed selections
  * retryable by submitting independent batches and reporting exact outcomes. */
 export async function assignGroupInBatches(

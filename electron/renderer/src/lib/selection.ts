@@ -68,7 +68,9 @@ export function createLibrarySelection() {
         const next = new Set(get().selected);
         for (const id of ids) next.delete(id);
         generation++;
-        set({ selected: next, resolving: false });
+        // The remainder is now an explicit retry list, not the original
+        // all-matching snapshot (which may have included completed IDs).
+        set({ selected: next, mode: 'explicit', universe: null, resolving: false });
       },
     };
   });

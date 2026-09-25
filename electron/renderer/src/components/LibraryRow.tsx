@@ -27,6 +27,7 @@ import { MeetingRowMenu } from './MeetingRowMenu';
 interface Meeting {
   id: string;
   title: string;
+  groupId?: string | null;
   groupName?: string | null;
   startedAt: string | null;
   durationS: number | null;
