@@ -13,9 +13,9 @@ const summary = (id: string, groupId: string | null): MeetingSummary => ({
 });
 
 describe('organized Library sections', () => {
-  it('keeps named groups alphabetic and Ungrouped last', () => {
+  it('shows Ungrouped first and keeps named groups alphabetic', () => {
     expect(organizedSections(groups, 3).map((section) => section.name))
-      .toEqual(['Alpha', 'Zeta', 'Ungrouped']);
+      .toEqual(['Ungrouped', 'Alpha', 'Zeta']);
   });
 
   it('places each search result exactly once, including stale group references', () => {

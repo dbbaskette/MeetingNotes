@@ -18,9 +18,9 @@ export function organizedSections(
   ungroupedCount: number,
 ): OrganizedSection[] {
   return [
+    { key: UNGROUPED_SECTION_KEY, groupId: null, name: 'Ungrouped', count: ungroupedCount },
     ...[...groups].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
       .map((group) => ({ key: group.id, groupId: group.id, name: group.name, count: group.count })),
-    { key: UNGROUPED_SECTION_KEY, groupId: null, name: 'Ungrouped', count: ungroupedCount },
   ];
 }
 
