@@ -13,7 +13,7 @@ import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { VirtualMeetingList } from '../components/VirtualMeetingList';
 import { RecordButton } from '../components/RecordButton';
-import { GroupPicker } from '../components/GroupPicker';
+import { OrganizedLibrary } from '../components/OrganizedLibrary';
 import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
 import { ModalShell } from '../components/ModalShell';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
@@ -38,6 +38,7 @@ import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLi
 import { createAttentionController } from '../lib/meeting-hydration';
 import { retainInboxOnFailure } from '../lib/needs-attention';
 import { recycleMeetings } from '../lib/meetings-recycle';
+import { organizedSections } from '../lib/organized-sections';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
 import { shouldPollLibrary } from '../lib/poll-gate';
@@ -75,7 +76,7 @@ type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 /** localStorage key for the browse-sort choice. Renderer-only preference —
  *  not worth an IPC round-trip to the settings repo. */
 const SORT_STORAGE_KEY = 'librarySortKey';
-const GROUP_STORAGE_KEY = 'libraryGroupId';
+const VIEW_STORAGE_KEY = 'libraryViewMode';
 
 export function LibraryView({
   onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
@@ -88,28 +89,37 @@ export function LibraryView({
   const [searchRevision, setSearchRevision] = useState(0);
   const { selected, resolving: resolvingSelection, busy: bulkBusy, mode: selectionMode } = useStore(librarySelection);
   const [libFilter, setLibFilter] = useState<LibFilter>('all');
-  const [groupId, setGroupId] = useState<string | null | undefined>(() => {
-    try {
-      const stored = window.localStorage.getItem(GROUP_STORAGE_KEY);
-      return stored === 'ungrouped' ? null : stored && /^[0-9a-f-]{36}$/i.test(stored) ? stored : undefined;
-    } catch { return undefined; }
+  const [groupId, setGroupId] = useState<string | null | undefined>(undefined);
+  const [viewMode, setViewMode] = useState<'organized' | 'flat'>(() => {
+    try { return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'flat' ? 'flat' : 'organized'; }
+    catch { return 'organized'; }
   });
-  const { groups, loaded: groupsLoaded, error: groupsError, refresh: refreshGroups, rename: renameGroup, delete: deleteGroup } = useGroupsStore();
-  const [groupDialog, setGroupDialog] = useState<'rename' | 'delete' | null>(null);
+  const { groups, ungroupedCount, loaded: groupsLoaded, error: groupsError,
+    refresh: refreshGroups, create: createGroup, rename: renameGroup, delete: deleteGroup } = useGroupsStore();
+  const [groupDialog, setGroupDialog] = useState<'create' | 'rename' | 'delete' | null>(null);
+  const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
+  const [revealGroupId, setRevealGroupId] = useState<string | null>(null);
+  const [organizedSnapshot, setOrganizedSnapshot] = useState<{ key: string; rows: MeetingSummary[] } | null>(null);
   const [groupOptionsOpen, setGroupOptionsOpen] = useState(false);
   const groupOptionsRef = useRef<HTMLDivElement>(null);
   const [moveSelected, setMoveSelected] = useState(false);
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const activeGroup = groupId ? groups.find((group) => group.id === groupId) : undefined;
+  const targetGroup = targetGroupId ? groups.find((group) => group.id === targetGroupId) : undefined;
+  const sections = useMemo(() => organizedSections(groups, ungroupedCount), [groups, ungroupedCount]);
+  const organizedFull = viewMode === 'organized' && groupId === undefined;
   const scopeName = groupId === undefined ? 'the entire Library' : groupId === null ? 'Ungrouped' : activeGroup?.name ?? 'this group';
   const changeGroup = useCallback((next: string | null | undefined): void => {
     setGroupId(next);
-    try {
-      if (next === undefined) window.localStorage.removeItem(GROUP_STORAGE_KEY);
-      else window.localStorage.setItem(GROUP_STORAGE_KEY, next === null ? 'ungrouped' : next);
-    } catch { /* selection remains valid for this session */ }
+    setOrganizedSnapshot(null);
   }, []);
+  const changeViewMode = (next: 'organized' | 'flat'): void => {
+    setViewMode(next);
+    setOrganizedSnapshot(null);
+    try { window.localStorage.setItem(VIEW_STORAGE_KEY, next); }
+    catch { /* view remains selected for this session */ }
+  };
   // Browse-mode sort. Persisted per machine in localStorage; sanitize on
   // read so a corrupt/stale value degrades to the default instead of
   // producing an option the dropdown doesn't have.
@@ -332,16 +342,23 @@ export function LibraryView({
     () => groupLibrarySearch(hits, searchMeetings, libFilter, contentSort),
     [hits, searchMeetings, libFilter, contentSort],
   );
+  const organizedSearchResults = useMemo(() => [...titleMatches, ...contentMatches], [titleMatches, contentMatches]);
   const libCounts = isSearching ? searchCounts : counts;
+  const organizedSnapshotKey = `${libFilter}:${sortKey}`;
+  const organizedLoaded = organizedSnapshot?.key === organizedSnapshotKey ? organizedSnapshot.rows : [];
+  const onOrganizedLoadedChange = useCallback((rows: MeetingSummary[]): void => {
+    setOrganizedSnapshot((previous) => previous?.key === organizedSnapshotKey && previous.rows === rows
+      ? previous : { key: organizedSnapshotKey, rows });
+  }, [organizedSnapshotKey]);
   const scope = selectionScope({
-    isSearching, filter: libFilter, groupId, loaded: meetings,
-    searchResults: [...titleMatches, ...contentMatches], total,
+    isSearching, filter: libFilter, groupId, loaded: organizedFull ? organizedLoaded : meetings,
+    searchResults: organizedSearchResults, total,
   });
   const scopeToken = groupId === undefined ? 'all' : groupId === null ? 'ungrouped' : groupId;
   const selectionUniverse = isSearching ? `search:${scopeToken}:${query.trim()}:${libFilter}` : `browse:${scopeToken}:${libFilter}`;
   const scopeReady = isSearching
     ? !searchPending && previousSearchQuery.current === `${scopeToken}:${query.trim()}`
-    : !loadingInitial && pageQuery.filter === libFilter && pageQuery.groupId === groupId;
+    : !loadingInitial && (!organizedFull || groupsLoaded) && pageQuery.filter === libFilter && pageQuery.groupId === groupId;
   useEffect(() => () => librarySelection.getState().cancelResolution(), [selectionUniverse]);
 
   const listRef = useRef<HTMLDivElement>(null);
@@ -544,22 +561,38 @@ export function LibraryView({
           <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
             Library
           </h2>
-          <GroupPicker value={groupId} onSelect={changeGroup} allowAll showCounts />
+          {groupId !== undefined ? <>
+            <button type="button" onClick={() => changeGroup(undefined)}
+              className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">‹ All groups</button>
+            <span className="min-w-0 truncate text-sm font-semibold" title={scopeName}>{scopeName}</span>
+          </> : <div role="group" aria-label="Library view" className="inline-flex rounded-lg border border-surface-border bg-surface p-0.5">
+            <button type="button" aria-pressed={viewMode === 'organized'} onClick={() => changeViewMode('organized')}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'organized' ? 'bg-brand-indigo text-white' : 'text-ink-muted hover:text-ink'}`}>Organized</button>
+            <button type="button" aria-pressed={viewMode === 'flat'} onClick={() => changeViewMode('flat')}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'flat' ? 'bg-brand-indigo text-white' : 'text-ink-muted hover:text-ink'}`}>All meetings</button>
+          </div>}
           <span className="text-[11px] text-ink-muted">
             {libCounts.all} {libCounts.all === 1 ? 'meeting' : 'meetings'}
           </span>
+          {groupId === undefined && <button type="button" onClick={() => { setGroupDialog('create'); setGroupError(null); }}
+            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">+ New group</button>}
           {activeGroup && <div ref={groupOptionsRef} className="ml-auto relative">
             <button type="button" aria-label={`Options for ${activeGroup.name}`} aria-haspopup="menu" aria-expanded={groupOptionsOpen}
               onClick={() => setGroupOptionsOpen((open) => !open)}
               className="w-8 h-8 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">⋯</button>
             {groupOptionsOpen && <div role="menu" className="absolute right-0 top-full mt-1 z-50 w-40 bg-surface rounded-lg border border-surface-border shadow-pop p-1">
-              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setGroupDialog('rename'); setGroupError(null); }}
+              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('rename'); setGroupError(null); }}
                 className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken">Rename group…</button>
-              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setGroupDialog('delete'); setGroupError(null); }}
+              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('delete'); setGroupError(null); }}
                 className="w-full text-left px-2 py-1.5 rounded-md text-sm text-danger hover:bg-danger-bg">Delete group…</button>
             </div>}
           </div>}
         </div>
+
+        {organizedFull && groupsError && <div role="alert" className="shrink-0 mb-3 rounded-lg border border-danger/20 bg-danger-bg px-3 py-2 text-xs text-danger-text">
+          Could not refresh groups: {groupsError}{' '}
+          <button type="button" onClick={() => void refreshGroups()} className="font-semibold underline">Retry</button>
+        </div>}
 
         {/* Filter chips — always rendered so the surface is discoverable
             even on a fresh install; chips with a zero count are disabled
@@ -657,6 +690,8 @@ export function LibraryView({
             Searching {scopeName}. Showing up to {LIBRARY_SEARCH_LIMIT} matching hits; refine your search for more specific results.
           </p>
         )}
+        {organizedFull && isSearching && searchError && organizedSearchResults.length > 0 &&
+          <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
 
         <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs">
           <button
@@ -688,12 +723,12 @@ export function LibraryView({
         {(() => {
           const totalShown = isSearching
             ? titleMatches.length + contentMatches.length
-            : browseList.length;
+            : organizedFull ? (groupsLoaded ? sections.length : 0) : browseList.length;
           if (totalShown === 0) {
-            if (isSearching ? searchPending : loadingInitial) {
+            if (isSearching ? searchPending : loadingInitial || (organizedFull && !groupsLoaded)) {
               return <div role="status" className="py-10 text-center text-sm text-ink-muted">{isSearching ? 'Searching…' : 'Loading meetings…'}</div>;
             }
-            const failure = isSearching ? searchError : error;
+            const failure = isSearching ? searchError : organizedFull ? groupsError ?? error : error;
             if (failure) return <LibraryRetryRow message={failure} onRetry={isSearching ? () => setSearchRevision((revision) => revision + 1) : () => void retry()} />;
             return (
               <LibraryEmpty
@@ -723,7 +758,7 @@ export function LibraryView({
                   checked={selected.has(m.id)}
                   onToggle={toggleSelect}
                   selectionActive={selected.size > 0}
-                  showGroup={groupId === undefined}
+                  showGroup={groupId === undefined && !organizedFull}
                 />
                 {meetingHits.length > 0 && (
                   <SearchMatches
@@ -738,6 +773,15 @@ export function LibraryView({
           };
           // The key resets browse scroll on a new filter/sort, while refreshes
           // and appended pages preserve the existing viewport and focused row.
+          if (organizedFull) return <OrganizedLibrary
+            sections={sections} filter={libFilter} sort={sortKey}
+            searching={isSearching} searchPending={searchPending} searchQuery={query}
+            searchResults={organizedSearchResults} refreshRevision={searchRevision}
+            revealGroupId={revealGroupId} renderRow={renderRow} onLoadedChange={onOrganizedLoadedChange}
+            onFocusGroup={changeGroup}
+            onRenameGroup={(id) => { setTargetGroupId(id); setGroupDialog('rename'); setGroupError(null); }}
+            onDeleteGroup={(id) => { setTargetGroupId(id); setGroupDialog('delete'); setGroupError(null); }}
+          />;
           if (!isSearching) return (
             <VirtualMeetingList
               key={`${scopeToken}:${libFilter}:${sortKey}`}
@@ -823,27 +867,41 @@ export function LibraryView({
 
       {moveSelected && <MoveToGroupDialog ids={[...selected]} onClose={() => setMoveSelected(false)} onChanged={() => void invalidate()} />}
 
-      {groupDialog === 'rename' && activeGroup && <GroupNameDialog
-        name={activeGroup.name} error={groupError} busy={groupBusy}
+      {groupDialog === 'create' && <GroupNameDialog
+        mode="create" name="" error={groupError} busy={groupBusy}
         onClose={() => setGroupDialog(null)}
         onSave={async (name) => {
           setGroupBusy(true); setGroupError(null);
-          try { await renameGroup(activeGroup.id, name); setGroupDialog(null); void invalidate(); }
+          try {
+            const group = await createGroup(name);
+            setRevealGroupId(group.id); changeViewMode('organized'); setGroupDialog(null);
+            void invalidate();
+          } catch (cause) { setGroupError((cause as Error).message); }
+          finally { setGroupBusy(false); }
+        }}
+      />}
+      {groupDialog === 'rename' && targetGroup && <GroupNameDialog
+        mode="rename" name={targetGroup.name} error={groupError} busy={groupBusy}
+        onClose={() => setGroupDialog(null)}
+        onSave={async (name) => {
+          setGroupBusy(true); setGroupError(null);
+          try { await renameGroup(targetGroup.id, name); setGroupDialog(null); void invalidate(); }
           catch (cause) { setGroupError((cause as Error).message); }
           finally { setGroupBusy(false); }
         }}
       />}
       <ConfirmDialog
-        open={groupDialog === 'delete' && !!activeGroup}
-        title={`Delete group “${activeGroup?.name ?? ''}”?`}
+        open={groupDialog === 'delete' && !!targetGroup}
+        title={`Delete group “${targetGroup?.name ?? ''}”?`}
         body="Meetings in this group will become ungrouped. Their audio, notes, and processing state will not be deleted."
         confirmLabel="Delete group" destructive busy={groupBusy}
         onCancel={() => setGroupDialog(null)}
         onConfirm={() => {
-          if (!activeGroup) return;
+          if (!targetGroup) return;
           setGroupBusy(true);
-          void deleteGroup(activeGroup.id).then(() => {
-            changeGroup(undefined); setGroupDialog(null); void invalidate();
+          void deleteGroup(targetGroup.id).then(() => {
+            if (groupId === targetGroup.id) changeGroup(undefined);
+            setGroupDialog(null); void invalidate();
           }).catch((cause) => {
             setGroupError((cause as Error).message);
             toast.show({ message: `Could not delete group: ${(cause as Error).message}`, variant: 'error' });
@@ -873,7 +931,8 @@ export function LibraryView({
 
 // ─── Supporting pieces ─────────────────────────────────────────────────────
 
-function GroupNameDialog({ name, error, busy, onClose, onSave }: {
+function GroupNameDialog({ mode, name, error, busy, onClose, onSave }: {
+  mode: 'create' | 'rename';
   name: string;
   error: string | null;
   busy: boolean;
@@ -890,14 +949,14 @@ function GroupNameDialog({ name, error, busy, onClose, onSave }: {
   }, [onClose]);
   return <ModalShell onClose={onClose}>
     <form onSubmit={(event) => { event.preventDefault(); void onSave(value); }}>
-      <label htmlFor="rename-group" className="block text-sm font-semibold mb-2">Rename group</label>
-      <input id="rename-group" ref={input} maxLength={80} value={value} onChange={(event) => setValue(event.target.value)}
+      <label htmlFor="group-name" className="block text-sm font-semibold mb-2">{mode === 'create' ? 'New group' : 'Rename group'}</label>
+      <input id="group-name" ref={input} maxLength={80} value={value} onChange={(event) => setValue(event.target.value)}
         className="w-full rounded-lg border border-surface-border px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo" />
       {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-ink-muted">Cancel</button>
         <button disabled={busy || !value.trim()} className="rounded-lg bg-brand-indigo px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
-          {busy ? 'Saving…' : 'Save name'}
+          {busy ? 'Saving…' : mode === 'create' ? 'Create group' : 'Save name'}
         </button>
       </div>
     </form>

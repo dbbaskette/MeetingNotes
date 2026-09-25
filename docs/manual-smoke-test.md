@@ -10,12 +10,13 @@ Run before merging significant feature work or releasing. ~10 min total.
 - [ ] Whisper server running (`scripts/whisper-server.sh status` reports Running).
 - [ ] Latest installer built: `npm run dist` produces a versioned DMG and ZIP under `release/` (the loose `.app` is removed after packaging).
 
-## Meeting groups (1.12.3)
+## Meeting groups
 
-- [ ] Create a named group in the Library selector; check All, the new empty group, and Ungrouped. Rename it, then confirm its name updates in the selector and any assigned rows.
-- [ ] Move an existing meeting from its row or detail view, and move several using bulk selection. Check the scoped list/count/search, Undo, and that the audio and notes remain in place.
+- [ ] In **Organized**, confirm named group rows and **Ungrouped** appear in the Library list. Expand/collapse several sections, restart the app, and verify expansion state persists. A meeting appears only inside its assigned group, never twice in the organized list.
+- [ ] Create a named group using **+ New group**; check its empty section, rename and delete from its **⋯** menu. Confirm the name updates on assigned rows. Use **View** to focus on one group and **All groups** to return.
+- [ ] Move an existing meeting from its row or detail view, and move several using bulk selection. Check the section count, filtered list, grouped inline search, Undo, and that audio and notes remain in place. Search results should appear only once under the assigned group; clearing search should restore the prior expand/collapse state.
 - [ ] Start a short recording with **Save to group** selected. Confirm the cataloged meeting belongs to that group. Delete the group and confirm the recording remains in Ungrouped.
-- [ ] Check the selector and move dialog with a long name and a narrow window; verify keyboard focus, arrow keys, Enter, and Escape. Confirm Needs Attention, Weekly, and ⌘K still show meetings across groups.
+- [ ] Switch to **All meetings** and back. Check the organized list and move dialog with a long name and a narrow window; verify keyboard focus, Enter, and Escape. Confirm Needs Attention, Weekly, and ⌘K still show meetings across groups.
 
 ## Pipeline (existing — should still work)
 
