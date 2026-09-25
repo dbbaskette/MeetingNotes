@@ -98,6 +98,14 @@ describe('Library selection snapshots', () => {
     store.getState().removeSucceeded(['d1', 'x1']);
     expect([...store.getState().selected]).toEqual(['p2', 'f1']);
   });
+
+  it('turns an all-matching selection into an explicit retry list after a partial move', async () => {
+    const store = createLibrarySelection();
+    await store.getState().selectMatching('browse:all', async () => ['moved', 'failed']);
+    store.getState().removeSucceeded(['moved']);
+    expect([...store.getState().selected]).toEqual(['failed']);
+    expect(store.getState()).toMatchObject({ mode: 'explicit', universe: null });
+  });
 });
 
 describe('selection scope', () => {

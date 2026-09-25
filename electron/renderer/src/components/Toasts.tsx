@@ -110,7 +110,7 @@ function ToastItem({
     <div
       className={`pointer-events-auto min-w-[280px] max-w-md rounded-lg border shadow-pop px-4 py-3 flex items-center gap-3 text-sm ${variantClass}`}
     >
-      <span className="flex-1 truncate">{toast.message}</span>
+      <span className="flex-1 min-w-0 break-words">{toast.message}</span>
       {toast.action && (
         <button
           onClick={() => { void toast.action!.onClick(); onDismiss(); }}

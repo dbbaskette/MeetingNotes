@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assignGroupInBatches } from './group-assignment';
+import { assignGroupInBatches, completedGroupAssignmentIds } from './group-assignment';
 
 describe('assignGroupInBatches', () => {
   it('chunks a large fixed selection and deduplicates IDs', async () => {
@@ -25,5 +25,10 @@ describe('assignGroupInBatches', () => {
     expect(result.moved).toHaveLength(999);
     expect(result.failedIds).toHaveLength(101);
     expect(result.failedIds).toContain('m999');
+  });
+
+  it('clears moved and already-in-destination IDs but retains failures', () => {
+    const result = { moved: [{ id: 'm1', previousGroupId: null }], failedIds: ['m3'] };
+    expect(completedGroupAssignmentIds(['m1', 'm2', 'm3', 'm1'], result)).toEqual(['m1', 'm2']);
   });
 });

@@ -102,7 +102,7 @@ export function LibraryView({
   const [organizedSnapshot, setOrganizedSnapshot] = useState<{ key: string; rows: MeetingSummary[] } | null>(null);
   const [groupOptionsOpen, setGroupOptionsOpen] = useState(false);
   const groupOptionsRef = useRef<HTMLDivElement>(null);
-  const [moveSelected, setMoveSelected] = useState(false);
+  const [moveSelection, setMoveSelection] = useState<{ ids: string[]; hiddenCount: number } | null>(null);
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const activeGroup = groupId ? groups.find((group) => group.id === groupId) : undefined;
@@ -861,11 +861,17 @@ export function LibraryView({
         busy={bulkBusy || resolvingSelection}
         onProcess={() => void requestProcessSelected()}
         onDelete={requestDeleteSelected}
-        onMove={() => setMoveSelected(true)}
+        onMove={() => {
+          const ids = [...librarySelection.getState().selected];
+          if (ids.length === 0) return;
+          const visible = new Set(scope.loadedIds);
+          setMoveSelection({ ids, hiddenCount: ids.filter((id) => !visible.has(id)).length });
+        }}
         onCancel={() => librarySelection.getState().clear()}
       />
 
-      {moveSelected && <MoveToGroupDialog ids={[...selected]} onClose={() => setMoveSelected(false)} onChanged={() => void invalidate()} />}
+      {moveSelection && <MoveToGroupDialog ids={moveSelection.ids} hiddenCount={moveSelection.hiddenCount}
+        onClose={() => setMoveSelection(null)} onChanged={() => void invalidate()} />}
 
       {groupDialog === 'create' && <GroupNameDialog
         mode="create" name="" error={groupError} busy={groupBusy}
@@ -1304,7 +1310,7 @@ function SelectionBar({
             disabled={busy}
             className="text-sm font-semibold text-surface px-3 py-1.5 rounded-lg hover:bg-surface/10 transition disabled:opacity-50"
           >
-            Move to group
+            Move to group…
           </button>
           <button
             onClick={onDelete}

@@ -15,7 +15,7 @@ import { RowDialogRetention } from './RowDialogRetention';
 import { MoveToGroupDialog } from './MoveToGroupDialog';
 
 export interface MeetingRowMenuProps {
-  meeting: { id: string; title: string };
+  meeting: { id: string; title: string; groupId?: string | null; groupName?: string | null };
   onChanged: () => void;
   /** Optional: called after a successful delete so the detail view can
    *  route back to Library if the deleted meeting is currently open. */
@@ -155,7 +155,7 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
       )}
 
       {modal === 'move' && (
-        <MoveToGroupDialog ids={[meeting.id]} onClose={() => setModal(null)} onChanged={onChanged} />
+        <MoveToGroupDialog ids={[meeting.id]} meeting={meeting} onClose={() => setModal(null)} onChanged={onChanged} />
       )}
 
       {modal === 'delete' && (
