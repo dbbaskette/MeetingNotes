@@ -9,7 +9,7 @@ Capture and inference run locally. Optional Google and webhook exports send only
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.12.7-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.12.8-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -222,7 +222,7 @@ Summaries are structured into **Overview · Key Discussion Points · Decisions �
 
 The **Summary editor** has View and Edit modes, with a live preview while editing — fix a hallucination or redact in place and Save (writes to `summary.md`).
 
-**Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. Manage rules and turn learning offers off in **Settings → Terminology**. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
+**Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. **Settings → Dictionary** shows a compact count and learning-offers toggle. Choose **Manage dictionary…** to search, filter by group, and add/edit/disable/delete rules in a dedicated scrollable dialog. The dictionary no longer pushes other settings down as it grows. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
 
 Use **Correct term…** above a transcript or summary to preview and select occurrences. **Review terminology** shows remembered suggestions and applied corrections with Undo. Raw transcription, speaker labels, and audio timing are preserved; corrections survive speaker renaming. If later edits overlap a correction, Undo asks you to correct the passage manually instead of overwriting those edits. Correcting a transcript marks its notes as out of date; regenerating notes is explicit and replaces the existing notes and action items. Saving or changing a dictionary rule does not rewrite historical meetings.
 
@@ -345,7 +345,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.7-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.8-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -361,9 +361,9 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.12.7** — for macOS 14.2+ / Apple Silicon. Remember terminology corrections such as Salsa → SLSA for a group or the whole library. Suggestions are the default; automatic replacement is opt-in. Review occurrences, correct transcripts and notes, manage the dictionary in Settings, and undo supported corrections without changing raw audio or transcription. Ungrouped-first organization and explicit group moves remain available.
+**1.12.8** — for macOS 14.2+ / Apple Silicon. Dictionary management now opens in a dedicated dialog with search and group filtering, keeping Settings compact even with hundreds of saved corrections. Remembered terminology, suggestion-first defaults, opt-in automatic replacement, and correction history remain unchanged.
 
-See the [1.12.7 release notes](docs/releases/v1.12.7.md) for upgrade guidance, the database migration, and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.7). The experimental remote-processing beta remains separate.
+See the [1.12.8 release notes](docs/releases/v1.12.8.md) for upgrade guidance and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.8). The experimental remote-processing beta remains separate.
 
 ## 📄 License
 
