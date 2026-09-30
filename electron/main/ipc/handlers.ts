@@ -54,8 +54,11 @@ import { tailLogFile } from '../logging/log-tail.js';
 import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
 import type { ArtifactCache } from '../library/artifact-cache.js';
 import { createCountsCache } from '../library/page-counts.js';
+import type { TerminologyService } from '../terminology/service.js';
+import { registerTerminologyHandlers } from './terminology-handlers.js';
 
 export interface IpcServices {
+  terminology?: TerminologyService;
   meetings: MeetingsRepo;
   groups: GroupsRepo;
   speakers: SpeakersRepo;
@@ -180,6 +183,7 @@ async function speakerReviewForFolder(
 }
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  if (s.terminology) registerTerminologyHandlers(ipc, s.terminology);
   const pageCounts = createCountsCache();
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
 
@@ -283,6 +287,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
       summaryMd: await s.artifactCache.readText(path.join(folder, 'summary.md')),
+      summaryStale: s.terminology?.stale(id as string) ?? false,
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
@@ -456,7 +461,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         // before flipping the skip switch — they may have labeled some but
         // not all voices, and they still deserve names in the transcript.
         try {
-          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName') });
+          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName'), terminology: s.terminology });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
         // Leaving the gate — forget the notified flag so a future re-entry alerts.
         clearGateNotified(id, s.gateNotified);
@@ -480,7 +485,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // bumping the stage — the whole point of the gate is giving the user a
     // chance to replace SPEAKER_00 with real names in the final output.
     try {
-      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName') });
+      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName'), terminology: s.terminology });
     } catch { /* see note above */ }
     // Advance manually to 'summarizing' so the pipeline's linear loop picks up
     // on the right side of the gate. (We don't flip skipSpeakerId — the user
@@ -496,6 +501,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Cap at ~5MB to defang a runaway editor sending a giant blob; real
     // summaries are <20KB. Anything bigger is a bug, not a feature.
     if (markdown.length > 5_000_000) throw new Error('summary too large');
+    if (s.terminology) { s.terminology.saveSummary(id, markdown); return markdown; }
     const meeting = s.meetings.findById(id);
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
@@ -624,6 +630,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     for (const meetingId of meetingIds) {
       try {
         remergeTranscript(meetingId, {
+          terminology: s.terminology,
           libraryRoot: s.libraryRoot,
           meetings: s.meetings,
           speakers: s.speakers,

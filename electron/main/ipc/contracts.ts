@@ -201,6 +201,13 @@ export const MeetingSpeakerReviewSchema = z.object({
 export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
 
 export const IPC_CHANNELS = {
+  terminologyList: 'terminology:list',
+  terminologySave: 'terminology:save',
+  terminologyDelete: 'terminology:delete',
+  terminologyOffers: 'terminology:offers',
+  terminologyPreview: 'terminology:preview',
+  terminologyCommit: 'terminology:commit',
+  terminologyUndo: 'terminology:undo',
   meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',

@@ -114,6 +114,6 @@ it('upgrades a version-16 database without changing existing meetings', () => {
       VALUES ('old', 'old', 'Old meeting', '/old.m4a', 'done', 'done', '2026', '2026')`).run();
     runMigrations(old);
     expect((old.prepare('SELECT group_id FROM meetings WHERE id = ?').get('old') as { group_id: string | null }).group_id).toBeNull();
-    expect((old.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(17);
+    expect((old.prepare('SELECT version FROM schema_version').get() as { version: number }).version).toBe(MIGRATIONS.at(-1)!.version);
   } finally { old.close(); }
 });

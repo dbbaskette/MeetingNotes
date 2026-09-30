@@ -9,6 +9,8 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { 
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { GroupsRepo } from './storage/groups-repo.js';
+import { TerminologyRepo } from './storage/terminology-repo.js';
+import { TerminologyService } from './terminology/service.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
@@ -188,6 +190,10 @@ app.whenReady().then(async () => {
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
   const artifactCache = new ArtifactCache();
+  const terminology = new TerminologyService(new TerminologyRepo(db), {
+    libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
+  });
+  terminology.recover();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -321,6 +327,7 @@ app.whenReady().then(async () => {
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
+    terminology,
     libraryRoot,
     artifactCache,
     lmStudio,
@@ -680,6 +687,7 @@ app.whenReady().then(async () => {
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
+    terminology,
     meetings,
     groups,
     speakers,

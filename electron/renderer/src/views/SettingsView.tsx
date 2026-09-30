@@ -6,6 +6,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
+import { TerminologySettings } from '../components/Terminology';
 
 interface Settings {
   lmStudioUrl: string;
@@ -121,6 +122,7 @@ export function SettingsView({
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
+        <TerminologySettings />
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -1157,4 +1159,3 @@ function SpeakerRosterRow({
     </li>
   );
 }
-
