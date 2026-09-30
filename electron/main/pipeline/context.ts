@@ -10,8 +10,10 @@ import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import type { Logger } from '../logging/logger.js';
 import type { ArtifactCache } from '../library/artifact-cache.js';
+import type { TerminologyService } from '../terminology/service.js';
 
 export interface PipelineContext {
+  terminology?: TerminologyService;
   libraryRoot: string;
   artifactCache: ArtifactCache;
   /** Chat/LLM endpoint (LM Studio). */

@@ -8,6 +8,7 @@ import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { mergeTranscriptWithDiarization, mergedToMarkdown } from '../../lib/merge-transcript.js';
 import { VOICE_SPEAKER_LABEL } from '../../lib/stem-paths.js';
 import type { ArtifactCache } from '../../library/artifact-cache.js';
+import type { TerminologyService } from '../../terminology/service.js';
 
 /**
  * Rebuilds `transcript.md` from `transcript.raw.json` + `diarization.json`,
@@ -32,8 +33,11 @@ export function remergeTranscript(
     speakers: SpeakersRepo;
     artifactCache: ArtifactCache;
     userName?: string;
+    terminology?: TerminologyService;
+    applyTerminology?: boolean;
   },
 ): { segments: number; named: number } {
+  if (deps.terminology) return deps.terminology.generateTranscript(meetingId, deps.applyTerminology ?? false);
   const meeting = deps.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(deps.libraryRoot, meeting.slug);
@@ -75,6 +79,8 @@ export const runMerging: StageHandler = async ({ meetingId }, ctx) => {
     speakers: ctx.speakers,
     artifactCache: ctx.artifactCache,
     userName: ctx.settings.get('userName'),
+    terminology: ctx.terminology,
+    applyTerminology: true,
   });
   ctx.logger.info('merge:done', { meetingId, ...result });
 };

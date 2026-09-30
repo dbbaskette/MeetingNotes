@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
 
 interface RecoveryItem {
   id: string; targetLabel: string; startedAt: string; outputPath: string;
@@ -35,6 +36,13 @@ type MeetingSummaryPage = {
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
+  terminologyList: 'terminology:list',
+  terminologySave: 'terminology:save',
+  terminologyDelete: 'terminology:delete',
+  terminologyOffers: 'terminology:offers',
+  terminologyPreview: 'terminology:preview',
+  terminologyCommit: 'terminology:commit',
+  terminologyUndo: 'terminology:undo',
   meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',
@@ -132,6 +140,15 @@ const IPC_CHANNELS = {
 } as const;
 
 const api = {
+  terminology: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.terminologyList) as Promise<TermRule[]>,
+    save: (input: TermInput, id?: string) => ipcRenderer.invoke(IPC_CHANNELS.terminologySave, input, id) as Promise<TermRule>,
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.terminologyDelete, id) as Promise<void>,
+    offers: (enabled?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.terminologyOffers, enabled) as Promise<boolean>,
+    preview: (input: TermPreviewInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyPreview, input) as Promise<TermReview>,
+    commit: (input: TermCommitInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyCommit, input) as Promise<TermReview>,
+    undo: (input: {meetingId: string; artifact: TermArtifact; historyId: string; revision: string}) => ipcRenderer.invoke(IPC_CHANNELS.terminologyUndo, input) as Promise<TermReview>,
+  },
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     /** Live keyset page; restart after changing filters/sorts or refreshing. */

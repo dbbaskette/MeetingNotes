@@ -19,6 +19,8 @@ import { MeetingExportPanel } from './MeetingExportPanel';
 import { SpeakersPanel } from './MeetingSpeakersPanel';
 import { ActionItemsPanel, Placeholder } from './MeetingActionsPanel';
 import { TranscriptPanel } from './MeetingTranscriptPanel';
+import { RememberTerms, TerminologyPanel } from '../components/Terminology';
+import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -43,6 +45,7 @@ export interface MeetingDetail {
   transcriptMd: string | null;
   rawTranscriptText: string | null;
   summaryMd: string | null;
+  summaryStale?: boolean;
   audioPath: string;
   userIdentified: boolean;
   speakers: DetailSpeaker[];
@@ -1284,6 +1287,7 @@ function CenterPane({
       <div className="p-5">
         {tab === 'summary' && (
           <SummaryPanel
+            key={meeting.id}
             meeting={meeting}
             onReload={onReload}
             provenance={provenance}
@@ -1298,6 +1302,8 @@ function CenterPane({
         {tab === 'transcript' && (
           <>
             <ArtifactFeedback label="transcript" state={transcriptState} onRetry={onRetryTranscript} />
+            {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="transcript" version={meeting.transcriptMd}
+              groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing'} onReload={onReload}/>}
             {transcriptState.data !== undefined && <TranscriptPanel
               meeting={meeting}
               showRaw={showRaw}
@@ -1377,14 +1383,22 @@ function SummaryPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [termCandidates, setTermCandidates] = useState<TermCandidate[]>([]);
+  const dismissedTerms = useRef(new Set<string>());
+  const saveGeneration = useRef(0);
+  useEffect(() => () => { saveGeneration.current++; }, []);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+
   const dirty = draft !== savedValue;
 
   async function save(): Promise<void> {
     if (!dirty || saving) return;
+    const before = savedValue, submitted = draft, generation = ++saveGeneration.current;
     setSaving(true); setError(null);
     try {
-      await api.meetings.saveSummary(meeting.id, draft);
-      onBaseline(draft);
+      await api.meetings.saveSummary(meeting.id, submitted);
+      if (generation !== saveGeneration.current) return;
+      onBaseline(submitted);
       setSavedAt(new Date());
       // After a successful save, drop back into view so the rendered
       // markdown reflects what's now on disk.
@@ -1392,6 +1406,14 @@ function SummaryPanel({
       // Refresh the parent so other panes keying off `meeting.summaryMd`
       // (e.g. RightRail's "has summary" check) see the new content.
       void onReload();
+      // Learning is independent of the save. A dictionary failure must never
+      // misreport a successful notes save as failed.
+      void Promise.all([api.terminology.offers(), api.terminology.list()]).then(([enabled, rules]) => {
+        if (!enabled || generation !== saveGeneration.current) return;
+        setTermCandidates(correctionCandidates(before, submitted).filter(c =>
+          !dismissedTerms.current.has(`${c.source}\0${c.replacement}`)
+          && !rules.some(r => r.source.toLowerCase() === c.source.toLowerCase() && (r.groupId === null || r.groupId === meeting.groupId))));
+      }).catch(() => { /* Learning can be retried from Settings; notes are saved. */ });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1405,6 +1427,18 @@ function SummaryPanel({
 
   return (
     <div className="flex flex-col gap-3">
+      {meeting.summaryStale && <div className="text-xs rounded-lg bg-status-warnBg text-status-warnText p-3">
+        The transcript was corrected after these notes were generated. Regenerating replaces the notes and action items.
+        <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty || meeting.status === 'processing'} onClick={() => setConfirmRegenerate(true)}>Regenerate notes…</button>
+      </div>}
+      <ConfirmDialog open={confirmRegenerate} title="Regenerate notes from the corrected transcript?" body="This replaces the current notes and action items, including manual edits. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(false)} onConfirm={() => {
+        setConfirmRegenerate(false);
+        void api.meetings.rerun(meeting.id, 'summarizing').then(onReload).catch(e => setError((e as Error).message));
+      }}/>
+      {termCandidates.length > 0 && <RememberTerms key={termCandidates.map(c => c.source+c.replacement).join('|')} candidates={termCandidates}
+        groupId={meeting.groupId} groupName={meeting.groupName} onClose={() => {for (const c of termCandidates) dismissedTerms.current.add(`${c.source}\0${c.replacement}`); setTermCandidates([]);}}/>}
+      <TerminologyPanel key={`summary-terms-${meeting.id}`} meetingId={meeting.id} artifact="summary" version={meeting.summaryMd}
+        groupId={meeting.groupId} groupName={meeting.groupName} disabled={dirty || mode === 'edit' || meeting.status === 'processing'} onReload={onReload}/>
       <SummaryToolbar
         mode={mode}
         onMode={onMode}

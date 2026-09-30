@@ -317,6 +317,31 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_recording_sessions_output_path ON recording_sessions(output_path);
     `,
   },
+  {
+    version: 18,
+    up: `
+      CREATE TABLE terminology_rules (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        replacement TEXT NOT NULL,
+        group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL CHECK(mode IN ('suggest', 'automatic')),
+        case_sensitive INTEGER NOT NULL,
+        enabled INTEGER NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE terminology_documents (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        artifact TEXT NOT NULL CHECK(artifact IN ('transcript', 'summary')),
+        state_json TEXT NOT NULL,
+        pending_json TEXT,
+        PRIMARY KEY(meeting_id, artifact)
+      );
+      CREATE TABLE terminology_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `,
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
