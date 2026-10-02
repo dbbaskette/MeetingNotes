@@ -307,6 +307,16 @@ describe('Obsidian sync', () => {
     expect(db.prepare('SELECT pending FROM obsidian_exports').get()).toEqual({ pending: null });
     expect(sync.status().issues).toEqual([]);
   });
+  it('repairs an index hash interrupted after its file write', async () => {
+    await enable();
+    db.prepare("UPDATE obsidian_destinations SET browse_hash='old-hash'").run();
+    sync.retry();
+    await idle();
+    meetings.updateTitle('one', 'After restart');
+    await sync.run();
+    expect(sync.status().error).toBeNull();
+    expect(fs.readFileSync(path.join(root(), 'Browse.md'), 'utf8')).toContain('After restart');
+  });
   it('refuses replacement when note identity was changed', async () => {
     await enable();
     const file = exported();

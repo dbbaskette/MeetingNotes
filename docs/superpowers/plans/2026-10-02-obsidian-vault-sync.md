@@ -38,7 +38,7 @@ Verify real grouped/date views against the same canonical files in a disposable 
 
 ## Verification evidence
 
-- Full Vitest suite: 981 passed, 6 skipped, 125 passing files and 2 skipped files. Includes 23 new Obsidian tests covering additive v18 migration, collision/ownership/path checks, preservation, conflicts, journal recovery, disable during a yielded batch, moved/missing notes, unavailable/read-only vaults, source deletion, and restart catch-up.
+- Full Vitest suite: 982 passed, 6 skipped, 125 passing files and 2 skipped files. Includes 24 new Obsidian tests covering additive v18 migration, collision/ownership/path checks, preservation, conflicts, note/index recovery, disable during a yielded batch, moved/missing notes, unavailable/read-only vaults, source deletion, and restart catch-up.
 - 500-meeting fixture: 3,175 ms initial export in the full run; 0.7 ms unchanged pass with no writes. Earlier focused run: 2,728 ms / 1.0 ms. These are local synthetic measurements, not a throughput guarantee.
 - Isolated Electron component fixture: preview and explicit enable, reconfiguration, 100 bounded issue rows, conflict/repair confirmations, disable, narrow layout, and focus restoration passed.
 - Generated Bases follows official syntax and is parsed in tests. Obsidian 1.13.7 was launched with a disposable profile, but the available UI selector resolved the existing user window rather than the isolated instance. No actions were taken in that vault; the temporary process was closed. Live Base rendering, collapse behavior, and link navigation remain a manual compatibility check, not a claimed pass.

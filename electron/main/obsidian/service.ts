@@ -503,7 +503,14 @@ export class ObsidianSync {
         .prepare('SELECT browse_hash FROM obsidian_destinations WHERE id=?')
         .get(d.id) as Destination
     ).browse_hash;
-    if (current === output) return;
+    if (current === output) {
+      // Repair a crash after the atomic index write but before its hash commit.
+      if (stored !== hash(output))
+        this.db
+          .prepare('UPDATE obsidian_destinations SET browse_hash=? WHERE id=?')
+          .run(hash(output), d.id);
+      return;
+    }
     if (
       !recreate &&
       ((current !== null && hash(current) !== stored) || (current === null && stored))
