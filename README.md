@@ -5,11 +5,11 @@
 <h1>MeetingNotes</h1>
 
 <p><strong>Record, transcribe, diarize, summarize, and extract action items from any meeting — entirely on your Mac.</strong><br/>
-Capture and inference run locally. Optional Google and webhook exports send only the meeting data you choose. No third-party recorder to install.</p>
+Capture and inference run locally. Optional exports send only the meeting data you choose; Obsidian sync writes local Markdown into your vault. No third-party recorder to install.</p>
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.12.8-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.13.0-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -56,7 +56,7 @@ Auto-detect meetings in browsers and native apps, or fire `meetingnotes://record
 <td valign="top">
 
 ### 📤 Export
-Push action items to **Apple Reminders** or **Google Tasks**; export meeting notes to **PDF**, **Markdown**, or **Google Docs**; or send a JSON payload to a **webhook** (n8n, Zapier, Slack…). PDF can include selected action items or notes alone.
+Push action items to **Apple Reminders** or **Google Tasks**; export meeting notes to **PDF**, **Markdown**, or **Google Docs**; automatically sync to an **Obsidian vault**; or send a JSON payload to a **webhook** (n8n, Zapier, Slack…). PDF can include selected action items or notes alone.
 
 </td>
 <td valign="top">
@@ -255,10 +255,15 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 | **Google Tasks / Docs** | Send action items to Google Tasks, or the full summary to a Google Doc (BYO OAuth client — see [`docs/google-setup.md`](docs/google-setup.md)). |
 | **Markdown** | Export the summary as a `.md` file, editor + live preview built in. |
 | **PDF** | Save formatted meeting notes as a `.pdf`; select which action items to include, or choose **None** for notes only. Generated locally. |
+| **[Obsidian](docs/obsidian-sync.md)** | Automatically maintain one Markdown note per completed meeting in your vault, with group/date Bases views and a plain Markdown index. Action items are optional; transcripts default off; audio is never copied. |
 | **[Webhook](docs/exporters.md)** | POST a `meeting.completed` JSON payload to any HTTPS/localhost endpoint. Templates: compact JSON · full JSON · Slack blocks · Telegram markdown. **Send test payload** verifies the round-trip. |
 | **[URL scheme](docs/url-scheme.md)** | `meetingnotes://record?source=zoom.us`, `…?source=ask`, `meetingnotes://stop` — drive recording from Shortcuts, `osascript`, Stream Deck, or a calendar trigger. |
 
 ## 🔧 Configuration
+
+**Obsidian:** open **Settings → Obsidian sync → Configure…**, select the root of an existing vault, then **Preview sync → Enable and sync**. MeetingNotes creates a dedicated `MeetingNotes/` folder with `Meetings.md`, a three-view `Meetings.base`, `Browse.md`, and canonical files in `Notes/`. Groups are properties, so moving a meeting between groups does not duplicate or move its note. Enable Obsidian's built-in Bases plugin for group/date views; the link-only index works without plugins.
+
+Sync is one-way and runs while MeetingNotes is open. Write annotations under **Personal notes**; edits to generated text, task checkboxes, or `mn_` properties pause that note until reviewed. **Configure…** shows progress, errors, comparison, retry, and backup-before-replace controls. Existing notes are retained when sync is disabled or the source meeting is removed. A vault's own cloud/Git sync may distribute exported content outside this Mac. See [setup, preservation, limits, and rollback](docs/obsidian-sync.md).
 
 Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`). Edit them in the app's **Settings** view or via `setup.sh`.
 
@@ -279,6 +284,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `audioWatchPath` | `~/Music/MeetingNotes` | Folder watched for new recordings. |
 | `recordingBitrateKbps` | `128` | AAC bitrate (96 / 128 / 192). |
 | `theme` | `system` | UI appearance: `system` / `light` / `dark`. |
+| `obsidian` | `null` (off) | Vault, owned subfolder, content options, and sync state. Configure through the preview/confirmation flow, not generic settings writes. |
 | `userName` | `""` | Your name, substituted into transcripts after speaker-ID. |
 | `userSpeakerId` | `null` | The roster speaker that represents you; pins your action items in Weekly. Set via Settings → "You are…". |
 | `autoDetectMeetings` | `{browserTabs:false, nativeApps:false, silenceMs:5000}` | `browserTabs` polls the frontmost browser for meeting URLs; `nativeApps` polls CoreAudio for Zoom/Teams/Webex/FaceTime; `silenceMs` debounces beeps. |
@@ -345,7 +351,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.12.8-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.13.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -361,9 +367,9 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.12.8** — for macOS 14.2+ / Apple Silicon. Dictionary management now opens in a dedicated dialog with search and group filtering, keeping Settings compact even with hundreds of saved corrections. Remembered terminology, suggestion-first defaults, opt-in automatic replacement, and correction history remain unchanged.
+**1.13.0** — for macOS 14.2+ / Apple Silicon. Optional Obsidian vault sync keeps completed meetings available as Markdown, organized by group or date without duplicate notes. The compact Settings flow includes a first-sync preview, explicit content choices, conflict review, and preservation of personal annotations. Database migration 19 adds durable sync tracking without relocating recordings.
 
-See the [1.12.8 release notes](docs/releases/v1.12.8.md) for upgrade guidance and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.12.8). The experimental remote-processing beta remains separate.
+See the [1.13.0 release notes](docs/releases/v1.13.0.md) for upgrade guidance and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.0). The experimental remote-processing beta remains separate.
 
 ## 📄 License
 

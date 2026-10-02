@@ -9,6 +9,8 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { 
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
 import { GroupsRepo } from './storage/groups-repo.js';
+import { ObsidianSync } from './obsidian/service.js';
+import { registerObsidianHandlers } from './ipc/obsidian-handlers.js';
 import { TerminologyRepo } from './storage/terminology-repo.js';
 import { TerminologyService } from './terminology/service.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
@@ -194,6 +196,9 @@ app.whenReady().then(async () => {
     libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
   });
   terminology.recover();
+  const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
+  registerObsidianHandlers(ipcMain, obsidian);
+  obsidian.start();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -737,6 +742,7 @@ app.whenReady().then(async () => {
     shuttingDown = true;
     e.preventDefault();
     pipeline.drain();
+    obsidian.stop();
     void (async () => {
       // Stop any active recordings cleanly so finalize is written, instead of
       // leaving the helper to die on parent-watch (which works but leaves an
