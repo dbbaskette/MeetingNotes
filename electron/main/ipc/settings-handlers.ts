@@ -14,6 +14,7 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
+    if (key === 'obsidian') throw new Error('Use Obsidian destination preview and enable controls');
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
     if (key === 'theme') {
       nativeTheme.themeSource = value as 'system' | 'light' | 'dark';

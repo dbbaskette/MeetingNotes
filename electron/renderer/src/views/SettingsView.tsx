@@ -7,6 +7,7 @@ import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
+import { ObsidianSettings } from '../components/ObsidianSettings';
 
 interface Settings {
   lmStudioUrl: string;
@@ -123,6 +124,7 @@ export function SettingsView({
 
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
         <TerminologySettings />
+        <ObsidianSettings />
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -285,7 +287,7 @@ export function SettingsView({
         <div className="text-xs text-ink-muted mt-1">
           The model file to load when starting whisper-server. Must be installed in
           ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
-          (use the setup wizard's Whisper step to download one).
+          (use the setup wizard&apos;s Whisper step to download one).
         </div>
       </Field>
       <Field label="Library Path">

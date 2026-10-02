@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
 import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
 
 interface RecoveryItem {
@@ -36,6 +37,17 @@ type MeetingSummaryPage = {
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
+  obsidianStatus: 'obsidian:status',
+  obsidianChoose: 'obsidian:choose',
+  obsidianPreview: 'obsidian:preview',
+  obsidianEnable: 'obsidian:enable',
+  obsidianDisable: 'obsidian:disable',
+  obsidianRetry: 'obsidian:retry',
+  obsidianOpen: 'obsidian:open',
+  obsidianCompare: 'obsidian:compare',
+  obsidianReplace: 'obsidian:replace',
+  obsidianRepair: 'obsidian:repair',
+  obsidianExportComparison: 'obsidian:export-comparison',
   terminologyList: 'terminology:list',
   terminologySave: 'terminology:save',
   terminologyDelete: 'terminology:delete',
@@ -140,6 +152,19 @@ const IPC_CHANNELS = {
 } as const;
 
 const api = {
+  obsidian: {
+    status: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianStatus),
+    choose: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.obsidianChoose),
+    preview: (options: ObsidianOptions): Promise<ObsidianPreview> => ipcRenderer.invoke(IPC_CHANNELS.obsidianPreview, options),
+    enable: (token: string): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianEnable, token),
+    disable: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianDisable),
+    retry: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRetry),
+    open: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianOpen),
+    compare: (id: string): Promise<ObsidianComparison> => ipcRenderer.invoke(IPC_CHANNELS.obsidianCompare, id),
+    replace: (id: string, revision: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianReplace, id, revision),
+    repair: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRepair),
+    exportComparison: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianExportComparison, id),
+  },
   terminology: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.terminologyList) as Promise<TermRule[]>,
     save: (input: TermInput, id?: string) => ipcRenderer.invoke(IPC_CHANNELS.terminologySave, input, id) as Promise<TermRule>,

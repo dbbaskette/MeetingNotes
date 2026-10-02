@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { OBSIDIAN_SCHEMA } from '../obsidian/schema.js';
 
 interface Migration { version: number; up: string; }
 
@@ -342,6 +343,7 @@ export const MIGRATIONS: Migration[] = [
       CREATE TABLE terminology_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `,
   },
+  { version: 19, up: OBSIDIAN_SCHEMA },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -201,6 +201,17 @@ export const MeetingSpeakerReviewSchema = z.object({
 export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
 
 export const IPC_CHANNELS = {
+  obsidianStatus: 'obsidian:status',
+  obsidianChoose: 'obsidian:choose',
+  obsidianPreview: 'obsidian:preview',
+  obsidianEnable: 'obsidian:enable',
+  obsidianDisable: 'obsidian:disable',
+  obsidianRetry: 'obsidian:retry',
+  obsidianOpen: 'obsidian:open',
+  obsidianCompare: 'obsidian:compare',
+  obsidianReplace: 'obsidian:replace',
+  obsidianRepair: 'obsidian:repair',
+  obsidianExportComparison: 'obsidian:export-comparison',
   terminologyList: 'terminology:list',
   terminologySave: 'terminology:save',
   terminologyDelete: 'terminology:delete',
