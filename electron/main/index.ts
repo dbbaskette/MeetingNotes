@@ -21,7 +21,7 @@ import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
 import { DiarizationClient } from './diarization/client.js';
 import { createDiarizationSupervisor } from './diarization/supervisor.js';
-import { createWhisperSupervisor } from './whisper/supervisor.js';
+import { createConfiguredWhisperSupervisor } from './whisper/supervisor.js';
 import { LLMSupervisor } from './llm/supervisor.js';
 import { WeeklySummariesRepo } from './storage/weekly-summaries-repo.js';
 import { WeeklyAggregator } from './weekly/aggregator.js';
@@ -244,8 +244,11 @@ app.whenReady().then(async () => {
     sidecarDir,
     onLog: (l) => logger.info('sidecar', { line: l }),
   });
-  const whisperSupervisor = createWhisperSupervisor({
+  // Match the transcription endpoint. Only plain-HTTP loopback URLs are
+  // locally managed; remote/TLS/proxy services remain user-managed.
+  const whisperSupervisor = createConfiguredWhisperSupervisor({
     getModelId: () => settings.get('sttModel'),
+    endpoint: s.sttUrl,
     onLog: (l) => logger.info('whisper', { line: l }),
   });
   // Phase 3 LLM-provider lifecycle. When summaryProvider='external'

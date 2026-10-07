@@ -2,6 +2,7 @@
 import type { LMStudioClient } from '../lm-studio/client.js';
 import type { DiarizationClient } from '../diarization/client.js';
 import type { ManagedService } from '../lib/managed-service.js';
+import type { WhisperLifecycle } from '../whisper/supervisor.js';
 import type { MeetingsRepo } from '../storage/meetings-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
@@ -31,7 +32,7 @@ export interface PipelineContext {
   /** Lazy-spawn supervisor for whisper-server. Stages call
    *  `await whisperSupervisor.ensureReady()` before invoking
    *  `stt.transcribe()`. */
-  whisperSupervisor: ManagedService;
+  whisperSupervisor: WhisperLifecycle;
   /** Lazy-spawn supervisor for the summarization LLM (LM Studio /
    *  Ollama). When provider='external', ensureReady() is a no-op
    *  and the existing user-managed flow continues unchanged.

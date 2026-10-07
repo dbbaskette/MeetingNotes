@@ -21,7 +21,7 @@ Capture and inference run locally. Optional exports send only the meeting data y
 ---
 
 > [!NOTE]
-> **Everything runs on your machine.** Audio never leaves the device — capture, speech-to-text, speaker diarization, and the LLM summary all happen locally. You bring the models; MeetingNotes orchestrates the rest.
+> **Local by default.** Capture, speech-to-text, speaker diarization, and LLM summaries can all run on your machine. You bring the models; MeetingNotes orchestrates the rest. If you configure remote inference endpoints, the corresponding audio or text is sent to those endpoints.
 
 ## ✨ What it does
 
@@ -283,7 +283,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `llmModel` | `qwen/qwen3.5-9b` | Model id for summarize/extract. Auto-loaded on first use. |
 | `disableThinking` | `true` | Sends `enable_thinking: false` so reasoning models skip chain-of-thought where they honor it. |
 | `summaryDetail` | `detailed` | Summary verbosity: `concise` / `standard` / `detailed`. |
-| `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint. |
+| `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint. Plain HTTP loopback URLs at the root path are managed locally on the configured port (HTTP without a port uses 80). Remote, HTTPS, or proxy endpoints are user-managed. Restart the app after changing this URL. |
 | `sttModel` | `whisper-1` | Model file loaded when the app spawns whisper-server (`ggml-<name>.bin`); falls back to an auto-pick order if missing. |
 | `sttLanguage` | `en` | Passed to Whisper. |
 | `libraryPath` | `~/Documents/MeetingNotes` | Meetings, DB, embeddings. |
@@ -368,7 +368,7 @@ The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sq
 
 ## 🔒 Privacy & security
 
-- **Local-only inference.** Audio, transcripts, and summaries never leave your Mac. No telemetry, no accounts, no API keys at inference time.
+- **Local inference by default.** No telemetry or accounts are required. Configuring a remote transcription or LLM endpoint sends the corresponding audio or text to that endpoint; choose only services you trust.
 - **Sandboxed renderer** — `contextIsolation: true`, `nodeIntegration: false`; the preload exposes a typed API surface only, and every IPC payload is **zod-validated**.
 - **Scoped audio capture** — the Swift helper is codesigned with the audio-input entitlement; TCC scopes your grant to MeetingNotes specifically, and the helper auto-stops if the app dies (no orphaned recorder).
 - **Parameterized SQLite** (`better-sqlite3`, FKs + WAL). The HF token is stored `chmod 600` and needed only for the one-time model download.
