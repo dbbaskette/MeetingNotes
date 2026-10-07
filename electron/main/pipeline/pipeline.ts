@@ -287,7 +287,9 @@ export class Pipeline {
       path.join(folder, 'diarization.json'),
     );
     const review = buildSpeakerReviewMetadata({
-      links: links.map((link) => ({ ...link, rosterId: link.rosterSpeakerId })),
+      // Assignments may have changed while the evidence was loading.
+      links: this.deps.ctx.speakers.listForMeeting(meetingId)
+        .map((link) => ({ ...link, rosterId: link.rosterSpeakerId })),
       diarization: diar?.segments ?? [],
       // Line counts are presentation-only; the gate needs no transcript read.
       transcript: [],

@@ -340,6 +340,36 @@ describe('Pipeline', () => {
     expect(meetings.findById('override')!.pipelineStage).toBe('done');
   });
 
+  it('rechecks speaker assignments changed while review evidence is loading', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-gate-link-change-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const meetings = new MeetingsRepo(db);
+    const speakers = new SpeakersRepo(db);
+    meetings.insert({ id: 'changed', slug: 'changed', title: 't', startedAt: null, durationS: null,
+      audioPath: '/x.mp3', status: 'processing', pipelineStage: 'identifying' });
+    speakers.linkToMeeting('changed', 'SPEAKER_00', speakers.create({ displayName: 'Alice' }), 0.95);
+    const ctx = testContext(meetings, speakers, dir);
+    ctx.artifactCache = new ArtifactCache({
+      stat: async () => ({ size: 1, mtimeMs: 1, ctimeMs: 1 }),
+      readFile: async () => {
+        speakers.linkToMeeting('changed', 'SPEAKER_00', null, 0);
+        return JSON.stringify({ segments: [
+          { speaker: 'SPEAKER_00', start: 0, end: 1 },
+          { speaker: 'SPEAKER_00', start: 1, end: 2 },
+        ] });
+      },
+    });
+    const noop = async () => {};
+    const summarizing = vi.fn(noop);
+    const pipeline = new Pipeline({
+      ctx,
+      stages: { transcribing: noop, diarizing: noop, merging: noop, identifying: noop, summarizing, extracting: noop },
+    });
+    await pipeline.run('changed');
+    expect(meetings.findById('changed')!.status).toBe('awaiting_user');
+    expect(summarizing).not.toHaveBeenCalled();
+  });
+
   it('marks status=failed when a stage throws and rolls back parallel stage', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-pl3-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
