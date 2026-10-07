@@ -9,7 +9,9 @@ if(!appPath?.endsWith('/MeetingNotes.app')||!speechPath)throw new Error('Pass th
 const root=path.resolve('.ci-package-fixture');
 if(fs.existsSync(root))throw new Error('Payload already exists; preserve it or remove the exact owned fixture before preparing another');
 fs.mkdirSync(path.join(root,'hub'),{recursive:true});
-fs.cpSync(appPath,path.join(root,'MeetingNotes.app'),{recursive:true});
+// Framework symlinks must remain relative/relocatable in the guest. Node's
+// default rewrites their targets to absolute host paths.
+fs.cpSync(appPath,path.join(root,'MeetingNotes.app'),{recursive:true,verbatimSymlinks:true});
 fs.copyFileSync(speechPath,path.join(root,'speech.wav'));
 const cache=process.env.MN_OFFLINE_MODEL_SOURCE??path.join(os.homedir(),'.cache/huggingface/hub');
 for(const name of ['speaker-diarization-3.1','segmentation-3.0','wespeaker-voxceleb-resnet34-LM']) {
