@@ -29,3 +29,8 @@ not evidence that a populated Library renders successfully.
 
 The guest writes PASS only after all checks finish. Results are retained under
 `~/Library/Logs/MacOS Test Suite/meetingnotes/`. Required GitHub gates still apply.
+
+The audio-helper gate builds the complete Swift helper and runs synthetic AAC
+writer checks without microphone or process-tap access. Its framework-free
+harness shares the exact assertions used by the developer XCTest target, since
+the Command Line Tools-only clean VM does not include XCTest.
