@@ -6,10 +6,11 @@ import { Icon } from './icons';
 import type { RecordingStartInput } from '../App';
 
 export function RecordButton({
-  onStarted, groupId,
+  onStarted, groupId, active = true,
 }: {
   onStarted: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
   groupId?: string | null;
+  active?: boolean;
 }): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,19 +21,20 @@ export function RecordButton({
   // both a "start recording" trigger and an "I changed my mind" out, and
   // also wires the shortcut up from any view that mounts the LibraryView.
   useEffect(() => {
+    if (!active) return;
     const onToggle = (): void => {
       if (busy) return;
       setPickerOpen((v) => !v);
     };
     window.addEventListener('mn:toggle-record', onToggle);
     return () => window.removeEventListener('mn:toggle-record', onToggle);
-  }, [busy]);
+  }, [busy, active]);
 
   async function pick(src: PickedSource): Promise<void> {
     setPickerOpen(false);
     setBusy(true); setError(null);
     const input: RecordingStartInput = {
-      targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true, groupId: src.groupId,
+      targetPid: src.targetPid, targetLabel: src.targetLabel, mic: true, groupId: src.groupId, title: src.title,
     };
     try {
       const { sessionId } = await api.recording.start(input) as { sessionId: string };

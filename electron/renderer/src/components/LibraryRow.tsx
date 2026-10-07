@@ -58,6 +58,8 @@ interface Props {
    *  hover-only) and makes row clicks toggle instead of open. */
   selectionActive?: boolean;
   showGroup?: boolean;
+  isNew?: boolean;
+  onMove?: () => void;
 }
 
 function fmtDur(s: number | null): string {
@@ -76,7 +78,7 @@ function fmtDate(iso: string | null): string {
 }
 
 export const LibraryRow = memo(function LibraryRow({
-  meeting, onOpen, onChanged, checked, onToggle, selectionActive, showGroup,
+  meeting, onOpen, onChanged, checked, onToggle, selectionActive, showGroup, isNew, onMove,
 }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
@@ -89,7 +91,7 @@ export const LibraryRow = memo(function LibraryRow({
   // Pending rows have a subtly muted background so unprocessed items read as
   // "not yet a finished meeting" without looking broken. Everything else
   // sits on standard surface.
-  const bg = isPending ? 'bg-surface-sunken/40' : 'bg-surface';
+  const bg = checked ? 'bg-brand-indigo/10' : isPending ? 'bg-surface-sunken/40' : 'bg-surface';
 
   function handleRowClick(): void {
     // Pending rows toggle on body click (makes "select 5 and process"
@@ -107,6 +109,13 @@ export const LibraryRow = memo(function LibraryRow({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`${onToggle && (isPending || selectionActive) ? checked ? 'Deselect' : 'Select' : 'Open'} ${meeting.title}`}
+      onKeyDown={e => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowClick(); }
+      }}
       onClick={handleRowClick}
       className={`
         group relative ${bg} border border-surface-border rounded-xl
@@ -120,7 +129,9 @@ export const LibraryRow = memo(function LibraryRow({
       {onToggle && (
         <button
           onClick={(e) => { e.stopPropagation(); onToggle(meeting.id); }}
-          aria-label={checked ? 'Deselect' : 'Select'}
+          role="checkbox"
+          aria-checked={!!checked}
+          aria-label={`${checked ? 'Deselect' : 'Select'} ${meeting.title}`}
           className={`
             w-[18px] h-[18px] rounded-[5px] border-2 shrink-0 flex items-center justify-center transition
             ${checked
@@ -128,7 +139,7 @@ export const LibraryRow = memo(function LibraryRow({
               : 'border-ink/20 bg-surface group-hover:border-ink/40'}
             ${isPending || checked || selectionActive
               ? 'opacity-100'
-              : 'opacity-0 group-hover:opacity-100'}
+              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100'}
           `}
         >
           {checked && (
@@ -177,6 +188,8 @@ export const LibraryRow = memo(function LibraryRow({
         </span>
       )}
 
+      {isNew && <span className="text-xs text-brand-indigo">New</span>}
+      {onMove && <button type="button" aria-label={`Move ${meeting.title} to a group`} onClick={event => { event.stopPropagation(); onMove(); }} className="text-xs font-semibold text-brand-indigo rounded px-2 py-1 hover:bg-brand-indigo/10">Move…</button>}
       <StatusChip meeting={meeting} />
 
       <MeetingRowMenu meeting={meeting} onChanged={onChanged} />

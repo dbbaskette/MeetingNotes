@@ -896,7 +896,8 @@ describe('registerIpcHandlers', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
-      actionItems: { listByMeeting: () => [], setStatus },
+      actionItems: { listByMeeting: () => [], setStatus, findById:()=>({meetingId:'m'}) },
+      meetings:{findById:()=>({id:'m',status:'done',deletedAt:null})},
     });
     registerIpcHandlers(fakeIpc, services);
     const call = handle.mock.calls.find((c) => c[0] === 'action-items:set-status');

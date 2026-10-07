@@ -1,5 +1,5 @@
 export interface GroupAssignOutcome {
-  moved: { id: string; previousGroupId: string | null }[];
+  moved: { id: string; previousGroupId: string | null; revision?: number }[];
   failedIds: string[];
 }
 

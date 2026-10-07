@@ -6,8 +6,8 @@ function baseData(over: Partial<WeeklyData> = {}): WeeklyData {
   return {
     isoYear: 2026,
     isoWeek: 17,
-    rangeStart: '2026-04-20T00:00:00.000Z',
-    rangeEnd: '2026-04-26T23:59:59.999Z',
+    rangeStart: new Date(2026, 3, 20).toISOString(),
+    rangeEnd: new Date(2026, 3, 26, 23, 59, 59, 999).toISOString(),
     totalDurationS: 0,
     meetings: [],
     openActionGroups: [],

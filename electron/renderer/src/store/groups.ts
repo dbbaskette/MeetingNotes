@@ -9,6 +9,7 @@ interface GroupsState {
   groups: MeetingGroup[];
   allCount: number;
   ungroupedCount: number;
+  ungroupedStatus?: {pending:number;processing:number;failed:number};
   loaded: boolean;
   error: string | null;
   refresh: () => Promise<void>;

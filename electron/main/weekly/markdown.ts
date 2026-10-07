@@ -37,7 +37,7 @@ export function renderWeeklyMarkdown(data: WeeklyData): string {
   const start = new Date(data.rangeStart);
   const end = new Date(data.rangeEnd);
   const fmt = (d: Date): string => d.toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', timeZone: 'UTC',
+    month: 'short', day: 'numeric',
   });
   lines.push(`# Weekly summary — ${fmt(start)} – ${fmt(end)}, ${data.isoYear}`);
   lines.push('');

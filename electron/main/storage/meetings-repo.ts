@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import { meetingInstant } from '../lib/meeting-instant.js';
+import { FacetedMeetings } from '../search/facets.js';
 
 export interface MeetingRow {
   id: string; slug: string; title: string;
@@ -16,6 +18,7 @@ export interface MeetingRow {
    *  `findById()` so the undo-delete toast can restore them. */
   deletedAt: string | null;
   createdAt: string; updatedAt: string;
+  titleExplicit?: boolean;
 }
 
 export interface MeetingInsert {
@@ -23,6 +26,7 @@ export interface MeetingInsert {
   startedAt: string | null; durationS: number | null;
   audioPath: string; status: string; pipelineStage: string;
   groupId?: string | null;
+  titleExplicit?: boolean;
 }
 
 export type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
@@ -147,7 +151,8 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     title: r.title as string,
     groupId: (r.group_id as string) ?? null,
     groupName: (r.group_name as string) ?? null,
-    startedAt: (r.started_at as string) ?? null,
+    startedAt: (r.started_at as string | null)?.includes('T')
+      ? meetingInstant(r.started_at as string, r.audio_path as string) : (r.started_at as string) ?? null,
     durationS: (r.duration_s as number) ?? null,
     audioPath: r.audio_path as string,
     status: r.status as string,
@@ -158,19 +163,27 @@ function rowToMeeting(r: Record<string, unknown>): MeetingRow {
     deletedAt: (r.deleted_at as string) ?? null,
     createdAt: r.created_at as string,
     updatedAt: r.updated_at as string,
+    titleExplicit: !!r.title_explicit,
   };
 }
 
 export class MeetingsRepo {
-  constructor(private readonly db: Database.Database) {}
+  facetedSearch(): FacetedMeetings { return new FacetedMeetings(this.db); }
+  constructor(private readonly db: Database.Database) {
+    db.function('mn_instant', (value, fallback, audioPath) => {
+      const instant = Date.parse(meetingInstant(value as string, audioPath as string) ?? meetingInstant(fallback as string) ?? '');
+      return Number.isFinite(instant) ? instant : null;
+    });
+  }
 
   insert(m: MeetingInsert): void {
     const now = new Date().toISOString();
     this.db.prepare(`
-      INSERT INTO meetings (id, slug, title, started_at, duration_s, audio_path, status, pipeline_stage, group_id, created_at, updated_at)
+      INSERT INTO meetings (id, slug, title, started_at, duration_s, audio_path, status, pipeline_stage, group_id, title_explicit, created_at, updated_at)
       VALUES (@id, @slug, @title, @startedAt, @durationS, @audioPath, @status, @pipelineStage,
-        (SELECT id FROM groups WHERE id = @groupId), @createdAt, @updatedAt)
-    `).run({ ...m, groupId: m.groupId ?? null, createdAt: now, updatedAt: now });
+        (SELECT id FROM groups WHERE id = @groupId), @titleExplicit, @createdAt, @updatedAt)
+    `).run({ ...m, startedAt: m.startedAt?.includes('T') ? meetingInstant(m.startedAt, m.audioPath) : m.startedAt,
+      groupId: m.groupId ?? null, titleExplicit: m.titleExplicit ? 1 : 0, createdAt: now, updatedAt: now });
   }
 
   findByAudioPath(audioPath: string): MeetingRow | null {
@@ -294,11 +307,11 @@ export class MeetingsRepo {
     const rows = this.db.prepare(`
       SELECT * FROM meetings
       WHERE deleted_at IS NULL
-        AND COALESCE(started_at, created_at) >= ?
-        AND COALESCE(started_at, created_at) <= ?
-      ORDER BY COALESCE(started_at, created_at) ASC
-    `).all(startIso, endIso) as Record<string, unknown>[];
-    return rows.map(rowToMeeting);
+        AND mn_instant(started_at, created_at, audio_path) >= ?
+        AND mn_instant(started_at, created_at, audio_path) <= ?
+      ORDER BY mn_instant(started_at, created_at, audio_path) ASC, id ASC
+    `).all(Date.parse(startIso), Date.parse(endIso)) as Record<string, unknown>[];
+    return rows.map(r => ({ ...rowToMeeting(r), startedAt: meetingInstant(r.started_at as string, r.audio_path as string) ?? meetingInstant(r.created_at as string) }));
   }
 
   findNonTerminal(): MeetingRow[] {
@@ -335,9 +348,9 @@ export class MeetingsRepo {
     ).run(stage, now, now, id);
   }
 
-  updateTitle(id: string, title: string): void {
-    this.db.prepare('UPDATE meetings SET title = ?, updated_at = ? WHERE id = ?')
-      .run(title, new Date().toISOString(), id);
+  updateTitle(id: string, title: string, explicit = true): void {
+    this.db.prepare('UPDATE meetings SET title = ?, title_explicit = ?, updated_at = ? WHERE id = ?')
+      .run(title, explicit ? 1 : 0, new Date().toISOString(), id);
   }
 
   updateStatus(id: string, status: string): void {
@@ -455,6 +468,6 @@ export class MeetingsRepo {
    *  weekly aggregator's input-hash invalidation picks up the change. */
   setStartedAt(id: string, startedAtIso: string): void {
     this.db.prepare('UPDATE meetings SET started_at = ?, updated_at = ? WHERE id = ?')
-      .run(startedAtIso, new Date().toISOString(), id);
+      .run(meetingInstant(startedAtIso, this.findById(id)?.audioPath), new Date().toISOString(), id);
   }
 }

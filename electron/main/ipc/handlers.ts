@@ -49,7 +49,10 @@ import type { WeeklyAggregator } from '../weekly/aggregator.js';
 import { registerWeeklyHandlers } from './weekly-handlers.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
 import { registerSettingsHandlers } from './settings-handlers.js';
-import { ripgrepSearch } from '../search/ripgrep-search.js';
+import { ripgrepSearch, ripgrepSearchDetailed } from '../search/ripgrep-search.js';
+import { FacetsSchema, searchScope } from '../search/facets.js';
+import {validCalendarDate} from '../../shared/calendar-date.js';
+import { SearchOwners } from '../search/owners.js';
 import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
 import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
@@ -61,8 +64,10 @@ import { createCountsCache } from '../library/page-counts.js';
 import type { TerminologyService } from '../terminology/service.js';
 import { registerTerminologyHandlers } from './terminology-handlers.js';
 import type { NotesHistory } from '../storage/notes-history.js';
+import type {LibraryBackup} from '../storage/library-backup.js';
 
 export interface IpcServices {
+  backup?: LibraryBackup;
   notesHistory?: NotesHistory;
   terminology?: TerminologyService;
   meetings: MeetingsRepo;
@@ -140,7 +145,7 @@ function meetingSummary(
   }));
   const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
   return {
-    id: m.id, slug: m.slug, title: m.title,
+    id: m.id, slug: m.slug, title: m.title, createdAt: m.createdAt,
     groupId: m.groupId, groupName: m.groupName,
     startedAt: m.startedAt, durationS: m.durationS,
     pipelineStage: m.pipelineStage, status: m.status,
@@ -189,9 +194,30 @@ async function speakerReviewForFolder(
 }
 
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  const searchOwners = new SearchOwners();
+  const SearchOwnerSchema = z.object({ clientId:z.string().min(1).max(100), requestId:z.number().int().nonnegative() });
+  const SearchRequestSchema = SearchOwnerSchema.extend({facets:FacetsSchema.optional()}).strict();
+  const observedSearchSenders = new WeakSet<object>();
+  ipc.handle(IPC_CHANNELS.searchCancel,(event,input:unknown)=>{
+    const request=SearchOwnerSchema.parse(input);searchOwners.cancel(event.sender.id,request.clientId,request.requestId);
+  });
   if (s.terminology) registerTerminologyHandlers(ipc, s.terminology);
   const pageCounts = createCountsCache();
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
+  ipc.handle(IPC_CHANNELS.backupStatus,()=>s.backup?.status??{state:'idle',completed:0,total:0});
+  ipc.handle(IPC_CHANNELS.backupPreview,async()=>{
+    if(!s.backup)throw new Error('Backup is unavailable.');
+    const picked=await dialog.showOpenDialog({title:'Choose where to back up the Library',properties:['openDirectory','createDirectory']});
+    if(picked.canceled||!picked.filePaths[0])return null;
+    return s.backup.preview(picked.filePaths[0]);
+  });
+  ipc.handle(IPC_CHANNELS.backupRun,(_event,destination:unknown)=>{
+    if(!s.backup)throw new Error('Backup is unavailable.');return s.backup.run(z.string().min(1).max(4000).parse(destination));
+  });
+  ipc.handle(IPC_CHANNELS.recordingMeeting,async(_event,sessionId:unknown)=>{
+    const output=s.recordingManager.recordedOutput(z.string().min(1).max(100).parse(sessionId));if(!output)return null;
+    for(let attempt=0;attempt<50;attempt++){const meeting=s.meetings.findByAudioPath(output);if(meeting)return {id:meeting.id,title:meeting.title};await new Promise(resolve=>setTimeout(resolve,100));}return null;
+  });
 
   ipc.handle(IPC_CHANNELS.logsTail, (_e, maxEntries?: unknown) => {
     const n = typeof maxEntries === 'number' && maxEntries > 0
@@ -257,6 +283,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const { ids, groupId, expectedGroupId } = AssignGroupSchema.parse(input);
     return s.groups.assign(ids, groupId, expectedGroupId);
   });
+  ipc.handle(IPC_CHANNELS.groupsUndo, (_e, input: unknown) => s.groups.undo(z.array(z.object({
+    id: z.string().min(1).max(100), previousGroupId: GroupIdSchema.nullable(), revision: z.number().int().positive(),
+  })).max(1000).parse(input)));
+  ipc.handle(IPC_CHANNELS.appUndoEdit, (event) => event.sender.undo());
 
   ipc.handle(IPC_CHANNELS.meetingsGet, async (_e, id: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
@@ -571,14 +601,15 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
   ipc.handle(IPC_CHANNELS.recordingStart, async (_e, input: unknown) => {
     if (typeof input !== 'object' || input === null) throw new Error('invalid args');
-    const { targetPid, targetLabel, mic, groupId } = z.object({
+    const { targetPid, targetLabel, mic, groupId, title } = z.object({
       targetPid: z.union([z.literal('system'), z.number().int().positive()]),
       targetLabel: z.string().min(1).max(200), mic: z.boolean(), groupId: OptionalGroupScopeSchema,
+      title: z.string().max(200).optional(),
     }).parse(input);
     // A group may have been deleted while the picker was open. Capture is
     // more important than filing; keep the one-click start and ungroup it.
     const validGroupId = groupId && s.groups.exists(groupId) ? groupId : null;
-    return s.recordingManager.start({ targetPid, targetLabel, mic, groupId: validGroupId });
+    return s.recordingManager.start({ targetPid, targetLabel, mic, groupId: validGroupId, title });
   });
   ipc.handle(IPC_CHANNELS.recordingStop, async (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
@@ -816,9 +847,15 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     remergeMeetings([meetingId]);
   });
 
+  const beforeActionMutation=(id:string):void=>{
+    const item=s.actionItems.findById(id);if(!item)throw new Error('Action item no longer exists. Refresh this meeting.');
+    const meeting=s.meetings.findById(item.meetingId);if(!meeting||meeting.deletedAt||meeting.status==='processing')throw new Error('Wait for processing to finish before editing tasks.');
+    s.notesHistory?.capture(item.meetingId,'Before action item changed');
+  };
   ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: unknown, status: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     if (status !== 'open' && status !== 'done') throw new Error('invalid status');
+    beforeActionMutation(id);
     return s.actionItems.setStatus(id, status);
   });
 
@@ -837,21 +874,27 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     if (dueDate !== undefined) {
       if (dueDate !== null && typeof dueDate !== 'string') throw new Error('dueDate must be string or null');
-      // YYYY-MM-DD — lenient: accept empty string as "clear the date".
+      if(typeof dueDate==='string'&&dueDate&&!validCalendarDate(dueDate))throw new Error('dueDate must be a valid YYYY-MM-DD date');
       normalized.dueDate = dueDate === null || dueDate === '' ? null : dueDate as string;
     }
+    beforeActionMutation(id);
     s.actionItems.update(id, normalized);
   });
 
   ipc.handle(IPC_CHANNELS.actionItemsDelete, (_e, id: unknown) => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
-    s.actionItems.delete(id);
+    beforeActionMutation(id);
+    return s.actionItems.deleteWithUndo(id);
   });
+  ipc.handle(IPC_CHANNELS.actionItemsUndoDelete,(_e,token:unknown)=>s.actionItems.undoDelete(z.string().min(1).max(100).parse(token)));
 
   ipc.handle(IPC_CHANNELS.actionItemsCreate, (_e, meetingId: unknown, patch: unknown) => {
     if (typeof meetingId !== 'string' || !patch || typeof patch !== 'object') throw new Error('invalid args');
     const { text, ownerName, dueDate } = patch as { text?: unknown; ownerName?: unknown; dueDate?: unknown };
     if (typeof text !== 'string' || text.trim() === '') throw new Error('text required');
+    if(dueDate!==undefined&&dueDate!==null&&(typeof dueDate!=='string'||dueDate&&!validCalendarDate(dueDate)))throw new Error('dueDate must be a valid YYYY-MM-DD date');
+    const meeting=s.meetings.findById(meetingId);if(!meeting||meeting.deletedAt||meeting.status==='processing')throw new Error('Wait for processing to finish before adding tasks.');
+    s.notesHistory?.capture(meetingId,'Before action item added');
     s.actionItems.create(meetingId, {
       text: text.trim().slice(0, 2000),
       ownerName: typeof ownerName === 'string' && ownerName.trim() ? ownerName.trim().slice(0, 200) : null,
@@ -897,11 +940,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // binary (@vscode/ripgrep) over the library's meetings/ tree. rg
   // parallelizes the walk and matches with SIMD, so even a multi-
   // thousand-meeting library answers each keystroke in tens of ms.
-  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown, scopeInput: unknown) => {
+  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown, scopeInput: unknown, requestInput?: unknown) => {
+    const request = requestInput === undefined ? null : SearchRequestSchema.parse(requestInput);
+    if(request && !observedSearchSenders.has(_e.sender)) {
+      observedSearchSenders.add(_e.sender);
+      _e.sender.once('destroyed',()=>searchOwners.destroy(_e.sender.id));
+    }
+    const owner = request ? await searchOwners.begin(_e.sender.id,request.clientId,request.requestId) : null;
+    try {
+    if(owner?.signal.aborted) return {hits:[],status:'cancelled'};
     if (typeof query !== 'string') return [];
     const groupId = OptionalGroupScopeSchema.parse(scopeInput);
-    const q = query.trim();
-    if (q.length < 2) return [];
+    const q = query.trim().slice(0,500);
+    if (q.length < 2 && !request) return [];
     const qLower = q.toLowerCase();
     const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;
 
@@ -915,13 +966,17 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       score: number;
     }
     const hits: Hit[] = [];
+    const facets = request?.facets ?? {};
+    const meId = s.settings.get('userSpeakerId');
+    const scope = request ? searchScope(facets,groupId,{id:meId,name:meId?s.speakers.findById(meId)?.displayName??null:s.settings.get('userName')??null}) : null;
+    const faceted = request ? s.meetings.facetedSearch() : null;
 
     // Title hits — rank highest so an exact-title match surfaces first.
     // Pushed down to SQL (LIKE, parameter-bound) instead of scanning a
     // listAll() snapshot per keystroke. Newest-first, capped at `max` —
     // the final slice keeps at most `max` anyway and titles outrank
     // everything else.
-    for (const m of s.meetings.searchByTitle(q, max, groupId)) {
+    for (const m of facets.content ? [] : faceted && scope ? faceted.titles(q,max+1,scope).map(row=>({...row,groupName:row.groupName})) : s.meetings.searchByTitle(q, max, groupId)) {
       hits.push({
         meetingId: m.id, title: m.title, groupName: m.groupName, source: 'title',
         snippet: m.title, score: 1000,
@@ -933,10 +988,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // additionally take only the first match below (one hit per
     // meeting is plenty, since a summary is short).
     const meetingsRoot = path.join(s.libraryRoot, 'meetings');
-    const rgHits = await ripgrepSearch(meetingsRoot, q, {
-      maxCountPerFile: 3,
-      globs: ['summary.md', 'transcript.md'],
-    });
+    const fileEligibility = new Map<string,boolean>();
+    const detailed = request ? await ripgrepSearchDetailed(meetingsRoot,q,{
+      maxCountPerFile:3,maxTotalMatches:10000,signal:owner!.signal,
+      globs:facets.content?[`${facets.content}.md`]:['summary.md','transcript.md'],
+      acceptFile:file=>{
+        const parts=path.relative(meetingsRoot,file).split(path.sep);
+        if(parts.length!==2||parts[0]==='..')return false;
+        const slug=parts[0]!;
+        if(!fileEligibility.has(slug)){if(fileEligibility.size>=1000)fileEligibility.delete(fileEligibility.keys().next().value!);fileEligibility.set(slug,faceted!.matchesSlug(slug,scope!));}
+        return fileEligibility.get(slug)!;
+      },
+    }) : null;
+    const rgHits = detailed?.matches ?? await ripgrepSearch(meetingsRoot,q,{maxCountPerFile:3,globs:['summary.md','transcript.md']});
 
     // Resolve only the slugs rg actually hit — one chunked IN query
     // instead of materializing the entire library.
@@ -991,11 +1055,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // already filesystem-driven, not date-sorted — close enough for a
     // palette where the score gap between tiers dominates).
     hits.sort((a, b) => b.score - a.score);
-    return hits.slice(0, max).map((h) => ({
+    const results = hits.slice(0, max).map((h) => ({
       meetingId: h.meetingId, title: h.title, groupName: h.groupName, source: h.source,
       snippet: h.snippet,
       ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
     }));
+    return request ? {hits:owner!.signal.aborted?[]:results,status:owner!.signal.aborted?'cancelled':detailed!.status==='complete'&&hits.length>max?'limit':detailed!.status,message:detailed!.message??(hits.length>max?'Result limit reached; refine the query or filters.':undefined)} : results;
+    } finally { owner?.finish(); }
   });
 
   registerWeeklyHandlers(ipc, s);

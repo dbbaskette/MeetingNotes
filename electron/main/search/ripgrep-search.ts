@@ -1,142 +1,67 @@
-// electron/main/search/ripgrep-search.ts
-//
-// Thin wrapper around the bundled ripgrep binary (@vscode/ripgrep) used
-// by the Cmd+K palette (#45). Replaces the previous folder-walk that
-// read every summary.md / transcript.md on every keystroke — rg's
-// parallel walker + SIMD matching is dramatically faster on large
-// libraries and (importantly) returns structured JSON so we don't need
-// to re-tokenize anything in JS.
-//
-// Output shape is deliberately small: the handler in ipc/handlers.ts
-// does the slug→meeting join, snippet trimming, and seconds-parse for
-// transcript hits. That keeps this module dialect-free.
-
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { rgPath as rgPathRaw } from '@vscode/ripgrep';
-
-// In production the app is packaged into app.asar, but native binaries
-// can't be exec'd from inside an asar archive. electron-builder.yml
-// unpacks @vscode/ripgrep into app.asar.unpacked; we rewrite the path
-// so spawn() points at the real binary. No-op in dev (no "app.asar"
-// segment in the path).
-const rgPath = rgPathRaw.replace(
-  /[\\/]app\.asar[\\/]/,
-  (m: string) => m.replace('app.asar', 'app.asar.unpacked'),
-);
-
-export interface RgMatch {
-  /** Absolute path of the file the match was found in. */
-  file: string;
-  /** 1-based line number. */
-  lineNumber: number;
-  /** Full text of the matched line, trailing newline trimmed. */
-  lineText: string;
-}
-
+const rgPath = rgPathRaw.replace(/[\\/]app\.asar[\\/]/, m => m.replace('app.asar','app.asar.unpacked'));
+export interface RgMatch { file:string; lineNumber:number; lineText:string }
 export interface RipgrepOptions {
-  /** Max matches per file. ripgrep stops scanning a file once hit. */
-  maxCountPerFile?: number;
-  /** Globs (rg -g) to restrict which files are searched. */
-  globs?: string[];
-  /** Hard timeout in ms to kill a runaway rg process. */
-  timeoutMs?: number;
+  maxCountPerFile?:number; globs?:string[]; timeoutMs?:number; maxTotalMatches?:number;
+  signal?:AbortSignal; acceptFile?:(file:string)=>boolean;
+  /** Optional diagnostics; invoked once on spawn and once after actual exit. */
+  onProcess?:(state:'started'|'closed')=>void;
 }
-
-/** Run ripgrep over `searchRoot` for `query` (treated as a literal
- *  string, not a regex). Returns one entry per match line. Throws only
- *  on spawn failure; an empty result set is returned for "no matches",
- *  rg-internal errors, or a timeout (the palette should degrade
- *  gracefully — a search that errors isn't worth surfacing to the
- *  user mid-keystroke). */
-export async function ripgrepSearch(
-  searchRoot: string,
-  query: string,
-  opts: RipgrepOptions = {},
-): Promise<RgMatch[]> {
-  if (!query) return [];
-
-  const args = [
-    '--json',
-    // Ignore the user's ~/.ripgreprc so behavior is identical across
-    // machines. Surprises here would silently break search results.
-    '--no-config',
-    // The library root isn't a git repo, but rg still consults
-    // .gitignore / .ignore if it finds one. Off for predictability.
-    '--no-ignore',
-    '--no-messages',
-    // Fixed-string match — user-typed queries aren't regex, and any
-    // accidental special chars (parentheses, periods) shouldn't blow
-    // up or change result counts.
-    '-F',
-    '-i',
-  ];
-  if (opts.maxCountPerFile && opts.maxCountPerFile > 0) {
-    args.push('--max-count', String(opts.maxCountPerFile));
-  }
-  for (const g of opts.globs ?? []) {
-    args.push('-g', g);
-  }
-  args.push(query, searchRoot);
-
-  return new Promise<RgMatch[]>((resolve) => {
-    const matches: RgMatch[] = [];
-    let stdoutBuf = '';
-    let settled = false;
-    const child = spawn(rgPath, args, { stdio: ['ignore', 'pipe', 'ignore'] });
-
-    const finish = (result: RgMatch[]): void => {
-      if (settled) return;
-      settled = true;
-      try { child.kill(); } catch { /* already dead */ }
-      resolve(result);
+export interface RipgrepResult { matches:RgMatch[]; status:'complete'|'partial'|'limit'|'failed'|'cancelled'; message?:string }
+export async function ripgrepSearch(searchRoot:string,query:string,opts:RipgrepOptions={}):Promise<RgMatch[]> {
+  return (await ripgrepSearchDetailed(searchRoot,query,opts)).matches;
+}
+/** Resolve only after child exit, so replacement owners cannot overlap subprocesses. */
+export async function ripgrepSearchDetailed(searchRoot:string,query:string,opts:RipgrepOptions={}):Promise<RipgrepResult> {
+  if(opts.signal?.aborted) return {matches:[],status:'cancelled'};
+  if(!query) return {matches:[],status:'complete'};
+  const args=['--json','--no-config','--no-ignore','--no-messages','-F','-i'];
+  if(opts.maxCountPerFile) args.push('--max-count',String(opts.maxCountPerFile));
+  for(const g of opts.globs??[]) args.push('-g',g);
+  args.push('--',query,searchRoot);
+  return new Promise(resolve=>{
+    const matches:RgMatch[]=[], counts=new Map<string,number>();
+    let buffer='', reason:RipgrepResult['status']|null=null, message:string|undefined, settled=false, perFileLimited=false;
+    const child=spawn(rgPath,args,{stdio:['ignore','pipe','ignore']});
+    opts.onProcess?.('started');
+    let killTimer:ReturnType<typeof setTimeout>|undefined;
+    const stop=(status:RipgrepResult['status'],text?:string):void=>{
+      if(reason||settled) return;
+      reason=status;message=text;
+      child.kill(); killTimer=setTimeout(()=>child.kill('SIGKILL'),250);
     };
-
-    const timer = setTimeout(
-      () => finish(matches),
-      opts.timeoutMs ?? 3000,
-    );
-
+    const abort=():void=>stop('cancelled');
+    opts.signal?.addEventListener('abort',abort,{once:true});
+    const timer=setTimeout(()=>stop('partial','Search timed out; these results are incomplete.'),opts.timeoutMs??3000);
     child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      // rg emits one JSON object per line. Buffer partial reads so a
-      // chunk boundary mid-line doesn't drop a match.
-      stdoutBuf += chunk;
-      let nl: number;
-      while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
-        const line = stdoutBuf.slice(0, nl);
-        stdoutBuf = stdoutBuf.slice(nl + 1);
-        if (!line) continue;
+    child.stdout.on('data',(chunk:string)=>{
+      if(reason) return;
+      buffer+=chunk;
+      if(buffer.length>2_000_000) {stop('partial','A very long line exceeded the search buffer; results are incomplete.');return;}
+      let nl:number;
+      while(!reason&&(nl=buffer.indexOf('\n'))>=0) {
+        const line=buffer.slice(0,nl);buffer=buffer.slice(nl+1);
         try {
-          const evt = JSON.parse(line) as RgEvent;
-          if (evt.type === 'match') {
-            const text = evt.data.lines.text ?? '';
-            matches.push({
-              file: evt.data.path.text,
-              lineNumber: evt.data.line_number,
-              lineText: text.replace(/\r?\n$/, ''),
-            });
-          }
-        } catch { /* skip malformed events — defensive only */ }
+          const event=JSON.parse(line) as {type:string;data:{path:{text:string};lines:{text:string};line_number:number}};
+          if(event.type!=='match') continue;
+          const file=event.data.path.text;
+          if(opts.acceptFile&&!opts.acceptFile(file)) continue;
+          const count=(counts.get(file)??0)+1;counts.set(file,count);
+          if(opts.maxCountPerFile&&count>=opts.maxCountPerFile) perFileLimited=true;
+          matches.push({file,lineNumber:event.data.line_number,lineText:event.data.lines.text.replace(/\r?\n$/,'')});
+          if(matches.length>=(opts.maxTotalMatches??10000)) stop('limit','Search result limit reached; refine the query or filters.');
+        } catch {stop('partial','Could not read a search event; results are incomplete.');}
       }
     });
-
-    child.on('error', () => {
-      clearTimeout(timer);
-      finish(matches);
+    child.on('error',(error)=>{reason='failed';message=error.message;});
+    child.on('close',(code)=>{
+      if(settled)return;settled=true;clearTimeout(timer);if(killTimer)clearTimeout(killTimer);
+      opts.onProcess?.('closed');
+      opts.signal?.removeEventListener('abort',abort);
+      const status=reason??(code===0||code===1?perFileLimited?'limit':'complete':'failed');
+      resolve({matches:status==='cancelled'?[]:matches,status,...(message?{message}:status==='failed'?{message:'Search could not complete.'}:status==='limit'?{message:'Per-file or total result limit reached; refine the query.'}:{})});
     });
-    child.on('close', () => {
-      clearTimeout(timer);
-      finish(matches);
-    });
+    if(opts.signal?.aborted) abort();
   });
-}
-
-interface RgEvent {
-  type: 'begin' | 'match' | 'end' | 'summary' | 'context';
-  data: {
-    path: { text: string };
-    lines: { text: string };
-    line_number: number;
-  };
 }

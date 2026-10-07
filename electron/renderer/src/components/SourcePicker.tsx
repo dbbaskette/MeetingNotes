@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ModalShell } from './ModalShell';
 import { api } from '../ipc/client';
 import { GroupPicker } from './GroupPicker';
 import { audioSourceLabel, groupAudioSources, type SourceItem } from '../lib/audio-source-groups';
 
-export interface PickedSource { targetPid: number | 'system'; targetLabel: string; groupId?: string | null; }
+export interface PickedSource { title?: string; targetPid: number | 'system'; targetLabel: string; groupId?: string | null; }
 
 
 export function SourcePicker({
   onPick, onCancel, initialGroupId, showGroupPicker = true,
 }: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null; showGroupPicker?: boolean }): JSX.Element {
+  const [title, setTitle] = useState('');
   const [groupId, setGroupId] = useState<string | null>(initialGroupId ?? null);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +63,7 @@ export function SourcePicker({
       setConfirmIdle(s);
       return;
     }
-    onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId });
+    onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId, title });
   }
 
   return (
@@ -73,6 +75,9 @@ export function SourcePicker({
       </div>
       {loading && sources.length === 0 && <div role="status" className="px-2 py-3 text-sm text-ink-muted">Looking for audio sources…</div>}
       {error && <div role="alert" className="px-2 py-3 text-xs text-danger">Could not refresh sources. {error} <button type="button" onClick={() => void refresh()} className="underline">Retry</button></div>}
+      <label className="block px-2 py-1 text-xs text-ink-muted">Meeting title (optional)
+        <input maxLength={200} value={title} onChange={event => setTitle(event.target.value)} placeholder="Use the default title" className="input mt-1" />
+      </label>
       <div className="max-h-[45vh] overflow-y-auto">
       {!loading && audible.length === 0 && (
         <div className="px-2 py-2 text-[11px] text-ink-muted italic">
@@ -109,7 +114,7 @@ export function SourcePicker({
       </div>
       <div className="border-t border-surface-border my-1" />
       <button
-        onClick={() => onPick({ targetPid: 'system', targetLabel: 'All system audio', groupId })}
+        onClick={() => onPick({ targetPid: 'system', targetLabel: 'All system audio', groupId, title })}
         className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm"
       >
         All system audio (catch-all)
@@ -130,7 +135,7 @@ export function SourcePicker({
           onProceed={() => {
             const s = confirmIdle;
             setConfirmIdle(null);
-            onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId });
+            onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId, title });
           }}
         />
       )}
@@ -164,14 +169,8 @@ function IdleConfirmDialog({
 }): JSX.Element {
   const displayName = audioSourceLabel(source);
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="bg-surface rounded-xl shadow-pop border border-surface-border p-5 w-full max-w-md"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <ModalShell title="Record an idle source?" onClose={onClose}>
+      <div>
         <div className="text-sm font-semibold mb-2">
           {displayName} isn&apos;t currently playing audio
         </div>
@@ -190,13 +189,13 @@ function IdleConfirmDialog({
             Start anyway
           </button>
           <button
-            onClick={onClose}
+            data-dialog-initial-focus onClick={onClose}
             className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-gradient-to-br from-brand-indigo to-brand-violet"
           >
             Cancel
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

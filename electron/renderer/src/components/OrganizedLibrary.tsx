@@ -23,6 +23,7 @@ interface Props {
   renderRow: (meeting: MeetingSummary, withMatches: boolean) => ReactNode;
   onLoadedChange: (rows: MeetingSummary[]) => void;
   onFocusGroup: (groupId: string | null) => void;
+  onFilterGroup: (groupId: string | null, filter: MeetingFilter) => void;
   onRenameGroup: (groupId: string) => void;
   onDeleteGroup: (groupId: string) => void;
 }
@@ -32,7 +33,7 @@ interface Props {
 export function OrganizedLibrary({
   sections, filter, sort, searching, searchPending, searchQuery, searchResults,
   refreshRevision, revealGroupId, renderRow, onLoadedChange, onFocusGroup,
-  onRenameGroup, onDeleteGroup,
+  onRenameGroup, onDeleteGroup, onFilterGroup,
 }: Props): JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try { return readExpandedSections(window.localStorage.getItem(EXPANDED_STORAGE_KEY)); }
@@ -96,7 +97,7 @@ export function OrganizedLibrary({
       searching={searching} searchRows={searchBuckets.get(section.key) ?? EMPTY_ROWS}
       expanded={searching ? !searchCollapsed.has(section.key) : expanded.has(section.key)}
       refreshRevision={refreshRevision} renderRow={renderRow} onToggle={() => toggle(section.key)}
-      onRows={reportRows} onFocus={() => onFocusGroup(section.groupId)}
+      onRows={reportRows} onFilter={filter => onFilterGroup(section.groupId, filter)} onFocus={() => onFocusGroup(section.groupId)}
       onRename={section.groupId ? () => onRenameGroup(section.groupId!) : undefined}
       onDelete={section.groupId ? () => onDeleteGroup(section.groupId!) : undefined}
     />)}
@@ -105,7 +106,7 @@ export function OrganizedLibrary({
 }
 
 function GroupSection({ section, filter, sort, searching, searchRows, expanded, refreshRevision, scrollRef,
-  renderRow, onToggle, onRows, onFocus, onRename, onDelete }: {
+  renderRow, onToggle, onRows, onFocus, onFilter, onRename, onDelete }: {
   section: OrganizedSection;
   scrollRef: RefObject<HTMLDivElement>;
   filter: MeetingFilter;
@@ -118,6 +119,7 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
   onToggle: () => void;
   onRows: (key: string, rows: MeetingSummary[]) => void;
   onFocus: () => void;
+  onFilter: (filter: MeetingFilter) => void;
   onRename?: () => void;
   onDelete?: () => void;
 }): JSX.Element {
@@ -183,6 +185,11 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
         <span id={`group-label-${section.key}`} className="truncate text-sm font-semibold" title={section.name}>{section.name}</span>
         <span className="shrink-0 text-xs font-normal text-ink-muted tabular-nums">{countText}</span>
       </button>
+      {!searching && ([["pending", "Unprocessed"], ["processing", "In progress / review"], ["failed", "Failed"]] as const).map(([status, label]) => (section.statusCounts?.[status] ?? 0) > 0 && <button key={status} type="button"
+        aria-label={`${section.name}: ${section.statusCounts![status]} ${label.toLowerCase()} meetings, all meetings in this group`}
+        onClick={() => onFilter(status)} className="shrink-0 rounded-full border border-surface-border px-2 py-1 text-[11px] text-ink-muted hover:text-brand-indigo">
+        {section.statusCounts![status]} {label}
+      </button>)}
       <button type="button" onClick={onFocus} aria-label={`View only ${section.name}`}
         className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">View</button>
       {onRename && onDelete && <>

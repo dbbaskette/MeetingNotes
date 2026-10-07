@@ -363,6 +363,25 @@ export const MIGRATIONS: Migration[] = [
     );
     CREATE INDEX processing_history_meeting ON processing_history(meeting_id, id DESC);
   ` },
+  { version: 22, up: `
+    ALTER TABLE recording_sessions ADD COLUMN title TEXT;
+    ALTER TABLE meetings ADD COLUMN title_explicit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE meetings ADD COLUMN group_revision INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE meetings ADD COLUMN action_revision INTEGER NOT NULL DEFAULT 0;
+    CREATE TRIGGER meetings_group_revision AFTER UPDATE OF group_id ON meetings
+      WHEN OLD.group_id IS NOT NEW.group_id BEGIN
+      UPDATE meetings SET group_revision = group_revision + 1 WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER actions_insert_revision AFTER INSERT ON action_items BEGIN
+      UPDATE meetings SET action_revision = action_revision + 1 WHERE id = NEW.meeting_id;
+    END;
+    CREATE TRIGGER actions_update_revision AFTER UPDATE ON action_items BEGIN
+      UPDATE meetings SET action_revision = action_revision + 1 WHERE id = NEW.meeting_id;
+    END;
+    CREATE TRIGGER actions_delete_revision AFTER DELETE ON action_items BEGIN
+      UPDATE meetings SET action_revision = action_revision + 1 WHERE id = OLD.meeting_id;
+    END;
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

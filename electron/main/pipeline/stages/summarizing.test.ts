@@ -5,6 +5,15 @@ import path from 'node:path';
 import { runSummarizing, extractTitleFromSummary, stripSummaryPreamble } from './summarizing.js';
 
 describe('runSummarizing', () => {
+  it('does not overwrite a user rename made during generation, even when it resembles a default filename',async()=>{
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mn-title-race-')),folder=path.join(dir,'meetings','slug');
+    try{
+      fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'transcript.md'),'[Dan 00:00] Synthetic discussion.');
+      const meeting={slug:'slug',title:'recording-20260421-163203-47c0c0f5',titleExplicit:false},updateTitle=vi.fn();
+      const ctx:Parameters<typeof runSummarizing>[1]={libraryRoot:dir,llmSupervisor:{ensureReady:async()=>{}},lmStudio:{chat:async()=>{meeting.titleExplicit=true;return '## Overview\nGenerated title.';}},meetings:{findById:()=>meeting,updateTitle},settings:{get:()=>''},logger:{info:()=>{}}} as unknown as Parameters<typeof runSummarizing>[1];
+      await runSummarizing({meetingId:'m'},ctx);expect(updateTitle).not.toHaveBeenCalled();
+    }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  });
   it('reads transcript.md, calls LLM, writes summary.md', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-'));
     const f = path.join(dir, 'meetings', 'slug');

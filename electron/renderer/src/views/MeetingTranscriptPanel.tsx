@@ -1,4 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { TranscriptWindow } from '../components/TranscriptWindow';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { colorForSpeakerIndex } from '../theme/tokens';
@@ -16,10 +17,11 @@ function readStoredViewMode(): TranscriptViewMode {
 }
 
 export function TranscriptPanel({
-  meeting, showRaw, currentTime, onSeek,
+  meeting, showRaw, currentTime, onSeek, seekRevision,
 }: {
   meeting: MeetingDetail;
   showRaw: boolean;
+  seekRevision?: number;
   currentTime: number;
   onSeek: (seconds: number) => void;
 }): JSX.Element {
@@ -53,18 +55,22 @@ export function TranscriptPanel({
 
   // Active group = the group whose lineIndices range contains activeIdx.
   // Stored as a number for the same scrollIntoView trigger; -1 means none.
-  const activeGroupIdx = useMemo(() => {
-    if (activeIdx < 0) return -1;
-    return groups.findIndex(
-      (g) => activeIdx >= g.lineIndices[0]! && activeIdx <= g.lineIndices[g.lineIndices.length - 1]!,
-    );
-  }, [groups, activeIdx]);
+  const groupByLine = useMemo(()=>{const indexes:number[]=[];groups.forEach((group,index)=>group.lineIndices.forEach(line=>{indexes[line]=index;}));return indexes;},[groups]);
+  const activeGroupIdx = activeIdx < 0 ? -1 : groupByLine[activeIdx] ?? -1;
+  const [find,setFind]=useState(''),[matchIndex,setMatchIndex]=useState(0),[jump,setJump]=useState<{index:number;nonce:number}|null>(null);
+  const matches=useMemo(()=>find.trim()?parsed.lines.flatMap((line,index)=>`${line.speaker} ${line.text}`.toLowerCase().includes(find.toLowerCase())?[index]:[]):[],[parsed.lines,find]);
+  const estimate=useCallback((index:number)=>viewMode==='lines'?30+22*Math.ceil((parsed.lines[index]!.text.length+30)/70):52+22*Math.ceil(groups[index]!.text.length/70),[viewMode,parsed.lines,groups]);
+  function goMatch(index:number):void {if(!matches.length)return;const next=(index+matches.length)%matches.length;setMatchIndex(next);const line=matches[next]!;setJump({index:viewMode==='lines'?line:groupByLine[line]!,nonce:Date.now()});}
+  useEffect(()=>{setMatchIndex(0);setJump(null);},[body,find,viewMode]);
 
   // Auto-scroll the active line into view — but only when the user hasn't
   // scrolled manually in the last few seconds (don't fight them). A
   // "lastUserScrollAt" timestamp bumps on any wheel/touch event inside the
   // scroll container.
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const findRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
+  useEffect(()=>{const key=(event:KeyboardEvent):void=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='f'&&panelRef.current?.getClientRects().length&&!document.querySelector('[aria-modal="true"]')){event.preventDefault();findRef.current?.focus();findRef.current?.select();}};document.addEventListener('keydown',key);return()=>document.removeEventListener('keydown',key);},[]);
   const activeRef = useRef<HTMLButtonElement | null>(null);
   const lastManualScrollAt = useRef(0);
   useEffect(() => {
@@ -78,10 +84,7 @@ export function TranscriptPanel({
       el.removeEventListener('touchmove', onScroll);
     };
   }, []);
-  useEffect(() => {
-    if (Date.now() - lastManualScrollAt.current < 3000) return;
-    activeRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [activeIdx, activeGroupIdx, viewMode]);
+
 
   if (body === '') {
     return (
@@ -136,35 +139,25 @@ export function TranscriptPanel({
         />
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <input ref={findRef} aria-label="Find in full transcript" value={find} onChange={event=>setFind(event.target.value)} placeholder="Find in transcript…" className="rounded border border-surface-border px-2 py-1"
+          onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();goMatch(matchIndex+(event.shiftKey?-1:1));}}}/>
+        {find&&<><span>{matches.length?Math.min(matchIndex+1,matches.length):0} / {matches.length} matches</span><button disabled={!matches.length} onClick={()=>goMatch(matchIndex-1)}>Previous</button><button disabled={!matches.length} onClick={()=>goMatch(matchIndex+1)}>Next</button></>}
+        <button onClick={()=>{void navigator.clipboard.writeText(body).catch(error=>toast.show({message:`Could not copy transcript: ${(error as Error).message}`,variant:'error'}));}}>Copy full transcript</button>
+        <span className="text-ink-muted">Up / Down moves between transcript rows.</span>
+      </div>
       {/* Scrolling is delegated to the parent rail now that the detail
           view caps its own height — a nested scroll container here would
           give the user two scrollbars to fight. The wheel/touchmove
           listeners below still fire on this element regardless of who
           actually scrolls, so "don't fight manual scroll" keeps working. */}
       <div ref={panelRef} className="text-sm leading-relaxed font-sans pr-1">
-        {viewMode === 'lines' ? (
-          parsed.lines.map((line, i) => (
-            <TranscriptLineRow
-              key={i}
-              line={line}
-              active={i === activeIdx}
-              speakerColor={speakerColor(line.speaker)}
-              onSeek={onSeek}
-              activeRef={activeRef}
-            />
-          ))
-        ) : (
-          groups.map((g, i) => (
-            <TranscriptGroupRow
-              key={i}
-              group={g}
-              active={i === activeGroupIdx}
-              speakerColor={speakerColor(g.speaker)}
-              onSeek={onSeek}
-              activeRef={activeRef}
-            />
-          ))
-        )}
+        <TranscriptWindow key={viewMode} contentRevision={body} count={viewMode==='lines'?parsed.lines.length:groups.length} estimate={estimate}
+          active={viewMode==='lines'?activeIdx:activeGroupIdx} seekRevision={seekRevision} jump={jump}
+          follow={()=>Date.now()-lastManualScrollAt.current>=3000}
+          renderRow={i=>viewMode==='lines'?<TranscriptLineRow line={parsed.lines[i]!} active={i===activeIdx} speakerColor={speakerColor(parsed.lines[i]!.speaker)} onSeek={onSeek} activeRef={activeRef}/>:
+            <TranscriptGroupRow group={groups[i]!} active={i===activeGroupIdx} speakerColor={speakerColor(groups[i]!.speaker)} onSeek={onSeek} activeRef={activeRef}/>}
+        />
       </div>
     </div>
   );

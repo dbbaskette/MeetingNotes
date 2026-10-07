@@ -46,9 +46,9 @@ if ((${#lint_files[@]})); then run_check changed-lint npx eslint "${lint_files[@
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 run_check native-electron npm run rebuild:electron
 else
-  export MN_FIXTURE_MODES=selection,grouped,startup,settings,sources,capture
+  export MN_FIXTURE_MODES=selection,grouped,startup,settings,sources,capture,epic243
 fi
-run_check renderer-fixtures env MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
+run_check renderer-fixtures env MN_BENCH_REPO="$source_root" MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
 # An optional task-owned package payload allows the same clean-Mac runner to
 # verify the actual packaged main/preload/renderer and bundled inference. It
 # is never fetched from a release or installed into /Applications.

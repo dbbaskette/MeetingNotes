@@ -38,6 +38,10 @@ import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLi
 import { createAttentionController } from '../lib/meeting-hydration';
 import { retainInboxOnFailure } from '../lib/needs-attention';
 import { recycleMeetings } from '../lib/meetings-recycle';
+import { SearchFilters } from '../components/SearchFilters';
+import type { SearchFacets } from '../../../shared/search';
+import { arrivalBaseline, acknowledgeArrivals } from '../lib/new-arrivals';
+import {readBrowsePreferences,saveBrowsePreferences} from '../lib/library-browse-preferences';
 import { organizedSections } from '../lib/organized-sections';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import type { PipelineStatusSnapshot } from '../lib/status-bar';
@@ -47,6 +51,7 @@ import logoUrl from '../assets/logo.png';
 import type { LiveRecording } from '../App';
 
 interface Props {
+  active?: boolean;
   /** When opening a meeting, pass through hint data so the detail
    *  view's skeleton can paint with the right title + stage instantly,
    *  before the full meetings:get IPC resolves. The optional
@@ -79,22 +84,40 @@ const SORT_STORAGE_KEY = 'librarySortKey';
 const VIEW_STORAGE_KEY = 'libraryViewMode';
 
 export function LibraryView({
-  onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
+  active = true, onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
   const {
     items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
     refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
   } = useMeetingsStore();
+  const [facets,setFacets]=useState<SearchFacets>({});
+  const searchClientId=useRef(`library-${crypto.randomUUID()}`),searchRequestId=useRef(0);
+  const [searchCompletion,setSearchCompletion]=useState<string|null>(null);
+  const [newBaseline, setNewBaseline] = useState(arrivalBaseline);
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"],[role="menu"]')) return;
+      if ((event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"]')) return;
+      const state = librarySelection.getState();
+      if (state.busy) return;
+      state.clear();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active]);
   const [searchRevision, setSearchRevision] = useState(0);
   const { selected, resolving: resolvingSelection, busy: bulkBusy, mode: selectionMode } = useStore(librarySelection);
-  const [libFilter, setLibFilter] = useState<LibFilter>('all');
-  const [groupId, setGroupId] = useState<string | null | undefined>(undefined);
+  const [browsePreferences]=useState(readBrowsePreferences);
+  const [libFilter, setLibFilter] = useState<LibFilter>(browsePreferences.filter);
+  const [groupId, setGroupId] = useState<string | null | undefined>(browsePreferences.groupId);
+  useEffect(()=>saveBrowsePreferences(libFilter,groupId),[libFilter,groupId]);
   const [viewMode, setViewMode] = useState<'organized' | 'flat'>(() => {
     try { return window.localStorage.getItem(VIEW_STORAGE_KEY) === 'flat' ? 'flat' : 'organized'; }
     catch { return 'organized'; }
   });
-  const { groups, ungroupedCount, loaded: groupsLoaded, error: groupsError,
+  const { groups, ungroupedCount, ungroupedStatus, loaded: groupsLoaded, error: groupsError,
     refresh: refreshGroups, create: createGroup, rename: renameGroup, delete: deleteGroup } = useGroupsStore();
   const [groupDialog, setGroupDialog] = useState<'create' | 'rename' | 'delete' | null>(null);
   const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
@@ -102,12 +125,12 @@ export function LibraryView({
   const [organizedSnapshot, setOrganizedSnapshot] = useState<{ key: string; rows: MeetingSummary[] } | null>(null);
   const [groupOptionsOpen, setGroupOptionsOpen] = useState(false);
   const groupOptionsRef = useRef<HTMLDivElement>(null);
-  const [moveSelection, setMoveSelection] = useState<{ ids: string[]; hiddenCount: number } | null>(null);
+  const [moveSelection, setMoveSelection] = useState<{ ids: string[]; hiddenCount: number; meeting?: {title:string;groupId:string|null;groupName?:string|null} } | null>(null);
   const [groupBusy, setGroupBusy] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const activeGroup = groupId ? groups.find((group) => group.id === groupId) : undefined;
   const targetGroup = targetGroupId ? groups.find((group) => group.id === targetGroupId) : undefined;
-  const sections = useMemo(() => organizedSections(groups, ungroupedCount), [groups, ungroupedCount]);
+  const sections = useMemo(() => organizedSections(groups, ungroupedCount, ungroupedStatus), [groups, ungroupedCount, ungroupedStatus]);
   const organizedFull = viewMode === 'organized' && groupId === undefined;
   const scopeName = groupId === undefined ? 'the entire Library' : groupId === null ? 'Ungrouped' : activeGroup?.name ?? 'this group';
   const changeGroup = useCallback((next: string | null | undefined): void => {
@@ -272,8 +295,8 @@ export function LibraryView({
   }, [libFilter, sortKey, groupId, setPageQuery]);
   // A remount can reuse the same query after changes in the detail view.
   // The initial request is shared when setPageQuery just started it above.
-  useEffect(() => { void refreshPages(); }, [refreshPages]);
-  useMeetingsPoll(hasMotion);
+  useEffect(() => { if(active)void refreshPages(); }, [active, refreshPages]);
+  useMeetingsPoll(active && hasMotion);
   useEffect(() => {
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') void refresh();
@@ -286,7 +309,7 @@ export function LibraryView({
   // Cmd+K palette uses, which ripgreps summary.md + transcript.md across
   // the library. Debounced so a fast typist doesn't fire one IPC per
   // keystroke.
-  const isSearching = query.trim().length >= 2;
+  const isSearching = query.trim().length >= 2 || Object.keys(facets).length > 0;
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [searchMeetings, setSearchMeetings] = useState<MeetingSummary[]>([]);
   const [searchPending, setSearchPending] = useState(false);
@@ -301,11 +324,17 @@ export function LibraryView({
     previousSearchQuery.current = searchKey;
     setSearchError(null);
     if (!isSearching) { setSearchPending(false); return; }
-    let cancelled = false;
+    let cancelled = false, dispatched=false;
+    const requestId=++searchRequestId.current;
+    setSearchCompletion(null);
     setSearchPending(true);
     const t = window.setTimeout(async () => {
       try {
-        const result = await hydrateLibrarySearch(query, { query: api.search.query, getMany: api.meetings.getMany }, groupId);
+        dispatched=true;
+        const response=await api.search.run(query,100,groupId,{clientId:searchClientId.current,requestId,facets:{...facets,...libFilter!=='all'?{status:libFilter}:{}}});
+        if(response.status==='failed')throw new Error(response.message??'Search failed');
+        const result = await hydrateLibrarySearch(query, { query: async()=>response.hits, getMany: api.meetings.getMany }, groupId);
+        if(!cancelled)setSearchCompletion(response.status==='complete'?null:response.message??response.status);
         if (!cancelled) {
           setHits(result.hits);
           setSearchMeetings(result.meetings);
@@ -316,18 +345,18 @@ export function LibraryView({
         if (!cancelled) setSearchPending(false);
       }
     }, 150);
-    return () => { cancelled = true; window.clearTimeout(t); };
-  }, [query, isSearching, searchRevision, groupId]);
+    return () => { cancelled = true; window.clearTimeout(t); if(dispatched)void api.search.cancel(searchClientId.current,requestId); };
+  }, [query, isSearching, searchRevision, groupId, facets,libFilter]);
 
   // Browse polling cannot update these detached, globally hydrated rows.
   // Hold a summary-only poll on the same active cadence, including off-page
   // hits; suspend it while a replacement search result is being hydrated.
   useEffect(() => {
-    if (!isSearching || !hasMotion || searchPending || hits.length === 0) return;
+    if (!active || !isSearching || !hasMotion || searchPending || hits.length === 0) return;
     return startLibrarySearchHydration(hits, api.meetings.getMany, (rows) => {
       setSearchMeetings((previous) => recycleMeetings(previous, rows));
     });
-  }, [hits, isSearching, hasMotion, searchPending, query, searchRevision]);
+  }, [active, hits, isSearching, hasMotion, searchPending, query, searchRevision]);
 
   // Sort order for the Content section. Reset to 'recent' whenever the
   // query changes so a stale "Most matches" choice doesn't carry over
@@ -355,7 +384,7 @@ export function LibraryView({
     searchResults: organizedSearchResults, total,
   });
   const scopeToken = groupId === undefined ? 'all' : groupId === null ? 'ungrouped' : groupId;
-  const selectionUniverse = isSearching ? `search:${scopeToken}:${query.trim()}:${libFilter}` : `browse:${scopeToken}:${libFilter}`;
+  const selectionUniverse = isSearching ? `search:${scopeToken}:${query.trim()}:${libFilter}:${JSON.stringify(facets)}` : `browse:${scopeToken}:${libFilter}`;
   const scopeReady = isSearching
     ? !searchPending && previousSearchQuery.current === `${scopeToken}:${query.trim()}`
     : !loadingInitial && (!organizedFull || groupsLoaded) && pageQuery.filter === libFilter && pageQuery.groupId === groupId;
@@ -492,6 +521,7 @@ export function LibraryView({
         <AppNav active="library" onNav={onNav} />
         <div className="flex-1" />
         <RecordButton
+          active={active}
           groupId={groupId}
           onStarted={({ sessionId, label, startInput }) => onStartRecording({
             sessionId, label, startInput, startedAt: new Date().toISOString(),
@@ -510,13 +540,14 @@ export function LibraryView({
         </div>
       )}
 
-      {liveRecording && (
+      {active && liveRecording && (
         <div className="shrink-0 mb-6">
           <LiveRecordingRow
             sessionId={liveRecording.sessionId}
             label={liveRecording.label}
             startedAt={liveRecording.startedAt}
             groupId={liveRecording.startInput?.groupId}
+            title={liveRecording.startInput?.title}
             micEnabled={liveRecording.startInput?.mic}
             onStopped={(summary) => {
               onRecordingStopped(summary);
@@ -562,6 +593,7 @@ export function LibraryView({
           <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
             Library
           </h2>
+          <button type="button" onClick={() => setNewBaseline(acknowledgeArrivals())} className="text-xs text-ink-muted hover:text-brand-indigo">Mark new as seen</button>
           {groupId !== undefined ? <>
             <button type="button" onClick={() => changeGroup(undefined)}
               className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">‹ All groups</button>
@@ -595,6 +627,8 @@ export function LibraryView({
           <button type="button" onClick={() => void refreshGroups()} className="font-semibold underline">Retry</button>
         </div>}
 
+        <SearchFilters facets={facets} onChange={setFacets} query={query} onQuery={setQuery}/>
+        {searchCompletion&&<p role="status" className="shrink-0 text-xs text-status-warnText mb-2">{searchCompletion}</p>}
         {/* Filter chips — always rendered so the surface is discoverable
             even on a fresh install; chips with a zero count are disabled
             (greyed + non-clickable) rather than hidden, which keeps the
@@ -658,6 +692,7 @@ export function LibraryView({
             <input
               placeholder={groupId === undefined ? 'Search titles, summaries, transcripts…' : `Search in ${scopeName}…`}
               value={query}
+              maxLength={500}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
                          focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
@@ -754,6 +789,8 @@ export function LibraryView({
               <div key={m.id}>
                 <LibraryRow
                   meeting={m}
+                  isNew={m.groupId === null && !!m.createdAt && m.createdAt > newBaseline}
+                  onMove={m.groupId === null ? () => setMoveSelection({ids:[m.id],hiddenCount:0,meeting:{title:m.title,groupId:null}}) : undefined}
                   onOpen={onOpen}
                   onChanged={rowChanged}
                   checked={selected.has(m.id)}
@@ -779,6 +816,7 @@ export function LibraryView({
             searching={isSearching} searchPending={searchPending} searchQuery={query}
             searchResults={organizedSearchResults} refreshRevision={searchRevision}
             revealGroupId={revealGroupId} renderRow={renderRow} onLoadedChange={onOrganizedLoadedChange}
+            onFilterGroup={(id, filter) => { changeGroup(id); setLibFilter(filter); }}
             onFocusGroup={changeGroup}
             onRenameGroup={(id) => { setTargetGroupId(id); setGroupDialog('rename'); setGroupError(null); }}
             onDeleteGroup={(id) => { setTargetGroupId(id); setGroupDialog('delete'); setGroupError(null); }}
@@ -871,7 +909,7 @@ export function LibraryView({
         onCancel={() => librarySelection.getState().clear()}
       />
 
-      {moveSelection && <MoveToGroupDialog ids={moveSelection.ids} hiddenCount={moveSelection.hiddenCount}
+      {moveSelection && <MoveToGroupDialog ids={moveSelection.ids} hiddenCount={moveSelection.hiddenCount} meeting={moveSelection.meeting}
         onClose={() => setMoveSelection(null)} onChanged={() => void invalidate()} />}
 
       {groupDialog === 'create' && <GroupNameDialog
@@ -954,7 +992,7 @@ function GroupNameDialog({ mode, name, error, busy, onClose, onSave }: {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
-  return <ModalShell onClose={onClose}>
+  return <ModalShell title={mode === 'create' ? 'Create group' : 'Rename group'} busy={busy} onClose={onClose}>
     <form onSubmit={(event) => { event.preventDefault(); void onSave(value); }}>
       <label htmlFor="group-name" className="block text-sm font-semibold mb-2">{mode === 'create' ? 'New group' : 'Rename group'}</label>
       <input id="group-name" ref={input} maxLength={80} value={value} onChange={(event) => setValue(event.target.value)}
@@ -1279,6 +1317,7 @@ function SelectionBar({
   onCancel: () => void;
 }): JSX.Element {
   const visible = count > 0;
+  if(!visible)return <></>;
   // Anchored `absolute` to the LibraryView root (which fills the shell's
   // flex-1 slot), NOT `fixed` to the viewport — the app-wide status bar
   // occupies the bottom of the viewport and would paint over the pill's
@@ -1296,7 +1335,7 @@ function SelectionBar({
       <div className="px-4 sm:px-6 lg:px-8 pb-4">
         <div className="pointer-events-auto bg-ink text-surface rounded-xl shadow-pop flex flex-wrap items-center gap-2 sm:gap-3 px-4 py-3">
           <span className="text-sm font-semibold tabular-nums">
-            {count} selected
+            {count} selected · Esc to clear
           </span>
           <div className="flex-1" />
           <button

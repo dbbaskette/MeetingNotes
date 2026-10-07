@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
     await run(`document.querySelector('#viewport').style.height = '700px'`); await settle();
     assert.equal(await count(), 20);
     await scroll(0);
-    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Select"]').focus()`);
+    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"]').focus()`);
     await scroll(36000);
     stats.pinned = await count(); assert.equal(stats.pinned, 21);
     assert.equal(await run(`document.activeElement.closest('[data-meeting-id]').dataset.meetingId`), 'fixture-0');
@@ -46,9 +46,9 @@ app.whenReady().then(async () => {
     assert.equal(await count(), 20);
     assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"]')`), false);
     await scroll(0);
-    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Select"]').click()`); await settle();
+    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"]').click()`); await settle();
     await scroll(36000); await scroll(0);
-    assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Deselect"]')`), true);
+    assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"][aria-checked="true"]')`), true);
     await run(`document.querySelector('#outside').click()`); await settle();
     await run(`document.querySelector('[data-meeting-id="fixture-0"] .group').click()`);
     assert.deepEqual(await run('window.fixture.opened'), ['fixture-0']);

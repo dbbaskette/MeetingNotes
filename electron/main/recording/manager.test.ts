@@ -46,6 +46,16 @@ afterEach(() => {
 });
 
 describe('RecordingManager', () => {
+  it('persists the normalized optional title before spawning and keeps the source label separate',async()=>{
+    const repo=fakeRepo(),{proc}=fakeRecordingProcess();
+    const spawn=vi.fn(()=>{expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({title:'Platform planning',targetLabel:'Zoom'}));return proc;});
+    const manager=new RecordingManager({helperPath:'/synthetic/helper',recordingsDir:'/synthetic',repo,spawn});
+    const result=await manager.start({targetPid:'system',targetLabel:'Zoom',mic:true,title:'  Platform planning  '});
+    await manager.stop(result.sessionId);
+    expect(spawn).toHaveBeenCalledOnce();
+    await expect(manager.start({targetPid:'system',targetLabel:'Zoom',mic:true,title:'a\nb'})).rejects.toThrow();
+    expect(spawn).toHaveBeenCalledOnce();
+  });
   it('rejects a stale start intent after a Stop command', async () => {
     const spawn = vi.fn();
     const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo: fakeRepo(), spawn });

@@ -73,7 +73,7 @@ export class SchemeDispatcher {
     }
   }
 
-  private async handleRecord(source: string, _title: string | null): Promise<DispatchResult> {
+  private async handleRecord(source: string, title: string | null): Promise<DispatchResult> {
     const expectedRevision = this.deps.recordingManager.startRevision;
     const openSessions = this.deps.recordingSessionsRepo.findOpen();
     if (openSessions.length > 0) {
@@ -94,6 +94,7 @@ export class SchemeDispatcher {
         targetPid: resolved.targetPid,
         targetLabel: resolved.label,
         mic: true,
+        title: title ?? undefined,
       }, { expectedRevision });
     } catch (e) {
       const message = `Could not start recording: ${(e as Error).message}`;

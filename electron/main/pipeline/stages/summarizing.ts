@@ -120,10 +120,11 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   // still the auto-generated filename. This is the common case for built-in
   // recordings ("recording-20260421-163203-47c0c0f5"); user-renamed meetings
   // and Audio Hijack imports with a configured name are left untouched.
-  if (DEFAULT_TITLE_PATTERN.test(meeting.title)) {
+  const current = ctx.meetings.findById(meetingId);
+  if (current && !current.titleExplicit && DEFAULT_TITLE_PATTERN.test(current.title)) {
     const derived = extractTitleFromSummary(cleaned);
     if (derived) {
-      ctx.meetings.updateTitle(meetingId, derived);
+      ctx.meetings.updateTitle(meetingId, derived, false);
       ctx.logger.info('summarize:auto-title', { meetingId, title: derived });
     }
   }

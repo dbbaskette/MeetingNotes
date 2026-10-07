@@ -65,7 +65,9 @@ export function buildAppMenu(): Menu {
   const editMenu: MenuItemConstructorOptions = {
     label: 'Edit',
     submenu: [
-      { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+      { label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: () => BrowserWindow.getFocusedWindow()?.webContents.send('mn:menu-action', 'undo') },
+      { label: 'Undo group move', click: () => BrowserWindow.getFocusedWindow()?.webContents.send('mn:menu-action', 'undo-group-move') },
+      { role: 'redo' }, { type: 'separator' },
       { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
     ],
   };

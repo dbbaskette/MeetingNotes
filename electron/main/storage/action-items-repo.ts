@@ -31,7 +31,9 @@ function row(r: Record<string, unknown>): ActionItemRow {
 }
 
 export class ActionItemsRepo {
+  private deleted = new Map<string,{snapshot:Record<string,unknown>;revision:number;expires:number}>();
   constructor(private readonly db: Database.Database) {}
+  findById(id:string):ActionItemRow|null{const found=this.db.prepare('SELECT * FROM action_items WHERE id=?').get(id) as Record<string,unknown>|undefined;return found?row(found):null;}
 
   replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {
     const del = this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?');
@@ -101,8 +103,8 @@ export class ActionItemsRepo {
     const text = patch.text !== undefined ? patch.text : (current.text as string);
     const ownerName = patch.ownerName !== undefined ? patch.ownerName : ((current.owner_name as string | null) ?? null);
     const dueDate = patch.dueDate !== undefined ? patch.dueDate : ((current.due_date as string | null) ?? null);
-    this.db.prepare('UPDATE action_items SET text = ?, owner_name = ?, due_date = ? WHERE id = ?')
-      .run(text, ownerName, dueDate, id);
+    this.db.prepare('UPDATE action_items SET text = ?, owner_name = ?, owner_speaker_id = ?, due_date = ? WHERE id = ?')
+      .run(text, ownerName, patch.ownerName !== undefined && ownerName!==current.owner_name ? null : current.owner_speaker_id, dueDate, id);
     const updated = this.db.prepare('SELECT * FROM action_items WHERE id = ?').get(id) as Record<string, unknown>;
     return row(updated);
   }
@@ -113,6 +115,31 @@ export class ActionItemsRepo {
    *  re-added via create() if the user changes their mind. */
   delete(id: string): void {
     this.db.prepare('DELETE FROM action_items WHERE id = ?').run(id);
+  }
+
+  deleteWithUndo(id:string):string|null {
+    for(const [token,entry] of this.deleted)if(entry.expires<Date.now())this.deleted.delete(token);
+    const snapshot=this.db.prepare('SELECT * FROM action_items WHERE id=?').get(id) as Record<string,unknown>|undefined;
+    if(!snapshot)return null;
+    const token=`undo_${shortId()}`;
+    this.db.transaction(()=>{
+      this.delete(id);
+      const meeting=this.db.prepare('SELECT action_revision FROM meetings WHERE id=?').get(snapshot.meeting_id) as {action_revision:number};
+      this.deleted.set(token,{snapshot,revision:meeting.action_revision,expires:Date.now()+600000});
+    })();
+    return token;
+  }
+  undoDelete(token:string):boolean {
+    const entry=this.deleted.get(token);if(!entry)return false;
+    if(entry.expires<Date.now()){this.deleted.delete(token);return false;}
+    return this.db.transaction(()=>{
+      const meeting=this.db.prepare('SELECT action_revision,status,deleted_at FROM meetings WHERE id=?').get(entry.snapshot.meeting_id) as {action_revision:number;status:string;deleted_at:string|null}|undefined;
+      if(!meeting||meeting.deleted_at||meeting.status==='processing'||meeting.action_revision!==entry.revision)return false;
+      if(this.db.prepare('SELECT 1 FROM action_items WHERE id=?').get(entry.snapshot.id))return false;
+      const fields=Object.keys(entry.snapshot); // trusted DB column names, never IPC input
+      this.db.prepare(`INSERT INTO action_items (${fields.join(',')}) VALUES (${fields.map(()=>'?').join(',')})`).run(...fields.map(key=>entry.snapshot[key]));
+      this.deleted.delete(token);return true;
+    })();
   }
 
   /** Create a single action item. For the "Add item" button in the

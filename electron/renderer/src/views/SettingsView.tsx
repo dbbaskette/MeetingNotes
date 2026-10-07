@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../ipc/client';
+import {LibraryBackupPanel} from '../components/LibraryBackupPanel';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -397,6 +398,7 @@ export function SettingsView({
       <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
       <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
+      <LibraryBackupPanel />
       <PathSetting label="Extra watch folder" value={s.audioWatchPath} onApply={value => update('audioWatchPath', value)}/>
         <div className="text-xs text-ink-muted mt-1">
           Optional. An extra folder watched for dropped audio. Your library&rsquo;s

@@ -11,45 +11,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { AppNav, type NavTarget } from '../components/AppNav';
-import { fmtDueLabel } from '../lib/due-date';
+import { WeeklyTaskRow } from '../components/WeeklyTaskRow';
 import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
 import logoUrl from '../assets/logo.png';
+import { getIsoWeek as currentIsoWeek, addWeeks as shiftWeek } from '../../../shared/local-week';
 import type { WeeklyStructured, WeeklyNarrative as WeeklyNarrativeResult } from '../../../main/ipc/contracts';
 
 interface Props {
+  active?: boolean;
   /** Open the meeting detail view for the given id when a meeting
    *  row in the list is clicked. */
   onOpenMeeting: (id: string) => void;
-  /** Shared nav tabs (Library / Weekly / Settings) — routes through
-   *  App's history-aware navigate(). 'weekly' never arrives. */
   onNav: (target: NavTarget) => void;
-}
-
-// Local copy of getIsoWeek — small enough that a renderer-side
-// dependency is cheaper than another IPC round-trip just to know
-// "what week are we in right now".
-function currentIsoWeek(now = new Date()): { year: number; week: number } {
-  const target = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const dow = (target.getUTCDay() + 6) % 7;
-  target.setUTCDate(target.getUTCDate() - dow + 3);
-  const isoYear = target.getUTCFullYear();
-  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
-  const jan4Dow = (jan4.getUTCDay() + 6) % 7;
-  const week1Thursday = new Date(jan4);
-  week1Thursday.setUTCDate(jan4.getUTCDate() - jan4Dow + 3);
-  const diffMs = target.getTime() - week1Thursday.getTime();
-  return { year: isoYear, week: 1 + Math.round(diffMs / (7 * 24 * 60 * 60 * 1000)) };
-}
-
-function shiftWeek(input: { year: number; week: number }, delta: number): { year: number; week: number } {
-  // Convert week number → Monday of that week → add delta*7 days → convert back.
-  const jan4 = new Date(Date.UTC(input.year, 0, 4));
-  const jan4Dow = (jan4.getUTCDay() + 6) % 7;
-  const week1Monday = new Date(jan4);
-  week1Monday.setUTCDate(jan4.getUTCDate() - jan4Dow);
-  const target = new Date(week1Monday);
-  target.setUTCDate(week1Monday.getUTCDate() + (input.week - 1) * 7 + delta * 7);
-  return currentIsoWeek(target);
 }
 
 function fmtDay(iso: string): string {
@@ -75,12 +48,12 @@ function fmtTotalDuration(seconds: number): string {
 
 function fmtRange(rangeStart: string, rangeEnd: string, year: number): string {
   const fmt = (iso: string): string => new Date(iso).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', timeZone: 'UTC',
+    month: 'short', day: 'numeric',
   });
   return `Week of ${fmt(rangeStart)} – ${fmt(rangeEnd)}, ${year}`;
 }
 
-export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
+export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.Element {
   const [week, setWeek] = useState(() => currentIsoWeek());
   const [structured, setStructured] = useState<WeeklyStructured | null>(null);
   const [narrative, setNarrative] = useState<WeeklyNarrativeResult | null>(null);
@@ -97,6 +70,18 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
    *  ignored when the user has already navigated away. */
   const fetchSeq = useRef(0);
   const toast = useToast();
+  const taskRefresh=useRef(0);
+  function patchTask(id:string,patch:{status?:string;ownerName?:string|null;dueDate?:string|null}):void {
+    fetchSeq.current++;setNarrative(null);setNarrState('idle');
+    setStructured(previous=>{
+      if(!previous)return previous;
+      const groups=previous.openActionGroups.map(group=>({...group,items:group.items.map(item=>item.id===id?{...item,...patch}:item)}));
+      return {...previous,hasFreshCache:false,openActionGroups:groups,openActionCount:groups.reduce((sum,group)=>sum+group.items.filter(item=>item.status!=='done').length,0)};
+    });
+  }
+  async function refreshTasks():Promise<void>{const sequence=++taskRefresh.current,navSequence=fetchSeq.current;const data=await api.weekly.getStructured(week.year,week.week) as WeeklyStructured;
+    if(sequence===taskRefresh.current&&navSequence===fetchSeq.current)setStructured(data);
+  }
 
   const isCurrentWeek = useMemo(() => {
     const now = currentIsoWeek();
@@ -173,8 +158,9 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
   }, []);
 
   useEffect(() => {
-    void load(week);
-  }, [week, load]);
+    if(active)void load(week);
+    return()=>{fetchSeq.current++;};
+  }, [week, load, active]);
 
   // Tick the elapsed-time label while the narrative is loading.
   // Stops as soon as narrState leaves 'loading'.
@@ -317,6 +303,7 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
           narrError={narrState === 'error' ? errorMsg : null}
           onRegenerate={onRegenerate}
           onOpenMeeting={onOpenMeeting}
+          onTaskPatch={patchTask} onTasksSaved={refreshTasks}
         />
       )}
       </div>
@@ -325,6 +312,8 @@ export function WeeklyView({ onOpenMeeting, onNav }: Props): JSX.Element {
 }
 
 interface BodyProps {
+  onTaskPatch:(id:string,patch:{status?:string;ownerName?:string|null;dueDate?:string|null})=>void;
+  onTasksSaved:()=>Promise<void>;
   structured: WeeklyStructured;
   narrative: WeeklyNarrativeResult | null;
   narrState: 'idle' | 'loading' | 'ready' | 'error';
@@ -335,12 +324,15 @@ interface BodyProps {
 }
 
 function WeeklyBody({
-  structured, narrative, narrState, narrElapsedMs, narrError, onRegenerate, onOpenMeeting,
+  structured, narrative, narrState, narrElapsedMs, narrError, onRegenerate, onOpenMeeting, onTaskPatch, onTasksSaved,
 }: BodyProps): JSX.Element {
   // Alias for the original prop name throughout the body so the
   // existing JSX further down keeps working without per-line edits.
   const data = structured;
   const empty = data.meetings.length === 0;
+  const [taskFilter,setTaskFilter]=useState<'all'|'mine'|'overdue'|'week'>('all');
+  const today=new Date();const todayString=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const filteredGroups=data.openActionGroups.map(group=>({...group,items:group.items.filter(item=>taskFilter==='all'||taskFilter==='mine'&&item.isYou||taskFilter==='overdue'&&!!item.dueDate&&item.dueDate<todayString||taskFilter==='week'&&!!item.dueDate&&new Date(`${item.dueDate}T12:00:00`).getTime()>=Date.parse(data.rangeStart)&&new Date(`${item.dueDate}T12:00:00`).getTime()<=Date.parse(data.rangeEnd))})).filter(group=>group.items.length>0);
 
   return (
     <>
@@ -503,7 +495,9 @@ function WeeklyBody({
                   Each item also repeats the owner badge — the header avatar
                   is below the fold once you scroll, the per-row one isn't. */}
               <div className="flex flex-col gap-6">
-                {data.openActionGroups.map((group, gi) => {
+                <div className="flex flex-wrap gap-2 text-xs">{(['all','mine','overdue','week'] as const).map(filter=><button key={filter} aria-pressed={filter===taskFilter} onClick={()=>setTaskFilter(filter)} className={`rounded-full border px-3 py-1 ${taskFilter===filter?'border-brand-indigo text-brand-indigo':'border-surface-border text-ink-muted'}`}>{filter==='week'?'Due this week':filter==='mine'?'Mine':filter==='all'?'All open':filter}</button>)}</div>
+                {filteredGroups.length===0&&<p className="text-sm text-ink-muted">No open actions match this filter.</p>}
+                {filteredGroups.map((group, gi) => {
                   const initials = group.isYou
                     ? 'YOU'
                     : group.ownerLabel.split(/\s+/).map((s) => s[0]).join('').slice(0, 2).toUpperCase();
@@ -534,48 +528,7 @@ function WeeklyBody({
                         </div>
                       </div>
                       <div className="divide-y divide-surface-border/70">
-                        {group.items.map((it) => {
-                          const due = fmtDueLabel(it.dueDate, data.rangeEnd);
-                          return (
-                            <button
-                              key={it.id}
-                              type="button"
-                              onClick={() => onOpenMeeting(it.meetingId)}
-                              className="w-full flex items-center gap-3 px-5 py-3 hover:bg-surface-sunken text-left transition"
-                            >
-                              <div
-                                className="w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center shrink-0"
-                                style={badgeStyle}
-                                aria-hidden
-                              >
-                                {initials.slice(0, 2)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm text-ink truncate">{it.text}</div>
-                                <div className="text-[11px] text-ink-muted truncate">
-                                  From {it.meetingTitle} · {fmtDay(it.meetingStartedAt)}
-                                </div>
-                              </div>
-                              {due.tier === 'overdue' ? (
-                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-danger-bg text-danger-text font-semibold shrink-0">
-                                  {due.label}
-                                </span>
-                              ) : due.tier === 'this-week' ? (
-                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-status-warnBg text-status-warnText font-medium shrink-0">
-                                  {due.label}
-                                </span>
-                              ) : due.tier === 'later' ? (
-                                <span className="text-[11px] px-2 py-0.5 rounded-full bg-skeleton text-ink-muted font-medium shrink-0">
-                                  {due.label}
-                                </span>
-                              ) : (
-                                <span className="text-[11px] px-2 py-0.5 text-ink-muted shrink-0">
-                                  {due.label}
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
+                        {group.items.map(it=><WeeklyTaskRow key={it.id} item={it} rangeEnd={data.rangeEnd} onOpen={onOpenMeeting} onPatch={onTaskPatch} onSaved={onTasksSaved}/>)}
                       </div>
                     </div>
                   );

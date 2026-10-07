@@ -7,6 +7,7 @@ export interface OrganizedSection {
   groupId: string | null;
   name: string;
   count: number;
+  statusCounts?: {pending:number;processing:number;failed:number};
 }
 
 export function sectionKey(groupId: string | null): string {
@@ -14,13 +15,14 @@ export function sectionKey(groupId: string | null): string {
 }
 
 export function organizedSections(
-  groups: readonly { id: string; name: string; count: number }[],
+  groups: readonly { id: string; name: string; count: number; statusCounts?: {pending:number;processing:number;failed:number} }[],
   ungroupedCount: number,
+  ungroupedStatus?: {pending:number;processing:number;failed:number},
 ): OrganizedSection[] {
   return [
-    { key: UNGROUPED_SECTION_KEY, groupId: null, name: 'Ungrouped', count: ungroupedCount },
+    { key: UNGROUPED_SECTION_KEY, groupId: null, name: 'Ungrouped', count: ungroupedCount, ...(ungroupedStatus ? {statusCounts:ungroupedStatus} : {}) },
     ...[...groups].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-      .map((group) => ({ key: group.id, groupId: group.id, name: group.name, count: group.count })),
+      .map((group) => ({ key: group.id, groupId: group.id, name: group.name, count: group.count, ...(group.statusCounts ? {statusCounts:group.statusCounts} : {}) })),
   ];
 }
 

@@ -65,7 +65,7 @@ window.api = {
     },
     undoDelete: async (id: string) => { calls.undo.push(id); return deleted.delete(id); },
   },
-  search: { query: async () => [110, 111].map((index) => ({ meetingId: `selection-${index}`, title: `Synthetic meeting ${index}`, source: 'title', line: 0, text: `Synthetic meeting ${index}` })) },
+  search: { query: async () => [], cancel: async () => {}, run: async () => ({ status: 'complete', hits: [110, 111].map((index) => ({ meetingId: `selection-${index}`, title: `Synthetic meeting ${index}`, source: 'title', line: 0, text: `Synthetic meeting ${index}` })) }) },
   pipeline: { status: async () => ({ paused: false, currentId: null, queueLength: 0, queueIds: [] }), onStatusChange: off },
   recording: { onStateChange: off }, meetingDetector: { onDetected: off },
   recovery: { list: async () => startup ? Array.from({length: 113}, (_, index) => ({

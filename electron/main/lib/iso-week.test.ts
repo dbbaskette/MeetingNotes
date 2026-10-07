@@ -27,14 +27,14 @@ describe('getIsoWeek', () => {
 describe('isoWeekRange', () => {
   it('returns Monday 00:00 to Sunday 23:59:59.999', () => {
     const { start, end } = isoWeekRange(2026, 17);
-    expect(start.toISOString()).toBe('2026-04-20T00:00:00.000Z');
-    expect(end.toISOString()).toBe('2026-04-26T23:59:59.999Z');
+    expect(start.toISOString()).toBe(new Date(2026, 3, 20).toISOString());
+    expect(end.toISOString()).toBe(new Date(2026, 3, 26, 23, 59, 59, 999).toISOString());
   });
 
   it('handles week 1 of an ISO year that starts in late Dec', () => {
     // 2008-W01 starts 2007-12-31 (Mon).
     const { start } = isoWeekRange(2008, 1);
-    expect(start.toISOString()).toBe('2007-12-31T00:00:00.000Z');
+    expect(start.toISOString()).toBe(new Date(2007, 11, 31).toISOString());
   });
 });
 

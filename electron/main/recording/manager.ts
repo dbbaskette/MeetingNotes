@@ -1,5 +1,7 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import crypto from 'node:crypto';
+import { captureTitle } from '../../shared/capture-title.js';
+import { assertBackupIdle } from '../storage/backup-gate.js';
 import path from 'node:path';
 import type { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 
@@ -10,6 +12,7 @@ export interface StartInput {
   targetLabel: string;
   mic: boolean;
   groupId?: string | null;
+  title?: string;
 }
 
 export interface StartResult {
@@ -60,6 +63,8 @@ export class RecordingManager {
   }) {}
 
   async start(input: StartInput, internal: { outputDir?: string; disposable?: boolean; expectedRevision?: number } = {}): Promise<StartResult> {
+    assertBackupIdle();
+    input = { ...input, title: captureTitle(input.title) };
     // All entry points converge here, AFTER any asynchronous enumeration.
     // Claim synchronously before spawning; a starting/stopping capture also
     // owns the slot. Persisted orphan detection must finish before a new start.
@@ -93,6 +98,7 @@ export class RecordingManager {
       targetLabel: input.targetLabel,
       outputPath,
       groupId: input.groupId ?? null,
+      title: input.title,
     });
     const spawnFn = this.deps.spawn ?? nodeSpawn;
     let proc!: ChildProcessWithoutNullStreams;
@@ -276,6 +282,8 @@ export class RecordingManager {
   state(sessionId: string): RecordingState {
     return this.sessions.get(sessionId)?.state ?? 'idle';
   }
+
+  recordedOutput(sessionId: string): string | null { return this.deps.repo.findById(sessionId)?.outputPath ?? null; }
 
   active(): { sessionId: string; state: RecordingState; label: string; startedAt: string; startInput: StartInput; disposable: boolean; outputPath: string }[] {
     return [...this.sessions].map(([sessionId, entry]) => ({ sessionId, state: entry.state, label: entry.input.targetLabel,

@@ -16,6 +16,8 @@ export interface WeeklyMeeting {
   speakerCount: number | null;
 }
 export interface WeeklyActionItem {
+  ownerName?: string | null;
+  sourceQuote?: string | null;
   id: string;
   meetingId: string;
   meetingTitle: string;
@@ -65,6 +67,7 @@ export const MeetingSpeakerSchema = z.object({
 });
 
 export const MeetingSummarySchema = z.object({
+  createdAt: z.string().optional(),
   id: z.string(),
   slug: z.string(),
   title: z.string(),
@@ -251,6 +254,14 @@ export const IPC_CHANNELS = {
   groupsRename: 'groups:rename',
   groupsDelete: 'groups:delete',
   groupsAssign: 'groups:assign',
+  groupsUndo: 'groups:undo',
+  searchCancel: 'search:cancel',
+  actionItemsUndoDelete: 'action-items:undo-delete',
+  appUndoEdit: 'app:undo-edit',
+  backupPreview: 'backup:preview',
+  backupRun: 'backup:run',
+  backupStatus: 'backup:status',
+  recordingMeeting: 'recording:meeting',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
