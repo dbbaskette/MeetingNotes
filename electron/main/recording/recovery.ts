@@ -30,6 +30,30 @@ export interface RecoveryItem {
 type Probe = (file: string) => Promise<AudioInfo>;
 type Trim = (source: string, destination: string, endSeconds: number, startSeconds: number) => Promise<void>;
 
+export interface FinderShell {
+  showItemInFolder: (file: string) => void;
+  openPath: (directory: string) => Promise<string>;
+}
+
+/**
+ * Show a recovered capture in Finder. `showItemInFolder` is a no-op when a
+ * stale recovery row points at a file that has since been moved or removed;
+ * opening its parent directory still gives the user a useful way to inspect
+ * the remaining capture files and is reliable for that case.
+ */
+export async function revealPathInFinder(audioPath: string, shell: FinderShell): Promise<void> {
+  const absolutePath = path.resolve(audioPath);
+  if (fs.existsSync(absolutePath)) {
+    shell.showItemInFolder(absolutePath);
+    return;
+  }
+  const folder = path.dirname(absolutePath);
+  const error = await shell.openPath(folder);
+  // Electron resolves with an error string instead of rejecting on failure.
+  // Propagate it through IPC so the row's existing retry/error UI can show it.
+  if (error) throw new Error(`Could not open the recording folder in Finder: ${error}`);
+}
+
 export class RecordingRecoveryService {
   private readonly busy = new Set<string>();
   private readonly probes = new Map<string, { fingerprint: string; duration: Promise<number | null>; expiresAt: number }>();
@@ -41,7 +65,7 @@ export class RecordingRecoveryService {
     meetings: MeetingsRepo;
     probe?: Probe;
     catalog: (audioPath: string) => Promise<CatalogResult>;
-    reveal: (audioPath: string) => void;
+    reveal: (audioPath: string) => void | Promise<void>;
     trim?: Trim;
   }) {}
 
@@ -162,8 +186,8 @@ export class RecordingRecoveryService {
     return { meetingId: result.meeting.id };
   }
 
-  reveal(id: string): void {
-    this.deps.reveal(this.requireSession(id).outputPath);
+  async reveal(id: string): Promise<void> {
+    await this.deps.reveal(this.requireSession(id).outputPath);
   }
 
   dismiss(id: string): void {

@@ -3,7 +3,9 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { registerIpcHandlers } from './handlers.js';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { registerIpcHandlers, type IpcServices } from './handlers.js';
+import type * as mergingModule from '../pipeline/stages/merging.js';
 import { LMStudioError } from '../lm-studio/client.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { ArtifactCache } from '../library/artifact-cache.js';
@@ -12,6 +14,9 @@ import { MeetingsRepo } from '../storage/meetings-repo.js';
 import { GroupsRepo } from '../storage/groups-repo.js';
 import { SpeakersRepo } from '../storage/speakers-repo.js';
 import { ActionItemsRepo } from '../storage/action-items-repo.js';
+
+type TestHandler = Parameters<IpcMain['handle']>[1];
+const ipcEvent = {} as IpcMainInvokeEvent;
 
 // Mock the merge step so speaker rename/merge tests can assert the re-merge
 // fan-out without needing real transcript files on disk.
@@ -30,7 +35,7 @@ describe('paginated meeting summaries', () => {
   let groups: GroupsRepo;
   let speakers: SpeakersRepo;
   let actionItems: ActionItemsRepo;
-  let handlers: Map<string, (...args: any[]) => any>;
+  let handlers: Map<string, TestHandler>;
   const insert = (id: string, status = 'done') => meetings.insert({
     id, slug: id, title: id, startedAt: '2026-09-01T12:00:00Z', durationS: 60,
     audioPath: `/audio/${id}`, status, pipelineStage: 'done',
@@ -38,7 +43,7 @@ describe('paginated meeting summaries', () => {
   const invoke = (channel: string, input?: unknown, extra?: unknown) => {
     const handler = handlers.get(channel);
     expect(handler, `${channel} must be registered`).toBeTypeOf('function');
-    return extra === undefined ? handler!(null, input) : handler!(null, input, extra);
+    return extra === undefined ? handler!(ipcEvent, input) : handler!(ipcEvent, input, extra);
   };
   beforeEach(() => {
     db = openDb(':memory:');
@@ -47,7 +52,7 @@ describe('paginated meeting summaries', () => {
     speakers = new SpeakersRepo(db);
     actionItems = new ActionItemsRepo(db);
     handlers = new Map();
-    registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+    registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
       baseServices({ meetings, groups, speakers, actionItems }));
   });
   afterEach(() => db.close());
@@ -68,7 +73,7 @@ describe('paginated meeting summaries', () => {
     const capped = invoke('meetings:list-page', { ...query, pageSize: 1000 });
     expect(capped.items).toHaveLength(100);
     const last = invoke('meetings:list-page', { ...query, cursor: capped.nextCursor });
-    expect(last.items.map((m: any) => m.id)).toEqual(['done-100', 'done-101', 'done-102', 'done-103', 'done-104']);
+    expect(last.items.map((m: { id: string }) => m.id)).toEqual(['done-100', 'done-101', 'done-102', 'done-103', 'done-104']);
     expect(last.nextCursor).toBeNull();
     expect(invoke('meetings:list-ids', 'processing')).toEqual(['gate', 'processing']);
   });
@@ -82,10 +87,10 @@ describe('paginated meeting summaries', () => {
     expect(() => invoke('groups:assign', { ids: ['one', 'two'], groupId: 'bad' })).toThrow();
     expect(invoke('groups:assign', { ids: ['one', 'two'], groupId: group.id }).moved).toHaveLength(2);
     const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: group.id });
-    expect(page.items.map((item: any) => item.id).sort()).toEqual(['one', 'two']);
+    expect(page.items.map((item: { id: string }) => item.id).sort()).toEqual(['one', 'two']);
     expect(page.items[0].groupName).toBe('Project Alpha');
     expect(page.counts.all).toBe(2);
-    expect(invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: null }).items.map((item: any) => item.id)).toEqual(['free']);
+    expect(invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: null }).items.map((item: { id: string }) => item.id)).toEqual(['free']);
     expect(invoke('meetings:list-ids', 'all', group.id)).toEqual(['one', 'two']);
     expect(invoke('groups:list').ungroupedCount).toBe(1);
     expect(() => invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: 'bad' })).toThrow();
@@ -108,14 +113,14 @@ describe('paginated meeting summaries', () => {
         fsSync.writeFileSync(path.join(folder, 'summary.md'), 'We need to coordinate the next release.\n');
       }
       handlers = new Map();
-      registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
         baseServices({ meetings, groups, speakers, actionItems, libraryRoot: root }));
       const search = handlers.get('search:query')!;
-      const scoped = await search(null, 'coordinate', 1, group.id);
-      expect(scoped.map((hit: any) => hit.meetingId)).toEqual(['inside']);
+      const scoped = await search(ipcEvent, 'coordinate', 1, group.id);
+      expect(scoped.map((hit: { meetingId: string }) => hit.meetingId)).toEqual(['inside']);
       expect(scoped[0].groupName).toBe('Project Alpha');
-      const global = await search(null, 'coordinate', 20);
-      expect(global.some((hit: any) => hit.meetingId === 'outside-0')).toBe(true);
+      const global = await search(ipcEvent, 'coordinate', 20);
+      expect(global.some((hit: { meetingId: string }) => hit.meetingId === 'outside-0')).toBe(true);
     } finally { fsSync.rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -165,12 +170,12 @@ describe('paginated meeting summaries', () => {
     const scopedSpeakers = vi.spyOn(speakers, 'listForMeetings');
     const scopedCounts = vi.spyOn(actionItems, 'countsForMeetings');
     const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
-    expect(page.items).toEqual([legacy.find((m: any) => m.id === 'a')]);
+    expect(page.items).toEqual([legacy.find((m: { id: string }) => m.id === 'a')]);
     expect(page.items[0]).toMatchObject({ unidentifiedCount: 1, actionItemsCount: 2, stageEtaMs: null, stageEtaRough: false });
     expect(scopedSpeakers).toHaveBeenLastCalledWith(['a']);
     expect(scopedCounts).toHaveBeenLastCalledWith(['a']);
     const hydrated = invoke('meetings:get-many', ['b', 'missing', 'a', 'b', 'deleted']);
-    expect(hydrated.map((m: any) => m.id)).toEqual(['b', 'a']);
+    expect(hydrated.map((m: { id: string }) => m.id)).toEqual(['b', 'a']);
     expect(hydrated[1]).toEqual(page.items[0]);
     expect(scopedSpeakers).toHaveBeenLastCalledWith(['b', 'a']);
     expect(scopedCounts).toHaveBeenLastCalledWith(['b', 'a']);
@@ -182,7 +187,7 @@ describe('paginated meeting summaries', () => {
     expect(scopedCounts).not.toHaveBeenCalled();
     scopedSpeakers.mockClear(); scopedCounts.mockClear();
     const shells = invoke('meetings:get-many', ['a', 'b'], { shell: true });
-    expect(shells.map((m: any) => m.id)).toEqual(['a', 'b']);
+    expect(shells.map((m: { id: string }) => m.id)).toEqual(['a', 'b']);
     expect(shells[0]).toMatchObject({ speakers: [], actionItemsCount: 0, unidentifiedCount: 0, stageEtaMs: null });
     expect(scopedSpeakers).not.toHaveBeenCalled();
     expect(scopedCounts).not.toHaveBeenCalled();
@@ -233,7 +238,7 @@ describe('paginated meeting summaries', () => {
     insert('retry', 'pending');
     insert('next', 'pending');
     const enqueued: string[] = [];
-    registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+    registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
       baseServices({ meetings, speakers, actionItems, pipeline: {
         enqueue: (id: string) => {
           if (id === 'retry') throw new Error('queue unavailable');
@@ -253,7 +258,7 @@ describe('paginated meeting summaries', () => {
         fsSync.writeFileSync(audioPath, id);
         meetings.insert({ id, slug: id, title: id, startedAt: null, durationS: 60, audioPath, status: 'done', pipelineStage: 'done' });
       }
-      registerIpcHandlers({ handle: (channel: string, handler: any) => handlers.set(channel, handler) } as any,
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
         baseServices({ meetings, speakers, actionItems, libraryRoot }));
       // Selected A/B, then A was deleted through the single-row action.
       expect(invoke('meetings:delete', 'A')).toBe(true);
@@ -275,7 +280,7 @@ describe('paginated meeting summaries', () => {
   });
 });
 
-function baseServices(overrides: Record<string, unknown> = {}): any {
+function baseServices(overrides: Record<string, unknown> = {}): IpcServices {
   return {
     meetings: { listAll: () => [] },
     speakers: { list: () => [] },
@@ -301,7 +306,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     logger: { info: () => {}, error: () => {} },
     gateNotified: new Set<string>(),
     ...overrides,
-  };
+  } as unknown as IpcServices;
 }
 
 describe('registerIpcHandlers', () => {
@@ -316,7 +321,7 @@ describe('registerIpcHandlers', () => {
         stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
       });
       const handle = vi.fn();
-      registerIpcHandlers({ handle } as any, baseServices({
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
         libraryRoot, artifactCache,
         meetings: { findById: () => ({ id: 'm1', slug: 'slug' }) },
         speakers: { listForMeeting: () => [] },
@@ -363,10 +368,10 @@ describe('registerIpcHandlers', () => {
       });
       // Exercise the actual writer for this integration test; other tests only
       // need the mocked fan-out because they have no transcript files.
-      const actual = await vi.importActual<typeof import('../pipeline/stages/merging.js')>('../pipeline/stages/merging.js');
+      const actual = await vi.importActual<typeof mergingModule>('../pipeline/stages/merging.js');
       vi.mocked(remergeTranscript).mockImplementationOnce(actual.remergeTranscript);
       const handle = vi.fn();
-      registerIpcHandlers({ handle } as any, baseServices({
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
         libraryRoot, artifactCache,
         meetings: {
           findById: () => ({ id: 'm1', slug: 'slug', pipelineStage: 'awaiting_speaker_id' }),
@@ -402,7 +407,7 @@ describe('registerIpcHandlers', () => {
         stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
       });
       const handle = vi.fn();
-      registerIpcHandlers({ handle } as any, baseServices({
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
         libraryRoot, artifactCache,
         meetings: {
           findById: () => ({ id: 'm1', slug: 'slug' }),
@@ -424,7 +429,7 @@ describe('registerIpcHandlers', () => {
 
   it('registers all known channels', () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     registerIpcHandlers(fakeIpc, baseServices());
     const channels = handle.mock.calls.map((c) => c[0]);
     expect(channels).toContain('meetings:list');
@@ -460,6 +465,39 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('recovery:list');
   });
 
+  it('recovery:reveal waits for the Finder handoff to finish', async () => {
+    const handle = vi.fn();
+    let finish!: () => void;
+    const reveal = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({ recordingRecovery: {
+      list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal, dismiss: () => {},
+    } }));
+    const call = handle.mock.calls.find((c) => c[0] === 'recovery:reveal');
+    const result = (call![1] as (event: unknown, id: unknown) => Promise<void>)(null, 'r1');
+
+    expect(result).toBeInstanceOf(Promise);
+    let completed = false;
+    void result.then(() => { completed = true; });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    finish();
+    await result;
+    expect(reveal).toHaveBeenCalledWith('r1');
+  });
+
+  it('recovery:reveal propagates Finder errors to the caller', async () => {
+    const handle = vi.fn();
+    const reveal = vi.fn(async () => { throw new Error('Finder could not open the folder'); });
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({ recordingRecovery: {
+      list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal, dismiss: () => {},
+    } }));
+    const call = handle.mock.calls.find((c) => c[0] === 'recovery:reveal');
+    const invoke = call![1] as (event: unknown, id: unknown) => Promise<void>;
+    await expect(invoke(null, 'r1')).rejects.toThrow('Finder could not open the folder');
+    expect(() => invoke(null, '')).toThrow('recovery id required');
+    expect(reveal).toHaveBeenCalledTimes(1);
+  });
+
   it('loads only the summary into the async meeting shell', async () => {
     const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-artifact-shell-'));
     const folder = path.join(libraryRoot, 'meetings', 'design-sync');
@@ -480,7 +518,7 @@ describe('registerIpcHandlers', () => {
       return source === null ? null : JSON.parse(source);
     });
     const handle = vi.fn();
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       libraryRoot,
       artifactCache: { readText, readJson },
       meetings: {
@@ -532,7 +570,7 @@ describe('registerIpcHandlers', () => {
       return source === null ? null : JSON.parse(source);
     });
     const handle = vi.fn();
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       libraryRoot,
       artifactCache: { readText, readJson },
       meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
@@ -561,7 +599,7 @@ describe('registerIpcHandlers', () => {
       return source === null ? null : JSON.parse(source);
     });
     const handle = vi.fn();
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       libraryRoot,
       artifactCache: { readText, readJson },
       meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
@@ -592,7 +630,7 @@ describe('registerIpcHandlers', () => {
       return source === null ? null : JSON.parse(source);
     });
     const handle = vi.fn();
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       libraryRoot,
       artifactCache: { readText: async () => null, readJson },
       meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
@@ -619,7 +657,7 @@ describe('registerIpcHandlers', () => {
 
   it('returns null for unknown meeting IDs from every detail-artifact handler', async () => {
     const handle = vi.fn();
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       meetings: { listAll: () => [], findById: () => null },
     }));
     const handler = (channel: string) => handle.mock.calls.find((call) => call[0] === channel)![1] as (
@@ -635,7 +673,7 @@ describe('registerIpcHandlers', () => {
     const linkToMeeting = vi.fn();
     const handle = vi.fn();
     const readJson = vi.fn(async () => ({ segments: [] }));
-    registerIpcHandlers({ handle } as any, baseServices({
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
       meetings: { listAll: () => [], findById: () => ({ id: 'm1', slug: 'meeting-1' }) },
       speakers: {
         list: () => [], findById: (id: string) => id === 'spk_a' ? { id, displayName: 'Alice' } : null,
@@ -661,7 +699,7 @@ describe('registerIpcHandlers', () => {
   it('speakers:rename updates the roster row and re-merges every affected transcript', () => {
     const rename = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       speakers: {
         list: () => [],
@@ -688,7 +726,7 @@ describe('registerIpcHandlers', () => {
     const known = new Set(['spk_a', 'spk_b']);
     const stored: Record<string, unknown> = { userSpeakerId: 'spk_a' };
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       speakers: {
         list: () => [],
@@ -739,7 +777,7 @@ describe('registerIpcHandlers', () => {
     const findSoftDeleted = vi.fn((olderThanIso?: string) =>
       olderThanIso ? rows.filter((r) => r.deletedAt < olderThanIso) : [...rows]);
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       meetings: { listAll: () => [], findSoftDeleted, hardDelete },
     });
@@ -760,7 +798,7 @@ describe('registerIpcHandlers', () => {
 
   it('llm:health-check-model reports ok for a well-behaved model and loops for one that burns its budget', async () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const stored: Record<string, unknown> = {};
     const chat = vi.fn()
       .mockResolvedValueOnce('[]')
@@ -794,7 +832,7 @@ describe('registerIpcHandlers', () => {
 
   it('llm:health-check-model re-throws a genuine (non-reasoning-loop) error', async () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const chat = vi.fn().mockRejectedValueOnce(new LMStudioError('LM Studio 500 on /v1/chat/completions'));
     const services = baseServices({ lmStudio: { listModels: async () => [], chat } });
     registerIpcHandlers(fakeIpc, services);
@@ -820,7 +858,7 @@ describe('registerIpcHandlers', () => {
     );
     const replaceForMeeting = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       libraryRoot: dir,
       meetings: { listAll: () => [], findById: () => ({ id: 'm', slug: 'slug' }) },
@@ -854,7 +892,7 @@ describe('registerIpcHandlers', () => {
   it('action-items:set-status whitelists the status value and validates the id', () => {
     const setStatus = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       actionItems: { listByMeeting: () => [], setStatus },
     });
@@ -880,7 +918,7 @@ describe('registerIpcHandlers', () => {
   it('clearing the speaker-ID gate flag lets a re-entry notify again', () => {
     const gateNotified = new Set<string>(['m1']); // already notified this visit
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       gateNotified,
       libraryRoot: '/tmp/mn-gate-clear',
@@ -904,7 +942,7 @@ describe('registerIpcHandlers', () => {
   it('action-items:reextract throws (without calling the LLM) when summary.md is missing', async () => {
     const chat = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       libraryRoot: '/tmp/does-not-exist-mn',
       meetings: { listAll: () => [], findById: () => ({ id: 'm', slug: 'no-such-slug' }) },
