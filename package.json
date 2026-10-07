@@ -1,6 +1,6 @@
 {
   "name": "meeting-notes",
-  "version": "1.14.0",
+  "version": "1.14.5",
   "description": "Local-first meeting notes for macOS — Audio Hijack + LM Studio + pyannote",
   "main": "dist/electron/main/index.js",
   "type": "module",
@@ -10,6 +10,7 @@
     "dev:main": "tsc -p tsconfig.node.json --watch & wait-on tcp:5174 && electron .",
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/electron/preload/package.json', JSON.stringify({type:'commonjs'}))\" && vite build",
     "build:audio-tap": "./audio-tap/scripts/build.sh",
+    "build:icons": "node scripts/build-icons.mjs",
     "start": "electron .",
     "dist": "npm run build:audio-tap && npm run build && npm run sidecar:bundle && electron-builder --mac && npm run dist:cleanup-loose-app",
     "dist:cleanup-loose-app": "rm -rf release/mac-arm64/MeetingNotes.app && echo '  removed loose release/mac-arm64/MeetingNotes.app (use the dmg/zip in release/ instead — leaving the unboxed .app on disk causes LaunchServices to register it as a duplicate of /Applications/MeetingNotes.app)'",
