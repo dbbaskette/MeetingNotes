@@ -71,7 +71,18 @@ Logs: `/private/tmp/meetingnotes-epic243-final-targeted.log`,
 
 ## Full clean-Mac gate
 
-Pending. The existing shared Tart wrapper will test a committed, disposable
+First run `1ba13e1` reached 1,189 passing tests (six skipped), but failed one
+existing watcher retry fixture before later gates could run. That failure is
+not a full pass. An isolated host reproduction passed all ten watcher tests;
+the polling fixture now lets its known initial-stat polling periods establish
+the baseline before asserting delivery of a subsequent change and always
+closes the watcher on failure. Assertions and product watcher behavior are
+unchanged. Review additionally protected automatic vault-sync starts and the
+structured Weekly metadata-cache write from the backup lock. Targeted
+Obsidian/watcher/backup tests pass (42 tests); capture/source fixtures verify
+title retention across Refresh and explicit restart.
+
+Full rerun pending. The existing shared Tart wrapper will test a committed, disposable
 standalone Git clone (history retained for baseline benchmarks), not the user's
 checkout, installed app, library or credentials. Source-only gate; no packaged
 installer or real inference/account integrations are claimed for this epic.

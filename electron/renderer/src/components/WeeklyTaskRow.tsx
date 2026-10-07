@@ -62,7 +62,7 @@ export function WeeklyTaskRow({
     setDue(value);
     void save({ dueDate: value });
   }
-  const label = fmtDueLabel(item.dueDate, rangeEnd).label;
+  const dueLabel = fmtDueLabel(item.dueDate, rangeEnd);
   return (
     <div className="px-4 py-3 space-y-2">
       <div className="flex items-start gap-2">
@@ -87,7 +87,7 @@ export function WeeklyTaskRow({
             From {item.meetingTitle}
           </button>
         </div>
-        <span className="text-xs text-ink-muted">{busy ? 'Saving…' : label}</span>
+        <span className={`text-xs rounded-full px-2 py-1 ${dueLabel.tier==='overdue'?'bg-danger-bg text-danger-text':dueLabel.tier==='this-week'?'bg-status-warnBg text-status-warnText':'text-ink-muted'}`}>{busy ? 'Saving…' : dueLabel.label}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <label>

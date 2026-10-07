@@ -32,7 +32,6 @@ const reads = new Set([
   'onboarding:hf-token-status',
   'search:query',
   'search:cancel',
-  'weekly:get-structured',
   'llm:detect-providers',
   'stt:probe',
   'llm:probe',

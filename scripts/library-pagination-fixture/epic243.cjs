@@ -190,6 +190,15 @@ app
     assert(
       await run('document.querySelector("details").textContent.includes("Original task source")'),
     );
+    await run('fixture.setMode("backup")');await settle();
+    await run('Array.from(document.querySelectorAll("button")).find(button=>button.textContent.includes("Choose backup destination")).click()');await settle();
+    assert(await run('document.querySelector("[role=dialog]").textContent.includes("webhook secrets")'));
+    await run('Array.from(document.querySelectorAll("button")).find(button=>button.textContent==="Create backup").click()');await settle();
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});await settle();
+    assert(await run('!!document.querySelector("[role=dialog]")'));
+    await until('document.body.textContent.includes("2 / 4 files")');
+    await run('fixture.finishBackup()');await settle();
+    assert(await run('document.body.textContent.includes("Backup validated: /synthetic/private-backup")'));
     assert.deepEqual(errors, []);
     console.log('Epic 243 transcript benchmark and keyboard fixtures:', JSON.stringify(results));
     if (process.env.MN_FIXTURE_RESULTS)

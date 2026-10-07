@@ -20,6 +20,7 @@ app.whenReady().then(async()=>{
   assert.equal(await run('window.fixture.starts.length'),0,'Failed Stop never launches overlapping restart');
   await run('window.fixture.failStop=false');await click('Restart with All system audio');await click('Stop and restart');
   assert.equal(await run('window.fixture.starts.at(-1).groupId'),'preserved-group');
+  assert.equal(await run('window.fixture.starts.at(-1).title'),'Preserved meeting title');
   await click('Reset live fixture');await run('window.fixture.state="recording"');await stop();
   assert.equal(await run('window.fixture.stopped'),1,'Confirmed Stop clears controls exactly once');
   await click('Reset live fixture');await run('window.fixture.state="recording";window.fixture.holdStop=true');

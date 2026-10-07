@@ -25,6 +25,7 @@ const fixture = {
   taskCalls: [] as { kind: string; patch: unknown }[],
   failNextTask: true,
   saved: 0,
+  finishBackup:null as null|(()=>void),
 };
 (window as unknown as { fixture: typeof fixture }).fixture = fixture;
 window.api = {
@@ -44,11 +45,13 @@ window.api = {
     },
   },
 } as unknown as typeof window.api;
+window.api.backup={preview:async()=>({destination:'/synthetic/private-backup',bytes:1024,files:4,missing:[]}),status:async()=>({state:'working',completed:2,total:4,destination:'/synthetic/private-backup'}),run:async()=>{await new Promise<void>(resolve=>{fixture.finishBackup=resolve;});return{state:'complete',completed:4,total:4,destination:'/synthetic/private-backup'};}};
 const {TranscriptPanel}=await import('../../electron/renderer/src/views/MeetingTranscriptPanel');
 const {ModalShell}=await import('../../electron/renderer/src/components/ModalShell');
 const {ConfirmDialog}=await import('../../electron/renderer/src/components/ConfirmDialog');
 const {LibraryRow}=await import('../../electron/renderer/src/components/LibraryRow');
 const {WeeklyTaskRow}=await import('../../electron/renderer/src/components/WeeklyTaskRow');
+const {LibraryBackupPanel}=await import('../../electron/renderer/src/components/LibraryBackupPanel');
 const Baseline=baseline?((await import(/* @vite-ignore */ baselineModulePath)) as {TranscriptPanel:typeof TranscriptPanel}).TranscriptPanel:TranscriptPanel;
 function Fixture(): JSX.Element {
   const [task, setTask] = useState<WeeklyActionItem>({
@@ -100,7 +103,7 @@ function Fixture(): JSX.Element {
             <Baseline meeting={meeting} showRaw={false} currentTime={time} onSeek={setTime} />
           </Profiler>
         </div>
-      ) : mode === 'tasks' ? (
+      ) : mode==='backup'?<LibraryBackupPanel/>:mode === 'tasks' ? (
         <WeeklyTaskRow
           item={task}
           rangeEnd="2026-10-11"

@@ -11,6 +11,7 @@ import { SpeakersRepo } from '../storage/speakers-repo.js';
 import { ActionItemsRepo } from '../storage/action-items-repo.js';
 import { SettingsRepo } from '../storage/settings-repo.js';
 import { ObsidianSync } from './service.js';
+import {acquireBackup} from '../storage/backup-gate.js';
 import { atomicWrite, hash, safePath } from './files.js';
 import { snapshot, newNote, mergeNote, type NoteData } from './render.js';
 
@@ -89,6 +90,14 @@ afterEach(async () => {
 });
 
 describe('Obsidian sync', () => {
+  it('defers automatic sync writes while a library backup owns the idle lock',async()=>{
+    await enable();const before=fs.readFileSync(exported(),'utf8');
+    fs.writeFileSync(path.join(library,'meetings','one','summary.md'),'Changed during backup');
+    meetings.updateTitle('one','Changed title');const release=acquireBackup();
+    try{await sync.run();expect(sync.status().running).toBe(false);expect(fs.readFileSync(exported(),'utf8')).toBe(before);}
+    finally{release();}
+    await sync.run();expect(fs.readFileSync(exported(),'utf8')).toContain('Changed during backup');
+  });
   it('resumes on startup and retries only failures without resetting unchanged exports', async () => {
     await enable();
     const unchanged = db.prepare('SELECT revision FROM obsidian_exports WHERE meeting_id=?').get('one');
