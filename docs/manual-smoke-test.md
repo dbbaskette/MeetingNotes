@@ -73,3 +73,8 @@ Run before merging significant feature work or releasing. ~10 min total.
 - "All system audio (catch-all)" may not work standalone — relies on the same per-PID enumeration as per-app capture.
 - `recordingBitrateKbps` setting is exposed in Settings but the helper doesn't yet read it; bitrate is hardcoded at 128 kbps in the helper. Follow-up work.
 - Helper standalone (run from a Terminal outside MeetingNotes.app) cannot capture system audio because TCC requires the parent .app's signed identity. The helper only works when spawned by the packaged MeetingNotes.app.
+# Source picker
+
+- Multiple audible helpers of one app remain separately selectable beneath the app heading. Labels identify each PID; selecting one records that stream, not every sibling.
+- Background processes stay accessible through their disclosure. Older helper binaries retain their named sources.
+- Idle meeting apps still require confirmation. All system audio remains available for capturing every stream.

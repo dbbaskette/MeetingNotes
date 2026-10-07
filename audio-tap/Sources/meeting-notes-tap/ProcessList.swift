@@ -12,6 +12,13 @@ struct AudioProcess {
   /// process's device negotiation when it later tries to start audio — see
   /// issue #33. The picker uses this flag to dim / warn about idle targets.
   let isRunningOutput: Bool
+  /// The Dock-visible application this audio process belongs to, resolved by
+  /// walking the parent-process chain (Chrome/Zoom emit audio from helper
+  /// processes whose NSRunningApplication is nil or .prohibited). nil for
+  /// system daemons like callservicesd — the picker hides those by default.
+  let ownerPid: pid_t?
+  let ownerBundleID: String?
+  let ownerName: String?
 }
 
 // Recognized meeting apps surface first in the renderer's source picker.
@@ -74,11 +81,35 @@ enum ProcessList {
     _ = AudioObjectGetPropertyData(id, &runAddr, 0, nil, &runSize, &runningOutput)
 
     let app = NSRunningApplication(processIdentifier: pid)
+    let owner = ownerApp(for: pid)
     return AudioProcess(
       pid: pid,
       bundleID: app?.bundleIdentifier,
       name: app?.localizedName,
-      isRunningOutput: runningOutput != 0
+      isRunningOutput: runningOutput != 0,
+      ownerPid: owner?.processIdentifier,
+      ownerBundleID: owner?.bundleIdentifier,
+      ownerName: owner?.localizedName
     )
+  }
+
+  /// Walks up the parent-process chain until it reaches a Dock-visible app
+  /// (activationPolicy == .regular). "Google Chrome Helper" and friends
+  /// resolve to their browser; launchd-owned daemons resolve to nil.
+  private static func ownerApp(for pid: pid_t) -> NSRunningApplication? {
+    var current = pid
+    for _ in 0..<8 {
+      if let app = NSRunningApplication(processIdentifier: current),
+         app.activationPolicy == .regular {
+        return app
+      }
+      var info = proc_bsdinfo()
+      let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+      guard proc_pidinfo(current, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+      let parent = pid_t(info.pbi_ppid)
+      guard parent > 1, parent != current else { return nil }
+      current = parent
+    }
+    return nil
   }
 }

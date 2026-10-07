@@ -15,10 +15,8 @@ describe('AppEnumerator', () => {
 
     const sources = await e.list();
     expect(sources).toHaveLength(2);
-    expect(sources[0]!.isMeetingApp).toBe(true);
-    expect(sources[0]!.name).toBe('Zoom');
-    expect(sources[0]!.isRunningOutput).toBe(false);
-    expect(sources[1]!.isRunningOutput).toBe(true);
+    expect(sources.find(s => s.pid === 100)).toMatchObject({ isMeetingApp: true, name: 'Zoom', isRunningOutput: false });
+    expect(sources.find(s => s.pid === 200)!.isRunningOutput).toBe(true);
   });
 
   it('defaults isRunningOutput to true when helper omits the field (older binary)', async () => {
@@ -35,5 +33,68 @@ describe('AppEnumerator', () => {
     const fakeRunner = vi.fn(async () => ({ stdout: '\n', stderr: '' }));
     const e = new AppEnumerator({ helperPath: '/h', runner: fakeRunner });
     expect(await e.list()).toEqual([]);
+  });
+
+  it('retains every tappable helper and prefers audible sources in sort order', async () => {
+    const helperOutput = JSON.stringify({
+      event: 'processes',
+      items: [
+        { pid: 301, name: 'Google Chrome Helper', is_running_output: false, is_user_app: true, owner_pid: 300, owner_name: 'Google Chrome' },
+        { pid: 302, name: 'Google Chrome Helper (GPU)', is_running_output: true, is_user_app: true, owner_pid: 300, owner_name: 'Google Chrome' },
+        { pid: 400, name: 'callservicesd', is_running_output: false, is_user_app: false },
+      ],
+    }) + '\n';
+    const fakeRunner = vi.fn(async () => ({ stdout: helperOutput, stderr: '' }));
+    const e = new AppEnumerator({ helperPath: '/h', runner: fakeRunner });
+
+    const sources = await e.list();
+    const chrome = sources.filter((s) => s.ownerPid === 300);
+    expect(chrome).toHaveLength(2);
+    expect(chrome[0]!.pid).toBe(302); // the audible helper is the tap target
+    expect(chrome[0]!.ownerName).toBe('Google Chrome');
+    expect(chrome[0]!.isRunningOutput).toBe(true);
+    // Daemons pass through unmerged and flagged for the picker to tuck away.
+    expect(sources.find((s) => s.pid === 400)!.isUserApp).toBe(false);
+  });
+
+  it('inherits the meeting badge from any sibling of the same owner', async () => {
+    const helperOutput = JSON.stringify({
+      event: 'processes',
+      items: [
+        { pid: 501, name: 'zoom helper', is_meeting_app: true, is_running_output: false, is_user_app: true, owner_pid: 500, owner_name: 'zoom.us' },
+        { pid: 502, name: 'zoom render', is_meeting_app: false, is_running_output: true, is_user_app: true, owner_pid: 500, owner_name: 'zoom.us' },
+      ],
+    }) + '\n';
+    const fakeRunner = vi.fn(async () => ({ stdout: helperOutput, stderr: '' }));
+    const e = new AppEnumerator({ helperPath: '/h', runner: fakeRunner });
+
+    const sources = await e.list();
+    expect(sources).toHaveLength(2);
+    expect(sources[0]!.isMeetingApp).toBe(true);
+    expect(sources[0]!.isRunningOutput).toBe(true);
+  });
+
+  it('retains two audible siblings and falls back to the owner bundle for detection', async () => {
+    const items = [501, 502].map(pid => ({ pid, bundle_id: 'us.zoom.helper', is_running_output: true, is_meeting_app: true, is_user_app: true, owner_pid: 500, owner_name: 'Zoom', owner_bundle_id: 'us.zoom.xos' }));
+    const enumerator = new AppEnumerator({ helperPath: '/h', runner: async () => ({ stdout: JSON.stringify({ event: 'processes', items }), stderr: '' }) });
+    const sources = await enumerator.list();
+    expect(sources.map(s => s.pid)).toEqual([501, 502]);
+    expect(sources.every(s => s.bundleId === 'us.zoom.xos' && s.ownerBundleId === 'us.zoom.xos')).toBe(true);
+  });
+
+  it('treats named sources from older helpers (no is_user_app) as user apps', async () => {
+    const helperOutput = JSON.stringify({
+      event: 'processes',
+      items: [
+        { pid: 100, name: 'Music', is_running_output: true },
+        { pid: 101, is_running_output: false },
+      ],
+    }) + '\n';
+    const fakeRunner = vi.fn(async () => ({ stdout: helperOutput, stderr: '' }));
+    const e = new AppEnumerator({ helperPath: '/h', runner: fakeRunner });
+
+    const sources = await e.list();
+    expect(sources.find((s) => s.pid === 100)!.isUserApp).toBe(true);
+    expect(sources.find((s) => s.pid === 101)!.isUserApp).toBe(false);
   });
 });
