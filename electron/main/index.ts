@@ -13,6 +13,7 @@ import { ObsidianSync } from './obsidian/service.js';
 import { registerObsidianHandlers } from './ipc/obsidian-handlers.js';
 import { TerminologyRepo } from './storage/terminology-repo.js';
 import { TerminologyService } from './terminology/service.js';
+import { NotesHistory } from './storage/notes-history.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
@@ -194,8 +195,11 @@ app.whenReady().then(async () => {
   const artifactCache = new ArtifactCache();
   const terminology = new TerminologyService(new TerminologyRepo(db), {
     libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
+    beforeSummaryChange: id => notesHistory.capture(id, 'Before notes changed'),
   });
+  const notesHistory = new NotesHistory(db, {libraryRoot, meetings, items: actionItems, terminology});
   terminology.recover();
+  try { notesHistory.recover(); } catch (e) { logger.error('notes-history:recovery', {error: String(e)}); }
   const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
   registerObsidianHandlers(ipcMain, obsidian);
   obsidian.start();
@@ -332,6 +336,7 @@ app.whenReady().then(async () => {
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
+    notesHistory,
     terminology,
     libraryRoot,
     artifactCache,
@@ -692,6 +697,7 @@ app.whenReady().then(async () => {
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
+    notesHistory,
     terminology,
     meetings,
     groups,

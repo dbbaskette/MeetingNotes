@@ -344,6 +344,17 @@ export const MIGRATIONS: Migration[] = [
     `,
   },
   { version: 19, up: OBSIDIAN_SCHEMA },
+  { version: 20, up: `
+    CREATE TABLE notes_versions (
+      id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL, reason TEXT NOT NULL, snapshot TEXT NOT NULL
+    );
+    CREATE INDEX notes_versions_meeting ON notes_versions(meeting_id, created_at DESC);
+    CREATE TABLE notes_restore_pending (
+      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+      before_json TEXT NOT NULL, after_json TEXT NOT NULL
+    );
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

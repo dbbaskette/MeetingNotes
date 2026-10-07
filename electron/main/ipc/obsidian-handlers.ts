@@ -17,8 +17,8 @@ export function registerObsidianHandlers(ipc: IpcMain, sync: ObsidianSync): void
     sync.enable(z.string().uuid().parse(token)),
   );
   ipc.handle(IPC_CHANNELS.obsidianDisable, () => sync.disable());
-  ipc.handle(IPC_CHANNELS.obsidianRetry, () => {
-    sync.retry();
+  ipc.handle(IPC_CHANNELS.obsidianRetry, (_e, recheckAll: unknown) => {
+    sync.retry(z.boolean().optional().parse(recheckAll) ?? false);
     return sync.status();
   });
   ipc.handle(IPC_CHANNELS.obsidianOpen, async () => {

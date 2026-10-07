@@ -19,6 +19,7 @@ const counts = () => ({ all: live().length, pending: matching('pending').length,
 const subscribers = new Set<() => void>();
 const off = () => () => {};
 window.api = {
+  groups: { list: async () => ({groups: [], ungroupedCount: live().length}) },
   meetings: {
     listPage: async (query: { filter: MeetingFilter; cursor?: string; pageSize?: number }) => {
       calls.pages.push(query);
@@ -51,6 +52,9 @@ window.api = {
 } as any;
 
 const { librarySelection } = await import('../../electron/renderer/src/lib/selection');
+// This fixture verifies flat-list selection snapshots. Grouped rendering has
+// its own fixture; fresh profiles now default to Organized in the real app.
+window.localStorage.setItem('libraryViewMode','flat');
 const { useMeetingsStore } = await import('../../electron/renderer/src/store/meetings');
 const { LibraryView } = await import('../../electron/renderer/src/views/LibraryView');
 const { ToastHost } = await import('../../electron/renderer/src/components/Toasts');

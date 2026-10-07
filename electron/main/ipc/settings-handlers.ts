@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow, nativeTheme, shell } from 'electron';
+import { BrowserWindow, dialog, nativeTheme, shell } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,12 +9,13 @@ import type { Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { storageLocations } from '../lib/storage-paths.js';
 import { downloadWhisperModel } from '../whisper/download-model.js';
+import { validateSetting } from '../storage/settings-validation.js';
 
 export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
-    if (key === 'obsidian') throw new Error('Use Obsidian destination preview and enable controls');
+    value = validateSetting(key, value);
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
     if (key === 'theme') {
       nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
@@ -33,11 +34,17 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
         else s.nativeAppDetector.stop();
       }
     }
+    return value;
+  });
+
+  ipc.handle(IPC_CHANNELS.settingsChooseFolder, async () => {
+    const result = await dialog.showOpenDialog({ title: 'Choose folder', properties: ['openDirectory'] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
   });
 
   ipc.handle(IPC_CHANNELS.settingsRevealStorage, (_e: unknown, key: unknown) => {
     const rows = storageLocations({
-      libraryRoot: s.settings.get('libraryPath'),
+      libraryRoot: s.libraryRoot,
       home: os.homedir(),
     });
     const row = rows.find((r) => r.key === key);

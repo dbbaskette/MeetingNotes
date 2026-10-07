@@ -21,6 +21,7 @@ import { ActionItemsPanel, Placeholder } from './MeetingActionsPanel';
 import { TranscriptPanel } from './MeetingTranscriptPanel';
 import { RememberTerms, TerminologyPanel } from '../components/Terminology';
 import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
+import { NotesHistory } from '../components/NotesHistory';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -1422,16 +1423,17 @@ function SummaryPanel({
   }
 
   if (!original && !dirty) {
-    return <Placeholder text="Summary will appear after the summarize stage." />;
+    return <><NotesHistory meetingId={meeting.id} disabled={meeting.status === 'processing'} onRestored={async summary => {onBaseline(summary); onDraft(summary); await onReload();}}/><Placeholder text="Summary will appear after the summarize stage." /></>;
   }
 
   return (
     <div className="flex flex-col gap-3">
+      <NotesHistory meetingId={meeting.id} disabled={dirty || saving || mode === 'edit' || meeting.status === 'processing'} onRestored={async summary => {onBaseline(summary); onDraft(summary); await onReload();}}/>
       {meeting.summaryStale && <div className="text-xs rounded-lg bg-status-warnBg text-status-warnText p-3">
         The transcript was corrected after these notes were generated. Regenerating replaces the notes and action items.
         <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty || meeting.status === 'processing'} onClick={() => setConfirmRegenerate(true)}>Regenerate notes…</button>
       </div>}
-      <ConfirmDialog open={confirmRegenerate} title="Regenerate notes from the corrected transcript?" body="This replaces the current notes and action items, including manual edits. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(false)} onConfirm={() => {
+      <ConfirmDialog open={confirmRegenerate} title="Regenerate notes from the corrected transcript?" body="The current notes and action items will be saved in history before being replaced. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(false)} onConfirm={() => {
         setConfirmRegenerate(false);
         void api.meetings.rerun(meeting.id, 'summarizing').then(onReload).catch(e => setError((e as Error).message));
       }}/>

@@ -1,5 +1,5 @@
 // electron/renderer/src/views/SettingsView.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../ipc/client';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
@@ -8,6 +8,8 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
+import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
+import { setUnsavedGuard } from '../lib/unsaved-guard';
 
 interface Settings {
   lmStudioUrl: string;
@@ -67,26 +69,58 @@ export function SettingsView({
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
+  const [saveStates, setSaveStates] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const queues = useRef<Record<string, Promise<unknown>>>({});
+  const revisions = useRef<Record<string, number>>({});
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const leaveResolver = useRef<((leave: boolean) => void) | null>(null);
+  useEffect(() => {
+    const unsaved = Object.values(saveStates).some(state => state !== 'Saved');
+    setUnsavedGuard(unsaved ? () => new Promise<boolean>(resolve => {leaveResolver.current = resolve; setLeaveOpen(true);}) : null);
+    return () => setUnsavedGuard(null);
+  }, [saveStates]);
+  useEffect(() => () => {leaveResolver.current?.(false);}, []);
 
   useEffect(() => {
     void (async () => {
       setS((await api.settings.getAll()) as Settings);
-      setModels((await api.models.list()) as string[]);
-      setPerms((await api.permissions.audio()) as AudioPerms);
-      setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
-      setProviders((await api.llm.detectProviders()) as ProviderAvailability);
-    })();
+      await Promise.all([
+        api.models.list().then(setModels), api.permissions.audio().then(setPerms),
+        api.speakers.list().then(setSpeakers), api.llm.detectProviders().then(setProviders),
+      ]);
+    })().catch(e => setLoadError((e as Error).message));
   }, []);
 
-  if (!s) return <div className="p-8">Loading…</div>;
+  if (!s) return <div className="p-8" role="status">{loadError ? `Could not load Settings: ${loadError}` : 'Loading…'}</div>;
 
-  async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
+  function edit<K extends keyof Settings>(key: K, value: Settings[K]): void {
+    revisions.current[key] = (revisions.current[key] ?? 0) + 1;
     setS((prev) => (prev ? { ...prev, [key]: value } : prev));
-    await api.settings.set(key, value);
+    setSaveStates(previous => ({...previous, [key]: 'Unsaved — leave the field to save'}));
+  }
+  async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<boolean> {
+    const revision = revisions.current[key] = (revisions.current[key] ?? 0) + 1;
+    const pathSetting = key === 'libraryPath' || key === 'audioWatchPath';
+    if (!pathSetting) setS(prev => prev ? {...prev, [key]: value} : prev);
+    setSaveStates(previous => ({...previous, [key]: 'Saving…'}));
+    const request = (queues.current[key] ?? Promise.resolve()).then(() => api.settings.set(key, value));
+    queues.current[key] = request.catch(() => {});
+    try {
+      const canonical = await request as Settings[K];
+      if (revisions.current[key] === revision) {
+        setS(prev => prev && (pathSetting || prev[key] === value) ? {...prev, [key]: canonical} : prev);
+        setSaveStates(previous => ({...previous, [key]: 'Saved'}));
+      }
+      return true;
+    } catch (e) {
+      if (revisions.current[key] === revision) setSaveStates(previous => ({...previous, [key]: `Couldn’t save: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`}));
+      return false;
+    }
   }
 
   async function changeLlmModel(modelId: string): Promise<void> {
-    await update('llmModel', modelId);
+    if (!await update('llmModel', modelId)) return;
     if (!modelId) { setHealthCheck(null); return; }
     setHealthCheck({ modelId, state: 'checking' });
     try {
@@ -107,6 +141,7 @@ export function SettingsView({
 
   return (
     <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
+      <ConfirmDialog open={leaveOpen} title="Leave Settings with unsaved changes?" body="Some changes have not been saved. Stay to finish saving or correct any errors." confirmLabel="Leave Settings" onCancel={() => {leaveResolver.current?.(false); leaveResolver.current = null; setLeaveOpen(false);}} onConfirm={() => {leaveResolver.current?.(true); leaveResolver.current = null; setLeaveOpen(false);}}/>
       <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
         <AppNav active="settings" onNav={onNav} />
         {/* Visually redundant with the active nav tab, kept for the
@@ -122,9 +157,20 @@ export function SettingsView({
         )}
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
+      <div className="shrink-0 px-8 py-2 text-xs max-h-24 overflow-auto" aria-live="polite">
+        {Object.entries(saveStates).map(([key, state]) => <div key={key} className={state.startsWith('Couldn') ? 'text-danger' : 'text-ink-muted'}>{key}: {state}
+          {state.startsWith('Couldn') && !['libraryPath','audioWatchPath'].includes(key) && <button className="ml-2 underline" onClick={() => void update(key as keyof Settings, s[key as keyof Settings])}>Retry</button>}
+        </div>)}
+        {loadError && <p role="alert">Some Settings information could not load: {loadError}</p>}
+      </div>
+      <SettingsNavigation>
+      <SettingsSection section="Organization" keywords="dictionary terminology corrections words">
         <TerminologySettings />
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="Obsidian vault sync">
         <ObsidianSettings />
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="summary provider lifecycle LLM LM Studio Ollama endpoint URL model">
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -151,7 +197,7 @@ export function SettingsView({
         <div className="flex gap-2">
           <input
             value={s.lmStudioUrl}
-            onChange={(e) => update('lmStudioUrl', e.target.value)}
+            onChange={(e) => edit('lmStudioUrl', e.target.value)} onBlur={() => void update('lmStudioUrl', s.lmStudioUrl)}
             className="input flex-1"
           />
           <TestButton kind="llm" url={s.lmStudioUrl} />
@@ -206,6 +252,8 @@ export function SettingsView({
           Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
         </div>
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="summary detail concise standard detailed thinking language">
       <Field label="Summary detail level">
         <select
           value={s.summaryDetail}
@@ -241,14 +289,15 @@ export function SettingsView({
           </div>
         </label>
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Organization" keywords="appearance theme light dark system">
       <Field label="Appearance">
         <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
           {(['system', 'light', 'dark'] as const).map((opt) => (
             <button
               key={opt}
               onClick={() => {
-                void update('theme', opt);
-                window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));
+                void update('theme', opt).then(saved => {if (saved) window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));});
               }}
               className={`px-4 py-1.5 text-sm capitalize transition border-l border-surface-border first:border-l-0 ${
                 s.theme === opt
@@ -264,11 +313,13 @@ export function SettingsView({
           System follows macOS appearance. Light and Dark override it.
         </div>
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
       <Field label="STT URL (whisper.cpp server)">
         <div className="flex gap-2">
           <input
             value={s.sttUrl}
-            onChange={(e) => update('sttUrl', e.target.value)}
+            onChange={(e) => edit('sttUrl', e.target.value)} onBlur={() => void update('sttUrl', s.sttUrl)}
             className="input flex-1"
           />
           <TestButton kind="stt" url={s.sttUrl} />
@@ -281,7 +332,7 @@ export function SettingsView({
       <Field label="STT Model name">
         <input
           value={s.sttModel}
-          onChange={(e) => update('sttModel', e.target.value)}
+          onChange={(e) => edit('sttModel', e.target.value)} onBlur={() => void update('sttModel', s.sttModel)}
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
@@ -290,37 +341,30 @@ export function SettingsView({
           (use the setup wizard&apos;s Whisper step to download one).
         </div>
       </Field>
-      <Field label="Library Path">
-        <input
-          value={s.libraryPath}
-          onChange={(e) => update('libraryPath', e.target.value)}
-          className="input"
-        />
-      </Field>
+      </SettingsSection>
+      <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
+      <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
-      <Field label="Extra watch folder">
-        <input
-          value={s.audioWatchPath}
-          onChange={(e) => update('audioWatchPath', e.target.value)}
-          placeholder="(none)"
-          className="input"
-        />
+      <PathSetting label="Extra watch folder" value={s.audioWatchPath} onApply={value => update('audioWatchPath', value)}/>
         <div className="text-xs text-ink-muted mt-1">
           Optional. An extra folder watched for dropped audio. Your library&rsquo;s
           recordings folder and the legacy ~/Music/MeetingNotes are always watched.
         </div>
-      </Field>
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="STT transcription language">
       <Field label="STT Language">
         <input
           value={s.sttLanguage}
-          onChange={(e) => update('sttLanguage', e.target.value)}
+          onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">
       <Field label="Your name">
         <input
           value={s.userName}
-          onChange={(e) => update('userName', e.target.value)}
+          onChange={(e) => edit('userName', e.target.value)} onBlur={() => void update('userName', s.userName)}
           placeholder="You"
           className="input"
         />
@@ -374,6 +418,8 @@ export function SettingsView({
         )}
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Recording" keywords="quality AAC bitrate audio capture meeting auto detect browser native Zoom permissions microphone">
       <section className="border-t border-surface-border pt-5">
         <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Recording quality</div>
         <label className="block">
@@ -460,18 +506,24 @@ export function SettingsView({
         </label>
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="webhook exporter notifications URL token payload Telegram Slack">
       <WebhookExporterCard
         settings={s}
-        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
-        onPersist={(key, value) => { void update(key, value); }}
+        onUpdate={(patch) => {for (const [key,value] of Object.entries(patch)) edit(key as keyof Settings, value as Settings[keyof Settings]);}}
+        onPersist={update}
       />
 
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="Google account OAuth credentials export Tasks Docs">
       <GoogleAccountCard
         settings={s}
-        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
-        onPersist={(key, value) => { void update(key, value); }}
+        onUpdate={(patch) => {for (const [key,value] of Object.entries(patch)) edit(key as keyof Settings, value as Settings[keyof Settings]);}}
+        onPersist={update}
       />
 
+      </SettingsSection>
+      <SettingsSection section="Recording" keywords="permissions microphone system audio privacy security">
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
           <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">Permissions</div>
@@ -495,8 +547,11 @@ export function SettingsView({
         )}
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="diagnostics logs warnings errors debug">
       <DiagnosticsSection />
-      </div>
+      </SettingsSection>
+      </SettingsNavigation>
     </div>
   );
 }
@@ -810,7 +865,7 @@ function GoogleAccountCard({
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
-  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<boolean>;
 }): JSX.Element {
   const [status, setStatus] = useState<{ email: string | null; hasCredentials: boolean; signedIn: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -822,16 +877,13 @@ function GoogleAccountCard({
   }
   useEffect(() => { void refresh(); }, []);
 
-  function set<K extends keyof Settings>(key: K, value: Settings[K]): void {
-    onUpdate({ [key]: value } as Partial<Settings>);
-    onPersist(key, value);
-  }
-
   const hasCreds = settings.googleClientId.trim().length > 0 && settings.googleClientSecret.trim().length > 0;
 
   async function signIn(): Promise<void> {
     setBusy(true); setError(null);
     try {
+      if (!await onPersist('googleClientId', settings.googleClientId) || !await onPersist('googleClientSecret', settings.googleClientSecret))
+        throw new Error('Save valid Google credentials before connecting');
       await api.google.authStart();
       await refresh();
     } catch (e) {
@@ -873,7 +925,7 @@ function GoogleAccountCard({
           <Field label="OAuth Client ID">
             <input
               value={settings.googleClientId}
-              onChange={(e) => set('googleClientId', e.target.value)}
+              onChange={(e) => onUpdate({googleClientId: e.target.value})} onBlur={() => void onPersist('googleClientId', settings.googleClientId)}
               placeholder="xxxxxxxx.apps.googleusercontent.com"
               className="input font-mono text-xs"
             />
@@ -882,7 +934,7 @@ function GoogleAccountCard({
             <input
               type="password"
               value={settings.googleClientSecret}
-              onChange={(e) => set('googleClientSecret', e.target.value)}
+              onChange={(e) => onUpdate({googleClientSecret: e.target.value})} onBlur={() => void onPersist('googleClientSecret', settings.googleClientSecret)}
               placeholder="GOCSPX-…"
               className="input font-mono text-xs"
             />
@@ -931,7 +983,7 @@ function WebhookExporterCard({
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
-  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<boolean>;
 }): JSX.Element {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Settings['webhookLastResult'] | null>(null);
@@ -944,6 +996,9 @@ function WebhookExporterCard({
   async function runTest(): Promise<void> {
     setTesting(true); setTestResult(null);
     try {
+      for (const key of ['webhookUrl', 'webhookSecret', 'webhookTemplate', 'webhookOwnerFilter'] as const) {
+        if (!await onPersist(key, settings[key])) {setTestResult({ts: new Date().toISOString(),status: null,error: 'Save valid webhook settings before sending a test'}); return;}
+      }
       const r = await api.webhook.testSend();
       setTestResult(r);
     } finally {
@@ -978,7 +1033,7 @@ function WebhookExporterCard({
           <Field label="Webhook URL (HTTPS)">
             <input
               value={settings.webhookUrl}
-              onChange={(e) => set('webhookUrl', e.target.value)}
+              onChange={(e) => onUpdate({webhookUrl: e.target.value})} onBlur={() => onPersist('webhookUrl', settings.webhookUrl)}
               placeholder="https://example.com/hooks/meetingnotes"
               className="input"
               spellCheck={false}
@@ -988,7 +1043,7 @@ function WebhookExporterCard({
             <input
               type="password"
               value={settings.webhookSecret}
-              onChange={(e) => set('webhookSecret', e.target.value)}
+              onChange={(e) => onUpdate({webhookSecret: e.target.value})} onBlur={() => onPersist('webhookSecret', settings.webhookSecret)}
               placeholder="Sent as Authorization: Bearer …"
               className="input"
               spellCheck={false}

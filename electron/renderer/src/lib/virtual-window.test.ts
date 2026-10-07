@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { retainedRowIndexes, stepMeetingIndex, virtualWindow } from './virtual-window';
+import { retainedRowIndexes, stepMeetingIndex, virtualWindow, sectionWindow } from './virtual-window';
 
 const base = { count: 1_000, rowHeight: 72, viewportHeight: 700, overscan: 5 };
+
+describe('sectionWindow', () => {
+  it('mounts no rows in groups entirely above or below the shared viewport', () => {
+    expect(sectionWindow({...base, scrollTop: -701})).toEqual({start: 0, end: 0, totalHeight: 72000});
+    expect(sectionWindow({...base, scrollTop: 72000})).toEqual({start: 0, end: 0, totalHeight: 72000});
+  });
+  it('handles partially visible groups without clamping the offset', () => {
+    expect(sectionWindow({...base, scrollTop: -650})).toEqual({start: 0, end: 6, totalHeight: 72000});
+    expect(sectionWindow({...base, scrollTop: 36000})).toEqual({start: 495, end: 515, totalHeight: 72000});
+  });
+});
 
 describe('virtualWindow', () => {
   it.each([

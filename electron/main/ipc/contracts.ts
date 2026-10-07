@@ -293,6 +293,10 @@ export const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsChooseFolder: 'settings:choose-folder',
+  notesHistoryList: 'notes-history:list',
+  notesHistoryCompare: 'notes-history:compare',
+  notesHistoryRestore: 'notes-history:restore',
   /** Reveal a storage location in Finder. Arg is a StorageLocationKey
    *  ('library'|'models'|'logs'|'hfCache'); main resolves the path via
    *  storageLocations(), mkdir -p's it, and shell.showItemInFolder()s it. */
