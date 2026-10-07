@@ -39,21 +39,24 @@ export interface ExtractActionItemsDeps {
   /** Optional log hook for each re-sample retry (the caller has a logger; this
    *  module doesn't), so the otherwise-invisible retry is observable. */
   onResample?: (retry: number, reasoningWords: number) => void;
+  beforeReplace?: () => void;
   /** Fired when the first extraction parses to zero items even though the
    *  summary visibly contains Action Items bullets, and a one-shot warmer
    *  retry is being attempted. */
   onZeroItemsRetry?: () => void;
 }
 
-/** True when summary.md contains an Action Items section with at least one
- *  real bullet — i.e. an empty extraction result is a model failure, not an
- *  actually item-free meeting. Tolerates '- None' / '- (none)' placeholders. */
+/** A conservative retry heuristic, not proof that the model missed an item.
+ * Ignore explicit empty-section placeholders, without reading later sections. */
 export function summaryClaimsActionItems(summary: string): boolean {
-  const m = summary.match(/^##\s*Action Items\s*$([\s\S]*?)(?=^##\s|\s*$(?![\s\S]))/im);
+  const m = summary.match(/^##[ \t]+Action Items[ \t]*\r?$([\s\S]*?)(?=^#{1,2}[ \t]|$(?![\s\S]))/im);
   if (!m) return false;
   return m[1]!
     .split('\n')
-    .some((line) => /^\s*[-*]\s+(?!\(?none\)?\s*$)\S/i.test(line));
+    .some((line) => {
+      const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+)$/);
+      return !!bullet && !/^(?:\(?none\)?|no action items(?: identified)?|n\/a)[.!]?$/i.test(bullet[1]!.trim());
+    });
 }
 
 /** Run the extraction against the meeting folder's saved summary.md, persist
@@ -70,7 +73,7 @@ export async function extractActionItemsFromSummary(
   meetingId: string,
   folder: string,
   missingSummaryHint: string,
-): Promise<{ count: number; suspectedMiss: boolean }> {
+): Promise<{ count: number }> {
   const summaryPath = path.join(folder, 'summary.md');
   const summary = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8').trim() : '';
   if (!summary) {
@@ -105,10 +108,11 @@ export async function extractActionItemsFromSummary(
     raw = await runExtraction(0.4);
     items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
   }
+  if (items.length === 0 && summaryClaimsActionItems(summary)) {
+    throw new Error('Action items could not be extracted after retry. Existing items were kept. Try Re-extract or a stronger model.');
+  }
+  deps.beforeReplace?.();
   fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
   deps.actionItems.replaceForMeeting(meetingId, items);
-  return {
-    count: items.length,
-    suspectedMiss: items.length === 0 && summaryClaimsActionItems(summary),
-  };
+  return { count: items.length };
 }

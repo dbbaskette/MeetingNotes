@@ -1,8 +1,10 @@
 import type Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
+import type { ObsidianConfig } from '../../shared/obsidian.js';
 
 export interface Settings {
+  obsidian: ObsidianConfig | null;
   lmStudioUrl: string;
   /** OpenAI-compatible STT endpoint (whisper.cpp's whisper-server, etc.). */
   sttUrl: string;
@@ -127,6 +129,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
   sttUrl: 'http://127.0.0.1:8080',
   sttModel: 'whisper-1',

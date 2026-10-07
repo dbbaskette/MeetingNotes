@@ -1,12 +1,79 @@
 import { z } from 'zod';
 
+/** Weekly payloads cross the main/renderer boundary unchanged. Keep their
+ * shape here instead of maintaining copies in both processes. */
+export interface WeeklyTheme {
+  title: string;
+  detail: string;
+  meetings: string[];
+}
+export interface WeeklyMeeting {
+  id: string;
+  title: string;
+  startedAt: string;
+  durationS: number | null;
+  highlight: string | null;
+  speakerCount: number | null;
+}
+export interface WeeklyActionItem {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  text: string;
+  ownerLabel: string | null;
+  isYou: boolean;
+  status: string;
+  dueDate: string | null;
+  meetingStartedAt: string;
+}
+export interface WeeklyOwnerGroup {
+  ownerLabel: string;
+  isYou: boolean;
+  items: WeeklyActionItem[];
+}
+export interface WeeklyStructured {
+  isoYear: number;
+  isoWeek: number;
+  rangeStart: string;
+  rangeEnd: string;
+  totalDurationS: number;
+  meetings: WeeklyMeeting[];
+  openActionGroups: WeeklyOwnerGroup[];
+  openActionCount: number;
+  inProgress: boolean;
+  hasFreshCache: boolean;
+}
+export interface WeeklyNarrative {
+  narrative: string;
+  themes: WeeklyTheme[];
+  decisions: string[];
+  generatedAt: string;
+  fromCache: boolean;
+}
+export interface WeeklyData extends Omit<WeeklyStructured, 'hasFreshCache'> {
+  narrative: string;
+  themes: WeeklyTheme[];
+  decisions: string[];
+  generatedAt: string;
+}
+
+export const MeetingSpeakerSchema = z.object({
+  localLabel: z.string(),
+  rosterId: z.string().nullable(),
+  displayName: z.string().nullable(),
+  confidence: z.number().nullable(),
+});
+
 export const MeetingSummarySchema = z.object({
   id: z.string(),
   slug: z.string(),
   title: z.string(),
+  groupId: z.string().nullable(),
+  groupName: z.string().nullable(),
   startedAt: z.string().nullable(),
   durationS: z.number().nullable(),
   pipelineStage: z.string(),
+  stageStartedAt: z.string().nullable(),
   status: z.string(),
   /** When status === 'failed', the error string from the stage that threw
    *  (e.g. "whisper: not ready ..."). Null otherwise. Powers the failure
@@ -23,17 +90,85 @@ export const MeetingSummarySchema = z.object({
    *  hedges it ("~3m (rough)"). Always false when stageEtaMs is null. */
   stageEtaRough: z.boolean(),
   skipSpeakerId: z.boolean(),
-  speakers: z.array(z.object({
-    localLabel: z.string(),
-    rosterId: z.string().nullable(),
-    displayName: z.string().nullable(),
-    confidence: z.number().nullable(),
-  })),
+  speakers: z.array(MeetingSpeakerSchema),
 });
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
+export const MeetingListFilterSchema = z.enum(['all', 'pending', 'processing', 'done', 'failed']);
+export const MeetingListSortSchema = z.enum(['newest', 'oldest', 'longest', 'title']);
+export const GroupIdSchema = z.string().uuid();
+export const OptionalGroupScopeSchema = GroupIdSchema.nullable().optional();
+export const GroupNameSchema = z.string().trim().min(1).max(80);
+export const AssignGroupSchema = z.object({
+  ids: z.array(z.string().min(1)).max(1000).transform((ids) => [...new Set(ids)]),
+  groupId: GroupIdSchema.nullable(),
+  expectedGroupId: GroupIdSchema.nullable().optional(),
+});
+export type MeetingListFilter = z.infer<typeof MeetingListFilterSchema>;
+export type MeetingListSort = z.infer<typeof MeetingListSortSchema>;
+
+const MeetingCursorSchema = z.object({
+  v: z.literal(1),
+  scope: z.string().optional(),
+  statusRank: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(9)]),
+  id: z.string().min(1),
+  sortValue: z.discriminatedUnion('sort', [
+    z.object({ sort: z.literal('newest'), values: z.tuple([z.string().nullable()]) }),
+    z.object({ sort: z.literal('oldest'), values: z.tuple([z.string().nullable()]) }),
+    z.object({ sort: z.literal('longest'), values: z.tuple([z.number().finite().nullable(), z.string().nullable()]) }),
+    z.object({ sort: z.literal('title'), values: z.tuple([z.string(), z.string().nullable()]) }),
+  ]),
+});
+
+/** Validate the complete opaque cursor before repository work. The repository
+ * also validates direct callers; neither path interpolates cursor values. */
+export const MeetingListQuerySchema = z.object({
+  filter: MeetingListFilterSchema,
+  sort: MeetingListSortSchema,
+  pageSize: z.number().int().positive().default(50).transform((size) => Math.min(size, 100)),
+  cursor: z.string().min(1).optional(),
+  groupId: OptionalGroupScopeSchema,
+}).superRefine((query, ctx) => {
+  if (query.cursor === undefined) return;
+  try {
+    if (!/^[A-Za-z0-9_-]+$/.test(query.cursor)) throw new Error();
+    const bytes = Buffer.from(query.cursor, 'base64url');
+    if (bytes.toString('base64url') !== query.cursor) throw new Error();
+    const cursor = MeetingCursorSchema.parse(JSON.parse(bytes.toString('utf8')));
+    const scope = query.groupId === undefined ? 'all' : query.groupId === null ? 'ungrouped' : `group:${query.groupId}`;
+    if (cursor.sortValue.sort !== query.sort || (cursor.scope ?? 'all') !== scope) throw new Error();
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['cursor'], message: 'Invalid meeting cursor' });
+  }
+});
+export type MeetingListQuery = z.input<typeof MeetingListQuerySchema>;
+
+/** Cap the raw input before deduplicating; large selections must batch. */
+export const MeetingIdsSchema = z.array(z.string().min(1)).max(1000)
+  .transform((ids) => [...new Set(ids)]);
+export interface MeetingStartManyResult { startedIds: string[]; failedIds: string[] }
+export const MeetingCountsSchema = z.object({
+  all: z.number(), pending: z.number(), processing: z.number(), done: z.number(), failed: z.number(),
+});
+export type MeetingCounts = z.infer<typeof MeetingCountsSchema>;
+export const MeetingSummaryPageSchema = z.object({
+  items: z.array(MeetingSummarySchema), nextCursor: z.string().nullable(),
+  total: z.number(), counts: MeetingCountsSchema,
+});
+export type MeetingSummaryPage = z.infer<typeof MeetingSummaryPageSchema>;
+
+export const ReviewedSpeakerSchema = MeetingSpeakerSchema.extend({
+  state: z.enum(['unknown', 'probable', 'confirmed']),
+  needsReview: z.boolean(),
+  segmentCount: z.number(),
+  durationS: z.number(),
+  lineCount: z.number(),
+});
+export type ReviewedSpeaker = z.infer<typeof ReviewedSpeakerSchema>;
+
+/** Lightweight detail shell. Transcript and speaker-review artifacts are
+ * intentionally absent; load them from their dedicated endpoints on demand. */
 export const MeetingDetailSchema = MeetingSummarySchema.extend({
-  transcriptMd: z.string().nullable(),
   summaryMd: z.string().nullable(),
   audioPath: z.string(),
   /** True when the user has set Settings → "You are…" (userSpeakerId).
@@ -54,9 +189,43 @@ export const MeetingDetailSchema = MeetingSummarySchema.extend({
 });
 export type MeetingDetail = z.infer<typeof MeetingDetailSchema>;
 
+export const MeetingTranscriptSchema = z.object({
+  transcriptMd: z.string().nullable(),
+  rawTranscriptText: z.string().nullable(),
+});
+export type MeetingTranscript = z.infer<typeof MeetingTranscriptSchema>;
+
+export const MeetingSpeakerReviewSchema = z.object({
+  speakers: z.array(ReviewedSpeakerSchema),
+});
+export type MeetingSpeakerReview = z.infer<typeof MeetingSpeakerReviewSchema>;
+
 export const IPC_CHANNELS = {
+  obsidianStatus: 'obsidian:status',
+  obsidianChoose: 'obsidian:choose',
+  obsidianPreview: 'obsidian:preview',
+  obsidianEnable: 'obsidian:enable',
+  obsidianDisable: 'obsidian:disable',
+  obsidianRetry: 'obsidian:retry',
+  obsidianOpen: 'obsidian:open',
+  obsidianCompare: 'obsidian:compare',
+  obsidianReplace: 'obsidian:replace',
+  obsidianRepair: 'obsidian:repair',
+  obsidianExportComparison: 'obsidian:export-comparison',
+  terminologyList: 'terminology:list',
+  terminologySave: 'terminology:save',
+  terminologyDelete: 'terminology:delete',
+  terminologyOffers: 'terminology:offers',
+  terminologyPreview: 'terminology:preview',
+  terminologyCommit: 'terminology:commit',
+  terminologyUndo: 'terminology:undo',
   meetingsList: 'meetings:list',
+  meetingsListPage: 'meetings:list-page',
+  meetingsGetMany: 'meetings:get-many',
+  meetingsListIds: 'meetings:list-ids',
   meetingsGet: 'meetings:get',
+  meetingsGetTranscript: 'meetings:get-transcript',
+  meetingsGetSpeakerReview: 'meetings:get-speaker-review',
   /** Light status poll for the detail view while a meeting is processing.
    *  Returns only the DB-backed live fields (stage/status/error/eta/counts)
    *  — never the transcript/summary markdown that meetings:get reads off
@@ -73,15 +242,28 @@ export const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
+  groupsList: 'groups:list',
+  groupsCreate: 'groups:create',
+  groupsRename: 'groups:rename',
+  groupsDelete: 'groups:delete',
+  groupsAssign: 'groups:assign',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
   recordingState: 'recording:state',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  recoveryList: 'recovery:list',
+  recoveryItem: 'recovery:item',
+  recoveryRecover: 'recovery:recover',
+  recoveryTrim: 'recovery:trim',
+  recoveryPreview: 'recovery:preview',
+  recoveryReveal: 'recovery:reveal',
+  recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
@@ -95,6 +277,7 @@ export const IPC_CHANNELS = {
   speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
@@ -110,6 +293,10 @@ export const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsChooseFolder: 'settings:choose-folder',
+  notesHistoryList: 'notes-history:list',
+  notesHistoryCompare: 'notes-history:compare',
+  notesHistoryRestore: 'notes-history:restore',
   /** Reveal a storage location in Finder. Arg is a StorageLocationKey
    *  ('library'|'models'|'logs'|'hfCache'); main resolves the path via
    *  storageLocations(), mkdir -p's it, and shell.showItemInFolder()s it. */
@@ -171,6 +358,7 @@ export const IPC_CHANNELS = {
   /** Push channel: main broadcasts a new PipelineStatus on every queue
    *  state change (enqueue, dequeue, pause, resume, clear). */
   pipelineStatusEvent: 'pipeline:status-change',
+  meetingStageEvent: 'meeting:stage-change',
   /** Push channel: main broadcasts {id} when the library watcher inserts
    *  a brand-new meeting row (e.g. just after a recording stops and the
    *  .m4a goes stable on disk). Renderer uses it to refresh the Library

@@ -1,0 +1,6 @@
+# Implementation plan — inline meeting groups
+
+1. Add pure organization helpers and tests for section ordering, exactly-once membership, search-result grouping, and stored expansion preferences. Keep named groups alphabetic and Ungrouped last.
+2. Build an inline section component using the existing scoped `meetings:list-page` API and paged store. Fetch only when expanded; maintain independent cursor/load-more state and preserve loaded depth on refresh. Keep headers visible at zero filtered results and support focus, rename, and delete.
+3. Integrate Organized (default), All meetings (flat), and focused-group states in `LibraryView`. Reuse the current virtualized list for flat/focused; render grouped search results inside Organized. Preserve selection semantics, capture preselection, global Needs Attention/Weekly/quick search, and local view/expansion preferences.
+4. Update README and the manual smoke checklist. Run targeted organization and renderer tests, full relevant suite, production build, and existing large-Library benchmark. Inspect the diff and report any live UI/capture checks that could not be run without touching the user's library. Do not commit, push, or release without a further request.

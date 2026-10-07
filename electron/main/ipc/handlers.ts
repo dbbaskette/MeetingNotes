@@ -1,20 +1,21 @@
 import type { IpcMain } from 'electron';
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron';
-import { execFile } from 'node:child_process';
+import { app, dialog, shell } from 'electron';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { IPC_CHANNELS } from './contracts.js';
-import type { MeetingsRepo } from '../storage/meetings-repo.js';
+import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
+  GroupIdSchema, GroupNameSchema, OptionalGroupScopeSchema, AssignGroupSchema,
+  type MeetingSummary, type MeetingSummaryPage, type MeetingStartManyResult } from './contracts.js';
+import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
+import type { GroupsRepo } from '../storage/groups-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
-import type { SettingsRepo, Settings } from '../storage/settings-repo.js';
-import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
+import type { SettingsRepo } from '../storage/settings-repo.js';
 import { LMStudioError, REASONING_LOOP_MARKER, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { extractActionItemsFromSummary } from '../pipeline/extract-action-items.js';
 import type { RecordingManager } from '../recording/manager.js';
+import type { RecordingRecoveryService } from '../recording/recovery.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
 import type { NativeAppDetector } from '../meeting-detector/native-app-detector.js';
@@ -24,7 +25,6 @@ import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
-import { storageLocations } from '../lib/storage-paths.js';
 import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
 import { transcriptChars } from '../pipeline/transcript-chars.js';
 import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
@@ -41,18 +41,28 @@ import {
 import { moveToTrash, restoreFromTrash, purgeTrashDir, TRASH_RETENTION_MS } from '../storage/trash.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { clearGateNotified } from '../pipeline/gate-alert.js';
-import type { WeeklyAggregator, WeeklyData } from '../weekly/aggregator.js';
-import { renderWeeklyMarkdown } from '../weekly/markdown.js';
+import type { WeeklyAggregator } from '../weekly/aggregator.js';
+import { registerWeeklyHandlers } from './weekly-handlers.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
-import { downloadWhisperModel } from '../whisper/download-model.js';
+import { registerSettingsHandlers } from './settings-handlers.js';
 import { ripgrepSearch } from '../search/ripgrep-search.js';
-import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from '../exporters/owner-filter.js';
+import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
+import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
+import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
+import type { ArtifactCache } from '../library/artifact-cache.js';
+import { createCountsCache } from '../library/page-counts.js';
+import type { TerminologyService } from '../terminology/service.js';
+import { registerTerminologyHandlers } from './terminology-handlers.js';
+import type { NotesHistory } from '../storage/notes-history.js';
 
 export interface IpcServices {
+  notesHistory?: NotesHistory;
+  terminology?: TerminologyService;
   meetings: MeetingsRepo;
+  groups: GroupsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;
   stageDurations: StageDurationsRepo;
@@ -63,6 +73,7 @@ export interface IpcServices {
    *  does — a no-op when provider='external' (user-managed LM Studio). */
   llmSupervisor: { ensureReady: () => Promise<void> };
   recordingManager: RecordingManager;
+  recordingRecovery: RecordingRecoveryService;
   appEnumerator: AppEnumerator;
   helperPath: string;
   roster: RosterService;
@@ -74,6 +85,7 @@ export interface IpcServices {
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
   googleAuth: GoogleAuth;
+  artifactCache: ArtifactCache;
   /** Process-lifetime set of meetings we've already alerted about entering the
    *  speaker-ID gate (see pipeline/gate-alert.ts). Cleared here on the three
    *  unblock paths so a genuine re-entry into the gate notifies again. */
@@ -112,7 +124,69 @@ function unidentifiedCount(rows: { rosterId: string | null }[]): number {
   return rows.filter((r) => r.rosterId === null).length;
 }
 
+function meetingSummary(
+  s: IpcServices,
+  m: MeetingRow,
+  links: ReturnType<SpeakersRepo['listForMeeting']>,
+  actionItemsCount: number,
+): MeetingSummary {
+  const speakers = links.map((sp) => ({
+    localLabel: sp.localLabel, rosterId: sp.rosterSpeakerId,
+    displayName: sp.displayName, confidence: sp.confidence,
+  }));
+  const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
+  return {
+    id: m.id, slug: m.slug, title: m.title,
+    groupId: m.groupId, groupName: m.groupName,
+    startedAt: m.startedAt, durationS: m.durationS,
+    pipelineStage: m.pipelineStage, status: m.status,
+    errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
+    unidentifiedCount: unidentifiedCount(speakers), actionItemsCount,
+    stageEtaMs: eta?.etaMs ?? null, stageEtaRough: eta?.rough ?? false, speakers,
+  };
+}
+
+function scopedMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSummary[] {
+  if (rows.length === 0) return [];
+  const ids = rows.map((m) => m.id);
+  const speakers = s.speakers.listForMeetings(ids);
+  const counts = s.actionItems.countsForMeetings(ids);
+  return rows.map((m) => meetingSummary(s, m, speakers.get(m.id) ?? [], counts.get(m.id) ?? 0));
+}
+
+/** Status-list shape for Needs Attention: skip speaker/action joins and ETA
+ *  file probes. The panel only needs id/title/status/stage/startedAt. */
+function shellMeetingSummaries(rows: MeetingRow[]): MeetingSummary[] {
+  return rows.map((m) => ({
+    id: m.id, slug: m.slug, title: m.title,
+    groupId: m.groupId, groupName: m.groupName,
+    startedAt: m.startedAt, durationS: m.durationS,
+    pipelineStage: m.pipelineStage, status: m.status,
+    errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
+    unidentifiedCount: 0, actionItemsCount: 0,
+    stageEtaMs: null, stageEtaRough: false, speakers: [],
+  }));
+}
+
+async function speakerReviewForFolder(
+  folder: string,
+  links: ReturnType<typeof listMeetingSpeakers>,
+  artifactCache: ArtifactCache,
+): Promise<Map<string, SpeakerReviewMetadata>> {
+  const [diar, raw] = await Promise.all([
+    artifactCache.readJson<{ segments?: DiarizationSegment[] }>(path.join(folder, 'diarization.json')),
+    artifactCache.readJson<{ segments?: Array<{ start: number; end: number; text: string; source?: 'voice' | 'system' }> }>(
+      path.join(folder, 'transcript.raw.json'),
+    ),
+  ]);
+  return buildSpeakerReviewMetadata({
+    links, diarization: diar?.segments ?? [], transcript: raw?.segments ?? [],
+  });
+}
+
 export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
+  if (s.terminology) registerTerminologyHandlers(ipc, s.terminology);
+  const pageCounts = createCountsCache();
   ipc.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion());
 
   ipc.handle(IPC_CHANNELS.logsTail, (_e, maxEntries?: unknown) => {
@@ -148,39 +222,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // O(N) queries — LibraryView polls every 3s.
     const speakersByMeeting = s.speakers.listForAllMeetings();
     const counts = s.actionItems.countsByMeeting();
-    return s.meetings.listAll().map((m) => {
-      const speakers = (speakersByMeeting.get(m.id) ?? []).map((sp) => ({
-        localLabel: sp.localLabel,
-        rosterId: sp.rosterSpeakerId,
-        displayName: sp.displayName,
-        confidence: sp.confidence,
-      }));
-      const eta = stageEtaForMeeting(
-        s.stageDurations,
-        m.pipelineStage,
-        () => transcriptChars(s.libraryRoot, m.slug),
-      );
-      return {
-        id: m.id, slug: m.slug, title: m.title,
-        startedAt: m.startedAt, durationS: m.durationS,
-        pipelineStage: m.pipelineStage, status: m.status,
-        errorMessage: m.errorMessage,
-        stageStartedAt: m.stageStartedAt,
-        skipSpeakerId: m.skipSpeakerId,
-        unidentifiedCount: unidentifiedCount(speakers),
-        actionItemsCount: counts.get(m.id) ?? 0,
-        stageEtaMs: eta?.etaMs ?? null,
-        stageEtaRough: eta?.rough ?? false,
-        speakers,
-      };
-    });
+    return s.meetings.listAll().map((m) => meetingSummary(s, m, speakersByMeeting.get(m.id) ?? [], counts.get(m.id) ?? 0));
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsGet, (_e, id: string) => {
+  ipc.handle(IPC_CHANNELS.meetingsListPage, (_e, input: unknown): MeetingSummaryPage => {
+    const query = MeetingListQuerySchema.parse(input);
+    const page = s.meetings.listPage(query);
+    const counts = pageCounts.forQuery(query, () => s.meetings.counts(query.groupId));
+    return { items: scopedMeetingSummaries(s, page.rows), nextCursor: page.nextCursor,
+      total: counts[query.filter], counts };
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsGetMany, (_e, input: unknown, opts?: unknown): MeetingSummary[] => {
+    const ids = MeetingIdsSchema.parse(input);
+    const rows = s.meetings.findByIds(ids);
+    const shell = Boolean(opts && typeof opts === 'object' && (opts as { shell?: unknown }).shell === true);
+    return shell ? shellMeetingSummaries(rows) : scopedMeetingSummaries(s, rows);
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown, groupId: unknown): string[] =>
+    s.meetings.listIds(MeetingListFilterSchema.parse(input), OptionalGroupScopeSchema.parse(groupId)));
+
+  ipc.handle(IPC_CHANNELS.groupsList, () => s.groups.listWithCounts());
+  ipc.handle(IPC_CHANNELS.groupsCreate, (_e, name: unknown) => s.groups.create(GroupNameSchema.parse(name)));
+  ipc.handle(IPC_CHANNELS.groupsRename, (_e, id: unknown, name: unknown) => {
+    s.groups.rename(GroupIdSchema.parse(id), GroupNameSchema.parse(name));
+  });
+  ipc.handle(IPC_CHANNELS.groupsDelete, (_e, id: unknown) => s.groups.delete(GroupIdSchema.parse(id)));
+  ipc.handle(IPC_CHANNELS.groupsAssign, (_e, input: unknown) => {
+    const { ids, groupId, expectedGroupId } = AssignGroupSchema.parse(input);
+    return s.groups.assign(ids, groupId, expectedGroupId);
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsGet, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
     const m = s.meetings.findById(id);
     if (!m) return null;
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
-    const read = (p: string) => fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
     const speakers = listMeetingSpeakers(s.speakers, id);
     const settingsSnapshot = s.settings.getAll();
     const items = s.actionItems.listByMeeting(id);
@@ -194,19 +272,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
         : null,
     };
-    // Show a raw (speaker-less) preview as soon as the whisper step completes,
-    // before merge produces transcript.md. Gives the user something to read
-    // while diarization is still running.
-    let rawTranscriptText: string | null = null;
-    const rawJson = read(path.join(folder, 'transcript.raw.json'));
-    if (rawJson) {
-      try {
-        const parsed = JSON.parse(rawJson) as { text?: string };
-        if (typeof parsed.text === 'string' && parsed.text.length > 0) {
-          rawTranscriptText = parsed.text;
-        }
-      } catch { /* ignore */ }
-    }
     const eta = stageEtaForMeeting(
       s.stageDurations,
       m.pipelineStage,
@@ -223,9 +288,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       speakers,
       // Whether the user has set "You are…" — task-app export is gated on this.
       userIdentified: userIsIdentified(me),
-      transcriptMd: read(path.join(folder, 'transcript.md')),
-      rawTranscriptText,
-      summaryMd: read(path.join(folder, 'summary.md')),
+      summaryMd: await s.artifactCache.readText(path.join(folder, 'summary.md')),
+      summaryStale: s.terminology?.stale(id as string) ?? false,
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
@@ -237,11 +301,45 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     };
   });
 
+  ipc.handle(IPC_CHANNELS.meetingsGetTranscript, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
+    const meeting = s.meetings.findById(id);
+    if (!meeting) return null;
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const transcriptMd = await s.artifactCache.readText(path.join(folder, 'transcript.md'));
+    if (transcriptMd) return { transcriptMd, rawTranscriptText: null };
+    const raw = await s.artifactCache.readJson<{ text?: string }>(path.join(folder, 'transcript.raw.json'));
+    return {
+      transcriptMd: null,
+      rawTranscriptText: typeof raw?.text === 'string' && raw.text.length > 0 ? raw.text : null,
+    };
+  });
+
+  ipc.handle(IPC_CHANNELS.meetingsGetSpeakerReview, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
+    const meeting = s.meetings.findById(id);
+    if (!meeting) return null;
+    const speakers = listMeetingSpeakers(s.speakers, id);
+    const review = await speakerReviewForFolder(
+      meetingFolderPath(s.libraryRoot, meeting.slug), speakers, s.artifactCache,
+    );
+    return {
+      speakers: speakers.map((speaker) => ({
+        ...speaker,
+        ...(review.get(speaker.localLabel) ?? {
+          state: speaker.rosterId ? ((speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
+          needsReview: !speaker.rosterId, segmentCount: 0, durationS: 0, lineCount: 0,
+        }),
+      })),
+    };
+  });
+
   // Light status poll for the detail view's 2s processing loop. Mirrors the
   // per-row shape of meetings:list (DB + learned eta only) — deliberately no
   // transcript/summary/raw-json file reads, which is what makes meetings:get
   // heavy for long meetings.
-  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: string) => {
+  ipc.handle(IPC_CHANNELS.meetingsGetStatus, (_e, id: unknown) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error('meeting id required');
     const m = s.meetings.findById(id);
     if (!m) return null;
     const speakers = listMeetingSpeakers(s.speakers, id);
@@ -270,10 +368,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.meetings.updateTitle(id, title.slice(0, 500));
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsDelete, (_e, id: unknown) => {
+  ipc.handle(IPC_CHANNELS.meetingsDelete, (_e, id: unknown): boolean => {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
-    if (!m || m.deletedAt) return; // already gone or already soft-deleted — idempotent
+    if (!m || m.deletedAt) return false; // idempotent no-op, not a new deletion
     // Soft-delete: move files to the per-meeting trash dir, stamp
     // deleted_at on the row. The undo path (meetingsUndoDelete) moves
     // everything back. Purge expired entries on startup + on a timer.
@@ -284,6 +382,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       });
     } catch { /* partial move is fine; restore will recover what it can */ }
     s.meetings.softDelete(id);
+    return true;
   });
 
   ipc.handle(IPC_CHANNELS.meetingsUndoDelete, (_e, id: unknown) => {
@@ -317,9 +416,12 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Clear stale artifacts & DB rows for the stage we're rewinding to, so the
     // UI doesn't keep showing yesterday's bad transcript while the retry runs.
     const meeting = s.meetings.findById(parsed.id);
+    if (!meeting || meeting.deletedAt) throw new Error('Meeting no longer exists');
+    if (meeting.status === 'processing') throw new Error('Wait for processing to finish before restarting');
+    if (shouldClearActionItems(parsed.fromStage)) s.notesHistory?.capture(parsed.id, 'Before reprocessing');
     if (meeting) {
       const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-      clearArtifactsFromStage(folder, parsed.fromStage);
+      clearArtifactsFromStage(folder, parsed.fromStage, s.artifactCache);
     }
     if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
     if (shouldClearSpeakerLinks(parsed.fromStage)) s.speakers.unlinkMeeting(parsed.id);
@@ -330,12 +432,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.pipeline.enqueue(parsed.id);
   });
 
-  const startOne = (id: string): boolean => {
+  const startOne = (id: string, pendingOnly = false): boolean => {
     if (typeof id !== 'string' || id.length === 0) return false;
     const m = s.meetings.findById(id);
     if (!m) return false;
+    if (pendingOnly && (m.deletedAt || m.status !== 'pending')) return false;
     s.meetings.updateStatus(id, 'processing');
-    s.pipeline.enqueue(id);
+    try {
+      s.pipeline.enqueue(id);
+    } catch (error) {
+      // Detailed bulk failures must still be eligible to retry. Preserve the
+      // legacy start/startMany behavior when pendingOnly is not requested.
+      if (pendingOnly) s.meetings.updateStatus(id, m.status);
+      throw error;
+    }
     return true;
   };
 
@@ -356,7 +466,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         // before flipping the skip switch — they may have labeled some but
         // not all voices, and they still deserve names in the transcript.
         try {
-          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
+          remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName'), terminology: s.terminology });
         } catch { /* first-pass merge hadn't run? fall through — summarize will still work off meeting_speakers */ }
         // Leaving the gate — forget the notified flag so a future re-entry alerts.
         clearGateNotified(id, s.gateNotified);
@@ -380,7 +490,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // bumping the stage — the whole point of the gate is giving the user a
     // chance to replace SPEAKER_00 with real names in the final output.
     try {
-      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, userName: s.settings.get('userName') });
+      remergeTranscript(id, { libraryRoot: s.libraryRoot, meetings: s.meetings, speakers: s.speakers, artifactCache: s.artifactCache, userName: s.settings.get('userName'), terminology: s.terminology });
     } catch { /* see note above */ }
     // Advance manually to 'summarizing' so the pipeline's linear loop picks up
     // on the right side of the gate. (We don't flip skipSpeakerId — the user
@@ -396,12 +506,25 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Cap at ~5MB to defang a runaway editor sending a giant blob; real
     // summaries are <20KB. Anything bigger is a bug, not a feature.
     if (markdown.length > 5_000_000) throw new Error('summary too large');
+    if (s.terminology) { s.terminology.saveSummary(id, markdown); return markdown; }
     const meeting = s.meetings.findById(id);
     if (!meeting) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     fs.mkdirSync(folder, { recursive: true });
-    fs.writeFileSync(path.join(folder, 'summary.md'), markdown);
+    const summaryPath = path.join(folder, 'summary.md');
+    s.artifactCache.invalidate(summaryPath);
+    fs.writeFileSync(summaryPath, markdown);
     return markdown;
+  });
+
+  ipc.handle(IPC_CHANNELS.notesHistoryList, (_e, id: unknown) => s.notesHistory?.list(z.string().min(1).max(200).parse(id)) ?? []);
+  ipc.handle(IPC_CHANNELS.notesHistoryCompare, (_e, id: unknown, version: unknown) => {
+    if (!s.notesHistory) throw new Error('Notes history is unavailable');
+    return s.notesHistory.compare(z.string().min(1).max(200).parse(id), z.string().uuid().parse(version));
+  });
+  ipc.handle(IPC_CHANNELS.notesHistoryRestore, (_e, id: unknown, version: unknown, revision: unknown) => {
+    if (!s.notesHistory) throw new Error('Notes history is unavailable');
+    s.notesHistory.restore(z.string().min(1).max(200).parse(id), z.string().uuid().parse(version), z.string().length(64).parse(revision));
   });
 
   ipc.handle(IPC_CHANNELS.meetingsStartMany, (_e, ids: unknown) => {
@@ -413,6 +536,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return started;
   });
 
+  ipc.handle(IPC_CHANNELS.meetingsStartManyDetailed, (_e, input: unknown): MeetingStartManyResult => {
+    const ids = MeetingIdsSchema.parse(input);
+    const result: MeetingStartManyResult = { startedIds: [], failedIds: [] };
+    for (const id of ids) {
+      try {
+        (startOne(id, true) ? result.startedIds : result.failedIds).push(id);
+      } catch {
+        result.failedIds.push(id);
+      }
+    }
+    return result;
+  });
+
   // Built-in recording namespace. The renderer asks for a list of audible
   // apps, picks one, and the manager spawns the bundled meeting-notes-tap
   // helper. Level + state-change events are broadcast via webContents.send
@@ -420,10 +556,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.recordingListSources, async () => s.appEnumerator.list());
   ipc.handle(IPC_CHANNELS.recordingStart, async (_e, input: unknown) => {
     if (typeof input !== 'object' || input === null) throw new Error('invalid args');
-    const { targetPid, targetLabel, mic } = input as {
-      targetPid: number | 'system'; targetLabel: string; mic: boolean;
-    };
-    return s.recordingManager.start({ targetPid, targetLabel, mic });
+    const { targetPid, targetLabel, mic, groupId } = z.object({
+      targetPid: z.union([z.literal('system'), z.number().int().positive()]),
+      targetLabel: z.string().min(1).max(200), mic: z.boolean(), groupId: OptionalGroupScopeSchema,
+    }).parse(input);
+    // A group may have been deleted while the picker was open. Capture is
+    // more important than filing; keep the one-click start and ungroup it.
+    const validGroupId = groupId && s.groups.exists(groupId) ? groupId : null;
+    return s.recordingManager.start({ targetPid, targetLabel, mic, groupId: validGroupId });
   });
   ipc.handle(IPC_CHANNELS.recordingStop, async (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
@@ -432,6 +572,38 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.recordingState, (_e, sessionId: unknown) => {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
     return s.recordingManager.state(sessionId);
+  });
+
+  ipc.handle(IPC_CHANNELS.recoveryList, (event, requestId: unknown) => {
+    if (requestId !== undefined && (typeof requestId !== 'string' || requestId.length > 100)) {
+      throw new Error('invalid recovery request id');
+    }
+    return s.recordingRecovery.list(typeof requestId === 'string' ? (item, index) => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.recoveryItem, { requestId, item, index });
+    } : undefined);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryRecover, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    return s.recordingRecovery.recover(id);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryTrim, (_e, input: unknown) => {
+    if (!input || typeof input !== 'object') throw new Error('invalid recovery trim');
+    const { id, endSeconds, startSeconds = 0 } = input as { id?: unknown; endSeconds?: unknown; startSeconds?: unknown };
+    if (typeof id !== 'string' || !id || typeof endSeconds !== 'number' || typeof startSeconds !== 'number') throw new Error('invalid recovery trim');
+    return s.recordingRecovery.trim(id, endSeconds, startSeconds);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryPreview, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    const preview = await s.recordingRecovery.preview(id);
+    return { ...preview, url: `recovery-audio://preview?id=${encodeURIComponent(id)}` };
+  });
+  ipc.handle(IPC_CHANNELS.recoveryReveal, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    return s.recordingRecovery.reveal(id);
+  });
+  ipc.handle(IPC_CHANNELS.recoveryDismiss, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    s.recordingRecovery.dismiss(id);
   });
 
   ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, input: unknown) => {
@@ -473,9 +645,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     for (const meetingId of meetingIds) {
       try {
         remergeTranscript(meetingId, {
+          terminology: s.terminology,
           libraryRoot: s.libraryRoot,
           meetings: s.meetings,
           speakers: s.speakers,
+          artifactCache: s.artifactCache,
           userName: s.settings.get('userName'),
         });
       } catch { /* see note above */ }
@@ -557,6 +731,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         } catch { /* roster update is best-effort; don't fail the link */ }
       }
       s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, parsed.rosterId, 1.0);
+      remergeMeetings([parsed.meetingId]);
       return parsed.rosterId;
     }
 
@@ -571,7 +746,38 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!embedding) throw new Error(`no embeddings for ${parsed.localLabel}`);
     const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding });
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
+    remergeMeetings([parsed.meetingId]);
     return id;
+  });
+
+  const BulkAssignSchema = z.object({
+    meetingId: z.string().min(1),
+    localLabels: z.array(z.string().min(1)).min(1).max(100),
+    rosterId: z.string().min(1),
+  });
+  ipc.handle(IPC_CHANNELS.speakersAssignBulk, async (_e, input: unknown) => {
+    const parsed = BulkAssignSchema.parse(input);
+    const meeting = s.meetings.findById(parsed.meetingId);
+    if (!meeting) throw new Error('meeting not found');
+    if (!s.speakers.findById(parsed.rosterId)) throw new Error('roster speaker not found');
+    const labels = [...new Set(parsed.localLabels)];
+    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+    const links = listMeetingSpeakers(s.speakers, parsed.meetingId);
+    const [metadata, diarFile] = await Promise.all([
+      speakerReviewForFolder(folder, links, s.artifactCache),
+      s.artifactCache.readJson<{ segments?: DiarizationSegment[] }>(path.join(folder, 'diarization.json')),
+    ]);
+    const diarization = diarFile?.segments ?? [];
+    for (const localLabel of labels) {
+      const embedding = averageEmbeddingForLabel(diarization, localLabel);
+      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+      s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
+    }
+    remergeMeetings([parsed.meetingId]);
+    return {
+      assigned: labels.length,
+      impactedLines: labels.reduce((sum, label) => sum + (metadata.get(label)?.lineCount ?? 0), 0),
+    };
   });
 
   ipc.handle(IPC_CHANNELS.speakersSuggestions, (_e, meetingId: unknown, localLabel: unknown) => {
@@ -592,6 +798,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // "Unlink" removes the roster_speaker_id but keeps the meeting_speakers
     // row so the local label still shows up as an unidentified voice.
     s.speakers.linkToMeeting(meetingId, localLabel, null, 0);
+    remergeMeetings([meetingId]);
   });
 
   ipc.handle(IPC_CHANNELS.actionItemsSetStatus, (_e, id: unknown, status: unknown) => {
@@ -641,6 +848,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof meetingId !== 'string' || meetingId.length === 0) throw new Error('invalid args');
     const meeting = s.meetings.findById(meetingId);
     if (!meeting) throw new Error('meeting not found');
+    if (meeting.deletedAt || meeting.status === 'processing') throw new Error('Wait for processing to finish before re-extracting');
+    const revision = s.notesHistory?.revision(meetingId);
     // Re-run ONLY the extract step against the current on-disk summary.md,
     // via the same shared helper the pipeline's extract stage uses.
     // Deliberately state-neutral: we never touch pipelineStage/status, so a
@@ -648,7 +857,14 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const { count } = await extractActionItemsFromSummary(
       { ...s, onResample: (retry, words) =>
-        s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
+        s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }),
+        onZeroItemsRetry: () => s.logger.warn('reextract:zero-items-retry', { meetingId }),
+        beforeReplace: () => {
+          const current = s.meetings.findById(meetingId);
+          if (!current || current.deletedAt || current.status === 'processing' || (revision && revision !== s.notesHistory?.revision(meetingId)))
+            throw new Error('Meeting changed during extraction. Retry to use the latest notes and action items.');
+          s.notesHistory?.capture(meetingId, 'Before action items replaced');
+        } },
       meetingId,
       folder,
       'save a summary (with an Action Items section) before re-extracting.',
@@ -657,187 +873,18 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return { count };
   });
 
-  ipc.handle(IPC_CHANNELS.exportRun, async (_e, input: {
-    exporter: string;
-    meetingId: string;
-    itemIds?: string[]; // optional subset; omitted = all open items (legacy behavior)
-    outputPath?: string; // optional file path for file-based exporters (markdown)
-  }) => {
-    if (typeof input?.exporter !== 'string' || typeof input?.meetingId !== 'string') throw new Error('invalid args');
-    const meeting = s.meetings.findById(input.meetingId);
-    if (!meeting) throw new Error('meeting not found');
-    const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
-    const exporter = s.exporters[input.exporter];
-    if (!exporter) throw new Error(`unknown exporter: ${input.exporter}`);
-    const rows = s.actionItems.listByMeeting(input.meetingId);
-    let selectedRows = Array.isArray(input.itemIds)
-      ? rows.filter((r) => input.itemIds!.includes(r.id))
-      : rows;
-    // Task-app exporters (Reminders, Google Tasks) push into the user's
-    // personal to-do list, so they ONLY ever send items assigned to the
-    // user — never the whole meeting's action items. Enforced here as
-    // defense-in-depth even though the renderer also pre-filters the modal.
-    if (TASK_APP_EXPORTERS.has(input.exporter)) {
-      const userSpeakerId = s.settings.get('userSpeakerId');
-      const me = {
-        userSpeakerId,
-        userDisplayName: userSpeakerId
-          ? (s.speakers.list().find((sp) => sp.id === userSpeakerId)?.displayName ?? null)
-          : null,
-      };
-      if (!userIsIdentified(me)) {
-        throw new Error('Set who you are in Settings → "You are…" to export your action items.');
-      }
-      selectedRows = selectedRows.filter((r) => r.status !== 'done' && isMyItem(r, me));
-      if (selectedRows.length === 0) {
-        throw new Error("None of this meeting's open action items are assigned to you.");
-      }
-    }
-    const items = selectedRows.map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
-    }));
-    const summaryPath = path.join(folder, 'summary.md');
-    const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
-    // Document exporters (Markdown, Google Doc) render the summary + a
-    // checklist, so they're valid with zero items. Task/integration
-    // exporters only push action items, so an empty set there is a no-op.
-    const DOCUMENT_EXPORTERS = new Set(['markdown', 'google-doc']);
-    if (items.length === 0 && !DOCUMENT_EXPORTERS.has(input.exporter)) {
-      throw new Error('No action items selected');
-    }
-    if (items.length === 0 && !summaryMd) {
-      throw new Error('Nothing to export — this meeting has no summary or action items yet.');
-    }
-    const result = await exporter.export({
-      items, meetingTitle: meeting.title, meetingFolder: folder,
-      summaryMd,
-      outputPath: typeof input.outputPath === 'string' ? input.outputPath : undefined,
-      onItemExported: (id) => s.actionItems.markExported(id, input.exporter),
-    });
-    return result;
-  });
+  registerExportHandlers(ipc, s);
 
-  ipc.handle(IPC_CHANNELS.dialogSave, async (_e, opts: unknown) => {
-    // Thin wrapper over Electron's save dialog so the renderer can prompt
-    // the user for a destination before a file-based export runs. We
-    // intentionally don't write the file here — the exporter does, using
-    // the returned path — so dialog:save stays a pure user-intent query.
-    const parsed = (opts ?? {}) as { defaultPath?: unknown; filters?: unknown };
-    const defaultPath = typeof parsed.defaultPath === 'string' ? parsed.defaultPath : undefined;
-    const filters = Array.isArray(parsed.filters)
-      ? (parsed.filters as { name: string; extensions: string[] }[])
-      : undefined;
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    const result = win
-      ? await dialog.showSaveDialog(win, { defaultPath, filters })
-      : await dialog.showSaveDialog({ defaultPath, filters });
-    if (result.canceled || !result.filePath) return null;
-    return result.filePath;
-  });
-
-  ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
-  ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
-    if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
-    s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
-    if (key === 'theme') {
-      nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
-    }
-    // Toggle each meeting detector live when the user flips its switch —
-    // no need to restart the app. autoDetectMeetings is the object form
-    // post-#78 (browserTabs / nativeApps / silenceMs).
-    if (key === 'autoDetectMeetings') {
-      const cfg = s.settings.get('autoDetectMeetings');
-      if (s.meetingDetector) {
-        if (cfg.browserTabs) s.meetingDetector.start();
-        else s.meetingDetector.stop();
-      }
-      if (s.nativeAppDetector) {
-        if (cfg.nativeApps) s.nativeAppDetector.start();
-        else s.nativeAppDetector.stop();
-      }
-    }
-  });
-
-  ipc.handle(IPC_CHANNELS.settingsRevealStorage, (_e: unknown, key: unknown) => {
-    const rows = storageLocations({
-      libraryRoot: s.settings.get('libraryPath'),
-      home: os.homedir(),
-    });
-    const row = rows.find((r) => r.key === key);
-    if (!row) throw new Error(`unknown storage location: ${String(key)}`);
-    fs.mkdirSync(row.path, { recursive: true });
-    shell.showItemInFolder(row.path);
-  });
-
-  ipc.handle(IPC_CHANNELS.modelsList, async () => {
-    try { return await s.lmStudio.listModels(); }
-    catch { return []; }
-  });
-
-  // Onboarding-wizard handlers (#43). Kept out of the main settings
-  // block because they're only used during first-run setup.
-  ipc.handle(IPC_CHANNELS.onboardingWhisperList, async () => {
-    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
-      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin'))
-      .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
-    if (typeof model !== 'string') throw new Error('invalid model id');
-    // Native streaming download (no shell script). The old path shelled out to
-    // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
-    // so onboarding's model download failed there with "No such file or
-    // directory". downloadWhisperModel validates the id and pulls the ggml
-    // file straight into the whisper-models directory. Progress fans out on
-    // the onboarding:whisper-progress push channel (throttled to ~4/sec in
-    // download-model.ts) so the wizard can render a real progress bar.
-    await downloadWhisperModel(model, {
-      onProgress: (received, total) => {
-        BrowserWindow.getAllWindows().forEach((w) =>
-          w.webContents.send(IPC_CHANNELS.onboardingWhisperProgress, { model, received, total }));
-      },
-    });
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
-    if (typeof token !== 'string' || token.length < 8) throw new Error('invalid token');
-    const dir = path.join(os.homedir(), '.cache', 'huggingface');
-    fs.mkdirSync(dir, { recursive: true });
-    const tokenPath = path.join(dir, 'token');
-    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-    // Set perms explicitly in case writeFileSync's mode arg is honored
-    // only at file creation on some filesystems.
-    try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenStatus, async () => {
-    // Report whether a non-empty token file exists — so the wizard's HF step,
-    // after the user navigates away and back, shows "already saved" rather than
-    // a blank field that looks like the token vanished. We never read the
-    // secret back into the renderer.
-    const tokenPath = path.join(os.homedir(), '.cache', 'huggingface', 'token');
-    let saved = false;
-    try { saved = fs.existsSync(tokenPath) && fs.readFileSync(tokenPath, 'utf8').trim().length > 0; }
-    catch { saved = false; }
-    return { saved };
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
-    if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
-      throw new Error('invalid url');
-    }
-    await shell.openExternal(url);
-  });
+  registerSettingsHandlers(ipc, s);
 
   // Cmd+K global search (#45). Titles are matched in-memory off the DB;
   // summary/transcript content is searched via the bundled ripgrep
   // binary (@vscode/ripgrep) over the library's meetings/ tree. rg
   // parallelizes the walk and matches with SIMD, so even a multi-
   // thousand-meeting library answers each keystroke in tens of ms.
-  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown) => {
+  ipc.handle(IPC_CHANNELS.searchQuery, async (_e, query: unknown, limit: unknown, scopeInput: unknown) => {
     if (typeof query !== 'string') return [];
+    const groupId = OptionalGroupScopeSchema.parse(scopeInput);
     const q = query.trim();
     if (q.length < 2) return [];
     const qLower = q.toLowerCase();
@@ -846,6 +893,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     interface Hit {
       meetingId: string;
       title: string;
+      groupName: string | null;
       source: 'title' | 'summary' | 'transcript';
       snippet: string;
       seconds?: number;
@@ -858,9 +906,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // listAll() snapshot per keystroke. Newest-first, capped at `max` —
     // the final slice keeps at most `max` anyway and titles outrank
     // everything else.
-    for (const m of s.meetings.searchByTitle(q, max)) {
+    for (const m of s.meetings.searchByTitle(q, max, groupId)) {
       hits.push({
-        meetingId: m.id, title: m.title, source: 'title',
+        meetingId: m.id, title: m.title, groupName: m.groupName, source: 'title',
         snippet: m.title, score: 1000,
       });
     }
@@ -885,7 +933,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const hitSlugs = [...new Set(
       rgHits.map((r) => slugFor(r.file)).filter((sl): sl is string => sl !== null),
     )];
-    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs).map((m) => [m.slug, m]));
+    const bySlug = new Map(s.meetings.findBySlugs(hitSlugs, groupId).map((m) => [m.slug, m]));
 
     const summarySeen = new Set<string>(); // slug — caps summary hits at 1/meeting
     for (const r of rgHits) {
@@ -902,6 +950,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         hits.push({
           meetingId: meeting.id,
           title: meeting.title,
+          groupName: meeting.groupName,
           source: 'summary',
           snippet: trimSnippet(r.lineText, qLower, 120),
           score: 500,
@@ -912,6 +961,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         hits.push({
           meetingId: meeting.id,
           title: meeting.title,
+          groupName: meeting.groupName,
           source: 'transcript',
           snippet: speakerLabel
             ? `${speakerLabel}: ${stripTimestampPrefix(r.lineText)}`.slice(0, 200)
@@ -927,68 +977,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // palette where the score gap between tiers dominates).
     hits.sort((a, b) => b.score - a.score);
     return hits.slice(0, max).map((h) => ({
-      meetingId: h.meetingId, title: h.title, source: h.source,
+      meetingId: h.meetingId, title: h.title, groupName: h.groupName, source: h.source,
       snippet: h.snippet,
       ...(h.seconds !== undefined ? { seconds: h.seconds } : {}),
     }));
   });
 
-  // Weekly summary (#weekly). Year/week pair identifies an ISO week.
-  // The aggregator handles cache-or-regenerate based on input hash.
-  const validWeek = (y: unknown, w: unknown): { year: number; week: number } | null => {
-    if (typeof y !== 'number' || typeof w !== 'number') return null;
-    if (!Number.isInteger(y) || !Number.isInteger(w)) return null;
-    if (y < 1970 || y > 9999) return null;
-    if (w < 1 || w > 53) return null;
-    return { year: y, week: w };
-  };
-
-  ipc.handle(IPC_CHANNELS.weeklyGet, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getWeek(w.year, w.week);
-  });
-
-  // Fast path: structured data only (meetings + actions + decisions
-  // groups), no LLM call. Used by the WeeklyView's parallel-fetch
-  // pattern so the page paints immediately while the narrative is
-  // still being drafted.
-  ipc.handle(IPC_CHANNELS.weeklyGetStructured, async (_e, year: unknown, week: unknown) => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getStructuredWeek(w.year, w.week);
-  });
-
-  // Slow path: returns the cached narrative if fresh, else triggers
-  // an LLM call. Pass force=true to bypass the cache (Regenerate).
-  ipc.handle(IPC_CHANNELS.weeklyGetNarrative, async (_e, year: unknown, week: unknown, force: unknown) => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getOrGenerateNarrative(w.year, w.week, {
-      force: force === true,
-    });
-  });
-
-  ipc.handle(IPC_CHANNELS.weeklyRegenerate, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.regenerateWeek(w.year, w.week);
-  });
-
-  ipc.handle(IPC_CHANNELS.weeklyExportMarkdown, async (_e, year: unknown, week: unknown): Promise<{ path: string | null; markdown: string }> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    const data = await s.weeklyAggregator.getWeek(w.year, w.week);
-    const markdown = renderWeeklyMarkdown(data);
-    const filename = `weekly-${w.year}-W${String(w.week).padStart(2, '0')}.md`;
-    const result = await dialog.showSaveDialog({
-      defaultPath: filename,
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    });
-    if (result.canceled || !result.filePath) return { path: null, markdown };
-    fs.writeFileSync(result.filePath, markdown, 'utf8');
-    return { path: result.filePath, markdown };
-  });
+  registerWeeklyHandlers(ipc, s);
 
   // Phase 3 LLM-provider lifecycle. Settings UI calls this to dim
   // managed-mode options when their CLI isn't installed and to show
