@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { MeetingsRepo } from '../storage/meetings-repo.js';
+import type { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 import { RecordingRecoveryService, revealPathInFinder } from './recovery.js';
 
 const fixtureDirs: string[] = [];
@@ -27,8 +29,8 @@ describe('RecordingRecoveryService', () => {
     } as const;
     const catalog = vi.fn(async (audioPath: string) => ({ kind: 'added', meeting: { id: 'm1', audioPath } }));
     const service = new RecordingRecoveryService({
-      sessions: { findRecoverable: () => [session], findById: () => session, dismissRecovery: vi.fn() } as any,
-      meetings: { findByAudioPath: () => null } as any,
+      sessions: { findRecoverable: () => [session], findById: () => session, dismissRecovery: vi.fn() } as unknown as RecordingSessionsRepo,
+      meetings: { findByAudioPath: () => null } as unknown as MeetingsRepo,
       probe: vi.fn(async (file: string) => {
         if (file === voice) return { durationS: 42 };
         throw new Error('no duration');
@@ -59,8 +61,8 @@ describe('RecordingRecoveryService', () => {
       startedAt: '2026-08-12T14:00:00.000Z', finalizedAt: null, status: 'error', dismissedAt: null,
     } as const;
     const service = new RecordingRecoveryService({
-      sessions: { findRecoverable: () => [session], findById: () => session, dismissRecovery } as any,
-      meetings: { findByAudioPath: () => null } as any,
+      sessions: { findRecoverable: () => [session], findById: () => session, dismissRecovery } as unknown as RecordingSessionsRepo,
+      meetings: { findByAudioPath: () => null } as unknown as MeetingsRepo,
       probe: vi.fn(async () => { throw new Error('invalid'); }),
       catalog: vi.fn(), reveal,
     });
@@ -118,8 +120,8 @@ describe('RecordingRecoveryService', () => {
     const dismissRecovery = vi.fn();
     const session = { id: 'failed', outputPath: path.join(dir, 'gone.m4a'), dismissedAt: null };
     const service = new RecordingRecoveryService({
-      sessions: { findById: (id: string) => id === session.id ? session : null, dismissRecovery } as any,
-      meetings: {} as any, catalog: vi.fn(),
+      sessions: { findById: (id: string) => id === session.id ? session : null, dismissRecovery } as unknown as RecordingSessionsRepo,
+      meetings: {} as unknown as MeetingsRepo, catalog: vi.fn(),
       reveal: async () => { throw new Error('Finder unavailable'); },
     });
     await expect(service.reveal('failed')).rejects.toThrow('Finder unavailable');
