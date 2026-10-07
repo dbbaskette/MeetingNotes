@@ -10,6 +10,7 @@ import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
+import { formatLogTimestamp } from '../lib/log-timestamp.js';
 
 interface Settings {
   lmStudioUrl: string;
@@ -669,14 +670,14 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
-  const time = entry.ts ? entry.ts.slice(11, 19) : '—';
+  const time = formatLogTimestamp(entry.ts);
   const dataStr =
     entry.data && Object.keys(entry.data).length > 0
       ? JSON.stringify(entry.data)
       : '';
   return (
     <div className="px-3 py-1 border-b border-surface-border/50 last:border-b-0 flex gap-2">
-      <span className="text-ink-muted/70 tabular-nums shrink-0">{time}</span>
+      <span className="text-ink-muted/70 tabular-nums shrink-0 whitespace-nowrap" title={entry.ts ?? undefined}>{time}</span>
       <span className={`font-semibold uppercase shrink-0 w-10 ${levelCls}`}>
         {entry.level}
       </span>
