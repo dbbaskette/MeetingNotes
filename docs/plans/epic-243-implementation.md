@@ -43,6 +43,9 @@ keep remote gates. Capture/export/backup tests never touch real user data.
 
 ## Progress
 
-Implementation slices complete. Targeted data/recording/search tests and
-synthetic keyboard/dialog/transcript/Weekly task fixtures pass. Full clean-Mac
-verification and publication remain pending; see the verification record.
+Implementation slices and clean-Mac verification complete. The full gate passes
+1,193 tests (six skipped), native checks, types/build/scoped lint, benchmarks and
+all eight renderer fixtures. The final key-fencing rerun also passes types/build/
+scoped lint and all eight fixtures; unchanged backend/native evidence is reused.
+See the verification record for exact source states, retained logs and owner
+spot checks. Authorized publication is through the accompanying PR to main.

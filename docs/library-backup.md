@@ -16,7 +16,9 @@ original paths. Keep the backup private. No cloud upload happens.
 
 `manifest.json` lists every included regular file with its size and SHA-256,
 audio path mappings and portable relative links. Database integrity is checked
-before success. Changed/missing files fail safely. An `INCOMPLETE` marker remains
+before success, including complete audio-reference mappings. The file inventory
+is rechecked under the write lock; files added or changed after Preview require
+a fresh preview. Changed/missing files fail safely. An `INCOMPLETE` marker remains
 in an unfinished destination; never restore it. Original files are never deleted
 or overwritten. A failed copy can be inspected or removed manually.
 

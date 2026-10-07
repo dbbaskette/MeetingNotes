@@ -45,7 +45,9 @@ replacement, real recording, account export, or live-library restore is requeste
   model caches. Idle/write coordination protects the consistent snapshot.
   Preview, progress, missing/changed-file failure, checksums/path validation and
   restore into a NEW disposable destination are tested. Originals stay unchanged;
-  incomplete destinations retain a marker and cannot be restored.
+  incomplete destinations retain a marker and cannot be restored. The inventory
+  is rechecked under the write lock so files added after Preview require a fresh
+  preview; validation also requires a mapping for every database audio reference.
 
 ## Targeted host milestone
 
@@ -55,19 +57,20 @@ weekly freshness/calendar, IPC contracts, browse state and group revisions.
 Types pass for main/renderer/fixtures; scoped lint has no errors (warnings are
 reported, not represented as clean lint).
 
-Host UI log: `/private/tmp/meetingnotes-epic243-ui.log`. Alternating four-sample
-12,000-line/~6.6-hour synthetic transcript comparison against `1be1704`, warm-up
-excluded: 12,000 → 19 mounted rows, median initial React work approximately
-135.5 → 9.0 ms. Process working-set and JS heap samples are retained; renderer
-reuse/GC makes them noisy, so no isolated memory-saving claim is made. Playback
-update samples are recorded by the final fixture. Search burst: 30 rapid requests,
-maximum one child, 29 cancelled, approximately 12 ms on this host. Running-child
-cancellation and timeout have distinct assertions. These are synthetic workload
-results, not production latency guarantees.
+The final clean-Mac fixture records an alternating four-sample 12,000-line/
+~6.6-hour synthetic transcript comparison against `1be1704`, warm-up excluded:
+12,000 → 17 mounted rows; median initial React work approximately 142.7 → 9.9 ms;
+median playback-update work 14.6 → 4.5 ms. Process working-set and JS heap samples
+are retained, but renderer reuse/GC makes them noisy, so no isolated memory-saving
+claim is made. Search burst: 30 rapid requests, maximum one child, 29 cancelled,
+21 ms elapsed in the clean Mac. Running-child cancellation and timeout have
+distinct assertions. These are synthetic workloads, not production guarantees.
 
 Logs: `/private/tmp/meetingnotes-epic243-final-targeted.log`,
 `/private/tmp/meetingnotes-epic243-data-tests.log`,
-`/private/tmp/meetingnotes-epic243-boundary-final.log`.
+`/private/tmp/meetingnotes-epic243-boundary-final.log`, and
+`/private/tmp/meetingnotes-epic243-final-backup-search.log` (51 final backup/search
+tests). Fifteen summary-stage tests also pass after lint-safe mock typing.
 
 ## Full clean-Mac gate
 
@@ -82,10 +85,54 @@ structured Weekly metadata-cache write from the backup lock. Targeted
 Obsidian/watcher/backup tests pass (42 tests); capture/source fixtures verify
 title retention across Refresh and explicit restart.
 
-Full rerun pending. The existing shared Tart wrapper will test a committed, disposable
-standalone Git clone (history retained for baseline benchmarks), not the user's
-checkout, installed app, library or credentials. Source-only gate; no packaged
-installer or real inference/account integrations are claimed for this epic.
+An infrastructure-only retry failed before tests with a Virtualization framework
+boot error. Run `541df02` then passed all 1,193 tests (six skipped), native audio,
+types and production build, but stopped at five legacy `any` annotations in the
+changed summary test file. Those mock annotations are now typed; no lint rule or
+assertion was bypassed. A stale search completion hint is also hidden once browse
+mode resumes. Intermediate runs are not represented as complete gates. Their
+exact disposable VMs were removed. Temporary scratch cleanup removed some earlier
+UI/CI logs; the final complete evidence is kept in the ignored workspace folder.
+
+The complete shared Tart gate passed on `828158e41f82ff4157c38b41bc8ddaeb603bf9c3`,
+tree `b09ca8f19fecc03e3469dc6d8663a5d98a233ff3`, in a disposable standalone clone
+with Git history retained for baseline benchmarks. Environment: macOS 27.0
+(26A428), arm64, Node 22.23.2, Electron 30.5.1.
+
+- 1,193 tests passed; six skipped (147 files passed, two skipped).
+- Native AAC/timeline/TTS synthetic checks, main/preload/renderer/fixture types,
+  production build and scoped changed-file lint passed (zero errors, 12 warnings).
+  This is not a claim that unrelated repository-wide lint has no existing errors.
+- Browse benchmark preserved identical output: 1,000 meetings median 5.01 → 1.25
+  ms; 10,000 meetings 61.88 → 10.57 ms, 500 groups, versus the existing benchmark
+  baseline. This reuses the delivered browse optimization, not a new #243 claim.
+- All eight renderer fixtures passed: rows, selection, grouped, startup, settings,
+  sources, capture and epic243. Rows include busy deletion, unsaved rename
+  retention and restored trigger focus; epic243 covers both transcript modes,
+  whole-text Find/distant seek/manual scroll, narrow width/zoom/dark mode,
+  nested/busy keyboard dialogs, task rollback/Retry and backup preview/progress.
+
+Final renderer key-fencing rerun passed at
+`68ca305feaac83125c3996704df174f635e42c7c`, tree
+`3c18297fc58d9a5875668377d5def5ab62d2cc28`, in the same clean-Mac environment.
+Types, production build, scoped lint (zero errors, 13 warnings) and all eight
+fixtures passed again, including hidden-view/dialog J/K isolation. Backend/native
+evidence above is reused because its source is unchanged. The final documentation-only
+commit does not alter the verified runtime. Neither the user's checkout nor
+installed app, library or credentials are used by guest fixtures. Source-only
+gate; no installer or real inference/account integration acceptance is claimed.
+
+Retained complete log directory:
+`/Users/dbbaskette/Projects/MeetingNotes/.worktrees/fix-recovery-actions/.ci-epic243-results/meetingnotes-test-20261007144258-24876-26394187`.
+Includes environment, checks, test/build/lint/native/renderer logs and
+`epic243-benchmark.json`; PASS and cleanup are recorded. The disposable VM was
+deleted; the stopped base was not modified.
+
+Final renderer log directory:
+`/Users/dbbaskette/Projects/MeetingNotes/.worktrees/fix-recovery-actions/.ci-epic243-results/meetingnotes-test-20261007144843-43644-67afc23d`.
+The final transcript benchmark repeats the improvement: initial median
+141.4 → 9.8 ms, playback median 13.7 → 4.1 ms; 17 mounted rows. PASS and
+disposable-VM deletion are recorded for this run too.
 
 Dependencies are unchanged. Prior audit: 49 findings (2 low, 8 moderate, 35 high,
 4 critical, including development dependencies); this is not a clean audit or
