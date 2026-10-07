@@ -8,13 +8,14 @@ import type { MeetingNotesApi } from '../../preload/index.js';
 
 // Serialized into the real renderer; type-check against the actual preload
 // contract so the smoke cannot confuse repository rows with IPC page items.
-async function rendererSnapshot(): Promise<{ rows: number; hasNext: boolean; active: number; autoProcess: boolean; title: string; text: string }> {
+async function rendererSnapshot(): Promise<{ rows: number; hasNext: boolean; active: number; autoProcess: boolean; micStatus: string; title: string; text: string }> {
   const api = (globalThis as unknown as { api: MeetingNotesApi }).api;
   const page = await api.meetings.listPage({ filter: 'all', sort: 'newest', pageSize: 50 });
   const active = await api.recording.active();
   const settings = await api.settings.getAll();
+  const micStatus = await api.permissions.micStatus();
   return { rows: page.items.length, hasNext: !!page.nextCursor, active: active.length, autoProcess: settings.autoProcessRecordings,
-    title: document.title, text: document.body.innerText.slice(0, 1200) };
+    micStatus, title: document.title, text: document.body.innerText.slice(0, 2000) };
 }
 
 /** Opt-in CI only: an explicit argument AND an owned temporary fixture marker
@@ -50,15 +51,22 @@ export async function verifyPackageSmoke(root: string, win: BrowserWindow, packa
   if (!packaged) throw new Error('This check must run the packaged app, not source Electron');
   let painted = false;
   for (let i = 0; i < 200; i++) {
-    painted = await win.webContents.executeJavaScript('document.body.innerText.includes("Synthetic package meeting")');
+    // Clean VMs have no microphone grant. The real production permission
+    // gate is the expected view there; never fake/grant TCC just to show rows.
+    painted = await win.webContents.executeJavaScript('document.body.innerText.includes("Synthetic package meeting") || document.body.innerText.includes("Permissions needed")');
     if (painted) break;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
-  if (!painted) throw new Error('Packaged Library did not render synthetic meetings');
+  if (!painted) throw new Error('Packaged app did not render its Library or permission gate');
   const state = await win.webContents.executeJavaScript(`(${rendererSnapshot.toString()})()`);
   if (state.rows !== 50 || !state.hasNext || state.active !== 0 || state.autoProcess !== false) throw new Error('Packaged IPC smoke assertion failed');
+  const view = state.micStatus === 'granted' ? 'library' : 'permissions';
+  if (view === 'library' ? !state.text.includes('Synthetic package meeting')
+    : !['Permissions needed', 'Microphone', 'System audio', 'Grant'].every(label => state.text.includes(label))) {
+    throw new Error('Packaged view does not match the real microphone permission state');
+  }
   const png = (await win.webContents.capturePage()).toPNG();
   if (png.byteLength < 10000) throw new Error('Packaged render screenshot is unexpectedly empty');
   fs.writeFileSync(path.join(root, 'render.png'), png);
-  fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ packaged, softwareRendering: process.argv.includes('--disable-gpu'), ...state }, null, 2));
+  fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ packaged, view, softwareRendering: process.argv.includes('--disable-gpu'), ...state }, null, 2));
 }
