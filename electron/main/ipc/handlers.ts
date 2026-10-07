@@ -858,6 +858,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const { count } = await extractActionItemsFromSummary(
       { ...s, onResample: (retry, words) =>
         s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }),
+        onZeroItemsRetry: () => s.logger.warn('reextract:zero-items-retry', { meetingId }),
         beforeReplace: () => {
           const current = s.meetings.findById(meetingId);
           if (!current || current.deletedAt || current.status === 'processing' || (revision && revision !== s.notesHistory?.revision(meetingId)))
