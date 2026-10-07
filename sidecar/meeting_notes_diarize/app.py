@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import traceback
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -18,10 +19,22 @@ def _read_build_id() -> str:
     # PyInstaller onedir bundle / dev module. Missing file = dev run: use
     # this process's own module mtime as a poor-man's build id so at least
     # repeated dev launches are distinguishable.
-    for candidate in [
+    candidates = []
+    if getattr(sys, "frozen", False):
+        # PyInstaller's onedir executable lives at
+        # dist/meeting-notes-diarize/meeting-notes-diarize. Raw bundles keep
+        # BUILD_ID in dist/, while the packaged .app keeps it in sidecar/ so
+        # the Electron supervisor and frozen service read the same stamp.
+        executable_dir = Path(sys.executable).parent
+        candidates.extend([
+            executable_dir.parent / "BUILD_ID",
+            executable_dir.parent.parent / "BUILD_ID",
+        ])
+    candidates.extend([
         Path(__file__).parent.parent / "BUILD_ID",          # dev: sidecar/BUILD_ID
         Path(__file__).parent.parent / "dist" / "BUILD_ID", # packaged sibling
-    ]:
+    ])
+    for candidate in candidates:
         try:
             if candidate.is_file():
                 return candidate.read_text().strip()

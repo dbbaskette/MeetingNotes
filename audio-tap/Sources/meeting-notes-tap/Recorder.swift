@@ -38,7 +38,8 @@ final class Recorder {
   private var micPendingFrames: [Float] = []
   private let micLock = NSLock()
   private var lastSignalAt: Date = .init()
-  private var lastLevelEmitAt: TimeInterval = 0
+  private var lastLevelEmitAt: [String: TimeInterval] = [:]
+  private let levelLock = NSLock()
   private var stopped = false
   // Task 12 diagnostics: count IOProc invocations to detect "no data flow"
   // even when AudioDeviceStart succeeds.
@@ -106,15 +107,18 @@ final class Recorder {
     detachProcessTap()
     // Finalize all three writers. Await each so the encoders flush cleanly;
     // the queue.sync inside AACWriter makes the cost additive but still
-    // bounded (sub-second each).
-    if let w = writerMixed { await w.finalize() }
-    if let w = writerVoice { await w.finalize() }
-    if let w = writerSystem { await w.finalize() }
+    // bounded (sub-second each). A writer that never received audio deletes
+    // its file (see AACWriter.finalize) so no unreadable stubs survive.
+    var dropped: [String] = []
+    if let w = writerMixed, await !w.finalize() { dropped.append("mixed") }
+    if let w = writerVoice, await !w.finalize() { dropped.append("voice") }
+    if let w = writerSystem, await !w.finalize() { dropped.append("system") }
     StatusEvent.emit([
       "event": "stopped",
       "bytes": NSNumber(value: writerMixed?.bytesWritten ?? 0),
       "bytes_voice": NSNumber(value: writerVoice?.bytesWritten ?? 0),
       "bytes_system": NSNumber(value: writerSystem?.bytesWritten ?? 0),
+      "empty_stems_deleted": dropped,
     ])
   }
 
@@ -440,6 +444,7 @@ final class Recorder {
       if let voiceWriter = self.writerVoice, let voiceCopy = Self.copyMonoBuffer(outBuf) {
         voiceWriter.append(voiceCopy, at: 0)
       }
+      self.emitLevel(source: "mic", buffer: outBuf)
       guard let chan = outBuf.floatChannelData?[0] else { return }
       let n = Int(outBuf.frameLength)
       var arr = [Float](repeating: 0, count: n)
@@ -537,6 +542,7 @@ final class Recorder {
     if let sysWriter = writerSystem, let systemCopy = Self.copyMonoBuffer(outBuf) {
       sysWriter.append(systemCopy, at: inputTime.pointee.mHostTime)
     }
+    emitLevel(source: "system", buffer: outBuf)
 
     // Task 9 mixes mic samples in here.
     mixPendingMicIfAvailable(into: outBuf)
@@ -544,14 +550,21 @@ final class Recorder {
     lastSignalAt = .init()
     mixedWriter.append(outBuf, at: inputTime.pointee.mHostTime)
 
+    emitLevel(source: "mixed", buffer: outBuf)
+  }
+
+  private func emitLevel(source: String, buffer: AVAudioPCMBuffer) {
     let now = Date().timeIntervalSince1970
-    if now - lastLevelEmitAt > 0.1 {
-      lastLevelEmitAt = now
-      StatusEvent.emit([
-        "event": "level",
-        "peak_db": Self.peakDB(outBuf),
-      ])
-    }
+    levelLock.lock()
+    let shouldEmit = now - (lastLevelEmitAt[source] ?? 0) > 0.1
+    if shouldEmit { lastLevelEmitAt[source] = now }
+    levelLock.unlock()
+    guard shouldEmit else { return }
+    StatusEvent.emit([
+      "event": "level",
+      "source": source,
+      "peak_db": Self.peakDB(buffer),
+    ])
   }
 
   // Mic mixing seam — body filled in by Task 9. In Task 8, no-op.

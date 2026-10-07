@@ -23,6 +23,24 @@ function insertMeeting(id: string): void {
 }
 
 describe('SpeakersRepo', () => {
+  it('batches requested meeting links only, deduplicating IDs and sorting labels', () => {
+    insertMeeting('first'); insertMeeting('last'); insertMeeting('outside');
+    const rosterId = repo.create({ displayName: 'Alex' });
+    repo.linkToMeeting('first', 'B', null, 0);
+    repo.linkToMeeting('first', 'A', rosterId, 1);
+    repo.linkToMeeting('last', 'A', null, 0);
+    repo.linkToMeeting('outside', 'A', rosterId, 1);
+    const ids = ['first', ...Array.from({ length: 900 }, (_, i) => `missing-${i}`), 'last', 'first'];
+    expect(repo.listForMeetings(ids)).toEqual(new Map([
+      ['first', [
+        { localLabel: 'A', rosterSpeakerId: rosterId, displayName: 'Alex', confidence: 1 },
+        { localLabel: 'B', rosterSpeakerId: null, displayName: null, confidence: 0 },
+      ]],
+      ['last', [{ localLabel: 'A', rosterSpeakerId: null, displayName: null, confidence: 0 }]],
+    ]));
+    expect(repo.listForMeetings([])).toEqual(new Map());
+  });
+
   it('create + list', () => {
     const id = repo.create({ displayName: 'Dan B.' });
     expect(repo.list()).toEqual([expect.objectContaining({ id, displayName: 'Dan B.' })]);

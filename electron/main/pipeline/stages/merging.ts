@@ -7,6 +7,8 @@ import type { SpeakersRepo } from '../../storage/speakers-repo.js';
 import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { mergeTranscriptWithDiarization, mergedToMarkdown } from '../../lib/merge-transcript.js';
 import { VOICE_SPEAKER_LABEL } from '../../lib/stem-paths.js';
+import type { ArtifactCache } from '../../library/artifact-cache.js';
+import type { TerminologyService } from '../../terminology/service.js';
 
 /**
  * Rebuilds `transcript.md` from `transcript.raw.json` + `diarization.json`,
@@ -29,9 +31,13 @@ export function remergeTranscript(
     libraryRoot: string;
     meetings: MeetingsRepo;
     speakers: SpeakersRepo;
+    artifactCache: ArtifactCache;
     userName?: string;
+    terminology?: TerminologyService;
+    applyTerminology?: boolean;
   },
 ): { segments: number; named: number } {
+  if (deps.terminology) return deps.terminology.generateTranscript(meetingId, deps.applyTerminology ?? false);
   const meeting = deps.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(deps.libraryRoot, meeting.slug);
@@ -53,7 +59,13 @@ export function remergeTranscript(
   for (const sp of deps.speakers.listForMeeting(meetingId)) {
     if (sp.displayName) labelMap[sp.localLabel] = sp.displayName;
   }
-  fs.writeFileSync(path.join(folder, 'transcript.md'), mergedToMarkdown(merged, labelMap));
+  // Fence overlapping reads before the write. Review sources may have been
+  // replaced by upstream stages even when coarse filesystem times are equal.
+  const transcriptPath = path.join(folder, 'transcript.md');
+  deps.artifactCache.invalidate(transcriptPath);
+  deps.artifactCache.invalidate(path.join(folder, 'transcript.raw.json'));
+  deps.artifactCache.invalidate(diarPath);
+  fs.writeFileSync(transcriptPath, mergedToMarkdown(merged, labelMap));
   // Count named as the overlap between detected speakers and labeled ones;
   // don't over-count the synthetic VOICE_YOU which is always "named."
   const named = deps.speakers.listForMeeting(meetingId).filter((sp) => sp.displayName).length;
@@ -65,7 +77,10 @@ export const runMerging: StageHandler = async ({ meetingId }, ctx) => {
     libraryRoot: ctx.libraryRoot,
     meetings: ctx.meetings,
     speakers: ctx.speakers,
+    artifactCache: ctx.artifactCache,
     userName: ctx.settings.get('userName'),
+    terminology: ctx.terminology,
+    applyTerminology: true,
   });
   ctx.logger.info('merge:done', { meetingId, ...result });
 };

@@ -6,5 +6,6 @@ let package = Package(
   platforms: [.macOS(.v14)],
   targets: [
     .executableTarget(name: "meeting-notes-tap"),
+    .testTarget(name: "meeting-notes-tap-tests", dependencies: ["meeting-notes-tap"]),
   ]
 )
