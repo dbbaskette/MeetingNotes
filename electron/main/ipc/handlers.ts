@@ -949,9 +949,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const owner = request ? await searchOwners.begin(_e.sender.id,request.clientId,request.requestId) : null;
     try {
     if(owner?.signal.aborted) return {hits:[],status:'cancelled'};
-    if (typeof query !== 'string') return [];
+    if (typeof query !== 'string') {if(request)throw new Error('Search query must be text');return [];}
     const groupId = OptionalGroupScopeSchema.parse(scopeInput);
     const q = query.trim().slice(0,500);
+    if(request?.facets?.content&&q.length<2)return{hits:[],status:'partial',message:'Enter at least two characters to search notes or transcripts.'};
     if (q.length < 2 && !request) return [];
     const qLower = q.toLowerCase();
     const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 100) : 20;

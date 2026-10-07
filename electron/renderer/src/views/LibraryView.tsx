@@ -331,7 +331,7 @@ export function LibraryView({
     const t = window.setTimeout(async () => {
       try {
         dispatched=true;
-        const response=await api.search.run(query,100,groupId,{clientId:searchClientId.current,requestId,facets:{...facets,...libFilter!=='all'?{status:libFilter}:{}}});
+        const response=await api.search.run(query,100,groupId,{clientId:searchClientId.current,requestId,facets:{...facets,...!facets.status&&libFilter!=='all'?{status:libFilter}:{}}});
         if(response.status==='failed')throw new Error(response.message??'Search failed');
         const result = await hydrateLibrarySearch(query, { query: async()=>response.hits, getMany: api.meetings.getMany }, groupId);
         if(!cancelled)setSearchCompletion(response.status==='complete'?null:response.message??response.status);
@@ -766,6 +766,12 @@ export function LibraryView({
             }
             const failure = isSearching ? searchError : organizedFull ? groupsError ?? error : error;
             if (failure) return <LibraryRetryRow message={failure} onRetry={isSearching ? () => setSearchRevision((revision) => revision + 1) : () => void retry()} />;
+            if (isSearching && searchCompletion) return (
+              <div role="status" className="py-10 text-center text-sm text-ink-muted">
+                <p>No matches found so far. {searchCompletion}</p>
+                <button type="button" className="mt-3 text-brand-indigo underline" onClick={() => setSearchRevision((revision) => revision + 1)}>Retry search</button>
+              </div>
+            );
             return (
               <LibraryEmpty
                 filter={libFilter}
