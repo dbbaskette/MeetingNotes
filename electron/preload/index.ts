@@ -620,7 +620,7 @@ const api = {
     probe: (url: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.llmProbe, url) as Promise<
         | { ok: true; models: string[] }
-        | { ok: false; error: string }
+        | { ok: false; error: string; code?: string }
       >,
     /** Fire one cheap canary extraction prompt through the real LM Studio
      *  chat path and report whether the model answered normally or hit the
@@ -637,7 +637,7 @@ const api = {
     probe: (url: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.sttProbe, url) as Promise<
         | { ok: true }
-        | { ok: false; error: string }
+        | { ok: false; error: string; code?: string }
       >,
   },
   permissions: {

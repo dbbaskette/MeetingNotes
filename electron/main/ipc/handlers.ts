@@ -14,6 +14,7 @@ import type { SettingsRepo } from '../storage/settings-repo.js';
 import { LMStudioError, REASONING_LOOP_MARKER, type LMStudioClient } from '../lm-studio/client.js';
 import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { extractActionItemsFromSummary } from '../pipeline/extract-action-items.js';
+import { probeError } from './probe-error.js';
 import type { RecordingManager } from '../recording/manager.js';
 import type { RecordingRecoveryService } from '../recording/recovery.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
@@ -996,7 +997,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // so a misconfigured URL fails fast instead of hanging the form.
   ipc.handle(IPC_CHANNELS.sttProbe, async (
     _e, url: unknown,
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+  ): Promise<{ ok: true } | { ok: false; error: string; code?: string }> => {
     if (typeof url !== 'string' || !url) return { ok: false, error: 'invalid url' };
     try {
       const resp = await fetch(`${url.replace(/\/$/, '')}/health`, {
@@ -1014,14 +1015,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         return { ok: false, error: '/health returned non-JSON — likely a different server on this port' };
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: msg.includes('ECONNREFUSED') ? 'connection refused' : msg };
+      return probeError(e);
     }
   });
 
   ipc.handle(IPC_CHANNELS.llmProbe, async (
     _e, url: unknown,
-  ): Promise<{ ok: true; models: string[] } | { ok: false; error: string }> => {
+  ): Promise<{ ok: true; models: string[] } | { ok: false; error: string; code?: string }> => {
     if (typeof url !== 'string' || !url) return { ok: false, error: 'invalid url' };
     try {
       const resp = await fetch(`${url.replace(/\/$/, '')}/v1/models`, {
@@ -1036,8 +1036,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         .filter((id) => id.length > 0);
       return { ok: true, models };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: msg.includes('ECONNREFUSED') ? 'connection refused' : msg };
+      return probeError(e);
     }
   });
 

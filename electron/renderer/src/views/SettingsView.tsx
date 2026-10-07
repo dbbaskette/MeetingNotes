@@ -11,6 +11,7 @@ import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { formatLogTimestamp } from '../lib/log-timestamp.js';
+import { effectiveLlmUrl as providerUrl, isIdleProbe, resolveWhisperEndpoint } from '../../../shared/inference-endpoints.js';
 
 interface Settings {
   lmStudioUrl: string;
@@ -39,6 +40,7 @@ interface Settings {
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  llmContextLength: number;
   summaryDetail: 'concise' | 'standard' | 'detailed';
   disableThinking: boolean;
   theme: 'system' | 'light' | 'dark';
@@ -94,6 +96,16 @@ export function SettingsView({
   }, []);
 
   if (!s) return <div className="p-8" role="status">{loadError ? `Could not load Settings: ${loadError}` : 'Loading…'}</div>;
+
+  // The chat client follows the active provider, not the LM Studio URL field —
+  // managed modes hardcode their ports (see LMStudioClient wiring in main).
+  // Test buttons and captions must probe the same endpoint the pipeline uses,
+  // otherwise a healthy ollama setup "fails" a test against :1234.
+  const effectiveLlmUrl = providerUrl(s.summaryProvider, s.lmStudioUrl);
+  const providerLabel =
+    s.summaryProvider === 'lm-studio' ? 'LM Studio, managed'
+    : s.summaryProvider === 'ollama' ? 'Ollama, managed'
+    : 'external server';
 
   function edit<K extends keyof Settings>(key: K, value: Settings[K]): void {
     revisions.current[key] = (revisions.current[key] ?? 0) + 1;
@@ -201,14 +213,17 @@ export function SettingsView({
             onChange={(e) => edit('lmStudioUrl', e.target.value)} onBlur={() => void update('lmStudioUrl', s.lmStudioUrl)}
             className="input flex-1"
           />
-          <TestButton kind="llm" url={s.lmStudioUrl} />
+          <TestButton kind="llm" url={effectiveLlmUrl} lazySpawn={s.summaryProvider !== 'external'} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
           Default for the &lsquo;external&rsquo; provider. Managed providers use their own
           ports (1234 for LM Studio, 11434 for Ollama).
+          {s.summaryProvider !== 'external' && (
+            <> Test probes the active provider at <code>{effectiveLlmUrl}</code>.</>
+          )}
         </div>
       </Field>
-      <Field label="LLM Model (loaded in LM Studio)">
+      <Field label="LLM Model">
         <select
           value={s.llmModel}
           onChange={(e) => void changeLlmModel(e.target.value)}
@@ -250,9 +265,29 @@ export function SettingsView({
           </div>
         )}
         <div className="text-xs text-ink-muted mt-1">
-          Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
+          Loaded from {effectiveLlmUrl}/v1/models ({providerLabel}). Used for
+          summarization and action-item extraction.
         </div>
       </Field>
+      {s.summaryProvider === 'lm-studio' && (
+        <Field label="Context length (managed LM Studio)">
+          <select
+            value={String(s.llmContextLength)}
+            onChange={(e) => update('llmContextLength', Number(e.target.value))}
+            className="input"
+          >
+            <option value="0">Model default (LM Studio setting — often 4k)</option>
+            <option value="8192">8k — short meetings, low RAM</option>
+            <option value="16384">16k — up to ~1 hour</option>
+            <option value="32768">32k — long meetings (recommended if you have the RAM)</option>
+          </select>
+          <div className="text-xs text-ink-muted mt-1">
+            Passed as <code>--context-length</code> when MeetingNotes auto-loads the model.
+            Too-small contexts silently truncate long transcripts; too-large ones can
+            exhaust memory on smaller Macs. Applies at the next model load.
+          </div>
+        </Field>
+      )}
       </SettingsSection>
       <SettingsSection section="Processing" keywords="summary detail concise standard detailed thinking language">
       <Field label="Summary detail level">
@@ -323,7 +358,7 @@ export function SettingsView({
             onChange={(e) => edit('sttUrl', e.target.value)} onBlur={() => void update('sttUrl', s.sttUrl)}
             className="input flex-1"
           />
-          <TestButton kind="stt" url={s.sttUrl} />
+          <TestButton kind="stt" url={s.sttUrl} lazySpawn={resolveWhisperEndpoint(s.sttUrl).kind === 'managed'} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
           Default http://127.0.0.1:8080. Local HTTP endpoints auto-launch whisper-server
@@ -794,11 +829,11 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
  *  Surfaces config errors at edit time instead of letting them bite the
  *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
  *  so the row doesn't accumulate stale state as the user keeps editing. */
-function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.Element {
+function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; detail?: string }
-    | { ok: false; error: string }
+    | { ok: false; error: string; code?: string }
     | null
   >(null);
 
@@ -819,11 +854,13 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         const r = await api.llm.probe(url);
         setResult(r.ok
           ? { ok: true, detail: `${r.models.length} model${r.models.length === 1 ? '' : 's'} loaded` }
-          : { ok: false, error: r.error });
+          : { ok: false, error: r.error, code: r.code });
       } else {
         const r = await api.stt.probe(url);
-        setResult(r.ok ? { ok: true } : { ok: false, error: r.error });
+        setResult(r.ok ? { ok: true } : { ok: false, error: r.error, code: r.code });
       }
+    } catch (error) {
+      setResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
     } finally {
       setBusy(false);
     }
@@ -847,9 +884,19 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         </span>
       )}
       {result && !result.ok && (
-        <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
-          ✗ {result.error}
-        </span>
+        // "Connection refused" on a service the app spawns on demand is the
+        // normal idle state, not a failure — whisper-server and the managed
+        // LLM runtimes shut down after 10 min. Only unexpected responses
+        // (wrong port answering with 404s, timeouts mid-request) stay red.
+        isIdleProbe(lazySpawn, result.code) ? (
+          <span className="text-xs text-ink-muted whitespace-nowrap">
+            ○ not running — starts on demand when needed
+          </span>
+        ) : (
+          <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
+            ✗ {result.error}
+          </span>
+        )
       )}
     </div>
   );

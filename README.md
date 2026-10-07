@@ -281,6 +281,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. Managed modes spawn the runtime, auto-load `llmModel`, and idle-shut-down. `external` = you run the server at `lmStudioUrl`. A healthy externally-started server is adopted (never killed) in any mode. |
 | `lmStudioUrl` | `http://localhost:1234` | Chat/LLM endpoint (used only in `external` mode; managed modes hardcode 1234 / 11434). |
 | `llmModel` | `qwen/qwen3.5-9b` | Model id for summarize/extract. Auto-loaded on first use. |
+| `llmContextLength` | `0` | Managed LM Studio context at the next model load: model default (0), 8192, 16384, or 32768. Larger contexts require more memory; already-loaded models are not reloaded automatically. |
 | `disableThinking` | `true` | Sends `enable_thinking: false` so reasoning models skip chain-of-thought where they honor it. |
 | `summaryDetail` | `detailed` | Summary verbosity: `concise` / `standard` / `detailed`. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint. Plain HTTP loopback URLs at the root path are managed locally on the configured port (HTTP without a port uses 80). Remote, HTTPS, or proxy endpoints are user-managed. Restart the app after changing this URL. |
