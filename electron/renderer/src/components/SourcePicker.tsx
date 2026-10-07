@@ -63,12 +63,13 @@ export function SourcePicker({
   }
 
   return (
-    <div className="absolute right-0 top-full mt-2 z-30 w-80 max-h-[80vh] overflow-y-auto bg-surface border border-surface-border rounded-xl shadow-pop p-2">
+    <div className="absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
       <div className="text-[11px] font-mono uppercase tracking-wider text-ink-muted px-2 py-1">
         Recording from
       </div>
       {loading && <div className="px-2 py-3 text-sm text-ink-muted">Looking…</div>}
       {error && <div className="px-2 py-3 text-sm text-danger">{error}</div>}
+      <div className="max-h-[45vh] overflow-y-auto">
       {!loading && audible.length === 0 && (
         <div className="px-2 py-2 text-[11px] text-ink-muted italic">
           Nothing is currently playing audio. Start a meeting or play a sound,
@@ -101,6 +102,7 @@ export function SourcePicker({
         </>
       )}
 
+      </div>
       <div className="border-t border-surface-border my-1" />
       <button
         onClick={() => onPick({ targetPid: 'system', targetLabel: 'All system audio', groupId })}
