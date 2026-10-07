@@ -2,32 +2,9 @@
 # Verify the local stack MeetingNotes depends on. Read-only — never starts services.
 set -uo pipefail
 
-LM_STUDIO_URL="${LM_STUDIO_URL:-http://localhost:1234}"
-STT_URL="${STT_URL:-}"
 DIAR_URL="${DIAR_URL:-http://127.0.0.1:8765}"
-LIB="${MEETINGNOTES_LIB:-$HOME/Documents/MeetingNotes}"
-
-# Read a settings value from the app DB (JSON-quoted strings come back bare).
-setting() {
-  sqlite3 "$LIB/db.sqlite" "SELECT value FROM settings WHERE key='$1';" 2>/dev/null | tr -d '"'
-}
-
-# The app spawns whisper-server at whatever sttUrl points to — probe the same
-# place rather than assuming :8080 (which may belong to another service).
-if [ -z "$STT_URL" ]; then
-  STT_URL="$(setting sttUrl)"
-  STT_URL="${STT_URL:-http://127.0.0.1:8080}"
-fi
-
-# The LLM endpoint follows summaryProvider: managed lm-studio/ollama modes use
-# fixed ports; 'external' uses the user-configured lmStudioUrl.
-PROVIDER="$(setting summaryProvider)"
-PROVIDER="${PROVIDER:-external}"
-case "$PROVIDER" in
-  ollama)    LLM_URL="http://127.0.0.1:11434" ;;
-  lm-studio) LLM_URL="http://127.0.0.1:1234" ;;
-  *)         LLM_URL="$(setting lmStudioUrl)"; LLM_URL="${LLM_URL:-$LM_STUDIO_URL}" ;;
-esac
+doctor_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$doctor_script_dir/doctor-config.sh"
 AUDIO_HIJACK_DIR="${AUDIO_HIJACK_DIR:-$HOME/Music/Audio Hijack}"
 
 pass=0; fail=0; warn=0
