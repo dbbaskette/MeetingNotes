@@ -286,7 +286,7 @@ function DeleteDialog({
   }
 
   return (
-    <ModalShell onClose={onClose}>
+    <ModalShell title="Delete meeting" busy={busy} onClose={onClose}>
       <div className="text-sm font-semibold mb-2">Delete this meeting?</div>
       <div className="text-sm text-ink-muted mb-4">
         <span className="font-mono text-ink">{meeting.title}</span>
