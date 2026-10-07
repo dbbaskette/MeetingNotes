@@ -1,28 +1,51 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runExtracting } from './extracting.js';
+import type { PipelineCtx } from '../context.js';
+import { extractActionItemsFromSummary, summaryClaimsActionItems } from '../extract-action-items.js';
 
-function makeCtx(chat: (input: unknown) => Promise<string>): { ctx: any; folder: string } {
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+
+function makeCtx(chat: (input: unknown) => Promise<string>) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-e-'));
+  dirs.push(dir);
   const folder = path.join(dir, 'meetings', 'slug');
   fs.mkdirSync(folder, { recursive: true });
-  const ctx: any = {
+  const fixture = {
     libraryRoot: dir,
     llmSupervisor: { ensureReady: async () => {} },
     lmStudio: { chat: vi.fn(chat) },
     meetings: { findById: () => ({ slug: 'slug' }) },
-    actionItems: { replaceForMeeting: vi.fn() },
+    actionItems: { replaceForMeeting: vi.fn(), listByMeeting: () => [] },
     settings: { get: () => 'llama-3.1-8b' },
-    logger: { info: () => {} },
+    logger: { info: () => {}, warn: vi.fn() },
   };
+  const ctx = fixture as typeof fixture & PipelineCtx;
   return { ctx, folder };
 }
 
 const SUMMARY = '## Overview\nWeekly sync.\n\n## Action Items\n- Send update — Dan — 2026-04-22';
 
 describe('runExtracting', () => {
+  it.each(['None', '(none)', 'None.', 'No action items identified.', 'N/A'])('ignores an explicit %s placeholder', (placeholder) => {
+    expect(summaryClaimsActionItems(`## Action Items\n- ${placeholder}\n\n## Decisions\n- Ship tomorrow`)).toBe(false);
+  });
+
+  it('recognizes numbered commitments', () => {
+    expect(summaryClaimsActionItems('## Action Items\n1. Send the report')).toBe(true);
+  });
+
+  it('runs the replacement guard before touching either store', async () => {
+    const { ctx, folder } = makeCtx(async () => '[{"text":"Send update","owner":null,"due_date":null}]');
+    fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
+    fs.writeFileSync(path.join(folder, 'action-items.json'), 'previous');
+    await expect(extractActionItemsFromSummary({ ...ctx, beforeReplace: () => { throw new Error('Meeting changed'); } }, 'm', folder, 'save summary')).rejects.toThrow('Meeting changed');
+    expect(ctx.actionItems.replaceForMeeting).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(folder, 'action-items.json'), 'utf8')).toBe('previous');
+  });
   it('sends summary.md to the LLM, parses JSON, writes action-items.json + repo', async () => {
     const { ctx, folder } = makeCtx(
       async () => '[{"text":"Send update","owner":"Dan","due_date":"2026-04-22"}]',
@@ -57,6 +80,45 @@ describe('runExtracting', () => {
     expect(empty.ctx.lmStudio.chat).not.toHaveBeenCalled();
   });
 
+  it('retries once warmer when extraction returns zero items but the summary has bullets', async () => {
+    let calls = 0;
+    const { ctx, folder } = makeCtx(async () => {
+      calls += 1;
+      return calls === 1 ? 'Sure! Here are the items you asked for.' // unparseable
+        : '[{"text":"Send update","owner":"Dan","due_date":"2026-04-22"}]';
+    });
+    fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
+    await runExtracting({ meetingId: 'm' }, ctx);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(2);
+    const second = ctx.lmStudio.chat.mock.calls[1]![0] as { temperature: number };
+    expect(second.temperature).toBeGreaterThan(0);
+    expect(ctx.logger.warn).toHaveBeenCalledWith('extract:zero-items-retry', { meetingId: 'm' });
+    const written = JSON.parse(fs.readFileSync(path.join(folder, 'action-items.json'), 'utf8'));
+    expect(written).toHaveLength(1);
+  });
+
+  it('keeps existing items and reports an error when both attempts return zero items', async () => {
+    const { ctx, folder } = makeCtx(async () => '[]');
+    fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
+    const prior = '[{"text":"Previously saved item"}]';
+    fs.writeFileSync(path.join(folder, 'action-items.json'), prior);
+    await expect(runExtracting({ meetingId: 'm' }, ctx)).rejects.toThrow(/Existing items were kept/);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(2);
+    expect(ctx.actionItems.replaceForMeeting).not.toHaveBeenCalled();
+    expect(fs.readFileSync(path.join(folder, 'action-items.json'), 'utf8')).toBe(prior);
+  });
+
+  it('accepts an empty result without retry when the summary has no real Action Items', async () => {
+    const { ctx, folder } = makeCtx(async () => '[]');
+    fs.writeFileSync(
+      path.join(folder, 'summary.md'),
+      '## Overview\nQuick chat.\n\n## Action Items\n- None',
+    );
+    await runExtracting({ meetingId: 'm' }, ctx);
+    expect(ctx.lmStudio.chat).toHaveBeenCalledTimes(1);
+    expect(ctx.logger.warn).not.toHaveBeenCalled();
+  });
+
   it('attaches source_quote by matching items to the summary bullets', async () => {
     const summary =
       '## Action Items\n' +
@@ -86,7 +148,7 @@ describe('runExtracting', () => {
     // Gemma repeatedly exhausted 4000 tokens around 2200 reasoning words in
     // production. 6000 leaves room, and resampleRetries still re-samples the
     // intermittent longer spiral (the client bumps retry temperature).
-    const { ctx, folder } = makeCtx(async () => '[]');
+    const { ctx, folder } = makeCtx(async () => '[{"text":"Send update","owner":null,"due_date":null}]');
     fs.writeFileSync(path.join(folder, 'summary.md'), SUMMARY);
     await runExtracting({ meetingId: 'm' }, ctx);
     const arg = ctx.lmStudio.chat.mock.calls[0]![0] as {

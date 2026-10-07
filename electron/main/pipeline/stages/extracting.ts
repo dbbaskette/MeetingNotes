@@ -12,8 +12,14 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   const { count } = await extractActionItemsFromSummary(
-    { ...ctx, onResample: (retry, words) =>
-      ctx.logger.warn('extract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
+    {
+      ...ctx,
+      onResample: (retry, words) =>
+        ctx.logger.warn('extract:reasoning-retry', { meetingId, retry, reasoningWords: words }),
+      onZeroItemsRetry: () =>
+        ctx.logger.warn('extract:zero-items-retry', { meetingId }),
+      beforeReplace: () => { if (ctx.notesHistory && ctx.actionItems.listByMeeting(meetingId).length) ctx.notesHistory.capture(meetingId, 'Before action items replaced'); },
+    },
     meetingId,
     folder,
     're-run processing so the summarize stage regenerates it before action-item extraction.',

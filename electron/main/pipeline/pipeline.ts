@@ -1,8 +1,12 @@
 // electron/main/pipeline/pipeline.ts
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
+import path from 'node:path';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
 import { bucketForChars } from '../lib/stage-eta.js';
 import { transcriptChars } from './transcript-chars.js';
+import { meetingFolderPath } from '../storage/meeting-folder.js';
+import { buildSpeakerReviewMetadata } from '../speakers/review-metadata.js';
+import type { DiarizationSegment } from '../speakers/sample-extractor.js';
 
 const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('merging'),
@@ -32,6 +36,7 @@ export interface PipelineStatus {
 }
 
 export type PipelineStatusListener = (s: PipelineStatus) => void;
+export type MeetingStageListener = (meetingId: string) => void;
 /** Fires when a meeting reaches status='done'. Async listeners are awaited
  *  but their errors are isolated — webhook delivery failures must not
  *  poison the next meeting's run. Issue #79. */
@@ -49,6 +54,7 @@ export class Pipeline {
   private paused = false;
   private currentId: string | null = null;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
+  private readonly stageListeners: Set<MeetingStageListener> = new Set();
   private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
   private readonly gateListeners: Set<SpeakerGateListener> = new Set();
 
@@ -122,6 +128,18 @@ export class Pipeline {
     return () => { this.statusListeners.delete(cb); };
   }
 
+  /** Emits after a persisted stage/status change, including failure. */
+  onMeetingStageChange(cb: MeetingStageListener): () => void {
+    this.stageListeners.add(cb);
+    return () => { this.stageListeners.delete(cb); };
+  }
+
+  private notifyMeeting(meetingId: string): void {
+    for (const cb of this.stageListeners) {
+      try { cb(meetingId); } catch { /* observer failures are isolated */ }
+    }
+  }
+
   /** Subscribe to meeting completions. Fires after the meeting flips to
    *  status='done'. Errors thrown by listeners are logged but don't roll
    *  back the completion. Used by the webhook exporter to push the
@@ -167,6 +185,7 @@ export class Pipeline {
             // user can retry) instead of a bare FAILED pill. The stage that
             // threw is also captured by the rolled-back pipeline_stage.
             this.deps.ctx.meetings.recordFailure(id, String(e));
+            this.notifyMeeting(id);
           }
           this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
         } finally {
@@ -186,7 +205,10 @@ export class Pipeline {
     if (!m) return;
 
     // Re-runs / recovery may put status back to 'processing' before enqueueing.
-    if (m.status === 'failed') this.deps.ctx.meetings.updateStatus(meetingId, 'processing');
+    if (m.status === 'failed') {
+      this.deps.ctx.meetings.updateStatus(meetingId, 'processing');
+      this.notifyMeeting(meetingId);
+    }
 
     let stage = m.pipelineStage as Stage;
 
@@ -194,6 +216,7 @@ export class Pipeline {
     // entry point so a rerun-from-transcribing still produces diarization.
     if (stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing') {
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
+      this.notifyMeeting(meetingId);
       await Promise.all([
         this.timeStage('transcribing', input, m.slug),
         this.timeStage('diarizing', input, m.slug),
@@ -213,9 +236,16 @@ export class Pipeline {
         // with stage='summarizing', which re-enters this loop past the gate.
         if (s === 'awaiting_speaker_id') {
           const fresh = this.deps.ctx.meetings.findById(meetingId);
-          if (!fresh?.skipSpeakerId) {
+          // Match the Speakers panel's review policy, not merely linkage:
+          // a linked voice can still be low-confidence or have too little
+          // evidence. Clear matches and zero-voice meetings flow through.
+          const needsReview = !fresh?.skipSpeakerId
+            && await this.needsSpeakerReview(meetingId, m.slug);
+          // Respect a user override made while the artifact read was pending.
+          if (needsReview && !this.deps.ctx.meetings.findById(meetingId)?.skipSpeakerId) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
+            this.notifyMeeting(meetingId);
             // Notify subscribers that this meeting is now blocked on the user.
             // Per-listener isolation matches notify()/complete-listener loops:
             // a throwing listener must not stop us returning to park the gate.
@@ -224,7 +254,7 @@ export class Pipeline {
             }
             return; // stop; user action re-enqueues
           }
-          // Skip flag is set — don't stop. But before summarize reads
+          // Review is unnecessary or explicitly skipped. Before summarize reads
           // transcript.md, re-run merging so any roster matches the
           // `identifying` stage auto-made replace SPEAKER_00 with real
           // names in the written transcript. Cheap (no network) and
@@ -233,11 +263,13 @@ export class Pipeline {
           continue;
         }
         this.deps.ctx.meetings.updateStage(meetingId, s);
+        this.notifyMeeting(meetingId);
         await this.timeStage(s as WorkStage, input, m.slug);
       }
     }
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
     this.deps.ctx.meetings.updateStatus(meetingId, 'done');
+    this.notifyMeeting(meetingId);
     for (const cb of this.completeListeners) {
       try {
         await cb(meetingId);
@@ -245,6 +277,24 @@ export class Pipeline {
         this.deps.ctx.logger.error('pipeline:complete-listener-error', { id: meetingId, err: String(e) });
       }
     }
+  }
+
+  private async needsSpeakerReview(meetingId: string, slug: string): Promise<boolean> {
+    const links = this.deps.ctx.speakers.listForMeeting(meetingId);
+    if (links.length === 0) return false;
+    const folder = meetingFolderPath(this.deps.ctx.libraryRoot, slug);
+    const diar = await this.deps.ctx.artifactCache.readJson<{ segments?: DiarizationSegment[] }>(
+      path.join(folder, 'diarization.json'),
+    );
+    const review = buildSpeakerReviewMetadata({
+      // Assignments may have changed while the evidence was loading.
+      links: this.deps.ctx.speakers.listForMeeting(meetingId)
+        .map((link) => ({ ...link, rosterId: link.rosterSpeakerId })),
+      diarization: diar?.segments ?? [],
+      // Line counts are presentation-only; the gate needs no transcript read.
+      transcript: [],
+    });
+    return Array.from(review.values()).some((speaker) => speaker.needsReview);
   }
 
   /** Run a stage handler and record its wall-clock duration as an ETA sample,

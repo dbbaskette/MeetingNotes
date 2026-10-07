@@ -23,6 +23,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveWhisperEndpoint } from './endpoint.js';
 import {
   ManagedService,
   type ManagedServiceDeps,
@@ -127,7 +128,8 @@ async function whisperHealthProbe(
   port: number,
 ): Promise<ProbeResult> {
   try {
-    const resp = await fetch(`http://${host}:${port}/health`, {
+    const urlHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    const resp = await fetch(`http://${urlHost}:${port}/health`, {
       signal: AbortSignal.timeout(1500),
     });
     if (!resp.ok) return { ok: false };
@@ -171,6 +173,25 @@ export interface WhisperSupervisorOpts {
 }
 
 const DEFAULT_IDLE_SHUTDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
+export type WhisperLifecycle = Pick<ManagedService, 'ensureReady' | 'stop'>;
+
+/** Configure the lifecycle from the same endpoint the transcription client
+ * uses. External services are never spawned, stopped, or probed as local HTTP. */
+export function createConfiguredWhisperSupervisor(
+  opts: WhisperSupervisorOpts & { endpoint: string },
+): WhisperLifecycle {
+  const endpoint = resolveWhisperEndpoint(opts.endpoint);
+  if (endpoint.kind === 'managed') {
+    return createWhisperSupervisor({ ...opts, host: endpoint.host, port: endpoint.port });
+  }
+  return {
+    ensureReady: async () => {
+      if (endpoint.kind === 'invalid') throw new Error(endpoint.reason);
+    },
+    stop: async () => {},
+  };
+}
 
 /** Build a ManagedService configured for whisper-server. */
 export function createWhisperSupervisor(

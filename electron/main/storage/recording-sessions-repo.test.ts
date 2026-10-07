@@ -16,6 +16,8 @@ describe('RecordingSessionsRepo', () => {
       targetLabel: 'Zoom', outputPath: '/tmp/x.m4a',
     });
     expect(repo.findOpen()).toHaveLength(1);
+    repo.updateHelperPid('sess1', 4321);
+    expect(repo.findById('sess1')?.helperPid).toBe(4321);
 
     repo.finalize('sess1');
     expect(repo.findOpen()).toHaveLength(0);
@@ -31,5 +33,19 @@ describe('RecordingSessionsRepo', () => {
     expect(all).toHaveLength(0); // no longer 'recording'
     const orphans = repo.findOrphaned();
     expect(orphans).toHaveLength(1);
+  });
+
+  it('lists finalized/orphaned/error sessions until they are dismissed', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-rs3-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    const repo = new RecordingSessionsRepo(db);
+    repo.insert({ id: 'final', helperPid: 1, targetPid: null, targetLabel: 'Zoom', outputPath: '/final' });
+    repo.insert({ id: 'open', helperPid: 2, targetPid: null, targetLabel: 'Zoom', outputPath: '/open' });
+    repo.finalize('final');
+
+    expect(repo.findRecoverable().map((s) => s.id)).toEqual(['final']);
+    repo.dismissRecovery('final');
+    expect(repo.findRecoverable()).toEqual([]);
+    expect(repo.findById('final')?.dismissedAt).toBeTruthy();
   });
 });

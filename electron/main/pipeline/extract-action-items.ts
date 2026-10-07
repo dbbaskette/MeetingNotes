@@ -39,6 +39,24 @@ export interface ExtractActionItemsDeps {
   /** Optional log hook for each re-sample retry (the caller has a logger; this
    *  module doesn't), so the otherwise-invisible retry is observable. */
   onResample?: (retry: number, reasoningWords: number) => void;
+  beforeReplace?: () => void;
+  /** Fired when the first extraction parses to zero items even though the
+   *  summary visibly contains Action Items bullets, and a one-shot warmer
+   *  retry is being attempted. */
+  onZeroItemsRetry?: () => void;
+}
+
+/** A conservative retry heuristic, not proof that the model missed an item.
+ * Ignore explicit empty-section placeholders, without reading later sections. */
+export function summaryClaimsActionItems(summary: string): boolean {
+  const m = summary.match(/^##[ \t]+Action Items[ \t]*\r?$([\s\S]*?)(?=^#{1,2}[ \t]|$(?![\s\S]))/im);
+  if (!m) return false;
+  return m[1]!
+    .split('\n')
+    .some((line) => {
+      const bullet = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.+)$/);
+      return !!bullet && !/^(?:\(?none\)?|no action items(?: identified)?|n\/a)[.!]?$/i.test(bullet[1]!.trim());
+    });
 }
 
 /** Run the extraction against the meeting folder's saved summary.md, persist
@@ -62,22 +80,38 @@ export async function extractActionItemsFromSummary(
     throw new Error(`summary.md is missing or empty — ${missingSummaryHint}`);
   }
   await deps.llmSupervisor.ensureReady();
-  const raw = await deps.lmStudio.chat({
-    model: deps.settings.get('llmModel'),
-    temperature: 0,
-    disableThinking: deps.settings.get('disableThinking'),
-    maxTokens: EXTRACT_MAX_TOKENS,
-    // Extract spirals too (Gemma's reasoning is intermittent). temperature 0
-    // makes a plain retry deterministic — useless — so the client raises the
-    // temperature on each re-sample to break the loop. See summarize.
-    resampleRetries: 2,
-    onResample: deps.onResample,
-    messages: [
-      { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
-      { role: 'user', content: summary },
-    ],
-  });
-  const items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+  const runExtraction = async (temperature: number): Promise<string> =>
+    deps.lmStudio.chat({
+      model: deps.settings.get('llmModel'),
+      temperature,
+      disableThinking: deps.settings.get('disableThinking'),
+      maxTokens: EXTRACT_MAX_TOKENS,
+      // Extract spirals too (Gemma's reasoning is intermittent). temperature 0
+      // makes a plain retry deterministic — useless — so the client raises the
+      // temperature on each re-sample to break the loop. See summarize.
+      resampleRetries: 2,
+      onResample: deps.onResample,
+      messages: [
+        { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },
+        { role: 'user', content: summary },
+      ],
+    });
+  let raw = await runExtraction(0);
+  let items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+  // Zero items from a summary whose Action Items section is plainly
+  // non-empty means the model flubbed the JSON (small models do this
+  // silently), not that the meeting had nothing actionable. One warmer
+  // retry breaks the deterministic failure before we accept the empty
+  // result. Observed with mistral-7b: fine prose summary, 0/3 extracted.
+  if (items.length === 0 && summaryClaimsActionItems(summary)) {
+    deps.onZeroItemsRetry?.();
+    raw = await runExtraction(0.4);
+    items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+  }
+  if (items.length === 0 && summaryClaimsActionItems(summary)) {
+    throw new Error('Action items could not be extracted after retry. Existing items were kept. Try Re-extract or a stronger model.');
+  }
+  deps.beforeReplace?.();
   fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
   deps.actionItems.replaceForMeeting(meetingId, items);
   return { count: items.length };
