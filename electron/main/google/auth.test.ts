@@ -48,6 +48,36 @@ describe('GoogleAuth.completeAuthorization', () => {
 });
 
 describe('GoogleAuth.getAccessToken', () => {
+  it.each([
+    { status: 503, body: { error: 'temporarily_unavailable' } },
+    { status: 429, body: { error: 'rate_limit_exceeded' } },
+    { status: 400, body: { error: 'invalid_client', error_description: 'invalid_grant mentioned in text' } },
+    { status: 503, body: { error: 'invalid_grant' } },
+    { status: 200, body: {} },
+  ])('keeps the session on non-definitive refresh failures: $status $body', async ({ status, body }) => {
+    const deps = makeDeps({ fetchImpl: routedFetch({ [GOOGLE_TOKEN_ENDPOINT]: { status, body } }) });
+    deps.store.refresh = 'RT'; deps.store.email = 'me@example.com';
+    const auth = new GoogleAuth(deps);
+    await expect(auth.getAccessToken()).rejects.toThrow(/kept your session/);
+    expect(deps.store).toEqual({ refresh: 'RT', email: 'me@example.com' });
+    expect(auth.isSignedIn()).toBe(true);
+  });
+
+  it('keeps the session after a network error and recovers on retry without leaking error text', async () => {
+    const fetcher = vi.fn()
+      .mockRejectedValueOnce(new Error('invalid_grant in proxy URL?secret=SYNTHETIC_TOKEN'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'FRESH', expires_in: 3600 })));
+    const deps = makeDeps({ fetchImpl: fetcher as typeof fetch });
+    deps.store.refresh = 'RT'; deps.store.email = 'me@example.com';
+    const auth = new GoogleAuth(deps);
+    const error = await auth.getAccessToken().catch((e: unknown) => e);
+    expect(String(error)).toContain('kept your session');
+    expect(String(error)).not.toContain('SYNTHETIC_TOKEN');
+    expect(auth.isSignedIn()).toBe(true);
+    expect(await auth.getAccessToken()).toBe('FRESH');
+    expect(deps.store).toEqual({ refresh: 'RT', email: 'me@example.com' });
+  });
+
   it('refreshes using the stored refresh token when there is no cached token', async () => {
     const deps = makeDeps({
       getRefreshToken: () => 'RT',

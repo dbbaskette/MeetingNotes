@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import {
   WebhookExporter,
   buildPayloadFromMeeting,
@@ -91,11 +92,20 @@ describe('validateUrl', () => {
 });
 
 describe('redactUrl', () => {
-  it('strips query strings and userinfo', () => {
-    expect(redactUrl('https://user:pw@example.com/hook?token=abc')).toBe('https://example.com/hook');
+  it('strips query strings, userinfo, and the path', () => {
+    expect(redactUrl('https://user:pw@example.com/hook?token=abc')).toBe('https://example.com/…');
   });
-  it('keeps host + path visible', () => {
-    expect(redactUrl('https://example.com/hook')).toBe('https://example.com/hook');
+  it('keeps scheme + host + port visible', () => {
+    expect(redactUrl('https://example.com:8443/hook')).toBe('https://example.com:8443/…');
+    expect(redactUrl('https://example.com/')).toBe('https://example.com');
+  });
+  it('hides path credentials for the documented Slack and Telegram setups', () => {
+    // Both services carry the secret in the PATH, which the old redaction
+    // left fully visible in the persistent log file.
+    expect(redactUrl('https://hooks.slack.com/services/T0/B0/SUPERSECRET'))
+      .toBe('https://hooks.slack.com/…');
+    expect(redactUrl('https://api.telegram.org/bot123:REALTOKEN/sendMessage?chat_id=1'))
+      .toBe('https://api.telegram.org/…');
   });
 });
 
@@ -154,6 +164,38 @@ describe('renderWebhookBody', () => {
 });
 
 describe('WebhookExporter.deliverPayload', () => {
+  it.each(['Error', 'TimeoutError', 'AbortError'])('never logs or persists credential-bearing %s messages', async (name) => {
+    const endpoint = new URL('https://hooks.slack.com/services/T0/B0/FIXTURE_PATH?token=FIXTURE_QUERY#FIXTURE_FRAGMENT');
+    // Generate inert userinfo per test rather than commit a credential-shaped
+    // literal. The injected fetch never contacts this endpoint.
+    endpoint.username = `fixture-${randomUUID()}`;
+    endpoint.password = `fixture-${randomUUID()}`;
+    const url = endpoint.toString();
+    const error = new Error(`Request ${url} failed with Bearer FIXTURE_BEARER`);
+    error.name = name;
+    const d = makeDeps({ config: { url, secret: 'FIXTURE_BEARER' }, fetchResponses: [error] });
+    const result = await d.exporter.deliverPayload(makePayload());
+    expect(result.status).toBeNull();
+    expect(result.error).toContain(name === 'Error' ? 'network request failed' : 'timed out');
+    expect(d.fetchMock).toHaveBeenCalledTimes(4);
+    expect(d.sleeps).toEqual([1000, 5000, 30000]);
+    expect(d.lastResult.current).toEqual(result);
+    const diagnostics = JSON.stringify({ result, persisted: d.lastResult.current, logs: d.log.mock.calls });
+    for (const credential of [endpoint.username, endpoint.password, 'FIXTURE_PATH', 'FIXTURE_QUERY', 'FIXTURE_FRAGMENT', 'FIXTURE_BEARER']) {
+      expect(diagnostics).not.toContain(credential);
+    }
+    expect(diagnostics).toContain('https://hooks.slack.com/…');
+  });
+
+  it('keeps success diagnostics credential-free after a network retry', async () => {
+    const url = 'https://api.telegram.org/bot123:FIXTURE_TOKEN/sendMessage';
+    const d = makeDeps({ config: { url }, fetchResponses: [new Error(url), new Response('ok')] });
+    const result = await d.exporter.deliverPayload(makePayload());
+    expect(result.error).toBeNull();
+    expect(d.fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(d.log.mock.calls)).not.toContain('FIXTURE_TOKEN');
+  });
+
   it('posts the payload with the chosen template', async () => {
     const d = makeDeps({ config: { url: 'https://example.com/hook', template: 'compact' } });
     const r = await d.exporter.deliverPayload(makePayload());

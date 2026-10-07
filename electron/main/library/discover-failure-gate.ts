@@ -25,9 +25,9 @@ export function fileState(p: string): FileState | null {
 }
 
 export class DiscoverFailureGate {
-  private readonly state = new Map<string, FileState & { fails: number }>();
+  private readonly state = new Map<string, FileState & { fails: number; retryAfter?: number }>();
 
-  constructor(private readonly maxFails = 3) {}
+  constructor(private readonly maxFails = 3, private readonly now = Date.now, private readonly maxEntries = 4096) {}
 
   /** True when probing this path again is pointless: it already exhausted
    *  its attempts and the file hasn't changed since. Callers should skip
@@ -36,7 +36,7 @@ export class DiscoverFailureGate {
     const rec = this.state.get(p);
     if (!rec) return false;
     if (rec.size !== st.size || rec.mtimeMs !== st.mtimeMs) return false;
-    return rec.fails >= this.maxFails;
+    return rec.fails >= this.maxFails || (rec.retryAfter ?? 0) > this.now();
   }
 
   /** Record a probe failure for the given on-disk state. Returns 'retry'
@@ -45,11 +45,25 @@ export class DiscoverFailureGate {
   recordFailure(p: string, st: FileState): 'retry' | 'quarantined' {
     const rec = this.state.get(p);
     if (!rec || rec.size !== st.size || rec.mtimeMs !== st.mtimeMs) {
+      this.makeRoom(p);
       this.state.set(p, { ...st, fails: 1 });
       return this.maxFails <= 1 ? 'quarantined' : 'retry';
     }
     rec.fails += 1;
     return rec.fails >= this.maxFails ? 'quarantined' : 'retry';
+  }
+
+  /** Infrastructure failures cool down, but never quarantine stable audio. */
+  recordTransientFailure(p: string, st: FileState): void {
+    this.makeRoom(p);
+    this.state.set(p, { ...st, fails: 0, retryAfter: this.now() + 60_000 });
+  }
+
+  private makeRoom(p: string): void {
+    if (!this.state.has(p) && this.state.size >= this.maxEntries) {
+      const oldest = this.state.keys().next().value;
+      if (oldest !== undefined) this.state.delete(oldest);
+    }
   }
 
   /** Forget a path after a successful probe (or deletion). */

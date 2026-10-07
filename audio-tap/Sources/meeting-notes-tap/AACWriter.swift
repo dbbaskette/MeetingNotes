@@ -71,12 +71,19 @@ final class AACWriter {
     queue.sync {
       // Releasing the file flushes the AAC encoder and finalizes the M4A.
       file = nil
+      if framesWritten == 0 {
+        do {
+          if FileManager.default.fileExists(atPath: outputURL.path) {
+            try FileManager.default.removeItem(at: outputURL)
+          }
+          return false
+        } catch {
+          StatusEvent.emit(["event": "diag", "stage": "empty_audio_delete_err", "err": String(describing: error)])
+          return true // Still present; do not claim this stem was deleted.
+        }
+      }
+      return true
     }
-    if framesWritten == 0 {
-      try? FileManager.default.removeItem(at: outputURL)
-      return false
-    }
-    return true
   }
 
   var bytesWritten: Int64 {

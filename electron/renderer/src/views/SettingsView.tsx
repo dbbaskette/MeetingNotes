@@ -1,8 +1,17 @@
 // electron/renderer/src/views/SettingsView.tsx
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../ipc/client';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
+import { AppNav, type NavTarget } from '../components/AppNav';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { Icon } from '../components/icons';
+import { TerminologySettings } from '../components/Terminology';
+import { ObsidianSettings } from '../components/ObsidianSettings';
+import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
+import { setUnsavedGuard } from '../lib/unsaved-guard';
+import { formatLogTimestamp } from '../lib/log-timestamp.js';
+import { effectiveLlmUrl as providerUrl, isIdleProbe, resolveWhisperEndpoint } from '../../../shared/inference-endpoints.js';
 
 interface Settings {
   lmStudioUrl: string;
@@ -31,6 +40,7 @@ interface Settings {
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  llmContextLength: number;
   summaryDetail: 'concise' | 'standard' | 'detailed';
   disableThinking: boolean;
   theme: 'system' | 'light' | 'dark';
@@ -48,10 +58,12 @@ type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
 
 export function SettingsView({
-  onBack,
+  onNav,
   onRunSetupAgain,
 }: {
-  onBack: () => void;
+  /** Shared nav tabs (Library / Weekly / Settings) — routes through
+   *  App's history-aware navigate(). 'settings' never arrives. */
+  onNav: (target: NavTarget) => void;
   onRunSetupAgain?: () => void;
 }): JSX.Element {
   const [s, setS] = useState<Settings | null>(null);
@@ -60,26 +72,68 @@ export function SettingsView({
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
+  const [saveStates, setSaveStates] = useState<Record<string, string>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const queues = useRef<Record<string, Promise<unknown>>>({});
+  const revisions = useRef<Record<string, number>>({});
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const leaveResolver = useRef<((leave: boolean) => void) | null>(null);
+  useEffect(() => {
+    const unsaved = Object.values(saveStates).some(state => state !== 'Saved');
+    setUnsavedGuard(unsaved ? () => new Promise<boolean>(resolve => {leaveResolver.current = resolve; setLeaveOpen(true);}) : null);
+    return () => setUnsavedGuard(null);
+  }, [saveStates]);
+  useEffect(() => () => {leaveResolver.current?.(false);}, []);
 
   useEffect(() => {
     void (async () => {
       setS((await api.settings.getAll()) as Settings);
-      setModels((await api.models.list()) as string[]);
-      setPerms((await api.permissions.audio()) as AudioPerms);
-      setSpeakers((await api.speakers.list()) as SpeakerListEntry[]);
-      setProviders((await api.llm.detectProviders()) as ProviderAvailability);
-    })();
+      await Promise.all([
+        api.models.list().then(setModels), api.permissions.audio().then(setPerms),
+        api.speakers.list().then(setSpeakers), api.llm.detectProviders().then(setProviders),
+      ]);
+    })().catch(e => setLoadError((e as Error).message));
   }, []);
 
-  if (!s) return <div className="p-8">Loading…</div>;
+  if (!s) return <div className="p-8" role="status">{loadError ? `Could not load Settings: ${loadError}` : 'Loading…'}</div>;
 
-  async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<void> {
+  // The chat client follows the active provider, not the LM Studio URL field —
+  // managed modes hardcode their ports (see LMStudioClient wiring in main).
+  // Test buttons and captions must probe the same endpoint the pipeline uses,
+  // otherwise a healthy ollama setup "fails" a test against :1234.
+  const effectiveLlmUrl = providerUrl(s.summaryProvider, s.lmStudioUrl);
+  const providerLabel =
+    s.summaryProvider === 'lm-studio' ? 'LM Studio, managed'
+    : s.summaryProvider === 'ollama' ? 'Ollama, managed'
+    : 'external server';
+
+  function edit<K extends keyof Settings>(key: K, value: Settings[K]): void {
+    revisions.current[key] = (revisions.current[key] ?? 0) + 1;
     setS((prev) => (prev ? { ...prev, [key]: value } : prev));
-    await api.settings.set(key, value);
+    setSaveStates(previous => ({...previous, [key]: 'Unsaved — leave the field to save'}));
+  }
+  async function update<K extends keyof Settings>(key: K, value: Settings[K]): Promise<boolean> {
+    const revision = revisions.current[key] = (revisions.current[key] ?? 0) + 1;
+    const pathSetting = key === 'libraryPath' || key === 'audioWatchPath';
+    if (!pathSetting) setS(prev => prev ? {...prev, [key]: value} : prev);
+    setSaveStates(previous => ({...previous, [key]: 'Saving…'}));
+    const request = (queues.current[key] ?? Promise.resolve()).then(() => api.settings.set(key, value));
+    queues.current[key] = request.catch(() => {});
+    try {
+      const canonical = await request as Settings[K];
+      if (revisions.current[key] === revision) {
+        setS(prev => prev && (pathSetting || prev[key] === value) ? {...prev, [key]: canonical} : prev);
+        setSaveStates(previous => ({...previous, [key]: 'Saved'}));
+      }
+      return true;
+    } catch (e) {
+      if (revisions.current[key] === revision) setSaveStates(previous => ({...previous, [key]: `Couldn’t save: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`}));
+      return false;
+    }
   }
 
   async function changeLlmModel(modelId: string): Promise<void> {
-    await update('llmModel', modelId);
+    if (!await update('llmModel', modelId)) return;
     if (!modelId) { setHealthCheck(null); return; }
     setHealthCheck({ modelId, state: 'checking' });
     try {
@@ -100,11 +154,12 @@ export function SettingsView({
 
   return (
     <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
+      <ConfirmDialog open={leaveOpen} title="Leave Settings with unsaved changes?" body="Some changes have not been saved. Stay to finish saving or correct any errors." confirmLabel="Leave Settings" onCancel={() => {leaveResolver.current?.(false); leaveResolver.current = null; setLeaveOpen(false);}} onConfirm={() => {leaveResolver.current?.(true); leaveResolver.current = null; setLeaveOpen(false);}}/>
       <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted text-sm">
-          ← Back
-        </button>
-        <h1 className="font-semibold">Settings</h1>
+        <AppNav active="settings" onNav={onNav} />
+        {/* Visually redundant with the active nav tab, kept for the
+            accessibility tree / screen-reader page title. */}
+        <h1 className="sr-only">Settings</h1>
         {onRunSetupAgain && (
           <button
             onClick={onRunSetupAgain}
@@ -115,7 +170,20 @@ export function SettingsView({
         )}
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
+      <div className="shrink-0 px-8 py-2 text-xs max-h-24 overflow-auto" aria-live="polite">
+        {Object.entries(saveStates).map(([key, state]) => <div key={key} className={state.startsWith('Couldn') ? 'text-danger' : 'text-ink-muted'}>{key}: {state}
+          {state.startsWith('Couldn') && !['libraryPath','audioWatchPath'].includes(key) && <button className="ml-2 underline" onClick={() => void update(key as keyof Settings, s[key as keyof Settings])}>Retry</button>}
+        </div>)}
+        {loadError && <p role="alert">Some Settings information could not load: {loadError}</p>}
+      </div>
+      <SettingsNavigation>
+      <SettingsSection section="Organization" keywords="dictionary terminology corrections words">
+        <TerminologySettings />
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="Obsidian vault sync">
+        <ObsidianSettings />
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="summary provider lifecycle LLM LM Studio Ollama endpoint URL model">
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
@@ -142,17 +210,20 @@ export function SettingsView({
         <div className="flex gap-2">
           <input
             value={s.lmStudioUrl}
-            onChange={(e) => update('lmStudioUrl', e.target.value)}
+            onChange={(e) => edit('lmStudioUrl', e.target.value)} onBlur={() => void update('lmStudioUrl', s.lmStudioUrl)}
             className="input flex-1"
           />
-          <TestButton kind="llm" url={s.lmStudioUrl} />
+          <TestButton kind="llm" url={effectiveLlmUrl} lazySpawn={s.summaryProvider !== 'external'} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
           Default for the &lsquo;external&rsquo; provider. Managed providers use their own
           ports (1234 for LM Studio, 11434 for Ollama).
+          {s.summaryProvider !== 'external' && (
+            <> Test probes the active provider at <code>{effectiveLlmUrl}</code>.</>
+          )}
         </div>
       </Field>
-      <Field label="LLM Model (loaded in LM Studio)">
+      <Field label="LLM Model">
         <select
           value={s.llmModel}
           onChange={(e) => void changeLlmModel(e.target.value)}
@@ -161,7 +232,10 @@ export function SettingsView({
           <option value="">(choose)</option>
           {models.map((m) => (
             <option key={m} value={m}>
-              {isKnownReasoningModel(m) ? `🧠 ${m}` : m}
+              {/* Plain-text only inside <option>; a suffix reads clearer
+                  than the old 🧠 prefix and survives any platform's
+                  emoji rendering. */}
+              {isKnownReasoningModel(m) ? `${m} (reasoning)` : m}
             </option>
           ))}
         </select>
@@ -176,21 +250,46 @@ export function SettingsView({
             {healthCheck.state === 'checking'
               ? 'Checking whether this model tends to loop on structured tasks…'
               : healthCheck.state === 'loops'
-                ? '⚠ This model looped on a quick extraction test — expect it to fail on real meetings too.'
+                ? 'This model looped on a quick extraction test — expect it to fail on real meetings too.'
                 : '✓ Passed a quick extraction canary.'}
           </div>
         )}
         {s.llmModel && isKnownReasoningModel(s.llmModel) && (
-          <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5">
-            🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below
-            and burn its token budget on chain-of-thought instead of answering — watch for
-            extract/summarize failures that mention a large &ldquo;reasoning&rdquo; word count.
+          <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mt-1.5 flex items-start gap-2">
+            <Icon name="brain" className="w-4 h-4 shrink-0 mt-px" />
+            <span>
+              This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo; below
+              and burn its token budget on chain-of-thought instead of answering — watch for
+              extract/summarize failures that mention a large &ldquo;reasoning&rdquo; word count.
+            </span>
           </div>
         )}
         <div className="text-xs text-ink-muted mt-1">
-          Loaded from {s.lmStudioUrl}/v1/models. Used for summarization and action-item extraction.
+          Loaded from {effectiveLlmUrl}/v1/models ({providerLabel}). Used for
+          summarization and action-item extraction.
         </div>
       </Field>
+      {s.summaryProvider === 'lm-studio' && (
+        <Field label="Context length (managed LM Studio)">
+          <select
+            value={String(s.llmContextLength)}
+            onChange={(e) => update('llmContextLength', Number(e.target.value))}
+            className="input"
+          >
+            <option value="0">Model default (LM Studio setting — often 4k)</option>
+            <option value="8192">8k — short meetings, low RAM</option>
+            <option value="16384">16k — up to ~1 hour</option>
+            <option value="32768">32k — long meetings (recommended if you have the RAM)</option>
+          </select>
+          <div className="text-xs text-ink-muted mt-1">
+            Passed as <code>--context-length</code> when MeetingNotes auto-loads the model.
+            Too-small contexts silently truncate long transcripts; too-large ones can
+            exhaust memory on smaller Macs. Applies at the next model load.
+          </div>
+        </Field>
+      )}
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="summary detail concise standard detailed thinking language">
       <Field label="Summary detail level">
         <select
           value={s.summaryDetail}
@@ -226,14 +325,15 @@ export function SettingsView({
           </div>
         </label>
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Organization" keywords="appearance theme light dark system">
       <Field label="Appearance">
         <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
           {(['system', 'light', 'dark'] as const).map((opt) => (
             <button
               key={opt}
               onClick={() => {
-                void update('theme', opt);
-                window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));
+                void update('theme', opt).then(saved => {if (saved) window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));});
               }}
               className={`px-4 py-1.5 text-sm capitalize transition border-l border-surface-border first:border-l-0 ${
                 s.theme === opt
@@ -249,63 +349,59 @@ export function SettingsView({
           System follows macOS appearance. Light and Dark override it.
         </div>
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
       <Field label="STT URL (whisper.cpp server)">
         <div className="flex gap-2">
           <input
             value={s.sttUrl}
-            onChange={(e) => update('sttUrl', e.target.value)}
+            onChange={(e) => edit('sttUrl', e.target.value)} onBlur={() => void update('sttUrl', s.sttUrl)}
             className="input flex-1"
           />
-          <TestButton kind="stt" url={s.sttUrl} />
+          <TestButton kind="stt" url={s.sttUrl} lazySpawn={resolveWhisperEndpoint(s.sttUrl).kind === 'managed'} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
-          Default http://127.0.0.1:8080. MeetingNotes auto-launches whisper-server
-          on first transcription and shuts it down after 10 minutes of inactivity.
+          Default http://127.0.0.1:8080. Local HTTP endpoints auto-launch whisper-server
+          on first transcription and shut it down after 10 minutes of inactivity.
+          Remote, HTTPS, or proxy endpoints must already be running. Restart MeetingNotes after changing this URL.
         </div>
       </Field>
       <Field label="STT Model name">
         <input
           value={s.sttModel}
-          onChange={(e) => update('sttModel', e.target.value)}
+          onChange={(e) => edit('sttModel', e.target.value)} onBlur={() => void update('sttModel', s.sttModel)}
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
           The model file to load when starting whisper-server. Must be installed in
           ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
-          (use the setup wizard's Whisper step to download one).
+          (use the setup wizard&apos;s Whisper step to download one).
         </div>
       </Field>
-      <Field label="Library Path">
-        <input
-          value={s.libraryPath}
-          onChange={(e) => update('libraryPath', e.target.value)}
-          className="input"
-        />
-      </Field>
+      </SettingsSection>
+      <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
+      <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
-      <Field label="Extra watch folder">
-        <input
-          value={s.audioWatchPath}
-          onChange={(e) => update('audioWatchPath', e.target.value)}
-          placeholder="(none)"
-          className="input"
-        />
+      <PathSetting label="Extra watch folder" value={s.audioWatchPath} onApply={value => update('audioWatchPath', value)}/>
         <div className="text-xs text-ink-muted mt-1">
           Optional. An extra folder watched for dropped audio. Your library&rsquo;s
           recordings folder and the legacy ~/Music/MeetingNotes are always watched.
         </div>
-      </Field>
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="STT transcription language">
       <Field label="STT Language">
         <input
           value={s.sttLanguage}
-          onChange={(e) => update('sttLanguage', e.target.value)}
+          onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
       </Field>
+      </SettingsSection>
+      <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">
       <Field label="Your name">
         <input
           value={s.userName}
-          onChange={(e) => update('userName', e.target.value)}
+          onChange={(e) => edit('userName', e.target.value)} onBlur={() => void update('userName', s.userName)}
           placeholder="You"
           className="input"
         />
@@ -359,6 +455,8 @@ export function SettingsView({
         )}
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Recording" keywords="quality AAC bitrate audio capture meeting auto detect browser native Zoom permissions microphone">
       <section className="border-t border-surface-border pt-5">
         <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Recording quality</div>
         <label className="block">
@@ -445,18 +543,24 @@ export function SettingsView({
         </label>
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="webhook exporter notifications URL token payload Telegram Slack">
       <WebhookExporterCard
         settings={s}
-        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
-        onPersist={(key, value) => { void update(key, value); }}
+        onUpdate={(patch) => {for (const [key,value] of Object.entries(patch)) edit(key as keyof Settings, value as Settings[keyof Settings]);}}
+        onPersist={update}
       />
 
+      </SettingsSection>
+      <SettingsSection section="Integrations" keywords="Google account OAuth credentials export Tasks Docs">
       <GoogleAccountCard
         settings={s}
-        onUpdate={(patch) => setS((prev) => (prev ? { ...prev, ...patch } : prev))}
-        onPersist={(key, value) => { void update(key, value); }}
+        onUpdate={(patch) => {for (const [key,value] of Object.entries(patch)) edit(key as keyof Settings, value as Settings[keyof Settings]);}}
+        onPersist={update}
       />
 
+      </SettingsSection>
+      <SettingsSection section="Recording" keywords="permissions microphone system audio privacy security">
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
           <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">Permissions</div>
@@ -480,8 +584,11 @@ export function SettingsView({
         )}
       </section>
 
+      </SettingsSection>
+      <SettingsSection section="Advanced" keywords="diagnostics logs warnings errors debug">
       <DiagnosticsSection />
-      </div>
+      </SettingsSection>
+      </SettingsNavigation>
     </div>
   );
 }
@@ -599,14 +706,14 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
-  const time = entry.ts ? entry.ts.slice(11, 19) : '—';
+  const time = formatLogTimestamp(entry.ts);
   const dataStr =
     entry.data && Object.keys(entry.data).length > 0
       ? JSON.stringify(entry.data)
       : '';
   return (
     <div className="px-3 py-1 border-b border-surface-border/50 last:border-b-0 flex gap-2">
-      <span className="text-ink-muted/70 tabular-nums shrink-0">{time}</span>
+      <span className="text-ink-muted/70 tabular-nums shrink-0 whitespace-nowrap" title={entry.ts ?? undefined}>{time}</span>
       <span className={`font-semibold uppercase shrink-0 w-10 ${levelCls}`}>
         {entry.level}
       </span>
@@ -722,11 +829,11 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
  *  Surfaces config errors at edit time instead of letting them bite the
  *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
  *  so the row doesn't accumulate stale state as the user keeps editing. */
-function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.Element {
+function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; detail?: string }
-    | { ok: false; error: string }
+    | { ok: false; error: string; code?: string }
     | null
   >(null);
 
@@ -747,11 +854,13 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         const r = await api.llm.probe(url);
         setResult(r.ok
           ? { ok: true, detail: `${r.models.length} model${r.models.length === 1 ? '' : 's'} loaded` }
-          : { ok: false, error: r.error });
+          : { ok: false, error: r.error, code: r.code });
       } else {
         const r = await api.stt.probe(url);
-        setResult(r.ok ? { ok: true } : { ok: false, error: r.error });
+        setResult(r.ok ? { ok: true } : { ok: false, error: r.error, code: r.code });
       }
+    } catch (error) {
+      setResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
     } finally {
       setBusy(false);
     }
@@ -775,9 +884,19 @@ function TestButton({ kind, url }: { kind: 'stt' | 'llm'; url: string }): JSX.El
         </span>
       )}
       {result && !result.ok && (
-        <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
-          ✗ {result.error}
-        </span>
+        // "Connection refused" on a service the app spawns on demand is the
+        // normal idle state, not a failure — whisper-server and the managed
+        // LLM runtimes shut down after 10 min. Only unexpected responses
+        // (wrong port answering with 404s, timeouts mid-request) stay red.
+        isIdleProbe(lazySpawn, result.code) ? (
+          <span className="text-xs text-ink-muted whitespace-nowrap">
+            ○ not running — starts on demand when needed
+          </span>
+        ) : (
+          <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
+            ✗ {result.error}
+          </span>
+        )
       )}
     </div>
   );
@@ -795,7 +914,7 @@ function GoogleAccountCard({
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
-  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<boolean>;
 }): JSX.Element {
   const [status, setStatus] = useState<{ email: string | null; hasCredentials: boolean; signedIn: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -807,16 +926,13 @@ function GoogleAccountCard({
   }
   useEffect(() => { void refresh(); }, []);
 
-  function set<K extends keyof Settings>(key: K, value: Settings[K]): void {
-    onUpdate({ [key]: value } as Partial<Settings>);
-    onPersist(key, value);
-  }
-
   const hasCreds = settings.googleClientId.trim().length > 0 && settings.googleClientSecret.trim().length > 0;
 
   async function signIn(): Promise<void> {
     setBusy(true); setError(null);
     try {
+      if (!await onPersist('googleClientId', settings.googleClientId) || !await onPersist('googleClientSecret', settings.googleClientSecret))
+        throw new Error('Save valid Google credentials before connecting');
       await api.google.authStart();
       await refresh();
     } catch (e) {
@@ -858,7 +974,7 @@ function GoogleAccountCard({
           <Field label="OAuth Client ID">
             <input
               value={settings.googleClientId}
-              onChange={(e) => set('googleClientId', e.target.value)}
+              onChange={(e) => onUpdate({googleClientId: e.target.value})} onBlur={() => void onPersist('googleClientId', settings.googleClientId)}
               placeholder="xxxxxxxx.apps.googleusercontent.com"
               className="input font-mono text-xs"
             />
@@ -867,7 +983,7 @@ function GoogleAccountCard({
             <input
               type="password"
               value={settings.googleClientSecret}
-              onChange={(e) => set('googleClientSecret', e.target.value)}
+              onChange={(e) => onUpdate({googleClientSecret: e.target.value})} onBlur={() => void onPersist('googleClientSecret', settings.googleClientSecret)}
               placeholder="GOCSPX-…"
               className="input font-mono text-xs"
             />
@@ -916,7 +1032,7 @@ function WebhookExporterCard({
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
-  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onPersist: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<boolean>;
 }): JSX.Element {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Settings['webhookLastResult'] | null>(null);
@@ -929,6 +1045,9 @@ function WebhookExporterCard({
   async function runTest(): Promise<void> {
     setTesting(true); setTestResult(null);
     try {
+      for (const key of ['webhookUrl', 'webhookSecret', 'webhookTemplate', 'webhookOwnerFilter'] as const) {
+        if (!await onPersist(key, settings[key])) {setTestResult({ts: new Date().toISOString(),status: null,error: 'Save valid webhook settings before sending a test'}); return;}
+      }
       const r = await api.webhook.testSend();
       setTestResult(r);
     } finally {
@@ -963,7 +1082,7 @@ function WebhookExporterCard({
           <Field label="Webhook URL (HTTPS)">
             <input
               value={settings.webhookUrl}
-              onChange={(e) => set('webhookUrl', e.target.value)}
+              onChange={(e) => onUpdate({webhookUrl: e.target.value})} onBlur={() => onPersist('webhookUrl', settings.webhookUrl)}
               placeholder="https://example.com/hooks/meetingnotes"
               className="input"
               spellCheck={false}
@@ -973,7 +1092,7 @@ function WebhookExporterCard({
             <input
               type="password"
               value={settings.webhookSecret}
-              onChange={(e) => set('webhookSecret', e.target.value)}
+              onChange={(e) => onUpdate({webhookSecret: e.target.value})} onBlur={() => onPersist('webhookSecret', settings.webhookSecret)}
               placeholder="Sent as Authorization: Bearer …"
               className="input"
               spellCheck={false}
@@ -1045,6 +1164,9 @@ function SpeakerRosterRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(speaker.displayName);
   const [busy, setBusy] = useState(false);
+  // Pending merge target — non-null while the styled ConfirmDialog (#192)
+  // is open. The old window.confirm here rendered un-themed OS chrome.
+  const [mergeTarget, setMergeTarget] = useState<SpeakerListEntry | null>(null);
 
   async function saveRename(): Promise<void> {
     const name = draft.trim();
@@ -1062,19 +1184,18 @@ function SpeakerRosterRow({
   async function mergeInto(targetId: string): Promise<void> {
     const target = others.find((o) => o.id === targetId);
     if (!target) return;
-    const ok = window.confirm(
-      `Merge "${speaker.displayName}" into "${target.displayName}"?\n\n` +
-      `Their meetings and action items move to "${target.displayName}", ` +
-      `"${speaker.displayName}" is removed from the roster, and the affected ` +
-      'transcripts are rewritten. This can’t be undone.',
-    );
-    if (!ok) return;
+    setMergeTarget(target);
+  }
+
+  async function confirmMerge(): Promise<void> {
+    if (!mergeTarget) return;
     setBusy(true);
     try {
-      await api.speakers.merge(speaker.id, targetId);
+      await api.speakers.merge(speaker.id, mergeTarget.id);
       await onChanged();
     } finally {
       setBusy(false);
+      setMergeTarget(null);
     }
   }
 
@@ -1123,7 +1244,24 @@ function SpeakerRosterRow({
           ))}
         </select>
       )}
+      <ConfirmDialog
+        open={mergeTarget !== null}
+        title={`Merge "${speaker.displayName}" into "${mergeTarget?.displayName ?? ''}"?`}
+        body={
+          <>
+            Their meetings and action items move to{' '}
+            <span className="font-mono text-ink">{mergeTarget?.displayName}</span>,{' '}
+            <span className="font-mono text-ink">{speaker.displayName}</span> is
+            removed from the roster, and the affected transcripts are
+            rewritten. This can&rsquo;t be undone.
+          </>
+        }
+        confirmLabel="Merge"
+        destructive
+        busy={busy}
+        onConfirm={() => void confirmMerge()}
+        onCancel={() => { if (!busy) setMergeTarget(null); }}
+      />
     </li>
   );
 }
-

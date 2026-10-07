@@ -1,8 +1,10 @@
 import type Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
+import type { ObsidianConfig } from '../../shared/obsidian.js';
 
 export interface Settings {
+  obsidian: ObsidianConfig | null;
   lmStudioUrl: string;
   /** OpenAI-compatible STT endpoint (whisper.cpp's whisper-server, etc.). */
   sttUrl: string;
@@ -83,6 +85,12 @@ export interface Settings {
    *    and shuts it down after idle.
    *  - 'ollama': MeetingNotes spawns `ollama serve` on demand. */
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
+  /** Context window (tokens) passed to `lms load --context-length` when the
+   *  managed LM Studio provider auto-loads llmModel. 0 = don't pass the flag,
+   *  LM Studio uses the model's saved default — which is often 4k, silently
+   *  truncating long transcripts. Only meaningful for summaryProvider
+   *  'lm-studio'; ollama bakes context into the model, external is user-run. */
+  llmContextLength: number;
   /** How verbose the generated summary should be. Drives which "Length &
    *  depth" guidance gets baked into the summarization prompt (see
    *  buildSummaryPrompt). Independent of the model — the prompt pins the
@@ -127,6 +135,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
   sttUrl: 'http://127.0.0.1:8080',
   sttModel: 'whisper-1',
@@ -155,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardedAt: null,
   userSpeakerId: null,
   summaryProvider: 'external',
+  llmContextLength: 0,
   summaryDetail: 'detailed',
   disableThinking: true,
   modelHealthChecks: {},

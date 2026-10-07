@@ -1,0 +1,69 @@
+interface VirtualWindowInput {
+  count: number;
+  rowHeight: number;
+  scrollTop: number;
+  viewportHeight: number;
+  overscan: number;
+}
+
+/** Layout can fluctuate by fractions of a CSS pixel (zoom, scroll anchoring).
+ * Keep the last viewport until it moves at least one pixel; row overscan
+ * covers that tolerance without repeated geometry-driven React updates. */
+export function settleSectionViewport(previous: {scrollTop: number; height: number}, next: {scrollTop: number; height: number}): typeof previous {
+  return previous.height === next.height && Math.abs(previous.scrollTop - next.scrollTop) < 1 ? previous : next;
+}
+
+/** Unlike an owning scroll container, a section may be entirely outside the
+ * viewport. Do not clamp an offscreen section to its first or last rows. */
+export function sectionWindow(input: VirtualWindowInput): {start: number; end: number; totalHeight: number} {
+  const totalHeight = input.count * input.rowHeight;
+  if (input.viewportHeight <= 0 || input.scrollTop + input.viewportHeight <= 0 || input.scrollTop >= totalHeight)
+    return {start: 0, end: 0, totalHeight};
+  return {
+    start: Math.max(0, Math.floor(Math.max(0, input.scrollTop) / input.rowHeight) - input.overscan),
+    end: Math.min(input.count, Math.ceil((input.scrollTop + input.viewportHeight) / input.rowHeight) + input.overscan),
+    totalHeight,
+  };
+}
+
+/** Fixed-height slots, with an exclusive end index. Clamp stale scroll
+ * positions after resize/removal before computing the visible range. */
+export function virtualWindow({ count, rowHeight, scrollTop, viewportHeight, overscan }: VirtualWindowInput): {
+  start: number; end: number; offset: number; totalHeight: number;
+} {
+  const totalHeight = count * rowHeight;
+  const height = Math.max(0, viewportHeight);
+  const top = Math.max(0, Math.min(scrollTop, totalHeight - height));
+  const extra = Math.max(0, Math.min(count, Math.floor(overscan)));
+  const start = Math.max(0, Math.floor(top / rowHeight) - extra);
+  const end = Math.min(count, Math.ceil((top + height) / rowHeight) + extra);
+  return { start, end, offset: start * rowHeight, totalHeight };
+}
+
+/** Add only retained owners to the visible slots, preserving DOM order and
+ * stable ID ownership after refresh/reorder. Focus and dialogs may share a pin. */
+export function retainedRowIndexes({ items, start, end, retainedIds }: {
+  items: readonly { id: string }[];
+  start: number;
+  end: number;
+  retainedIds: Iterable<string>;
+}): number[] {
+  const indexes = new Set(Array.from({ length: end - start }, (_, index) => start + index));
+  for (const id of retainedIds) {
+    const index = items.findIndex((item) => item.id === id);
+    if (index >= 0) indexes.add(index);
+  }
+  return [...indexes].sort((a, b) => a - b);
+}
+
+/** J/K list movement. Nothing focused → j lands on the first row, k on the
+ *  last. Clamps at the ends so the virtual window can scroll the owner in. */
+export function stepMeetingIndex(
+  count: number,
+  current: number | null,
+  delta: 1 | -1,
+): number | null {
+  if (count <= 0) return null;
+  if (current === null) return delta === 1 ? 0 : count - 1;
+  return Math.max(0, Math.min(count - 1, current + delta));
+}

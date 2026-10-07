@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { LLMSupervisor } from './supervisor.js';
 
@@ -23,7 +24,7 @@ function fakeProc(): EventEmitter & {
 
 describe('LLMSupervisor', () => {
   it('ensureReady is a no-op when provider is "external"', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const sup = new LLMSupervisor({
       getProvider: () => 'external',
       spawn,
@@ -37,7 +38,7 @@ describe('LLMSupervisor', () => {
   });
 
   it('lm-studio mode adopts an existing healthy server without spawning', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const sup = new LLMSupervisor({
       getProvider: () => 'lm-studio',
       spawn,
@@ -58,7 +59,7 @@ describe('LLMSupervisor', () => {
       // First call (pre-flight): not ok. After spawn: ok on poll.
       return { ok: probeCalls >= 2 };
     };
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const sup = new LLMSupervisor({
       getProvider: () => 'lm-studio',
       spawn,
@@ -82,7 +83,7 @@ describe('LLMSupervisor', () => {
       probeCalls += 1;
       return { ok: probeCalls >= 2 };
     };
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const sup = new LLMSupervisor({
       getProvider: () => 'ollama',
       spawn,
@@ -101,13 +102,40 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  it('lm-studio cold spawn survives the launcher exiting 0 before health (lms daemonizes)', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 3 };
+    };
+    const spawn = vi.fn(() => {
+      const proc = fakeProc() as unknown as ChildProcess;
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc;
+    });
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel: vi.fn(async () => {}),
+      lmsListLoadedModels: vi.fn(async () => ['qwen/qwen3.5-9b']),
+      idleShutdownMs: 0,
+    });
+    await expect(sup.ensureReady()).resolves.toBeUndefined();
+    await sup.stop();
+  });
+
   it('lm-studio mode auto-loads the configured model when not already loaded', async () => {
     let probeCalls = 0;
     const probe = async (): Promise<{ ok: boolean }> => {
       probeCalls += 1;
       return { ok: probeCalls >= 2 };
     };
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const lmsLoadModel = vi.fn(async () => {});
     const lmsListLoadedModels = vi.fn(async () => [] as string[]);
     const sup = new LLMSupervisor({
@@ -124,13 +152,38 @@ describe('LLMSupervisor', () => {
     });
     await sup.ensureReady();
     expect(lmsListLoadedModels).toHaveBeenCalledWith('127.0.0.1', 1234);
-    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b');
+    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b', 0);
+    await sup.stop();
+  });
+
+  it('lm-studio auto-load passes the configured context length through', async () => {
+    let probeCalls = 0;
+    const probe = async (): Promise<{ ok: boolean }> => {
+      probeCalls += 1;
+      return { ok: probeCalls >= 2 };
+    };
+    const lmsLoadModel = vi.fn(async () => {});
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.5-9b',
+      getContextLength: () => 32768,
+      spawn: vi.fn(() => fakeProc() as unknown as ChildProcess),
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: probe,
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels: vi.fn(async () => [] as string[]),
+      idleShutdownMs: 0,
+    });
+    await sup.ensureReady();
+    expect(lmsLoadModel).toHaveBeenCalledWith('/fake/lms', 'qwen/qwen3.5-9b', 32768);
     await sup.stop();
   });
 
   it('lm-studio mode skips auto-load when the model is already loaded', async () => {
     const probe = async (): Promise<{ ok: boolean }> => ({ ok: true });
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const lmsLoadModel = vi.fn(async () => {});
     const lmsListLoadedModels = vi.fn(async () => ['qwen/qwen3.5-9b']);
     const sup = new LLMSupervisor({
@@ -151,7 +204,7 @@ describe('LLMSupervisor', () => {
 
   it('lm-studio mode tolerates auto-load failures without throwing', async () => {
     const probe = async (): Promise<{ ok: boolean }> => ({ ok: true });
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const lmsLoadModel = vi.fn(async () => { throw new Error('lms exit 1'); });
     const lmsListLoadedModels = vi.fn(async () => [] as string[]);
     const sup = new LLMSupervisor({
@@ -177,7 +230,7 @@ describe('LLMSupervisor', () => {
       probeCalls += 1;
       return { ok: probeCalls >= 2 };
     };
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const lmsLoadModel = vi.fn(async () => {});
     const lmsListLoadedModels = vi.fn(async () => [] as string[]);
     const sup = new LLMSupervisor({
@@ -209,7 +262,7 @@ describe('LLMSupervisor', () => {
       return { ok: probeCalls.ollama >= 2 };
     };
     let provider: 'lm-studio' | 'ollama' = 'lm-studio';
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const sup = new LLMSupervisor({
       getProvider: () => provider,
       spawn,
