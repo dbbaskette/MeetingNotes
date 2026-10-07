@@ -8,6 +8,9 @@ import electron from 'electron';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const server = await createServer({ configFile: false, root, plugins: [react()],
+  // The final capture fixture uses Markdown recovery details. Pre-optimize
+  // those dependencies so a cold run does not reload its assertion sequence.
+  optimizeDeps: { include: ['react-markdown', 'remark-gfm'] },
   server: { host: '127.0.0.1', port: 5198, strictPort: true } });
 try {
   await server.listen();

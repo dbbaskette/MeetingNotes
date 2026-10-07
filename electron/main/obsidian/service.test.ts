@@ -437,7 +437,9 @@ describe('Obsidian sync', () => {
     console.info(
       `Obsidian fixture: 500 exports ${(unchanged - started).toFixed(0)} ms; unchanged pass ${(performance.now() - unchanged).toFixed(1)} ms`,
     );
-  });
+  // Hundreds of durable file writes on the disposable VM are not a 5-second
+  // performance budget. Keep all batch/no-rewrite assertions and a finite cap.
+  }, 30_000);
   it('checks compare-before-write and never clobbers an unexpected file', () => {
     const file = path.join(vault, 'file.md');
     fs.writeFileSync(file, 'User data');
