@@ -23,6 +23,7 @@ export interface AudioSource {
    *  process's own identity when the helper predates these fields). */
   ownerPid: number;
   ownerName: string | null;
+  ownerBundleId: string | null;
 }
 
 type Runner = (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>;
@@ -38,12 +39,12 @@ export class AppEnumerator {
     const payload = JSON.parse(line) as {
       items?: {
         pid: number; bundle_id?: string; name?: string; is_meeting_app?: boolean;
-        is_running_output?: boolean; is_user_app?: boolean; owner_pid?: number; owner_name?: string;
+        is_running_output?: boolean; is_user_app?: boolean; owner_pid?: number; owner_name?: string; owner_bundle_id?: string;
       }[];
     };
     const sources = (payload.items ?? []).map((it) => ({
       pid: it.pid,
-      bundleId: it.bundle_id ?? null,
+      bundleId: it.bundle_id ?? it.owner_bundle_id ?? null,
       name: it.name ?? null,
       isMeetingApp: it.is_meeting_app ?? false,
       // Default true when the helper doesn't emit the field (older binary):
@@ -54,34 +55,22 @@ export class AppEnumerator {
       isUserApp: it.is_user_app ?? (it.name != null),
       ownerPid: it.owner_pid ?? it.pid,
       ownerName: it.owner_name ?? it.name ?? null,
+      ownerBundleId: it.owner_bundle_id ?? it.bundle_id ?? null,
     }));
-    return dedupeByOwner(sources);
+    return attributeOwners(sources);
   }
 }
 
-/** One picker row per owning app: a browser's several audio helpers collapse
- *  into a single entry. The representative pid is the audible helper when one
- *  exists — that's the process actually worth tapping. Daemons (no owner) are
- *  never merged; they pass through one-per-process. */
-export function dedupeByOwner(sources: AudioSource[]): AudioSource[] {
-  const byOwner = new Map<number, AudioSource>();
+/** Share app identity/badges without discarding independently tappable PIDs.
+ * A process tap targets one PID, so collapsing audible siblings loses audio. */
+export function attributeOwners(sources: AudioSource[]): AudioSource[] {
+  const meetingOwners = new Set(sources.filter(s => s.isUserApp && s.isMeetingApp).map(s => s.ownerPid));
+  const seen = new Set<number>();
   const out: AudioSource[] = [];
   for (const s of sources) {
-    if (!s.isUserApp) { out.push(s); continue; }
-    const existing = byOwner.get(s.ownerPid);
-    if (!existing) {
-      byOwner.set(s.ownerPid, { ...s, name: s.ownerName ?? s.name });
-      continue;
-    }
-    // Prefer the audible process as the tap target; keep meeting flag if any
-    // sibling carries it.
-    const preferNew = s.isRunningOutput && !existing.isRunningOutput;
-    const merged: AudioSource = {
-      ...(preferNew ? { ...s, name: s.ownerName ?? s.name } : existing),
-      isMeetingApp: existing.isMeetingApp || s.isMeetingApp,
-      isRunningOutput: existing.isRunningOutput || s.isRunningOutput,
-    };
-    byOwner.set(s.ownerPid, merged);
+    if (seen.has(s.pid)) continue;
+    seen.add(s.pid);
+    out.push({ ...s, isMeetingApp: s.isMeetingApp || (s.isUserApp && meetingOwners.has(s.ownerPid)) });
   }
-  return [...byOwner.values(), ...out];
+  return out.sort((a,b) => Number(b.isRunningOutput) - Number(a.isRunningOutput));
 }

@@ -15,10 +15,8 @@ describe('AppEnumerator', () => {
 
     const sources = await e.list();
     expect(sources).toHaveLength(2);
-    expect(sources[0]!.isMeetingApp).toBe(true);
-    expect(sources[0]!.name).toBe('Zoom');
-    expect(sources[0]!.isRunningOutput).toBe(false);
-    expect(sources[1]!.isRunningOutput).toBe(true);
+    expect(sources.find(s => s.pid === 100)).toMatchObject({ isMeetingApp: true, name: 'Zoom', isRunningOutput: false });
+    expect(sources.find(s => s.pid === 200)!.isRunningOutput).toBe(true);
   });
 
   it('defaults isRunningOutput to true when helper omits the field (older binary)', async () => {
@@ -37,7 +35,7 @@ describe('AppEnumerator', () => {
     expect(await e.list()).toEqual([]);
   });
 
-  it('collapses helper processes into one row per owning app, preferring the audible pid', async () => {
+  it('retains every tappable helper and prefers audible sources in sort order', async () => {
     const helperOutput = JSON.stringify({
       event: 'processes',
       items: [
@@ -51,9 +49,9 @@ describe('AppEnumerator', () => {
 
     const sources = await e.list();
     const chrome = sources.filter((s) => s.ownerPid === 300);
-    expect(chrome).toHaveLength(1);
+    expect(chrome).toHaveLength(2);
     expect(chrome[0]!.pid).toBe(302); // the audible helper is the tap target
-    expect(chrome[0]!.name).toBe('Google Chrome'); // displayed as the owning app
+    expect(chrome[0]!.ownerName).toBe('Google Chrome');
     expect(chrome[0]!.isRunningOutput).toBe(true);
     // Daemons pass through unmerged and flagged for the picker to tuck away.
     expect(sources.find((s) => s.pid === 400)!.isUserApp).toBe(false);
@@ -71,9 +69,17 @@ describe('AppEnumerator', () => {
     const e = new AppEnumerator({ helperPath: '/h', runner: fakeRunner });
 
     const sources = await e.list();
-    expect(sources).toHaveLength(1);
+    expect(sources).toHaveLength(2);
     expect(sources[0]!.isMeetingApp).toBe(true);
     expect(sources[0]!.isRunningOutput).toBe(true);
+  });
+
+  it('retains two audible siblings and falls back to the owner bundle for detection', async () => {
+    const items = [501, 502].map(pid => ({ pid, is_running_output: true, is_meeting_app: true, is_user_app: true, owner_pid: 500, owner_name: 'Zoom', owner_bundle_id: 'us.zoom.xos' }));
+    const enumerator = new AppEnumerator({ helperPath: '/h', runner: async () => ({ stdout: JSON.stringify({ event: 'processes', items }), stderr: '' }) });
+    const sources = await enumerator.list();
+    expect(sources.map(s => s.pid)).toEqual([501, 502]);
+    expect(sources.every(s => s.bundleId === 'us.zoom.xos' && s.ownerBundleId === 'us.zoom.xos')).toBe(true);
   });
 
   it('treats named sources from older helpers (no is_user_app) as user apps', async () => {

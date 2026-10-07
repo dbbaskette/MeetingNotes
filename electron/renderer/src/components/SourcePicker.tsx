@@ -1,18 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../ipc/client';
 import { GroupPicker } from './GroupPicker';
+import { audioSourceLabel, groupAudioSources, type SourceItem } from '../lib/audio-source-groups';
 
 export interface PickedSource { targetPid: number | 'system'; targetLabel: string; groupId?: string | null; }
 
-interface SourceItem {
-  pid: number;
-  name: string | null;
-  bundleId: string | null;
-  isMeetingApp: boolean;
-  isRunningOutput: boolean;
-  isUserApp?: boolean;
-  ownerName?: string | null;
-}
 
 export function SourcePicker({
   onPick, onCancel, initialGroupId,
@@ -67,11 +59,11 @@ export function SourcePicker({
       setConfirmIdle(s);
       return;
     }
-    onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}`, groupId });
+    onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId });
   }
 
   return (
-    <div className="absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
+    <div className="absolute right-0 top-full mt-2 z-30 w-80 max-h-[80vh] overflow-y-auto bg-surface border border-surface-border rounded-xl shadow-pop p-2">
       <div className="text-[11px] font-mono uppercase tracking-wider text-ink-muted px-2 py-1">
         Recording from
       </div>
@@ -83,17 +75,7 @@ export function SourcePicker({
           then reopen this picker.
         </div>
       )}
-      {audible.map((s) => (
-        <button
-          key={s.pid}
-          onClick={() => pickOrConfirm(s)}
-          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2"
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-status-ok shrink-0" title="Currently audible" />
-          <span className="flex-1 truncate">{s.name ?? `PID ${s.pid}`}</span>
-          {s.isMeetingApp && <span className="text-[10px] text-brand-indigo font-semibold">MEETING</span>}
-        </button>
-      ))}
+      <SourceRows sources={audible} onPick={pickOrConfirm} />
 
       {idle.length > 0 && (
         <>
@@ -101,17 +83,7 @@ export function SourcePicker({
           <div className="px-2 pt-1 pb-0.5 text-[10px] font-mono uppercase tracking-wider text-ink-muted/70">
             Idle (not currently audible)
           </div>
-          {idle.map((s) => (
-            <button
-              key={s.pid}
-              onClick={() => pickOrConfirm(s)}
-              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2 text-ink-muted"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-ink-muted/40 shrink-0" title="Not currently playing audio" />
-              <span className="flex-1 truncate">{s.name ?? `PID ${s.pid}`}</span>
-              {s.isMeetingApp && <span className="text-[10px] text-ink-muted/70 font-semibold">MEETING</span>}
-            </button>
-          ))}
+          <SourceRows sources={idle} onPick={pickOrConfirm} />
         </>
       )}
 
@@ -125,19 +97,7 @@ export function SourcePicker({
           >
             {showBackground ? '▾' : '▸'} Background processes ({background.length})
           </button>
-          {showBackground && background.map((s) => (
-            <button
-              key={s.pid}
-              onClick={() => pickOrConfirm(s)}
-              className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2 text-ink-muted"
-            >
-              <span
-                className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.isRunningOutput ? 'bg-status-ok' : 'bg-ink-muted/40'}`}
-                title={s.isRunningOutput ? 'Currently audible' : 'Not currently playing audio'}
-              />
-              <span className="flex-1 truncate">{s.name ?? `PID ${s.pid}`}</span>
-            </button>
-          ))}
+          {showBackground && <SourceRows sources={background} onPick={pickOrConfirm} />}
         </>
       )}
 
@@ -164,12 +124,28 @@ export function SourcePicker({
           onProceed={() => {
             const s = confirmIdle;
             setConfirmIdle(null);
-            onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}`, groupId });
+            onPick({ targetPid: s.pid, targetLabel: audioSourceLabel(s), groupId });
           }}
         />
       )}
     </div>
   );
+}
+
+function SourceRows({ sources, onPick }: { sources: SourceItem[]; onPick: (source: SourceItem) => void }): JSX.Element {
+  const row = (source: SourceItem) => <button key={source.pid} type="button" onClick={() => onPick(source)}
+    data-source-pid={source.pid} title={audioSourceLabel(source)}
+    className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2">
+    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${source.isRunningOutput ? 'bg-status-ok' : 'bg-ink-muted/40'}`} />
+    <span className="flex-1 min-w-0 truncate">{audioSourceLabel(source)}</span>
+    {source.isMeetingApp && <span className="text-[10px] text-brand-indigo font-semibold">MEETING</span>}
+  </button>;
+  return <>{groupAudioSources(sources).map(group => group.sources.length === 1 ? row(group.sources[0]!) :
+    <details key={group.key} open>
+      <summary className="px-2 py-1 text-xs font-semibold cursor-pointer">{group.name} · {group.sources.length} audio streams</summary>
+      <div className="pl-2">{group.sources.map(row)}</div>
+      <p className="px-2 text-[10px] text-ink-muted">Each stream records separately. Use All system audio to capture every stream.</p>
+    </details>)}</>;
 }
 
 function IdleConfirmDialog({
@@ -179,7 +155,7 @@ function IdleConfirmDialog({
   onClose: () => void;
   onProceed: () => void;
 }): JSX.Element {
-  const displayName = source.name ?? `PID ${source.pid}`;
+  const displayName = audioSourceLabel(source);
   return (
     <div
       className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4"
