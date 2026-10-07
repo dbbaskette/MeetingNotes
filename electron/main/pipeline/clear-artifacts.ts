@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ArtifactCache } from '../library/artifact-cache.js';
 
 // Artifacts each stage produces, in pipeline order. Clearing FROM a stage
 // deletes that stage's output + everything downstream, so a retry doesn't
@@ -15,9 +16,10 @@ const STAGE_ARTIFACTS: Record<string, readonly string[]> = {
   extracting:   ['action-items.json'],
 };
 
-export function clearArtifactsFromStage(folder: string, fromStage: string): void {
+export function clearArtifactsFromStage(folder: string, fromStage: string, artifactCache: ArtifactCache): void {
   const files = STAGE_ARTIFACTS[fromStage];
   if (!files) return;
+  artifactCache.invalidateFolder(folder);
   for (const name of files) {
     const p = path.join(folder, name);
     try {

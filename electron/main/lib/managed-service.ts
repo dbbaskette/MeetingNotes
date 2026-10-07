@@ -151,6 +151,7 @@ async function defaultKillOnPort(port: number): Promise<void> {
 export class ManagedService {
   private proc: ChildProcess | null = null;
   private lastExitCode: number | null = null;
+  private launcherHealthy = false;
   private restarts = 0;
   private stopped = false;
   private startedAt = 0;
@@ -315,6 +316,8 @@ export class ManagedService {
   /** Spawn the child and wire up its output/exit handlers. Assumes
    *  this.proc is null. */
   private spawnProc(host: string, port: number): void {
+    this.lastExitCode = null;
+    this.launcherHealthy = false;
     const launch = this.deps.resolveLaunch(host, port);
     let proc: ChildProcess;
     try {
@@ -347,6 +350,13 @@ export class ManagedService {
       // A kill we issued deliberately to respawn a wedged process — the
       // attempt loop will spawn the replacement, so don't double-spawn.
       if (this.suppressRestart) return;
+      if (this.deps.launcherExitsOk && code === 0) {
+        // A successful launcher has handed off its daemon, not crashed.
+        // Only adopt it after a successful health probe; never race startup
+        // with a scheduled restart or try to kill the exited launcher.
+        if (this.launcherHealthy) this.external = true;
+        return;
+      }
       if (uptime >= this.healthyUptime) this.restarts = 0;
       this.scheduleRestart();
     });
@@ -362,6 +372,7 @@ export class ManagedService {
   ): Promise<'ok' | 'exited' | 'port-conflict' | 'timeout'> {
     const deadline = Date.now() + this.startupAttemptTimeoutMs;
     while (Date.now() < deadline) {
+      if (this.deps.launcherExitsOk && this.stopped) return 'exited';
       // Launcher-style commands (lms server start) exit 0 after handing the
       // real server to the OS — that's success-in-progress, so keep polling
       // health. Anything else exiting, or a launcher failing (code != 0),
@@ -369,7 +380,16 @@ export class ManagedService {
       if (!this.proc && !(this.deps.launcherExitsOk && this.lastExitCode === 0)) return 'exited';
       if (this.portConflict) return 'port-conflict';
       const p = await this.probe(host, port);
-      if (p.ok) return 'ok';
+      if (this.deps.launcherExitsOk && this.stopped) return 'exited';
+      if (p.ok) {
+        if (this.deps.launcherExitsOk) {
+          // The daemon is outside the child-process lifecycle, like an
+          // instance found by pre-flight. Future calls verify its health.
+          this.launcherHealthy = true;
+          if (!this.proc) this.external = true;
+        }
+        return 'ok';
+      }
       await new Promise((r) => setTimeout(r, this.startupPollIntervalMs));
     }
     return 'timeout';

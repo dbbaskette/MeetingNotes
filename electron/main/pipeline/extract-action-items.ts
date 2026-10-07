@@ -39,6 +39,7 @@ export interface ExtractActionItemsDeps {
   /** Optional log hook for each re-sample retry (the caller has a logger; this
    *  module doesn't), so the otherwise-invisible retry is observable. */
   onResample?: (retry: number, reasoningWords: number) => void;
+  beforeReplace?: () => void;
 }
 
 /** Run the extraction against the meeting folder's saved summary.md, persist
@@ -78,6 +79,7 @@ export async function extractActionItemsFromSummary(
     ],
   });
   const items = matchSourceQuotes(parseActionItemsLoose(raw), summary);
+  deps.beforeReplace?.();
   fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
   deps.actionItems.replaceForMeeting(meetingId, items);
   return { count: items.length };

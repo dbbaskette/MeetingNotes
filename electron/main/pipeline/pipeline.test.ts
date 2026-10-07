@@ -27,9 +27,16 @@ describe('Pipeline', () => {
         identifying: mk('i'), summarizing: mk('s'), extracting: mk('e'),
       },
     });
+    const stageEvents: string[] = [];
+    p.onMeetingStageChange((id) => {
+      stageEvents.push(meetings.findById(id)?.pipelineStage ?? 'missing');
+    });
     await p.run('m');
     expect(meetings.findById('m')?.pipelineStage).toBe('done');
     expect(calls).toContain('t'); expect(calls).toContain('d'); expect(calls).toContain('m');
+    expect(stageEvents).toContain('transcribing');
+    expect(stageEvents).toContain('summarizing');
+    expect(stageEvents.at(-1)).toBe('done');
   });
 
   it('re-running from "transcribing" re-runs both parallel branches', async () => {
