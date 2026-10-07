@@ -21,5 +21,11 @@ benchmark against the reviewed baseline, Electron-native rebuild, and isolated
 Library/Settings/history renderer fixtures. All UI/API data is synthetic; no
 microphone, real account, vault, or paid service is contacted.
 
+The populated Library startup regression renders the real Library with 600
+meetings, three expanded groups, and 113 recovery entries. It checks subpixel
+geometry jitter, narrow/short flex layouts, zoom, view switching, and collapse,
+and fails on renderer/React errors. An empty first-run permissions screen is
+not evidence that a populated Library renders successfully.
+
 The guest writes PASS only after all checks finish. Results are retained under
 `~/Library/Logs/MacOS Test Suite/meetingnotes/`. Required GitHub gates still apply.

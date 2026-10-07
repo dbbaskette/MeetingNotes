@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { retainedRowIndexes, stepMeetingIndex, virtualWindow, sectionWindow } from './virtual-window';
+import { retainedRowIndexes, stepMeetingIndex, virtualWindow, sectionWindow, settleSectionViewport } from './virtual-window';
 
 const base = { count: 1_000, rowHeight: 72, viewportHeight: 700, overscan: 5 };
+
+describe('settleSectionViewport', () => {
+  it('reuses state across subpixel layout jitter rather than rerendering', () => {
+    const previous = {scrollTop: -56.125, height: 700};
+    expect(settleSectionViewport(previous, {scrollTop: -55.875, height: 700})).toBe(previous);
+    expect(settleSectionViewport(previous, {scrollTop: -56.875, height: 700})).toBe(previous);
+  });
+  it('tracks accumulated scrolling, section reflow, and even a collapsed viewport', () => {
+    const previous = {scrollTop: 0, height: 700};
+    for (const next of [{scrollTop: 1, height: 700}, {scrollTop: -56, height: 700}, {scrollTop: 0, height: 0}])
+      expect(settleSectionViewport(previous, next)).toBe(next);
+  });
+});
 
 describe('sectionWindow', () => {
   it('mounts no rows in groups entirely above or below the shared viewport', () => {

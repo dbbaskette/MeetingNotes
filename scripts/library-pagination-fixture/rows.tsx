@@ -12,7 +12,7 @@ const data: MeetingSummary[] = Array.from({ length: 1000 }, (_, index) => {
     status, stageStartedAt: status === 'processing' ? new Date().toISOString() : null,
     stageEtaMs: null, stageEtaRough: false, unidentifiedCount: 4, actionItemsCount: 3,
     speakers: ['Alice', 'Bob', 'Cameron', 'Daria'].map((name, n) => ({ localLabel: `SPEAKER_${n}`, displayName: name, rosterId: `person-${n}`, confidence: 1 })),
-    errorMessage: null, skipSpeakerId: false,
+    errorMessage: null, skipSpeakerId: false, groupId: null, groupName: null,
   };
 });
 const requests: unknown[] = [];

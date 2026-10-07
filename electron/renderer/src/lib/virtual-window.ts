@@ -6,6 +6,13 @@ interface VirtualWindowInput {
   overscan: number;
 }
 
+/** Layout can fluctuate by fractions of a CSS pixel (zoom, scroll anchoring).
+ * Keep the last viewport until it moves at least one pixel; row overscan
+ * covers that tolerance without repeated geometry-driven React updates. */
+export function settleSectionViewport(previous: {scrollTop: number; height: number}, next: {scrollTop: number; height: number}): typeof previous {
+  return previous.height === next.height && Math.abs(previous.scrollTop - next.scrollTop) < 1 ? previous : next;
+}
+
 /** Unlike an owning scroll container, a section may be entirely outside the
  * viewport. Do not clamp an offscreen section to its first or last rows. */
 export function sectionWindow(input: VirtualWindowInput): {start: number; end: number; totalHeight: number} {

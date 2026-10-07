@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { MeetingSummary } from '../lib/paged-meetings';
-import { retainedRowIndexes, sectionWindow } from '../lib/virtual-window';
+import { retainedRowIndexes, sectionWindow, settleSectionViewport } from '../lib/virtual-window';
 import { RowDialogRetention } from './RowDialogRetention';
 
 /** Fixed browse rows reuse the organized library's single scroll surface.
@@ -13,6 +13,7 @@ export function VirtualGroupRows({items, scrollRef, renderRow}: {
   const [focused, setFocused] = useState<string | null>(null);
   const [dialogs, setDialogs] = useState<Set<string>>(new Set());
   const focusRevision = useRef(0);
+  const measureFrame = useRef<number | null>(null);
   const retainDialog = useCallback((id: string, open: boolean) => setDialogs(previous => {
     if (previous.has(id) === open) return previous;
     const next = new Set(previous); if (open) next.add(id); else next.delete(id); return next;
@@ -22,21 +23,29 @@ export function VirtualGroupRows({items, scrollRef, renderRow}: {
     if (!scroll || !list) return;
     const top = scroll.getBoundingClientRect().top + scroll.clientTop - list.getBoundingClientRect().top;
     const height = scroll.clientHeight;
-    setViewport(previous => previous.scrollTop === top && previous.height === height ? previous : {scrollTop: top, height});
+    setViewport(previous => settleSectionViewport(previous, {scrollTop: top, height}));
   }, [scrollRef]);
-  useLayoutEffect(measure);
+  const scheduleMeasure = useCallback(() => {
+    if (measureFrame.current !== null) return;
+    measureFrame.current = requestAnimationFrame(() => {measureFrame.current = null; measure();});
+  }, [measure]);
+  // Never synchronously set state on every commit: measuring changes to the
+  // shared flex/scroll layout can otherwise cause a nested React update loop.
+  useLayoutEffect(scheduleMeasure);
   useEffect(() => {
     const scroll = scrollRef.current, list = listRef.current;
     if (!scroll || !list) return;
-    let frame: number | null = null;
-    const schedule = () => { if (frame === null) frame = requestAnimationFrame(() => {frame = null; measure();}); };
-    const observer = new ResizeObserver(schedule);
+    const observer = new ResizeObserver(scheduleMeasure);
     observer.observe(scroll); observer.observe(list);
     if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
-    scroll.addEventListener('scroll', schedule, {passive: true});
-    measure();
-    return () => { observer.disconnect(); scroll.removeEventListener('scroll', schedule); if (frame !== null) cancelAnimationFrame(frame); };
-  }, [scrollRef, measure]);
+    scroll.addEventListener('scroll', scheduleMeasure, {passive: true});
+    scheduleMeasure();
+    return () => {
+      observer.disconnect(); scroll.removeEventListener('scroll', scheduleMeasure);
+      if (measureFrame.current !== null) cancelAnimationFrame(measureFrame.current);
+      measureFrame.current = null;
+    };
+  }, [scrollRef, scheduleMeasure]);
   const window = sectionWindow({count: items.length, rowHeight: 72, scrollTop: viewport.scrollTop, viewportHeight: viewport.height, overscan: 5});
   const indexes = retainedRowIndexes({items, start: window.start, end: window.end, retainedIds: focused ? [...dialogs, focused] : dialogs});
   return <RowDialogRetention.Provider value={retainDialog}>

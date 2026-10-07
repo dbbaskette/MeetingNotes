@@ -32,6 +32,7 @@ if [[ "$test_mode" == full ]]; then
 run_check native-node npm run rebuild:node
 run_check tests npx vitest run
 run_check renderer-types npx tsc --noEmit -p tsconfig.json
+run_check fixture-types npx tsc --noEmit -p scripts/library-pagination-fixture/tsconfig.json
 run_check build npm run build
 # macOS Bash 3 has no mapfile. Read the scoped changed-file list portably.
 lint_files=()
@@ -42,7 +43,7 @@ if ((${#lint_files[@]})); then run_check changed-lint npx eslint "${lint_files[@
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 run_check native-electron npm run rebuild:electron
 else
-  export MN_FIXTURE_MODES=selection,grouped,settings
+  export MN_FIXTURE_MODES=selection,grouped,startup,settings
 fi
 run_check renderer-fixtures env MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
 printf 'Electron: ' >> "$results_root/environment.txt"
