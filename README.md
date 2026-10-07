@@ -362,6 +362,8 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
 Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/start.sh --status` (what's running). App logs: `~/Library/Logs/MeetingNotes/app.log`, surfaced in-app under **Settings → Advanced → Diagnostics**. Full isolated macOS verification uses [the shared Tart runner](docs/local-ci.md).
+
+The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sqlite`, follows the configured library and active LLM provider, and never creates a missing database. For deliberate overrides, set `MEETINGNOTES_SETTINGS_DB`, `MEETINGNOTES_LIB`, `STT_URL`, or `LM_STUDIO_URL`; explicit endpoint overrides take precedence over saved settings.
 </details>
 
 ## 🔒 Privacy & security
