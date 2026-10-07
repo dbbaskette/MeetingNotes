@@ -80,6 +80,15 @@ interface GoogleTokenResponse {
   error_description?: string;
 }
 
+/** Preserve the endpoint's structured failure, without copying free-form
+ * response descriptions that might include credentials into diagnostics. */
+export class GoogleTokenError extends Error {
+  constructor(readonly status: number, readonly code: string | null) {
+    super(`Google token endpoint ${status}: ${code ?? 'request failed'}`);
+    this.name = 'GoogleTokenError';
+  }
+}
+
 async function postToken(
   fetchImpl: FetchImpl,
   body: Record<string, string>,
@@ -91,9 +100,9 @@ async function postToken(
   });
   const json = (await resp.json().catch(() => ({}))) as GoogleTokenResponse;
   if (!resp.ok || json.error) {
-    throw new Error(
-      `Google token endpoint ${resp.status}: ${json.error ?? ''} ${json.error_description ?? ''}`.trim(),
-    );
+    const code = typeof json.error === 'string' && /^[a-z_]+$/.test(json.error)
+      ? json.error : null;
+    throw new GoogleTokenError(resp.status, code);
   }
   return json;
 }

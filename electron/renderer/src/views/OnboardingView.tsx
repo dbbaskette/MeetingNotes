@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 import { type StepStatus, statusFromProbe } from '../lib/setup-wizard';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
+import { Icon } from '../components/icons';
 
 interface Props {
   onFinished: () => void;
@@ -592,7 +593,7 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
             className="input mb-2"
           >
             {loaded!.map((m) => (
-              <option key={m} value={m}>{isKnownReasoningModel(m) ? `🧠 ${m}` : m}</option>
+              <option key={m} value={m}>{isKnownReasoningModel(m) ? `${m} (reasoning)` : m}</option>
             ))}
           </select>
           {health && (
@@ -606,14 +607,17 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
               {health === 'checking'
                 ? 'Checking whether this model tends to loop on structured tasks…'
                 : health === 'loops'
-                  ? '⚠ This model looped on a quick extraction test — expect it to fail on real meetings too. You can continue, but consider a non-reasoning model.'
+                  ? 'This model looped on a quick extraction test — expect it to fail on real meetings too. You can continue, but consider a non-reasoning model.'
                   : '✓ Passed a quick extraction canary.'}
             </div>
           )}
           {picked && isKnownReasoningModel(picked) && (
-            <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mb-1.5">
-              🧠 This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo;
-              and burn its token budget on chain-of-thought instead of answering.
+            <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1.5 mb-1.5 flex items-start gap-2">
+              <Icon name="brain" className="w-4 h-4 shrink-0 mt-px" />
+              <span>
+                This looks like a reasoning model. It may ignore &ldquo;Disable model thinking&rdquo;
+                and burn its token budget on chain-of-thought instead of answering.
+              </span>
             </div>
           )}
         </>

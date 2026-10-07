@@ -1,7 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registerIpcHandlers } from './handlers.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import { registerIpcHandlers, type IpcServices } from './handlers.js';
+import type * as mergingModule from '../pipeline/stages/merging.js';
 import { LMStudioError } from '../lm-studio/client.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
+import { ArtifactCache } from '../library/artifact-cache.js';
+import { openDb } from '../storage/db.js';
+import { MeetingsRepo } from '../storage/meetings-repo.js';
+import { GroupsRepo } from '../storage/groups-repo.js';
+import { SpeakersRepo } from '../storage/speakers-repo.js';
+import { ActionItemsRepo } from '../storage/action-items-repo.js';
+
+type TestHandler = Parameters<IpcMain['handle']>[1];
+const ipcEvent = {} as IpcMainInvokeEvent;
 
 // Mock the merge step so speaker rename/merge tests can assert the re-merge
 // fan-out without needing real transcript files on disk.
@@ -14,7 +29,258 @@ beforeEach(() => {
   vi.mocked(remergeTranscript).mockClear();
 });
 
-function baseServices(overrides: Record<string, unknown> = {}): any {
+describe('paginated meeting summaries', () => {
+  let db: ReturnType<typeof openDb>;
+  let meetings: MeetingsRepo;
+  let groups: GroupsRepo;
+  let speakers: SpeakersRepo;
+  let actionItems: ActionItemsRepo;
+  let handlers: Map<string, TestHandler>;
+  const insert = (id: string, status = 'done') => meetings.insert({
+    id, slug: id, title: id, startedAt: '2026-09-01T12:00:00Z', durationS: 60,
+    audioPath: `/audio/${id}`, status, pipelineStage: 'done',
+  });
+  const invoke = (channel: string, input?: unknown, extra?: unknown) => {
+    const handler = handlers.get(channel);
+    expect(handler, `${channel} must be registered`).toBeTypeOf('function');
+    return extra === undefined ? handler!(ipcEvent, input) : handler!(ipcEvent, input, extra);
+  };
+  beforeEach(() => {
+    db = openDb(':memory:');
+    meetings = new MeetingsRepo(db);
+    groups = new GroupsRepo(db);
+    speakers = new SpeakersRepo(db);
+    actionItems = new ActionItemsRepo(db);
+    handlers = new Map();
+    registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
+      baseServices({ meetings, groups, speakers, actionItems }));
+  });
+  afterEach(() => db.close());
+
+  it('defaults to 50, caps at 100, and returns library-wide counts with a filtered total', () => {
+    for (let i = 0; i < 105; i++) insert(`done-${String(i).padStart(3, '0')}`);
+    insert('pending', 'pending');
+    insert('gate', 'awaiting_user');
+    insert('processing', 'processing');
+    insert('failed', 'failed');
+    insert('deleted');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const query = { filter: 'done', sort: 'newest' };
+    const first = invoke('meetings:list-page', query);
+    expect(first.items).toHaveLength(50);
+    expect(first.total).toBe(105);
+    expect(first.counts).toEqual({ all: 109, pending: 1, processing: 2, done: 105, failed: 1 });
+    const capped = invoke('meetings:list-page', { ...query, pageSize: 1000 });
+    expect(capped.items).toHaveLength(100);
+    const last = invoke('meetings:list-page', { ...query, cursor: capped.nextCursor });
+    expect(last.items.map((m: { id: string }) => m.id)).toEqual(['done-100', 'done-101', 'done-102', 'done-103', 'done-104']);
+    expect(last.nextCursor).toBeNull();
+    expect(invoke('meetings:list-ids', 'processing')).toEqual(['gate', 'processing']);
+  });
+
+  it('validates group IPC and applies scoped pages, counts, ID selection, and assignment', () => {
+    insert('one'); insert('two'); insert('free');
+    const group = invoke('groups:create', 'Project Alpha');
+    expect(group.name).toBe('Project Alpha');
+    expect(() => invoke('groups:create', 'project alpha')).toThrow(/already exists/);
+    expect(() => invoke('groups:create', '   ')).toThrow();
+    expect(() => invoke('groups:assign', { ids: ['one', 'two'], groupId: 'bad' })).toThrow();
+    expect(invoke('groups:assign', { ids: ['one', 'two'], groupId: group.id }).moved).toHaveLength(2);
+    const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: group.id });
+    expect(page.items.map((item: { id: string }) => item.id).sort()).toEqual(['one', 'two']);
+    expect(page.items[0].groupName).toBe('Project Alpha');
+    expect(page.counts.all).toBe(2);
+    expect(invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: null }).items.map((item: { id: string }) => item.id)).toEqual(['free']);
+    expect(invoke('meetings:list-ids', 'all', group.id)).toEqual(['one', 'two']);
+    expect(invoke('groups:list').ungroupedCount).toBe(1);
+    expect(() => invoke('meetings:list-page', { filter: 'all', sort: 'newest', groupId: 'bad' })).toThrow();
+    invoke('groups:rename', group.id, 'Renamed');
+    expect(invoke('groups:list').groups[0].name).toBe('Renamed');
+    expect(invoke('groups:delete', group.id)).toBe(true);
+    expect(meetings.findById('one')?.groupId).toBeNull();
+  });
+
+  it('scopes content search before the hit limit and annotates the global result', async () => {
+    const root = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-group-search-'));
+    try {
+      const group = groups.create('Project Alpha');
+      for (let i = 0; i < 8; i++) insert(`outside-${i}`);
+      insert('inside');
+      groups.assign(['inside'], group.id);
+      for (const id of [...Array.from({ length: 8 }, (_, i) => `outside-${i}`), 'inside']) {
+        const folder = path.join(root, 'meetings', id);
+        fsSync.mkdirSync(folder, { recursive: true });
+        fsSync.writeFileSync(path.join(folder, 'summary.md'), 'We need to coordinate the next release.\n');
+      }
+      handlers = new Map();
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
+        baseServices({ meetings, groups, speakers, actionItems, libraryRoot: root }));
+      const search = handlers.get('search:query')!;
+      const scoped = await search(ipcEvent, 'coordinate', 1, group.id);
+      expect(scoped.map((hit: { meetingId: string }) => hit.meetingId)).toEqual(['inside']);
+      expect(scoped[0].groupName).toBe('Project Alpha');
+      const global = await search(ipcEvent, 'coordinate', 20);
+      expect(global.some((hit: { meetingId: string }) => hit.meetingId === 'outside-0')).toBe(true);
+    } finally { fsSync.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each([
+    { filter: 'bogus', sort: 'newest' }, { filter: 'all', sort: 'DROP TABLE meetings' },
+    { filter: 'all', sort: 'newest', pageSize: 0 }, { filter: 'all', sort: 'newest', pageSize: 1.5 },
+    { filter: 'all', sort: 'newest', pageSize: Infinity }, { filter: 'all', sort: 'newest', pageSize: '50' },
+    { filter: 'all', sort: 'newest', cursor: '' }, { filter: 'all', sort: 'newest', cursor: 'not-json' },
+    { filter: 'all', sort: 'newest', cursor: null },
+    { filter: 'all', sort: 'newest', cursor: Buffer.from(JSON.stringify({ v: 1, statusRank: 4, id: 'x', sortValue: { sort: 'title', values: ['x', null] } })).toString('base64url') },
+    { filter: 'all', sort: 'newest', cursor: Buffer.from(JSON.stringify({ v: 1, statusRank: 4, id: 'x', sortValue: { sort: 'newest', values: [42] } })).toString('base64url') },
+  ])('rejects invalid query input before repository work: %j', (query) => {
+    expect(handlers.has('meetings:list-page')).toBe(true);
+    const page = vi.spyOn(meetings, 'listPage');
+    expect(() => invoke('meetings:list-page', query)).toThrow();
+    expect(page).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid ID filters and hydration inputs, including over-limit duplicates', () => {
+    expect(handlers.has('meetings:list-ids')).toBe(true);
+    expect(handlers.has('meetings:get-many')).toBe(true);
+    const find = vi.spyOn(meetings, 'findByIds');
+    const listIds = vi.spyOn(meetings, 'listIds');
+    expect(() => invoke('meetings:list-ids', 'awaiting_user')).toThrow();
+    expect(listIds).not.toHaveBeenCalled();
+    for (const input of [null, 'm1', [''], [1], Array(1001).fill('m1')]) {
+      expect(() => invoke('meetings:get-many', input)).toThrow();
+    }
+    expect(find).not.toHaveBeenCalled();
+    expect(invoke('meetings:get-many', Array(1000).fill('missing'))).toEqual([]);
+    expect(find).toHaveBeenLastCalledWith(['missing']);
+  });
+
+  it('enriches only page/hydrated IDs, preserves summary shape and first-occurrence order', () => {
+    for (const id of ['a', 'b', 'outside', 'deleted']) insert(id);
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const rosterId = speakers.create({ displayName: 'Alex' });
+    speakers.linkToMeeting('a', 'SPEAKER_00', rosterId, 1);
+    speakers.linkToMeeting('a', 'SPEAKER_01', null, 0);
+    speakers.linkToMeeting('outside', 'SPEAKER_00', null, 0);
+    actionItems.create('a', { text: 'One' });
+    actionItems.create('a', { text: 'Two' });
+    actionItems.create('outside', { text: 'Excluded' });
+    const legacy = invoke('meetings:list');
+    const allSpeakers = vi.spyOn(speakers, 'listForAllMeetings');
+    const allCounts = vi.spyOn(actionItems, 'countsByMeeting');
+    const scopedSpeakers = vi.spyOn(speakers, 'listForMeetings');
+    const scopedCounts = vi.spyOn(actionItems, 'countsForMeetings');
+    const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
+    expect(page.items).toEqual([legacy.find((m: { id: string }) => m.id === 'a')]);
+    expect(page.items[0]).toMatchObject({ unidentifiedCount: 1, actionItemsCount: 2, stageEtaMs: null, stageEtaRough: false });
+    expect(scopedSpeakers).toHaveBeenLastCalledWith(['a']);
+    expect(scopedCounts).toHaveBeenLastCalledWith(['a']);
+    const hydrated = invoke('meetings:get-many', ['b', 'missing', 'a', 'b', 'deleted']);
+    expect(hydrated.map((m: { id: string }) => m.id)).toEqual(['b', 'a']);
+    expect(hydrated[1]).toEqual(page.items[0]);
+    expect(scopedSpeakers).toHaveBeenLastCalledWith(['b', 'a']);
+    expect(scopedCounts).toHaveBeenLastCalledWith(['b', 'a']);
+    expect(allSpeakers).not.toHaveBeenCalled();
+    expect(allCounts).not.toHaveBeenCalled();
+    scopedSpeakers.mockClear(); scopedCounts.mockClear();
+    expect(invoke('meetings:get-many', [])).toEqual([]);
+    expect(scopedSpeakers).not.toHaveBeenCalled();
+    expect(scopedCounts).not.toHaveBeenCalled();
+    scopedSpeakers.mockClear(); scopedCounts.mockClear();
+    const shells = invoke('meetings:get-many', ['a', 'b'], { shell: true });
+    expect(shells.map((m: { id: string }) => m.id)).toEqual(['a', 'b']);
+    expect(shells[0]).toMatchObject({ speakers: [], actionItemsCount: 0, unidentifiedCount: 0, stageEtaMs: null });
+    expect(scopedSpeakers).not.toHaveBeenCalled();
+    expect(scopedCounts).not.toHaveBeenCalled();
+  });
+
+  it('reuses first-page counts for continuation pages of the same query', () => {
+    for (let i = 0; i < 3; i++) insert(`done-${i}`);
+    const counts = vi.spyOn(meetings, 'counts');
+    const first = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
+    const next = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1, cursor: first.nextCursor });
+    expect(next.items).toHaveLength(1);
+    expect(next.counts).toEqual(first.counts);
+    expect(counts).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts only exact pending snapshot IDs and returns failures without aborting later items', () => {
+    for (const id of ['first', 'locked', 'last', 'later', 'deleted']) insert(id, 'pending');
+    insert('done');
+    insert('processing', 'processing');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted');
+    const update = meetings.updateStatus.bind(meetings);
+    vi.spyOn(meetings, 'updateStatus').mockImplementation((id, status) => {
+      if (id === 'locked') throw new Error('locked');
+      update(id, status);
+    });
+    expect(invoke('meetings:start-many-detailed', ['first', 'locked', 'done', 'deleted', 'missing', 'processing', 'last', 'first'])).toEqual({
+      startedIds: ['first', 'last'], failedIds: ['locked', 'done', 'deleted', 'missing', 'processing'],
+    });
+    expect(meetings.findById('first')?.status).toBe('processing');
+    expect(meetings.findById('last')?.status).toBe('processing');
+    expect(meetings.findById('locked')?.status).toBe('pending');
+    expect(meetings.findById('later')?.status).toBe('pending');
+    expect(meetings.findById('done')?.status).toBe('done');
+  });
+
+  it('validates detailed batch IDs before any status mutation and preserves numeric legacy startMany', () => {
+    insert('pending', 'pending');
+    const update = vi.spyOn(meetings, 'updateStatus');
+    for (const input of [null, 'pending', [''], [1], ['pending', 1], Array(1001).fill('pending')]) {
+      expect(() => invoke('meetings:start-many-detailed', input)).toThrow();
+    }
+    expect(update).not.toHaveBeenCalled();
+    expect(invoke('meetings:start-many-detailed', [])).toEqual({ startedIds: [], failedIds: [] });
+    expect(invoke('meetings:start-many', ['pending', 'missing'])).toBe(1);
+  });
+
+  it('keeps an enqueue failure pending and retryable while starting subsequent IDs', () => {
+    insert('retry', 'pending');
+    insert('next', 'pending');
+    const enqueued: string[] = [];
+    registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
+      baseServices({ meetings, speakers, actionItems, pipeline: {
+        enqueue: (id: string) => {
+          if (id === 'retry') throw new Error('queue unavailable');
+          enqueued.push(id);
+        },
+      } }));
+    expect(invoke('meetings:start-many-detailed', ['retry', 'next'])).toEqual({ startedIds: ['next'], failedIds: ['retry'] });
+    expect(meetings.findById('retry')?.status).toBe('pending');
+    expect(enqueued).toEqual(['next']);
+  });
+
+  it('distinguishes a new B deletion from an earlier A deletion so bulk Undo restores only B', () => {
+    const libraryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-delete-accounting-'));
+    try {
+      for (const id of ['A', 'B']) {
+        const audioPath = path.join(libraryRoot, `${id}.m4a`);
+        fsSync.writeFileSync(audioPath, id);
+        meetings.insert({ id, slug: id, title: id, startedAt: null, durationS: 60, audioPath, status: 'done', pipelineStage: 'done' });
+      }
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
+        baseServices({ meetings, speakers, actionItems, libraryRoot }));
+      // Selected A/B, then A was deleted through the single-row action.
+      expect(invoke('meetings:delete', 'A')).toBe(true);
+      const originalADeletion = meetings.findById('A')?.deletedAt;
+      const ids = ['A', 'B', 'missing'];
+      const newlyDeleted = ids.map((id) => invoke('meetings:delete', id));
+      expect(newlyDeleted).toEqual([false, true, false]);
+      expect(meetings.findById('A')?.deletedAt).toBe(originalADeletion);
+      const undoIds = ids.filter((_, index) => newlyDeleted[index] === true);
+      expect(undoIds).toEqual(['B']);
+      for (const id of undoIds) expect(invoke('meetings:undo-delete', id)).toBe(true);
+      expect(meetings.findById('A')?.deletedAt).toBeTruthy();
+      expect(meetings.findById('B')?.deletedAt).toBeNull();
+      expect(fsSync.existsSync(path.join(libraryRoot, 'A.m4a'))).toBe(false);
+      expect(fsSync.readFileSync(path.join(libraryRoot, 'B.m4a'), 'utf8')).toBe('B');
+    } finally {
+      fsSync.rmSync(libraryRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+function baseServices(overrides: Record<string, unknown> = {}): IpcServices {
   return {
     meetings: { listAll: () => [] },
     speakers: { list: () => [] },
@@ -22,6 +288,7 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     settings: { getAll: () => ({}), get: () => '', set: () => {} },
     lmStudio: { listModels: async () => [] },
     recordingManager: { start: async () => ({ sessionId: 's', outputPath: '/o' }), stop: async () => {}, state: () => 'idle', on: () => {} },
+    recordingRecovery: { list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal: () => {}, dismiss: () => {} },
     appEnumerator: { list: async () => [] },
     helperPath: '/bin/meeting-notes-tap',
     roster: { confirmSpeaker: () => 'id', confirmSpeakerFor: () => {} },
@@ -34,21 +301,141 @@ function baseServices(overrides: Record<string, unknown> = {}): any {
     },
     exporters: {},
     libraryRoot: '/tmp',
+    artifactCache: new ArtifactCache(),
     llmSupervisor: { ensureReady: async () => {} },
     logger: { info: () => {}, error: () => {} },
     gateNotified: new Set<string>(),
     ...overrides,
-  };
+  } as unknown as IpcServices;
 }
 
 describe('registerIpcHandlers', () => {
+  it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-save-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+        libraryRoot, artifactCache,
+        meetings: { findById: () => ({ id: 'm1', slug: 'slug' }) },
+        speakers: { listForMeeting: () => [] },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const save = handle.mock.calls.find(([channel]) => channel === 'meetings:save-summary')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+
+      const writeFileSync = fsSync.writeFileSync.bind(fsSync);
+      let entriesAtWrite = -1;
+      const write = vi.spyOn(fsSync, 'writeFileSync').mockImplementation((...args) => {
+        entriesAtWrite = artifactCache.stats().entries;
+        return writeFileSync(...args);
+      });
+      try {
+        expect(save(null, 'm1', 'New summary')).toBe('New summary');
+      } finally {
+        write.mockRestore();
+      }
+
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+      expect(entriesAtWrite).toBe(0);
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'speakers:rename', 'meetings:set-skip-speaker-id', 'meetings:continue-from-speaker-id',
+  ])('%s remerges with the shared cache and refreshes transcript bytes', async (channel) => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rename-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'transcript.raw.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, text: 'Hi.' }],
+      }));
+      await fs.writeFile(path.join(folder, 'diarization.json'), JSON.stringify({
+        segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00' }],
+      }));
+      await fs.writeFile(path.join(folder, 'transcript.md'), '[Alice 00:00] Hi.');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      // Exercise the actual writer for this integration test; other tests only
+      // need the mocked fan-out because they have no transcript files.
+      const actual = await vi.importActual<typeof mergingModule>('../pipeline/stages/merging.js');
+      vi.mocked(remergeTranscript).mockImplementationOnce(actual.remergeTranscript);
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug', pipelineStage: 'awaiting_speaker_id' }),
+          updateSkipSpeakerId: () => {}, updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: {
+          rename: () => {},
+          meetingIdsForSpeaker: () => ['m1'],
+          listForMeeting: () => [{ localLabel: 'SPEAKER_00', displayName: 'Bobby' }],
+        },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get-transcript')![1];
+      const mutate = handle.mock.calls.find(([registered]) => registered === channel)![1];
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Alice 00:00] Hi.');
+
+      if (channel === 'speakers:rename') mutate(null, 'speaker-1', 'Bobby');
+      else mutate(null, 'm1', true);
+
+      expect((await get(null, 'm1')).transcriptMd).toBe('[Bobby 00:00] Hi.');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rerun invalidates the shared cache before artifacts are recreated', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-rerun-cache-'));
+    try {
+      const folder = path.join(libraryRoot, 'meetings', 'slug');
+      const summaryPath = path.join(folder, 'summary.md');
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(summaryPath, 'Old summary');
+      const artifactCache = new ArtifactCache({
+        stat: async (filePath) => ({ size: (await fs.stat(filePath)).size, mtimeMs: 1, ctimeMs: 1 }),
+      });
+      const handle = vi.fn();
+      registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+        libraryRoot, artifactCache,
+        meetings: {
+          findById: () => ({ id: 'm1', slug: 'slug' }),
+          updateStatus: () => {}, updateStage: () => {},
+        },
+        speakers: { listForMeeting: () => [] },
+        actionItems: { listByMeeting: () => [], deleteForMeeting: () => {} },
+      }));
+      const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
+      const rerun = handle.mock.calls.find(([channel]) => channel === 'meetings:rerun')![1];
+      expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+      rerun(null, 'm1', 'summarizing');
+      await fs.writeFile(summaryPath, 'New summary');
+      expect((await get(null, 'm1')).summaryMd).toBe('New summary');
+    } finally {
+      await fs.rm(libraryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('registers all known channels', () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     registerIpcHandlers(fakeIpc, baseServices());
     const channels = handle.mock.calls.map((c) => c[0]);
     expect(channels).toContain('meetings:list');
     expect(channels).toContain('meetings:get');
+    expect(channels).toContain('meetings:get-transcript');
+    expect(channels).toContain('meetings:get-speaker-review');
     // Light detail-view status poll (no transcript/summary file reads).
     expect(channels).toContain('meetings:get-status');
     expect(channels).toContain('export:run');
@@ -74,12 +461,245 @@ describe('registerIpcHandlers', () => {
     // Roster management (rename existed already; merge is new).
     expect(channels).toContain('speakers:rename');
     expect(channels).toContain('speakers:merge');
+    expect(channels).toContain('speakers:assign-bulk');
+    expect(channels).toContain('recovery:list');
+  });
+
+  it('recovery:reveal waits for the Finder handoff to finish', async () => {
+    const handle = vi.fn();
+    let finish!: () => void;
+    const reveal = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({ recordingRecovery: {
+      list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal, dismiss: () => {},
+    } }));
+    const call = handle.mock.calls.find((c) => c[0] === 'recovery:reveal');
+    const result = (call![1] as (event: unknown, id: unknown) => Promise<void>)(null, 'r1');
+
+    expect(result).toBeInstanceOf(Promise);
+    let completed = false;
+    void result.then(() => { completed = true; });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    finish();
+    await result;
+    expect(reveal).toHaveBeenCalledWith('r1');
+  });
+
+  it('recovery:reveal propagates Finder errors to the caller', async () => {
+    const handle = vi.fn();
+    const reveal = vi.fn(async () => { throw new Error('Finder could not open the folder'); });
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({ recordingRecovery: {
+      list: async () => [], recover: async () => ({}), trim: async () => ({}), reveal, dismiss: () => {},
+    } }));
+    const call = handle.mock.calls.find((c) => c[0] === 'recovery:reveal');
+    const invoke = call![1] as (event: unknown, id: unknown) => Promise<void>;
+    await expect(invoke(null, 'r1')).rejects.toThrow('Finder could not open the folder');
+    expect(() => invoke(null, '')).toThrow('recovery id required');
+    expect(reveal).toHaveBeenCalledTimes(1);
+  });
+
+  it('loads only the summary into the async meeting shell', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-artifact-shell-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const summaryPath = path.join(folder, 'summary.md');
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    const diarizationPath = path.join(folder, 'diarization.json');
+    await Promise.all([
+      fs.writeFile(summaryPath, '# Summary\nDecision recorded.'),
+      fs.writeFile(transcriptPath, 'x'.repeat(2 * 1024 * 1024)),
+      fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] })),
+      fs.writeFile(diarizationPath, JSON.stringify({ segments: [] })),
+    ]);
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: {
+        listAll: () => [],
+        findById: (id: string) => id === 'm1' ? {
+          id, slug: 'design-sync', title: 'Design sync', startedAt: null, durationS: null,
+          pipelineStage: 'done', status: 'done', errorMessage: null, stageStartedAt: null,
+          skipSpeakerId: false, audioPath: '/audio/design-sync.m4a',
+        } : null,
+      },
+      speakers: {
+        list: () => [],
+        listForMeeting: () => [{
+          localLabel: 'SPEAKER_00', rosterSpeakerId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        }],
+      },
+    }));
+    const get = handle.mock.calls.find((call) => call[0] === 'meetings:get')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<Record<string, unknown> | null>;
+
+    const shell = await get(null, 'm1');
+
+    expect(shell).toMatchObject({ summaryMd: '# Summary\nDecision recorded.' });
+    expect(shell).not.toHaveProperty('transcriptMd');
+    expect(shell).not.toHaveProperty('rawTranscriptText');
+    expect(shell?.speakers).toEqual([{
+      localLabel: 'SPEAKER_00', rosterId: 'spk-alice', displayName: 'Alice', confidence: 1,
+    }]);
+    expect(readText).toHaveBeenCalledWith(summaryPath);
+    expect(readText).not.toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).not.toHaveBeenCalledWith(rawPath);
+    expect(readJson).not.toHaveBeenCalledWith(diarizationPath);
+  });
+
+  it('loads transcript markdown and early raw preview through the transcript artifact handler', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-transcript-artifact-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    await Promise.all([
+      fs.writeFile(transcriptPath, 'Alice: Decision recorded.'),
+      fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] })),
+    ]);
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+    }));
+    const getTranscript = handle.mock.calls.find((call) => call[0] === 'meetings:get-transcript')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ transcriptMd: string | null; rawTranscriptText: string | null } | null>;
+
+    await expect(getTranscript(null, 'm1')).resolves.toEqual({
+      transcriptMd: 'Alice: Decision recorded.', rawTranscriptText: null,
+    });
+    expect(readText).toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).not.toHaveBeenCalled();
+  });
+
+  it('loads the raw preview only when transcript markdown is missing', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-transcript-raw-fallback-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const transcriptPath = path.join(folder, 'transcript.md');
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    await fs.writeFile(rawPath, JSON.stringify({ text: 'Early raw preview', segments: [] }));
+    const readText = vi.fn(async (filePath: string) => fs.readFile(filePath, 'utf8').catch(() => null));
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      libraryRoot,
+      artifactCache: { readText, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+    }));
+    const getTranscript = handle.mock.calls.find((call) => call[0] === 'meetings:get-transcript')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ transcriptMd: string | null; rawTranscriptText: string | null } | null>;
+
+    await expect(getTranscript(null, 'm1')).resolves.toEqual({
+      transcriptMd: null, rawTranscriptText: 'Early raw preview',
+    });
+    expect(readText).toHaveBeenCalledWith(transcriptPath);
+    expect(readJson).toHaveBeenCalledWith(rawPath);
+  });
+
+  it('loads speaker review metadata through the speaker-review artifact handler', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-review-artifact-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const rawPath = path.join(folder, 'transcript.raw.json');
+    const diarizationPath = path.join(folder, 'diarization.json');
+    await Promise.all([
+      fs.writeFile(rawPath, JSON.stringify({ segments: [{ start: 0, end: 4, text: 'Decision recorded.' }] })),
+      fs.writeFile(diarizationPath, JSON.stringify({ segments: [{ start: 0, end: 4, speaker: 'SPEAKER_00' }] })),
+    ]);
+    const readJson = vi.fn(async (filePath: string) => {
+      const source = await fs.readFile(filePath, 'utf8').catch(() => null);
+      return source === null ? null : JSON.parse(source);
+    });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      libraryRoot,
+      artifactCache: { readText: async () => null, readJson },
+      meetings: { listAll: () => [], findById: (id: string) => id === 'm1' ? { id, slug: 'design-sync' } : null },
+      speakers: {
+        list: () => [],
+        listForMeeting: () => [{
+          localLabel: 'SPEAKER_00', rosterSpeakerId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        }],
+      },
+    }));
+    const getSpeakerReview = handle.mock.calls.find((call) => call[0] === 'meetings:get-speaker-review')![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<{ speakers: unknown[] } | null>;
+
+    await expect(getSpeakerReview(null, 'm1')).resolves.toEqual({
+      speakers: [{
+        localLabel: 'SPEAKER_00', rosterId: 'spk-alice', displayName: 'Alice', confidence: 1,
+        state: 'confirmed', needsReview: true, segmentCount: 1, durationS: 4, lineCount: 1,
+      }],
+    });
+    expect(readJson).toHaveBeenCalledWith(rawPath);
+    expect(readJson).toHaveBeenCalledWith(diarizationPath);
+  });
+
+  it('returns null for unknown meeting IDs from every detail-artifact handler', async () => {
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      meetings: { listAll: () => [], findById: () => null },
+    }));
+    const handler = (channel: string) => handle.mock.calls.find((call) => call[0] === channel)![1] as (
+      event: unknown, id: unknown,
+    ) => Promise<unknown>;
+
+    await expect(handler('meetings:get')(null, 'missing')).resolves.toBeNull();
+    await expect(handler('meetings:get-transcript')(null, 'missing')).resolves.toBeNull();
+    await expect(handler('meetings:get-speaker-review')(null, 'missing')).resolves.toBeNull();
+  });
+
+  it('speakers:assign-bulk links every label and re-merges once', async () => {
+    const linkToMeeting = vi.fn();
+    const handle = vi.fn();
+    const readJson = vi.fn(async () => ({ segments: [] }));
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      meetings: { listAll: () => [], findById: () => ({ id: 'm1', slug: 'meeting-1' }) },
+      speakers: {
+        list: () => [], findById: (id: string) => id === 'spk_a' ? { id, displayName: 'Alice' } : null,
+        listForMeeting: () => [],
+        linkToMeeting,
+      },
+      artifactCache: { readJson, readText: async () => null },
+    }));
+    const call = handle.mock.calls.find((c) => c[0] === 'speakers:assign-bulk');
+    const handler = call![1] as (event: unknown, input: unknown) => Promise<{ assigned: number; impactedLines: number }>;
+
+    const result = await handler(null, { meetingId: 'm1', localLabels: ['SPEAKER_00', 'SPEAKER_01'], rosterId: 'spk_a' });
+
+    expect(linkToMeeting.mock.calls).toEqual([
+      ['m1', 'SPEAKER_00', 'spk_a', 1],
+      ['m1', 'SPEAKER_01', 'spk_a', 1],
+    ]);
+    expect(vi.mocked(remergeTranscript)).toHaveBeenCalledTimes(1);
+    expect(readJson).toHaveBeenCalled();
+    expect(result.assigned).toBe(2);
   });
 
   it('speakers:rename updates the roster row and re-merges every affected transcript', () => {
     const rename = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       speakers: {
         list: () => [],
@@ -106,7 +726,7 @@ describe('registerIpcHandlers', () => {
     const known = new Set(['spk_a', 'spk_b']);
     const stored: Record<string, unknown> = { userSpeakerId: 'spk_a' };
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       speakers: {
         list: () => [],
@@ -157,7 +777,7 @@ describe('registerIpcHandlers', () => {
     const findSoftDeleted = vi.fn((olderThanIso?: string) =>
       olderThanIso ? rows.filter((r) => r.deletedAt < olderThanIso) : [...rows]);
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       meetings: { listAll: () => [], findSoftDeleted, hardDelete },
     });
@@ -178,7 +798,7 @@ describe('registerIpcHandlers', () => {
 
   it('llm:health-check-model reports ok for a well-behaved model and loops for one that burns its budget', async () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const stored: Record<string, unknown> = {};
     const chat = vi.fn()
       .mockResolvedValueOnce('[]')
@@ -212,7 +832,7 @@ describe('registerIpcHandlers', () => {
 
   it('llm:health-check-model re-throws a genuine (non-reasoning-loop) error', async () => {
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const chat = vi.fn().mockRejectedValueOnce(new LMStudioError('LM Studio 500 on /v1/chat/completions'));
     const services = baseServices({ lmStudio: { listModels: async () => [], chat } });
     registerIpcHandlers(fakeIpc, services);
@@ -238,7 +858,7 @@ describe('registerIpcHandlers', () => {
     );
     const replaceForMeeting = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       libraryRoot: dir,
       meetings: { listAll: () => [], findById: () => ({ id: 'm', slug: 'slug' }) },
@@ -272,7 +892,7 @@ describe('registerIpcHandlers', () => {
   it('action-items:set-status whitelists the status value and validates the id', () => {
     const setStatus = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       actionItems: { listByMeeting: () => [], setStatus },
     });
@@ -298,7 +918,7 @@ describe('registerIpcHandlers', () => {
   it('clearing the speaker-ID gate flag lets a re-entry notify again', () => {
     const gateNotified = new Set<string>(['m1']); // already notified this visit
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       gateNotified,
       libraryRoot: '/tmp/mn-gate-clear',
@@ -322,7 +942,7 @@ describe('registerIpcHandlers', () => {
   it('action-items:reextract throws (without calling the LLM) when summary.md is missing', async () => {
     const chat = vi.fn();
     const handle = vi.fn();
-    const fakeIpc = { handle } as any;
+    const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
       libraryRoot: '/tmp/does-not-exist-mn',
       meetings: { listAll: () => [], findById: () => ({ id: 'm', slug: 'no-such-slug' }) },
