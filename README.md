@@ -124,8 +124,10 @@ flowchart TD
     stt --> merge[merge]
     dia --> merge
     merge --> id["identify<br/>voice embeddings vs roster"]
-    id --> gate{{"awaiting_speaker_id<br/>name unknown voices"}}
-    gate -->|Continue / Skip| sum["summarize<br/>LM Studio :1234 / Ollama :11434"]
+    id --> review{"Any voices need review?"}
+    review -->|Yes| gate{{"awaiting_speaker_id<br/>review voices"}}
+    review -->|No| sum["summarize<br/>LM Studio :1234 / Ollama :11434"]
+    gate -->|Continue / Skip| sum
     sum --> ext["extract action items<br/>same LLM"]
     ext --> done([✅ done])
 
@@ -212,7 +214,7 @@ MeetingNotes talks to any chat model in **LM Studio** or **Ollama** over an Open
 <details open>
 <summary><strong>The speaker-ID gate</strong> — name unknown voices once</summary>
 
-After diarize + identify, the pipeline pauses at `awaiting_speaker_id`; the library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
+After diarize + identify, meetings continue automatically when no voices need review, including recordings with no detected voices. The pipeline uses the same **Needs review** rules as the Speakers panel: an unknown voice, a match below 80% confidence, or fewer than two diarization segments pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds; automatic continuation also re-merges names before summarizing. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
 </details>
 
 <details>

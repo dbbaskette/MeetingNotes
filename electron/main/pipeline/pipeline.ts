@@ -1,8 +1,12 @@
 // electron/main/pipeline/pipeline.ts
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
+import path from 'node:path';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
 import { bucketForChars } from '../lib/stage-eta.js';
 import { transcriptChars } from './transcript-chars.js';
+import { meetingFolderPath } from '../storage/meeting-folder.js';
+import { buildSpeakerReviewMetadata } from '../speakers/review-metadata.js';
+import type { DiarizationSegment } from '../speakers/sample-extractor.js';
 
 const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('merging'),
@@ -232,16 +236,13 @@ export class Pipeline {
         // with stage='summarizing', which re-enters this loop past the gate.
         if (s === 'awaiting_speaker_id') {
           const fresh = this.deps.ctx.meetings.findById(meetingId);
-          // Gate only when a voice actually needs the user: at least one
-          // detected speaker without a roster link (the matcher's own
-          // confidence threshold decides linkage). Meetings where every
-          // voice auto-matched — the recurring-colleagues case — and
-          // zero-voice recordings flow straight through, keeping the
-          // "name voices once and they're recognized" promise.
-          const unresolved = this.deps.ctx.speakers
-            .listForMeeting(meetingId)
-            .some((l) => !l.rosterSpeakerId);
-          if (!fresh?.skipSpeakerId && unresolved) {
+          // Match the Speakers panel's review policy, not merely linkage:
+          // a linked voice can still be low-confidence or have too little
+          // evidence. Clear matches and zero-voice meetings flow through.
+          const needsReview = !fresh?.skipSpeakerId
+            && await this.needsSpeakerReview(meetingId, m.slug);
+          // Respect a user override made while the artifact read was pending.
+          if (needsReview && !this.deps.ctx.meetings.findById(meetingId)?.skipSpeakerId) {
             this.deps.ctx.meetings.updateStage(meetingId, s);
             this.deps.ctx.meetings.updateStatus(meetingId, 'awaiting_user');
             this.notifyMeeting(meetingId);
@@ -253,7 +254,7 @@ export class Pipeline {
             }
             return; // stop; user action re-enqueues
           }
-          // Skip flag is set — don't stop. But before summarize reads
+          // Review is unnecessary or explicitly skipped. Before summarize reads
           // transcript.md, re-run merging so any roster matches the
           // `identifying` stage auto-made replace SPEAKER_00 with real
           // names in the written transcript. Cheap (no network) and
@@ -276,6 +277,22 @@ export class Pipeline {
         this.deps.ctx.logger.error('pipeline:complete-listener-error', { id: meetingId, err: String(e) });
       }
     }
+  }
+
+  private async needsSpeakerReview(meetingId: string, slug: string): Promise<boolean> {
+    const links = this.deps.ctx.speakers.listForMeeting(meetingId);
+    if (links.length === 0) return false;
+    const folder = meetingFolderPath(this.deps.ctx.libraryRoot, slug);
+    const diar = await this.deps.ctx.artifactCache.readJson<{ segments?: DiarizationSegment[] }>(
+      path.join(folder, 'diarization.json'),
+    );
+    const review = buildSpeakerReviewMetadata({
+      links: links.map((link) => ({ ...link, rosterId: link.rosterSpeakerId })),
+      diarization: diar?.segments ?? [],
+      // Line counts are presentation-only; the gate needs no transcript read.
+      transcript: [],
+    });
+    return Array.from(review.values()).some((speaker) => speaker.needsReview);
   }
 
   /** Run a stage handler and record its wall-clock duration as an ETA sample,
