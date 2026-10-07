@@ -10,6 +10,7 @@ import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
+import { formatLogTimestamp } from '../lib/log-timestamp.js';
 
 interface Settings {
   lmStudioUrl: string;
@@ -660,24 +661,6 @@ function DiagnosticsSection(): JSX.Element {
   );
 }
 
-/** Log timestamps arrive as UTC ISO strings. Slicing the raw string showed
- *  UTC digits that read as local time, and dropped the date entirely — so
- *  yesterday's 05:28 error sorted above today's 03:59 one and the panel
- *  looked shuffled. Render local time, and prefix the date once an entry
- *  isn't from today. */
-function formatLogTs(ts: string | null | undefined): string {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts.slice(11, 19);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const hms = d.toTimeString().slice(0, 8);
-  return sameDay ? hms : `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${hms}`;
-}
-
 function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
   const levelCls =
     entry.level === 'error'
@@ -687,14 +670,14 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
         : entry.level === 'debug'
           ? 'text-ink-muted/60'
           : 'text-ink-muted';
-  const time = formatLogTs(entry.ts);
+  const time = formatLogTimestamp(entry.ts);
   const dataStr =
     entry.data && Object.keys(entry.data).length > 0
       ? JSON.stringify(entry.data)
       : '';
   return (
     <div className="px-3 py-1 border-b border-surface-border/50 last:border-b-0 flex gap-2">
-      <span className="text-ink-muted/70 tabular-nums shrink-0">{time}</span>
+      <span className="text-ink-muted/70 tabular-nums shrink-0 whitespace-nowrap" title={entry.ts ?? undefined}>{time}</span>
       <span className={`font-semibold uppercase shrink-0 w-10 ${levelCls}`}>
         {entry.level}
       </span>
