@@ -9,7 +9,7 @@ Capture and inference run locally. Optional exports send only the meeting data y
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.13.2-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.14.0-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -360,7 +360,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.13.2-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -378,9 +378,9 @@ The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sq
 
 ## 📊 Status
 
-**1.13.2** — for macOS 14.2+ / Apple Silicon. Fixes a blank-window crash when the grouped Library opens with existing meetings. Expanded groups render viewport-bounded rows, Settings has searchable sections and reliable save feedback, notes/action items have local compare-and-restore history, and Obsidian sync resumes pending work without rescanning every unchanged export. Quoted and Terminal-escaped folder paths are handled safely. Additive migration 20 stores notes history without relocating recordings.
+**1.14.0 development version** — for macOS 14.2+ / Apple Silicon. Reliable shared-timeline capture and confirmed Stop/restart controls, app-grouped source refresh, compact Setup & health, guided processing recovery, full paged attention, opt-in processing of newly finalized recordings, and safer webhook/Google Tasks delivery. Includes the contributor fixes merged after 1.13.2. Additive migration 21 stores bounded processing history without relocating recordings; notes/action-item history and one-way Obsidian sync remain available.
 
-See the [1.13.2 release notes](docs/releases/v1.13.2.md) for upgrade guidance, verification, and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
+See the [1.14.0 release notes](docs/releases/v1.14.0.md) for upgrade guidance, verification, and deferred device checks. These notes prepare the next release; no 1.14.0 GitHub release or installer has been published yet. The [last published source-only release is 1.13.2](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
 
 ## 📄 License
 
