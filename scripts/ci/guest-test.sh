@@ -30,9 +30,9 @@ run_check() {
 run_check install npm ci
 if [[ "$test_mode" == full ]]; then
 run_check native-node npm run rebuild:node
-# SQLite/native-addon suites run in isolated processes. Keep VM concurrency
-# bounded so a clean Mac run does not depend on the host's worker count.
-run_check tests npx vitest run --pool=forks --maxWorkers=2 --minWorkers=1
+# SQLite/native-addon suites run in isolated processes. Serialize VM workers
+# so concurrent filesystem/SQLite stress fixtures do not starve watcher polls.
+run_check tests npx vitest run --pool=forks --maxWorkers=1 --minWorkers=1
 run_check audio-helper bash scripts/ci/audio-helper-smoke.sh "$task_root/native-build"
 run_check renderer-types npx tsc --noEmit -p tsconfig.json
 run_check fixture-types npx tsc --noEmit -p scripts/library-pagination-fixture/tsconfig.json
