@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "meeting-notes-tap",
-  platforms: [.macOS(.v14)],
+  platforms: [.macOS("14.2")],
   targets: [
     .executableTarget(name: "meeting-notes-tap"),
     .testTarget(name: "meeting-notes-tap-tests", dependencies: ["meeting-notes-tap"]),
