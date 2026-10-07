@@ -9,7 +9,7 @@ Capture and inference run locally. Optional exports send only the meeting data y
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.14.0-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.14.5-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -370,7 +370,9 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.5-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+
+The app icon uses a bright tile and bold indigo waveform/chat mark for visibility on dark backgrounds. `npm run build:icons` regenerates its macOS icon family and matching in-app logo from `build/icon-1024.png`.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -388,9 +390,9 @@ The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sq
 
 ## 📊 Status
 
-**1.14.0 development version** — for macOS 14.2+ / Apple Silicon. Reliable shared-timeline capture and confirmed Stop/restart controls, app-grouped source refresh, compact Setup & health, guided processing recovery, full paged attention, opt-in processing of newly finalized recordings, and safer webhook/Google Tasks delivery. Includes the contributor fixes merged after 1.13.2. Additive migration 21 stores bounded processing history without relocating recordings; notes/action-item history and one-way Obsidian sync remain available.
+**1.14.5** — for macOS 14.2+ / Apple Silicon. Includes the high-contrast application icon and both completed epics: reliable capture/guided processing (#242), and organized Library/trustworthy Weekly workflows (#243). Search facets, named filters, transcript windowing, recording titles, safe task/move Undo and local Library backup join the contributor fixes merged after 1.13.2. Additive migrations 21–22 do not relocate recordings or rewrite historical timestamps; notes/action-item history and one-way Obsidian sync remain available.
 
-See the [1.14.0 release notes](docs/releases/v1.14.0.md) for upgrade guidance, verification, and deferred device checks. These notes prepare the next release; no 1.14.0 GitHub release or installer has been published yet. The [last published source-only release is 1.13.2](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
+See the [1.14.5 release notes](docs/releases/v1.14.5.md) and [GitHub source release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.14.5) for changes, upgrade guidance, verification and deferred device checks. GitHub releases intentionally omit binary assets; installers are built locally. The experimental remote-processing beta remains separate.
 
 ## 📄 License
 
