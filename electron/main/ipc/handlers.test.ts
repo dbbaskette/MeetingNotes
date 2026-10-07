@@ -323,7 +323,7 @@ describe('registerIpcHandlers', () => {
       const handle = vi.fn();
       registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
         libraryRoot, artifactCache,
-        meetings: { findById: () => ({ id: 'm1', slug: 'slug' }) },
+        meetings: { findById: () => ({ id: 'm1', slug: 'slug' }), processingHistory: () => [] },
         speakers: { listForMeeting: () => [] },
       }));
       const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
@@ -412,6 +412,7 @@ describe('registerIpcHandlers', () => {
         meetings: {
           findById: () => ({ id: 'm1', slug: 'slug' }),
           updateStatus: () => {}, updateStage: () => {},
+          processingHistory: () => [], recordProcessingEvent: () => {},
         },
         speakers: { listForMeeting: () => [] },
         actionItems: { listByMeeting: () => [], deleteForMeeting: () => {} },
@@ -523,6 +524,7 @@ describe('registerIpcHandlers', () => {
       artifactCache: { readText, readJson },
       meetings: {
         listAll: () => [],
+        processingHistory: () => [],
         findById: (id: string) => id === 'm1' ? {
           id, slug: 'design-sync', title: 'Design sync', startedAt: null, durationS: null,
           pipelineStage: 'done', status: 'done', errorMessage: null, stageStartedAt: null,

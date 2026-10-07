@@ -67,6 +67,7 @@ export interface Settings {
    *  Only Zoom for now — Teams / FaceTime / Slack / etc. still surface
    *  the banner. */
   autoRecordZoom: boolean;
+  autoProcessRecordings: boolean;
   /** Display name used for the local user's voice in stem-aware transcripts.
    *  Empty → the literal "You" is used. (#13 Phase 3.) */
   userName: string;
@@ -160,6 +161,7 @@ export const DEFAULT_SETTINGS: Settings = {
   recordingBitrateKbps: 128,
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
+  autoProcessRecordings: false,
   userName: '',
   onboardedAt: null,
   userSpeakerId: null,

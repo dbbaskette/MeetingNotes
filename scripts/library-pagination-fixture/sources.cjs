@@ -17,6 +17,13 @@ app.whenReady().then(async () => {
   await win.loadURL(url);
   await until('!!document.querySelector("[data-source-pid=\\"502\\"]")');
   assert(await run('document.body.innerText.includes("Zoom · 2 audio streams")'));
+  await run('window.fixture.fail=true; Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Refresh").click()');
+  await until('document.body.innerText.includes("Could not refresh sources")');
+  assert.equal(await run('!!document.querySelector("[data-source-pid=\\"502\\"]")'),true,'Failed refresh keeps usable sources');
+  await run('window.fixture.fail=false; Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Retry").click()');
+  await until('!document.body.innerText.includes("Could not refresh sources")');
+  assert.equal(await run('window.fixture.refreshes'),3);
+  assert.equal(await run('window.fixture.picks.length'),0,'Refreshing never silently chooses a source');
   for (const pid of [501,502]) {
     await run(`document.querySelector('[data-source-pid="${pid}"]').click()`);
     assert.equal(await run('window.fixture.picks.at(-1).targetPid'), pid);

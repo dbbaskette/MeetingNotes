@@ -3,8 +3,8 @@
 // Helpers for the dual-stem capture files (#13 Phase 1). A recording's
 // primary output is `foo.m4a` (mixed mic + tap); sidecar stems are
 // `foo.voice.m4a` (mic only) and `foo.system.m4a` (tap only). The
-// pipeline consults stems when present for cleaner per-stream
-// transcription, and falls back to the mixed file for older meetings.
+// recovery/trash paths retain these names. Processing intentionally uses
+// the primary mixed timeline for both STT and diarization (#173).
 
 import fs from 'node:fs';
 import path from 'node:path';

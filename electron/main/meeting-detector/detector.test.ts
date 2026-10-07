@@ -19,6 +19,30 @@ describe('matchMeeting', () => {
 });
 
 describe('MeetingDetector', () => {
+  it('latches each simultaneous URL and rearms only the source that leaves', async () => {
+    let tabs = [
+      { browser: 'chrome' as const, url: 'https://meet.google.com/a', title: null, pid: 1 },
+      { browser: 'safari' as const, url: 'https://zoom.us/j/123', title: null, pid: 2 },
+    ];
+    const d = new MeetingDetector({ queryBrowsers: async () => tabs });
+    const listener = vi.fn(); d.onDetected(listener);
+    for (let i = 0; i < 6; i++) await d.tick();
+    expect(listener).toHaveBeenCalledTimes(2);
+    const second = tabs[1]!; tabs = [tabs[0]!]; await d.tick();
+    tabs.push(second); await d.tick();
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+  it('serializes polls and rechecks suppression after awaiting browsers', async () => {
+    let resolve!: (tabs: never[]) => void;
+    let suppressed = false;
+    const query = vi.fn(() => new Promise<never[]>(r => { resolve = r; }));
+    const d = new MeetingDetector({ queryBrowsers: query, isSuppressed: () => suppressed });
+    const listener = vi.fn(); d.onDetected(listener);
+    const tick = d.tick(); await d.tick();
+    expect(query).toHaveBeenCalledTimes(1);
+    suppressed = true; resolve([]); await tick;
+    expect(listener).not.toHaveBeenCalled();
+  });
   it('emits on first meeting URL and suppresses repeat ticks for the same URL', async () => {
     const listener = vi.fn();
     const d = new MeetingDetector({

@@ -351,9 +351,22 @@ export class MeetingsRepo {
   /** Mark a meeting failed and record why. Keeps the error string the
    *  pipeline caught so the detail view can explain the failure. */
   recordFailure(id: string, message: string): void {
+    this.recordProcessingEvent(id, 'failure', this.findById(id)?.pipelineStage ?? 'discovered', message);
     this.db.prepare(
       "UPDATE meetings SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?",
     ).run(message, new Date().toISOString(), id);
+  }
+
+  recordProcessingEvent(id: string, kind: 'failure' | 'retry', stage: string, message: string): void {
+    this.db.transaction(() => {
+      this.db.prepare('INSERT INTO processing_history(meeting_id,created_at,kind,stage,message) VALUES(?,?,?,?,?)')
+        .run(id, new Date().toISOString(), kind, stage, message.slice(0, 4096));
+      this.db.prepare('DELETE FROM processing_history WHERE meeting_id=? AND id NOT IN (SELECT id FROM processing_history WHERE meeting_id=? ORDER BY id DESC LIMIT 20)').run(id, id);
+    })();
+  }
+
+  processingHistory(id: string): { createdAt: string; kind: string; stage: string; message: string }[] {
+    return this.db.prepare('SELECT created_at AS createdAt,kind,stage,message FROM processing_history WHERE meeting_id=? ORDER BY id DESC LIMIT 20').all(id) as { createdAt: string; kind: string; stage: string; message: string }[];
   }
 
   updateDuration(id: string, durationS: number): void {

@@ -6,7 +6,7 @@ export const EXPORT_TARGETS = {
   reminders: { label: 'Apple Reminders', kind: 'task', extension: null, allowsEmptySelection: false, ownOpenItemsOnly: true, requiresGoogle: false },
   'google-tasks': { label: 'Google Tasks', kind: 'task', extension: null, allowsEmptySelection: false, ownOpenItemsOnly: true, requiresGoogle: true },
   'google-doc': { label: 'Google Doc', kind: 'document', extension: null, allowsEmptySelection: true, ownOpenItemsOnly: false, requiresGoogle: true },
-  webhook: { label: 'Webhook', kind: 'integration', extension: null, allowsEmptySelection: false, ownOpenItemsOnly: false, requiresGoogle: false },
+  webhook: { label: 'Webhook', kind: 'integration', extension: null, allowsEmptySelection: true, ownOpenItemsOnly: false, requiresGoogle: false },
 } as const;
 
 export type ExportTargetId = keyof typeof EXPORT_TARGETS;

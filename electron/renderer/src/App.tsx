@@ -226,16 +226,35 @@ function AppInner(): JSX.Element {
   // the helper's reason instead of silently swallowing the banner (#191).
   // The partial audio file still lands in the library via the watcher.
   useEffect(() => {
+    let revision = 0;
+    void api.recording.active().then(rows => {
+      if (revision !== 0 || liveRecordingRef.current) return;
+      const active = rows.find(row => !row.disposable);
+      if (active) setLiveRecording(active);
+    }).catch(() => { /* no guessed capture state */ });
     const off = api.recording.onStateChange(({ sessionId, state, reason }) => {
+      const token = ++revision;
+      if (state === 'starting' || state === 'recording' || state === 'stopping') {
+        if (liveRecordingRef.current?.sessionId !== sessionId) {
+          void api.recording.active().then(async rows => {
+            const active = rows.find(row => row.sessionId === sessionId && !row.disposable);
+            if (active && await api.recording.state(sessionId) !== 'idle' && token === revision && !liveRecordingRef.current) setLiveRecording(active);
+          }).catch(() => { /* existing live row remains authoritative */ });
+        }
+        return;
+      }
       if (state !== 'idle' && state !== 'error') return;
       const cur = liveRecordingRef.current;
       if (cur?.sessionId !== sessionId) return;
-      setLiveRecording(null);
+      void api.recording.state(sessionId).then(authoritative => {
+        if (token !== revision) return;
+        if (authoritative !== 'idle' && authoritative !== 'error') return;
+        if (liveRecordingRef.current?.sessionId === sessionId) setLiveRecording(null);
       const why = state === 'error'
         ? reason ?? 'the recorder hit an error'
         : reason ?? 'the capture process exited';
       toast.show({
-        message: `Recording stopped unexpectedly — ${why}. Audio captured so far was saved.`,
+        message: `Recording stopped unexpectedly — ${why}. Check Library or Needs attention for recoverable audio.`,
         variant: 'error',
         durationMs: 10_000,
         action: cur.startInput
@@ -260,8 +279,9 @@ function AppInner(): JSX.Element {
             }
           : undefined,
       });
+      }).catch(() => { /* uncertain recorder state: retain Stop and don't announce success */ });
     });
-    return () => { off(); };
+    return () => { revision++; off(); };
   }, [toast, setLiveRecording]);
 
   // Application menu actions. Items in the View / File menus emit named
@@ -309,8 +329,8 @@ function AppInner(): JSX.Element {
   // (Zoom + autoRecordZoom). Route into LiveRecording so the in-progress
   // card appears without a manual click. (#78 follow-up)
   useEffect(() => {
-    const off = api.onAutoRecordingStarted(({ sessionId, label, startedAt }) => {
-      setLiveRecording({ sessionId, label, startedAt });
+    const off = api.onAutoRecordingStarted(({ sessionId, label, startedAt, startInput }) => {
+      setLiveRecording({ sessionId, label, startedAt, startInput });
     });
     return () => { off(); };
   }, [setLiveRecording]);
@@ -449,6 +469,8 @@ function AppInner(): JSX.Element {
               sessionId={liveRecording!.sessionId}
               label={liveRecording!.label}
               startedAt={liveRecording!.startedAt}
+              groupId={liveRecording!.startInput?.groupId}
+              micEnabled={liveRecording!.startInput?.mic}
               onStopped={(summary) => {
                 setLiveRecording(null);
                 toast.show({ message: summary, durationMs: 5000 });

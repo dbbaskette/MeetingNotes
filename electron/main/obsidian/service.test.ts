@@ -115,11 +115,11 @@ describe('Obsidian sync', () => {
       .all() as { name: string }[];
     for (const t of triggers) db.exec(`DROP TRIGGER "${t.name}"`);
     db.exec(
-      'DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
+      'DROP TABLE processing_history; DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 20 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 21 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,
@@ -437,7 +437,9 @@ describe('Obsidian sync', () => {
     console.info(
       `Obsidian fixture: 500 exports ${(unchanged - started).toFixed(0)} ms; unchanged pass ${(performance.now() - unchanged).toFixed(1)} ms`,
     );
-  });
+  // Hundreds of durable file writes on the disposable VM are not a 5-second
+  // performance budget. Keep all batch/no-rewrite assertions and a finite cap.
+  }, 30_000);
   it('checks compare-before-write and never clobbers an unexpected file', () => {
     const file = path.join(vault, 'file.md');
     fs.writeFileSync(file, 'User data');

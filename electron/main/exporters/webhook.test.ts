@@ -144,7 +144,7 @@ describe('renderWebhookBody', () => {
   it('telegram-markdown returns Telegram sendMessage shape with Markdown body', () => {
     const r = renderWebhookBody(makePayload(), 'telegram-markdown');
     const parsed = JSON.parse(r.body) as { text: string; parse_mode: string };
-    expect(parsed.parse_mode).toBe('Markdown');
+    expect(parsed.parse_mode).toBe('MarkdownV2');
     expect(parsed.text).toContain('*Standup*');
     expect(parsed.text).toContain('File the spec by Friday');
   });
@@ -159,11 +159,57 @@ describe('renderWebhookBody', () => {
       meeting: { ...makePayload().meeting, title: 'Bug_report [#42]' },
     }), 'telegram-markdown');
     const parsed = JSON.parse(r.body) as { text: string };
-    expect(parsed.text).toContain('Bug\\_report \\[#42\\]');
+    expect(parsed.text).toContain('Bug\\_report \\[\\#42\\]');
   });
 });
 
 describe('WebhookExporter.deliverPayload', () => {
+  it('retries an uncertain server-success with the same identity; deliberate re-delivery gets a new one', async () => {
+    const d = makeDeps({ fetchResponses: [new DOMException('fixture', 'TimeoutError'), new Response('ok')] });
+    await d.exporter.deliverPayload(makePayload());
+    const requests = d.fetchMock.mock.calls as unknown as [string, RequestInit][];
+    const first = (requests[0]![1].headers as Record<string, string>)['idempotency-key'];
+    expect(first).toBeTruthy();
+    expect((requests[1]![1].headers as Record<string, string>)['idempotency-key']).toBe(first);
+    expect(JSON.parse(String(requests[0]![1].body))).toMatchObject({ delivery_id: first, meeting: { id: 'm1' } });
+    expect(requests[0]![1].redirect).toBe('error');
+    await d.exporter.deliverPayload(makePayload());
+    expect((requests[2]![1].headers as Record<string, string>)['idempotency-key']).not.toBe(first);
+  });
+
+  it.each(['mine', 'all', 'none'] as const)('manual delivery honors %s, real identity, and name-only owners', async (ownerFilter) => {
+    const d = makeDeps({ config: { ownerFilter } });
+    await d.exporter.export({ meetingId: 'real-id', meetingTitle: 'Title', meetingFolder: '/fixture',
+      ownerIdentity: { userSpeakerId: 'self', userDisplayName: 'Dan' }, summaryMd: 'Summary',
+      items: [
+        { id: '1', text: 'Mine', ownerName: ' DAN ', dueDate: null, status: 'open' },
+        { id: '2', text: 'Other', ownerName: 'Other', dueDate: null, status: 'open' },
+      ] });
+    const request = (d.fetchMock.mock.calls as unknown as [string, RequestInit][])[0]![1];
+    const body = JSON.parse(String(request.body));
+    expect(body.meeting.id).toBe('real-id');
+    expect(body.action_items.map((it: { text: string }) => it.text)).toEqual(ownerFilter === 'all' ? ['Mine', 'Other'] : ownerFilter === 'mine' ? ['Mine'] : []);
+  });
+
+  it('allows literal IPv6 loopback but no remote plaintext destination', () => {
+    expect(validateUrl('http://[::1]:3000/hook').ok).toBe(true);
+    expect(validateUrl('http://[::2]:3000/hook').ok).toBe(false);
+    expect(validateUrl('http://localhost.evil/hook').ok).toBe(false);
+  });
+
+  it('escapes all Telegram dynamic text and bounds Slack headers/mentions and long content', () => {
+    const payload = makePayload({ meeting: { ...makePayload().meeting, title: 'X'.repeat(500), attendees: ['<!everyone>&'] },
+      summary_markdown: '`raw` [oops * _ ! <@U123>&'.repeat(500),
+      action_items: [{ text: '<!here>&', owner: 'A>B', due_date: null }] });
+    const telegram = JSON.parse(renderWebhookBody(payload, 'telegram-markdown').body);
+    expect(telegram.text).toContain('\\`raw\\` \\[oops \\* \\_ \\!');
+    expect(telegram.text.length).toBeLessThan(4096);
+    const slack = JSON.parse(renderWebhookBody(payload, 'slack-blocks').body);
+    expect(slack.blocks[0].text.text.length).toBe(150);
+    expect(JSON.stringify(slack)).not.toContain('<!');
+    expect(JSON.stringify(slack)).toContain('&lt;!everyone&gt;&amp;');
+    expect(slack.blocks.filter((b: { type: string }) => b.type === 'section').every((b: { text: { text: string } }) => b.text.text.length <= 3000)).toBe(true);
+  });
   it.each(['Error', 'TimeoutError', 'AbortError'])('never logs or persists credential-bearing %s messages', async (name) => {
     const endpoint = new URL('https://hooks.slack.com/services/T0/B0/FIXTURE_PATH?token=FIXTURE_QUERY#FIXTURE_FRAGMENT');
     // Generate inert userinfo per test rather than commit a credential-shaped

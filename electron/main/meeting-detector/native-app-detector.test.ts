@@ -42,6 +42,23 @@ const teamsActive: FakeSource = {
 };
 
 describe('NativeAppDetector', () => {
+  it('reads live debounce without relaunch and serializes pending enumeration', async () => {
+    let now = 0, debounce = 5000, suppressed = false;
+    let resolve!: (sources: FakeSource[]) => void;
+    const list = vi.fn(() => new Promise<FakeSource[]>(r => { resolve = r; }));
+    const detector = new NativeAppDetector({ appEnumerator: { list } as never, now: () => now,
+      getSilenceMs: () => debounce, isSuppressed: () => suppressed });
+    const event = vi.fn(); detector.onDetected(event);
+    const first = detector.tick(); await detector.tick(); expect(list).toHaveBeenCalledOnce(); resolve([zoomActive]); await first;
+    now = 2000; debounce = 1000;
+    const second = detector.tick(); resolve([zoomActive]); await second; expect(event).toHaveBeenCalledOnce();
+    now = 9000;
+    const third = detector.tick(); suppressed = true; resolve([teamsActive]); await third;
+    expect(event).toHaveBeenCalledOnce();
+    suppressed = false;
+    const cancelled = detector.tick(); detector.stop(); resolve([teamsActive]); await cancelled;
+    expect(event).toHaveBeenCalledOnce();
+  });
   it('does not fire on the first tick — silenceMs must elapse first', async () => {
     const listener = vi.fn();
     const t = makeDetector({ initialSources: [zoomActive], silenceMs: 5000 });

@@ -8,7 +8,7 @@ import type { IpcServices } from './handlers.js';
 import type { Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { storageLocations } from '../lib/storage-paths.js';
-import { downloadWhisperModel } from '../whisper/download-model.js';
+import { downloadWhisperModel, isWhisperModelFile } from '../whisper/download-model.js';
 import { validateSetting } from '../storage/settings-validation.js';
 
 export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
@@ -16,6 +16,7 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     value = validateSetting(key, value);
+    if (key === 'sttModel' && s.pipeline.getStatus().currentId) throw new Error('Wait for active processing to finish before changing the transcription model');
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
     if (key === 'theme') {
       nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
@@ -64,12 +65,13 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
     const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir)
-      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin'))
+      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin') && isWhisperModelFile(path.join(dir, f)))
       .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
   });
 
   ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
     if (typeof model !== 'string') throw new Error('invalid model id');
+    if (s.pipeline.getStatus().currentId) throw new Error('Wait for processing to finish before installing or replacing a transcription model');
     // Native streaming download (no shell script). The old path shelled out to
     // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
     // so onboarding's model download failed there with "No such file or

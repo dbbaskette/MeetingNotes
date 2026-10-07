@@ -4,6 +4,10 @@ import { captureSummary, deriveCaptureHealth } from './capture-health.js';
 const startedAtMs = 1_000;
 
 describe('deriveCaptureHealth', () => {
+  it('does not warn about a deliberately disabled microphone', () => {
+    expect(deriveCaptureHealth({ startedAtMs, nowMs: 30000, micEnabled: false,
+      lastAudibleAt: { system: 29000, mixed: 29000 } }).state).toBe('healthy');
+  });
   it('reports a startup preflight during the grace period', () => {
     expect(deriveCaptureHealth({ startedAtMs, nowMs: 5_000, lastAudibleAt: {} }).state).toBe('checking');
   });

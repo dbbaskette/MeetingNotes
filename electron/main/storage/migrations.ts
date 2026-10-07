@@ -355,6 +355,14 @@ export const MIGRATIONS: Migration[] = [
       before_json TEXT NOT NULL, after_json TEXT NOT NULL
     );
   ` },
+  { version: 21, up: `
+    CREATE TABLE processing_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL, kind TEXT NOT NULL, stage TEXT NOT NULL, message TEXT NOT NULL
+    );
+    CREATE INDEX processing_history_meeting ON processing_history(meeting_id, id DESC);
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

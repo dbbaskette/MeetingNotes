@@ -16,6 +16,7 @@ export interface WebhookActionItem {
 }
 
 export interface WebhookPayload {
+  delivery_id?: string;
   event: 'meeting.completed';
   meeting: {
     id: string;
@@ -55,7 +56,8 @@ export function renderWebhookBody(payload: WebhookPayload, template: WebhookTemp
 // Strips the transcript out of compact so downstream chat surfaces don't
 // see a 20KB payload when a 200-byte summary will do.
 function renderCompact(payload: WebhookPayload): RenderedBody {
-  const { transcript_markdown: _, ...rest } = payload;
+  const { transcript_markdown, ...rest } = payload;
+  void transcript_markdown;
   return { contentType: 'application/json', body: JSON.stringify(rest) };
 }
 
@@ -65,28 +67,29 @@ function renderFull(payload: WebhookPayload): RenderedBody {
 
 function renderTelegram(payload: WebhookPayload): RenderedBody {
   const lines: string[] = [];
-  lines.push(`*${escapeTelegram(payload.meeting.title)}*`);
+  lines.push(`*${escapeTelegram(truncate(payload.meeting.title, 100))}*`);
   if (payload.meeting.started_at) {
-    lines.push(`_${escapeTelegram(payload.meeting.started_at)} · ${formatDuration(payload.meeting.duration_s)}_`);
+    lines.push(`_${escapeTelegram(truncate(payload.meeting.started_at, 40))} · ${escapeTelegram(formatDuration(payload.meeting.duration_s))}_`);
   } else {
-    lines.push(`_${formatDuration(payload.meeting.duration_s)}_`);
+    lines.push(`_${escapeTelegram(formatDuration(payload.meeting.duration_s))}_`);
   }
   if (payload.summary_markdown) {
     lines.push('');
-    lines.push(payload.summary_markdown);
+    lines.push(escapeTelegram(truncate(payload.summary_markdown, 900)));
   }
   if (payload.action_items.length > 0) {
     lines.push('');
     lines.push('*Action items*');
-    for (const ai of payload.action_items) {
-      const owner = ai.owner ? ` — ${escapeTelegram(ai.owner)}` : '';
-      const due = ai.due_date ? ` (due ${escapeTelegram(ai.due_date)})` : '';
-      lines.push(`• ${escapeTelegram(ai.text)}${owner}${due}`);
+    for (const ai of payload.action_items.slice(0, 5)) {
+      const owner = ai.owner ? ` — ${truncate(ai.owner, 30)}` : '';
+      const due = ai.due_date ? ` (due ${truncate(ai.due_date, 10)})` : '';
+      lines.push(escapeTelegram(`• ${truncate(ai.text, 100)}${owner}${due}`));
     }
+    if (payload.action_items.length > 5) lines.push(escapeTelegram(`… ${payload.action_items.length - 5} more action items in MeetingNotes`));
   }
   return {
     contentType: 'application/json',
-    body: JSON.stringify({ text: lines.join('\n'), parse_mode: 'Markdown' }),
+    body: JSON.stringify({ text: lines.join('\n'), parse_mode: 'MarkdownV2' }),
   };
 }
 
@@ -94,7 +97,7 @@ function renderSlack(payload: WebhookPayload): RenderedBody {
   const blocks: unknown[] = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: payload.meeting.title, emoji: true },
+      text: { type: 'plain_text', text: truncate(payload.meeting.title || 'Meeting', 150), emoji: true },
     },
   ];
   const metaParts: string[] = [];
@@ -105,24 +108,24 @@ function renderSlack(payload: WebhookPayload): RenderedBody {
   }
   blocks.push({
     type: 'context',
-    elements: [{ type: 'mrkdwn', text: metaParts.join(' · ') }],
+    elements: [{ type: 'mrkdwn', text: escapeSlack(truncate(metaParts.join(' · '), 400)), verbatim: true }],
   });
   if (payload.summary_markdown) {
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: truncate(payload.summary_markdown, 2900) },
+      text: { type: 'mrkdwn', text: escapeSlack(truncate(payload.summary_markdown, 580)), verbatim: true },
     });
   }
   if (payload.action_items.length > 0) {
     const lines = payload.action_items.map((ai) => {
-      const owner = ai.owner ? ` — *${ai.owner}*` : '';
-      const due = ai.due_date ? ` _(due ${ai.due_date})_` : '';
+      const owner = ai.owner ? ` — ${ai.owner}` : '';
+      const due = ai.due_date ? ` (due ${ai.due_date})` : '';
       return `• ${ai.text}${owner}${due}`;
     });
     blocks.push({ type: 'divider' });
     blocks.push({
       type: 'section',
-      text: { type: 'mrkdwn', text: `*Action items*\n${truncate(lines.join('\n'), 2900)}` },
+      text: { type: 'mrkdwn', text: `*Action items*\n${escapeSlack(truncate(lines.join('\n'), 580))}`, verbatim: true },
     });
   }
   blocks.push({
@@ -157,5 +160,9 @@ function truncate(s: string, max: number): string {
 // Telegram's Markdown parse_mode treats `_*[]()` as formatting characters.
 // Escape so user titles / action-item text don't accidentally bold a name.
 function escapeTelegram(s: string): string {
-  return s.replace(/[_*[\]()]/g, (c) => `\\${c}`);
+  return s.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, (c) => `\\${c}`);
+}
+
+function escapeSlack(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

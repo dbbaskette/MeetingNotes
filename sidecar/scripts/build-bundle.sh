@@ -5,14 +5,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VENV_PY=".venv/bin/python"
+VENV_PY="${MN_BUNDLE_PYTHON:-.venv/bin/python}"
 if [ ! -x "$VENV_PY" ]; then
   echo "ERROR: sidecar venv not found at $(pwd)/.venv. Run scripts/install.sh first." >&2
   exit 1
 fi
 
 # Install PyInstaller inside the same venv (idempotent).
-"$VENV_PY" -m pip install --quiet 'pyinstaller>=6.10'
+if [[ "${MN_BUNDLE_SKIP_INSTALL:-0}" == 1 ]]; then
+  "$VENV_PY" -c 'import PyInstaller; assert tuple(map(int, PyInstaller.__version__.split(".")[:2])) >= (6, 10)'
+else
+  "$VENV_PY" -m pip install --quiet 'pyinstaller>=6.10'
+fi
 
 rm -rf build dist
 

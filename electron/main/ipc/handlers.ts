@@ -16,6 +16,8 @@ import { ACTION_ITEM_SYSTEM_PROMPT } from '../pipeline/prompts.js';
 import { extractActionItemsFromSummary } from '../pipeline/extract-action-items.js';
 import { probeError } from './probe-error.js';
 import type { RecordingManager } from '../recording/manager.js';
+import { testCapture } from '../recording/capture-test.js';
+import { setupHealth } from './setup-health.js';
 import type { RecordingRecoveryService } from '../recording/recovery.js';
 import type { AppEnumerator } from '../recording/app-enumerator.js';
 import type { MeetingDetector } from '../meeting-detector/detector.js';
@@ -28,6 +30,7 @@ import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { isStage } from '../lib/stage-machine.js';
 import { stageEtaForMeeting } from './stage-eta-for-meeting.js';
 import { transcriptChars } from '../pipeline/transcript-chars.js';
+import { preserveTranscript } from '../pipeline/preserve-transcript.js';
 import type { StageDurationsRepo } from '../storage/stage-durations-repo.js';
 import {
   clearArtifactsFromStage,
@@ -280,6 +283,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     );
     return {
       ...m, slug: m.slug,
+      processingHistory: s.meetings.processingHistory(id),
       stageStartedAt: m.stageStartedAt,
       skipSpeakerId: m.skipSpeakerId,
       unidentifiedCount: unidentifiedCount(speakers),
@@ -420,8 +424,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting || meeting.deletedAt) throw new Error('Meeting no longer exists');
     if (meeting.status === 'processing') throw new Error('Wait for processing to finish before restarting');
     if (shouldClearActionItems(parsed.fromStage)) s.notesHistory?.capture(parsed.id, 'Before reprocessing');
+    s.meetings.recordProcessingEvent(parsed.id, 'retry', parsed.fromStage, 'User requested reprocessing; original audio retained and existing notes/action items saved to history when present.');
     if (meeting) {
       const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
+      const snapshot = preserveTranscript(folder, parsed.fromStage);
+      if (snapshot) s.meetings.recordProcessingEvent(parsed.id, 'retry', parsed.fromStage, `Previous transcript preserved in the meeting folder: ${snapshot}`);
       clearArtifactsFromStage(folder, parsed.fromStage, s.artifactCache);
     }
     if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
@@ -555,6 +562,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // helper. Level + state-change events are broadcast via webContents.send
   // (wired up where the manager is constructed in electron/main/index.ts).
   ipc.handle(IPC_CHANNELS.recordingListSources, async () => s.appEnumerator.list());
+  ipc.handle(IPC_CHANNELS.recordingActive, () => s.recordingManager.active());
+  ipc.handle(IPC_CHANNELS.setupHealth, () => setupHealth(s));
+  ipc.handle(IPC_CHANNELS.recordingTest, async (_e, input: unknown) => {
+    const parsed = z.object({ targetPid: z.union([z.literal('system'), z.number().int().positive()]),
+      targetLabel: z.string().min(1).max(200), mic: z.boolean() }).strict().parse(input);
+    return testCapture(s.recordingManager, parsed);
+  });
   ipc.handle(IPC_CHANNELS.recordingStart, async (_e, input: unknown) => {
     if (typeof input !== 'object' || input === null) throw new Error('invalid args');
     const { targetPid, targetLabel, mic, groupId } = z.object({

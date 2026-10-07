@@ -46,9 +46,19 @@ if ((${#lint_files[@]})); then run_check changed-lint npx eslint "${lint_files[@
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 run_check native-electron npm run rebuild:electron
 else
-  export MN_FIXTURE_MODES=selection,grouped,startup,settings,sources
+  export MN_FIXTURE_MODES=selection,grouped,startup,settings,sources,capture
 fi
 run_check renderer-fixtures env MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
+# An optional task-owned package payload allows the same clean-Mac runner to
+# verify the actual packaged main/preload/renderer and bundled inference. It
+# is never fetched from a release or installed into /Applications.
+if [[ -f "$source_root/.ci-package-fixture/manifest.json" ]]; then
+  package_commit="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).sourceCommit' "$source_root/.ci-package-fixture/manifest.json")"
+  [[ "$package_commit" == "$(git_source rev-parse HEAD)" ]] || { printf 'Stale package payload\n' >&2; exit 1; }
+  run_check packaged-runtime bash scripts/ci/package-smoke.sh "$source_root/.ci-package-fixture" "$results_root/package"
+else
+  printf 'Packaged runtime: not requested (no task-owned payload)\n' >> "$results_root/environment.txt"
+fi
 printf 'Electron: ' >> "$results_root/environment.txt"
 node -p 'require("electron/package.json").version' >> "$results_root/environment.txt"
 printf 'PASS\n' > "$results_root/result.txt"

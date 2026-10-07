@@ -48,7 +48,7 @@ export function registerExportHandlers(ipc: IpcMain, s: IpcServices): void {
       }
     }
     const items = selectedRows.map((ai) => ({
-      id: ai.id, text: ai.text, ownerName: ai.ownerName, dueDate: ai.dueDate, status: ai.status,
+      id: ai.id, text: ai.text, ownerName: ai.ownerName, ownerSpeakerId: ai.ownerSpeakerId, dueDate: ai.dueDate, status: ai.status,
     }));
     const summaryPath = path.join(folder, 'summary.md');
     const summaryMd = fs.existsSync(summaryPath) ? fs.readFileSync(summaryPath, 'utf8') : null;
@@ -63,6 +63,11 @@ export function registerExportHandlers(ipc: IpcMain, s: IpcServices): void {
     }
     const result = await exporter.export({
       items, meetingTitle: meeting.title, meetingFolder: folder,
+      meetingId: meeting.id, meetingSlug: meeting.slug,
+      ownerIdentity: {
+        userSpeakerId: s.settings.get('userSpeakerId'),
+        userDisplayName: s.speakers.list().find((sp) => sp.id === s.settings.get('userSpeakerId'))?.displayName ?? null,
+      },
       summaryMd,
       outputPath: typeof input.outputPath === 'string' ? input.outputPath : undefined,
       onItemExported: (id) => s.actionItems.markExported(id, input.exporter),

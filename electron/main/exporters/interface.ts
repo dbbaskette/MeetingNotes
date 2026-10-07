@@ -1,10 +1,14 @@
 export interface ExportableItem {
   id: string; text: string; ownerName: string | null; dueDate: string | null; status: string;
+  ownerSpeakerId?: string | null;
 }
 export interface ExportInput {
   items: ExportableItem[];
   meetingTitle: string;
   meetingFolder: string;
+  meetingId?: string;
+  meetingSlug?: string;
+  ownerIdentity?: { userSpeakerId: string | null; userDisplayName: string | null };
   /** Meeting summary markdown, if available. File-based exporters may include
    *  it; action-only exporters (Apple Reminders) ignore it. */
   summaryMd?: string | null;

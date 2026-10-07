@@ -9,7 +9,7 @@ Capture and inference run locally. Optional exports send only the meeting data y
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.13.2-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.14.0-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -178,10 +178,10 @@ brew install whisper-cpp ffmpeg
 ## 🎬 Recording a meeting
 
 1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
-2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Optionally choose **Save to group** (preselected when you are browsing a group), then pick an app or **All system audio** as a catch-all. Choosing the source still starts recording in one click.
+2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. **Refresh** updates sources without reopening or losing the group. Optionally choose **Save to group**, then pick an app or **All system audio**. Choosing the source starts recording.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
-4. Click **■ Stop** — the new row lands in your library instantly.
-5. Click **▶ Process** to run the pipeline.
+4. Click **■ Stop**, then confirm — finalized audio is cataloged in Library. If exit cannot be confirmed, keep the controls open and retry Stop.
+5. Click **▶ Process**, or explicitly enable **Process recordings automatically when recording stops** in Processing Settings (default off). Automation applies only to newly finalized built-in captures, not imports/recovery/history, and respects queue pause and speaker review.
 
 Each recording writes up to three AAC files to the Library's `recordings/` directory (by default `~/Documents/MeetingNotes/recordings/`; mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
 
@@ -246,7 +246,7 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
 - <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.
-- **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings are prioritized in one compact panel with a next action and age.
+- **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings have prioritized next actions. **View all** or **+N more** opens the entire backlog with bounded pages.
 </details>
 
 ## 📤 Integrations & export
@@ -264,6 +264,8 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 ## 🔧 Configuration
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](docs/usability-improvements.md).
+
+**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing Settings includes the shared Whisper download/model picker; custom paths stay in Advanced. See [capture, processing and delivery guide](docs/reliable-capture-processing.md) for retry history, audio limitations and deferred hardware checks.
 
 **Notes history:** the Notes tab's **Notes & action-item history…** compares and restores the latest 20 saved versions. Regeneration and re-extraction preserve existing notes/tasks before replacing them; restore includes completion status, ownership, due dates, and export markers while leaving the transcript/audio unchanged.
 
@@ -300,7 +302,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `webhookUrl` | `""` | Destination (HTTPS, or localhost). |
 | `webhookSecret` | `""` | Optional bearer token; redacted from logs. |
 | `webhookTemplate` | `compact` | `compact` / `full` (JSON), `slack-blocks`, `telegram-markdown`. |
-| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (by `userSpeakerId`) / `all` / `none`. |
+| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (roster ID or normalized owner name) / `all` / `none`, for both manual and automatic delivery. |
 | `googleClientId` / `googleClientSecret` | `""` | BYO Google OAuth desktop client for Tasks/Docs export. |
 
 </details>
@@ -358,7 +360,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.13.2-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
@@ -376,9 +378,9 @@ The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sq
 
 ## 📊 Status
 
-**1.13.2** — for macOS 14.2+ / Apple Silicon. Fixes a blank-window crash when the grouped Library opens with existing meetings. Expanded groups render viewport-bounded rows, Settings has searchable sections and reliable save feedback, notes/action items have local compare-and-restore history, and Obsidian sync resumes pending work without rescanning every unchanged export. Quoted and Terminal-escaped folder paths are handled safely. Additive migration 20 stores notes history without relocating recordings.
+**1.14.0 development version** — for macOS 14.2+ / Apple Silicon. Reliable shared-timeline capture and confirmed Stop/restart controls, app-grouped source refresh, compact Setup & health, guided processing recovery, full paged attention, opt-in processing of newly finalized recordings, and safer webhook/Google Tasks delivery. Includes the contributor fixes merged after 1.13.2. Additive migration 21 stores bounded processing history without relocating recordings; notes/action-item history and one-way Obsidian sync remain available.
 
-See the [1.13.2 release notes](docs/releases/v1.13.2.md) for upgrade guidance, verification, and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
+See the [1.14.0 release notes](docs/releases/v1.14.0.md) for upgrade guidance, verification, and deferred device checks. These notes prepare the next release; no 1.14.0 GitHub release or installer has been published yet. The [last published source-only release is 1.13.2](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
 
 ## 📄 License
 

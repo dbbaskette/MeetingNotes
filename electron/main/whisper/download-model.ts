@@ -18,7 +18,7 @@ export const WHISPER_GGML_BASE = 'https://huggingface.co/ggerganov/whisper.cpp/r
 
 /** Allow only bare model ids like `medium.en` / `large-v3-turbo` — never a
  *  path fragment — so the id can't escape the models directory or the URL. */
-const MODEL_ID = /^[a-z0-9][a-z0-9.\-]*$/i;
+const MODEL_ID = /^[a-z0-9][a-z0-9.-]*$/i;
 
 /** Progress callbacks are throttled to roughly this cadence so a fast
  *  connection doesn't spam IPC with per-chunk updates. */
@@ -51,10 +51,11 @@ export async function downloadWhisperModel(
   if (typeof model !== 'string' || !MODEL_ID.test(model)) {
     throw new Error(`invalid model id: ${String(model)}`);
   }
-  const existing = inflight.get(model);
+  const key = path.join(opts.dir ?? modelsDir(), model);
+  const existing = inflight.get(key);
   if (existing) return existing;
-  const job = doDownload(model, opts).finally(() => { inflight.delete(model); });
-  inflight.set(model, job);
+  const job = doDownload(model, opts).finally(() => { inflight.delete(key); });
+  inflight.set(key, job);
   return job;
 }
 
@@ -70,7 +71,7 @@ async function doDownload(
   // crashed leftover) sharing one temp path and corrupting each other.
   const tmp = `${dest}.${process.pid}.${Date.now()}.download`;
 
-  const res = await doFetch(`${WHISPER_GGML_BASE}/ggml-${model}.bin`);
+  const res = await doFetch(`${WHISPER_GGML_BASE}/ggml-${model}.bin`, { signal: AbortSignal.timeout(30 * 60_000) });
   if (!res.ok || !res.body) {
     throw new Error(
       res.status === 404
@@ -103,6 +104,8 @@ async function doDownload(
       counter,
       fs.createWriteStream(tmp),
     );
+    if (total !== null && received !== total) throw new Error('Whisper download was incomplete; retry the download');
+    if (!isWhisperModelFile(tmp)) throw new Error('Downloaded file is not a valid GGML Whisper model; the existing model was kept');
     fs.renameSync(tmp, dest);
   } catch (e) {
     try { fs.rmSync(tmp, { force: true }); } catch { /* best-effort cleanup */ }
@@ -112,4 +115,17 @@ async function doDownload(
   // even when the throttle swallowed the last chunk's update.
   opts.onProgress?.(received, total);
   return { path: dest };
+}
+
+/** Structural validation, not a cryptographic integrity claim. Reject HTML,
+ * empty files and truncated headers before marking a model installed. */
+export function isWhisperModelFile(file: string): boolean {
+  let fd: number | undefined;
+  try {
+    if (!fs.statSync(file).isFile() || fs.statSync(file).size < 32) return false;
+    fd = fs.openSync(file, 'r');
+    const magic = Buffer.alloc(4);
+    return fs.readSync(fd, magic, 0, 4, 0) === 4 && magic.readUInt32LE() === 0x67676d6c;
+  } catch { return false; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
 }

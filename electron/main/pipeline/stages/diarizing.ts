@@ -16,10 +16,8 @@ export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   // overlap with in diarization, and those segments all fall through to
   // "UNKNOWN" in the merge stage.
   //
-  // Since the stem-aware transcription path is off pending #27 (voice
-  // stem writes silence — Swift bug), we must diarize the same audio we
-  // transcribed. When #27 is fixed and stem-aware transcribe comes back,
-  // restore the `hasStems ? system : mixed` branch here.
+  // #173 keeps stem processing deferred: use exactly the same mixed timeline
+  // as STT. Capture fixes alone do not prove independent-stem attribution.
   ctx.logger.info('diarize:start', { meetingId });
   // Wake the pyannote sidecar on demand. First call after a cold app
   // start blocks for ~5–10s while the model loads; subsequent calls

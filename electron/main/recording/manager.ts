@@ -31,10 +31,19 @@ interface SessionEntry {
   state: RecordingState;
   silenceTimer: ReturnType<typeof setTimeout> | null;
   stopPromise: Promise<void> | null;
+  exited: boolean;
+  started: boolean;
+  finalized: boolean;
+  disposable: boolean;
+  input: StartInput;
+  startedAt: string;
 }
 
 export class RecordingManager {
   private sessions = new Map<string, SessionEntry>();
+  private intentRevision = 0;
+  get startRevision(): number { return this.intentRevision; }
+  cancelPendingStarts(): void { this.intentRevision++; }
   private listeners = {
     level: new Set<(sessionId: string, source: RecordingLevelSource, peakDb: number) => void>(),
     stateChange: new Set<(sessionId: string, state: RecordingState, reason?: string) => void>(),
@@ -47,16 +56,24 @@ export class RecordingManager {
     spawn?: SpawnFn;
     clock?: () => Date;
     onAutoStop?: (sessionId: string, silenceMs: number) => void;
+    onFinalized?: (sessionId: string, outputPath: string) => void;
   }) {}
 
-  async start(input: StartInput): Promise<StartResult> {
+  async start(input: StartInput, internal: { outputDir?: string; disposable?: boolean; expectedRevision?: number } = {}): Promise<StartResult> {
+    // All entry points converge here, AFTER any asynchronous enumeration.
+    // Claim synchronously before spawning; a starting/stopping capture also
+    // owns the slot. Persisted orphan detection must finish before a new start.
+    if (internal.expectedRevision !== undefined && internal.expectedRevision !== this.intentRevision) throw new Error('Recording request was cancelled while sources were loading.');
+    if (this.sessions.size > 0 || this.deps.repo.findOpen().length > 0) {
+      throw new Error('Already recording or stopping. Finish the active capture first.');
+    }
     const now = this.deps.clock?.() ?? new Date();
     // Short random ID — collision-resistant enough for single-user app, easy
     // to copy from logs. (ulid helper isn't present in this project.)
     const sessionId = crypto.randomUUID().slice(0, 8);
     const stamp = now.toISOString()
       .replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
-    const outputPath = path.join(this.deps.recordingsDir, `recording-${stamp}-${sessionId}.m4a`);
+    const outputPath = path.join(internal.outputDir ?? this.deps.recordingsDir, `recording-${stamp}-${sessionId}.m4a`);
 
     const args: string[] = [];
     if (input.targetPid === 'system') {
@@ -69,7 +86,7 @@ export class RecordingManager {
 
     // Persist capture intent before spawning. The helper can create its file
     // immediately and the watcher may catalog it before start() resolves.
-    this.deps.repo.insert({
+    if (!internal.disposable) this.deps.repo.insert({
       id: sessionId,
       helperPid: -1,
       targetPid: input.targetPid === 'system' ? null : input.targetPid,
@@ -81,12 +98,8 @@ export class RecordingManager {
     let proc!: ChildProcessWithoutNullStreams;
     try {
       proc = spawnFn(this.deps.helperPath, args);
-      this.deps.repo.updateHelperPid(sessionId, proc.pid ?? -1);
-      proc.stdout.setEncoding('utf8');
-      proc.stderr.setEncoding('utf8');
     } catch (error) {
-      try { proc?.kill('SIGTERM'); } catch { /* helper may not have spawned */ }
-      this.deps.repo.markError(sessionId);
+      if (!internal.disposable) this.deps.repo.markError(sessionId);
       throw error;
     }
     const entry: SessionEntry = {
@@ -95,13 +108,40 @@ export class RecordingManager {
       state: 'starting',
       silenceTimer: null,
       stopPromise: null,
+      exited: false,
+      started: false,
+      finalized: false,
+      disposable: internal.disposable ?? false,
+      input,
+      startedAt: now.toISOString(),
     };
     this.sessions.set(sessionId, entry);
+    this.transition(sessionId, 'starting');
+    try {
+      if (!internal.disposable) this.deps.repo.updateHelperPid(sessionId, proc.pid ?? -1);
+      proc.stdout.setEncoding('utf8');
+      proc.stderr.setEncoding('utf8');
+    } catch (error) {
+      // Once spawn has succeeded, even setup failures retain the reservation
+      // until Stop confirms exit. Never free the slot merely after kill().
+      await this.stop(sessionId).catch(() => { /* retain stopping entry */ });
+      throw error;
+    }
 
     // Wait for the started event (helper emits {"event":"started"} when CoreAudio is attached).
     let startupFailure: Error | undefined;
     try {
       await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          startupFailure = new Error('Recorder did not become ready within 15 seconds. Check audio permissions and retry.');
+          // Keep the shared slot until exit is confirmed, even after a
+          // startup timeout. A retry must not create an overlapping helper.
+          this.transition(sessionId, 'stopping');
+          void this.stop(sessionId).catch(() => { /* retain retryable controls */ });
+          reject(startupFailure);
+        }, 15_000);
+        const succeed = (): void => { clearTimeout(timer); resolve(); };
+        const fail = (error: Error): void => { clearTimeout(timer); reject(error); };
         let buf = '';
         const onChunk = (chunk: string): void => {
           buf += chunk;
@@ -109,7 +149,7 @@ export class RecordingManager {
           while ((nl = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
             this.handleLine(sessionId, line);
-            if (line.includes('"event":"started"')) resolve();
+            try { if (JSON.parse(line).event === 'started') succeed(); } catch { /* diagnostics may be plain text */ }
           }
         };
         proc.stdout.on('data', onChunk);
@@ -117,13 +157,20 @@ export class RecordingManager {
         // without this listener the EventEmitter throws uncaught and this
         // promise (and the renderer's Record invoke) hangs forever.
         proc.on('error', (err: Error) => {
+          if (!proc.pid) entry.exited = true;
           startupFailure = new Error(`helper failed to spawn: ${err.message}`);
-          reject(startupFailure);
+          fail(startupFailure);
         });
         proc.on('exit', (code: number | null) => {
+          entry.exited = true;
+          if (entry.state === 'stopping' && !entry.stopPromise) {
+            this.finalize(sessionId, entry, entry.started && code === 0);
+            this.transition(sessionId, 'idle', 'Recorder confirmed exit after the Stop timeout');
+            this.sessions.delete(sessionId);
+          }
           if (this.sessions.get(sessionId)?.state !== 'recording') {
             startupFailure = new Error(`helper exited before started (code=${code})`);
-            reject(startupFailure);
+            fail(startupFailure);
           }
         });
       });
@@ -137,8 +184,12 @@ export class RecordingManager {
       // An explicit stop owns finalization; don't relabel it as an error or
       // remove its entry while performStop is still using it.
       if (entry.state === 'starting') {
-        try { this.deps.repo.markError(sessionId); } catch { /* best-effort */ }
-        if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+        if (!entry.exited) await this.stop(sessionId).catch(() => { /* preserve unconfirmed helper */ });
+        else {
+          try { if (!entry.disposable) this.deps.repo.markError(sessionId); } catch { /* best-effort */ }
+          this.transition(sessionId, 'error', 'Recorder could not start');
+          if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+        }
       }
       throw e;
     }
@@ -151,6 +202,7 @@ export class RecordingManager {
       throw new Error('recording was stopped before capture started');
     }
     this.transition(sessionId, 'recording');
+    entry.started = true;
     this.armSilenceTimer(sessionId);
     // Keep draining stdout for level events for the lifetime of the session.
     // The handler installed above keeps running because we never removed it.
@@ -163,7 +215,7 @@ export class RecordingManager {
         // silently swallowing the banner (#191).
         this.clearSilenceTimer(cur);
         this.transition(sessionId, 'idle', `helper exited unexpectedly (code=${code ?? 'null'})`);
-        try { this.deps.repo.finalize(sessionId); } catch { /* best-effort */ }
+        try { this.finalize(sessionId, cur, code === 0); } catch { /* best-effort */ }
         this.sessions.delete(sessionId);
       }
     });
@@ -171,34 +223,53 @@ export class RecordingManager {
   }
 
   async stop(sessionId: string): Promise<void> {
+    this.cancelPendingStarts();
     const s = this.sessions.get(sessionId);
     if (!s) throw new Error(`no such session: ${sessionId}`);
     if (s.stopPromise) return s.stopPromise;
-    s.stopPromise = this.performStop(sessionId, s);
+    s.stopPromise = this.performStop(sessionId, s).catch((error: unknown) => {
+      s.stopPromise = null;
+      // Keep the slot and controls until actual helper exit, never report a
+      // successful stop merely because a signal was sent.
+      throw error;
+    });
     return s.stopPromise;
   }
 
   private async performStop(sessionId: string, s: SessionEntry): Promise<void> {
     this.clearSilenceTimer(s);
     this.transition(sessionId, 'stopping');
-    await new Promise<void>((resolve) => {
+    if (!s.exited) await new Promise<void>((resolve, reject) => {
       let done = false;
       let hardKillTimer: ReturnType<typeof setTimeout> | null = null;
+      let exitTimer: ReturnType<typeof setTimeout> | null = null;
+      const cleanup = (): void => {
+        if (hardKillTimer !== null) clearTimeout(hardKillTimer);
+        if (exitTimer !== null) clearTimeout(exitTimer);
+        s.proc.removeListener('exit', finish);
+      };
       const finish = (): void => {
         if (done) return;
         done = true;
-        if (hardKillTimer !== null) clearTimeout(hardKillTimer);
+        cleanup();
         resolve();
       };
       s.proc.on('exit', finish);
       // Hard-kill safety: if SIGTERM doesn't end it in 5s, SIGKILL.
       hardKillTimer = setTimeout(() => {
         try { s.proc.kill('SIGKILL'); } catch { /* already dead */ }
-        finish();
+        exitTimer = setTimeout(() => {
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error('Recorder has not confirmed exit. Keep these controls open and retry Stop.'));
+        }, 2000);
       }, 5000);
-      s.proc.kill('SIGTERM');
+      try { s.proc.kill('SIGTERM'); }
+      catch (error) { done = true; cleanup(); reject(error); }
     });
-    this.deps.repo.finalize(sessionId);
+    this.finalize(sessionId, s, s.started);
+    if (!s.started || s.disposable) this.transition(sessionId, 'idle', s.started ? undefined : 'Capture did not become ready; recorder has exited');
     if (this.sessions.get(sessionId) === s) this.sessions.delete(sessionId);
   }
 
@@ -206,11 +277,26 @@ export class RecordingManager {
     return this.sessions.get(sessionId)?.state ?? 'idle';
   }
 
-  on(event: 'level', cb: LevelListener): void;
-  on(event: 'state-change', cb: StateListener): void;
-  on(event: 'level' | 'state-change', cb: LevelListener | StateListener): void {
+  active(): { sessionId: string; state: RecordingState; label: string; startedAt: string; startInput: StartInput; disposable: boolean; outputPath: string }[] {
+    return [...this.sessions].map(([sessionId, entry]) => ({ sessionId, state: entry.state, label: entry.input.targetLabel,
+      startedAt: entry.startedAt, startInput: entry.input, disposable: entry.disposable, outputPath: entry.outputPath }));
+  }
+
+  private finalize(sessionId: string, entry: SessionEntry, eligible: boolean): void {
+    if (entry.finalized) return;
+    if (!entry.disposable) this.deps.repo.finalize(sessionId);
+    entry.finalized = true;
+    if (eligible && !entry.disposable) {
+      try { this.deps.onFinalized?.(sessionId, entry.outputPath); } catch { /* observer cannot invalidate a completed stop */ }
+    }
+  }
+
+  on(event: 'level', cb: LevelListener): () => void;
+  on(event: 'state-change', cb: StateListener): () => void;
+  on(event: 'level' | 'state-change', cb: LevelListener | StateListener): () => void {
     if (event === 'level') this.listeners.level.add(cb as LevelListener);
     else this.listeners.stateChange.add(cb as StateListener);
+    return () => { if (event === 'level') this.listeners.level.delete(cb as LevelListener); else this.listeners.stateChange.delete(cb as StateListener); };
   }
 
   private transition(sessionId: string, state: RecordingState, reason?: string): void {
@@ -245,7 +331,7 @@ export class RecordingManager {
       if (!current || current.state !== 'recording') return;
       current.silenceTimer = null;
       try { this.deps.onAutoStop?.(sessionId, SILENCE_TIMEOUT_MS); } catch { /* observer only */ }
-      void this.stop(sessionId).catch(() => this.transition(sessionId, 'error'));
+      void this.stop(sessionId).catch(() => this.transition(sessionId, 'stopping', 'Automatic Stop failed. Retry Stop to confirm recorder exit.'));
     }, SILENCE_TIMEOUT_MS);
     // This watchdog should not keep a test process or the app alive by itself.
     (entry.silenceTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
