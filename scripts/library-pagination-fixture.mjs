@@ -12,8 +12,11 @@ const server = await createServer({ configFile: false, root, plugins: [react()],
 try {
   await server.listen();
   const origin = server.resolvedUrls.local[0];
-  for (const mode of ['rows', 'selection']) {
-    const entry = mode === 'rows' ? 'index.html' : 'selection.html';
+  const modes = ['rows', 'selection', 'grouped', 'settings'];
+  const selected = process.env.MN_FIXTURE_MODES?.split(',') ?? modes;
+  if (selected.some(mode => !modes.includes(mode))) throw new Error('Unknown fixture mode');
+  for (const mode of selected) {
+    const entry = mode === 'rows' ? 'index.html' : `${mode}.html`;
     await new Promise((resolve, reject) => {
       const child = spawn(electron, [path.join(root, `scripts/library-pagination-fixture/${mode}.cjs`)], {
         cwd: root, stdio: 'inherit', env: { ...process.env, ELECTRON_RUN_AS_NODE: '',

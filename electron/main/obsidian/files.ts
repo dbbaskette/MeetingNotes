@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { existingFolder } from '../lib/pasted-path.js';
 
 export const hash = (text: string): string => createHash('sha256').update(text).digest('hex');
 export function identity(file: string): string {
@@ -17,11 +18,10 @@ export function inside(root: string, target: string): boolean {
   );
 }
 export function validateVault(input: string, library: string): string {
-  if (!path.isAbsolute(input))
-    throw new Error('Choose the absolute path to an existing Obsidian vault');
-  const vault = fs.realpathSync(input);
+  const vault = existingFolder(input);
   identity(vault);
-  identity(path.join(vault, '.obsidian'));
+  try { identity(path.join(vault, '.obsidian')); }
+  catch { throw new Error('This is not an Obsidian vault. Choose the folder containing its .obsidian folder.'); }
   const source = fs.realpathSync(library);
   if (inside(source, vault) || inside(vault, source))
     throw new Error('The vault and MeetingNotes library must be separate folders');

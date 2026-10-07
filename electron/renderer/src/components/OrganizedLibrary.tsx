@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { VirtualGroupRows } from './VirtualGroupRows';
 import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
 import { api } from '../ipc/client';
@@ -86,10 +87,12 @@ export function OrganizedLibrary({
     : sections;
 
   return <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8">
+    <div>
     {searching && searchPending && searchResults.length === 0 &&
       <div role="status" className="py-8 text-center text-sm text-ink-muted">Searching…</div>}
     {visibleSections.map((section) => <GroupSection
       key={section.key} section={section} filter={filter} sort={sort}
+      scrollRef={scrollRef}
       searching={searching} searchRows={searchBuckets.get(section.key) ?? EMPTY_ROWS}
       expanded={searching ? !searchCollapsed.has(section.key) : expanded.has(section.key)}
       refreshRevision={refreshRevision} renderRow={renderRow} onToggle={() => toggle(section.key)}
@@ -97,12 +100,14 @@ export function OrganizedLibrary({
       onRename={section.groupId ? () => onRenameGroup(section.groupId!) : undefined}
       onDelete={section.groupId ? () => onDeleteGroup(section.groupId!) : undefined}
     />)}
+    </div>
   </div>;
 }
 
-function GroupSection({ section, filter, sort, searching, searchRows, expanded, refreshRevision,
+function GroupSection({ section, filter, sort, searching, searchRows, expanded, refreshRevision, scrollRef,
   renderRow, onToggle, onRows, onFocus, onRename, onDelete }: {
   section: OrganizedSection;
+  scrollRef: RefObject<HTMLDivElement>;
   filter: MeetingFilter;
   sort: LibrarySortKey;
   searching: boolean;
@@ -198,7 +203,8 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
         <button type="button" onClick={() => void pageStore.getState().retry()} className="font-semibold underline">Retry</button></p>}
       {!searching && queryMatches && !loadingInitial && !error && rows.length === 0 &&
         <p className="py-3 text-sm text-ink-muted">{filter === 'all' ? 'No meetings here yet. Use Move to group on a meeting.' : `No ${filter} meetings here.`}</p>}
-      {rows.map((meeting) => <div key={meeting.id}>{renderRow(meeting, searching)}</div>)}
+      {searching ? rows.map((meeting) => <div key={meeting.id}>{renderRow(meeting, true)}</div>)
+        : <VirtualGroupRows items={rows} scrollRef={scrollRef} renderRow={meeting => renderRow(meeting, false)}/>}
       {!searching && queryMatches && hasMore && <button type="button" disabled={loadingMore || refreshing}
         onClick={() => void pageStore.getState().loadMore()}
         className="rounded-lg border border-surface-border px-3 py-1.5 text-xs font-semibold text-ink-muted hover:text-ink disabled:opacity-50">

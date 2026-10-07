@@ -89,6 +89,25 @@ afterEach(async () => {
 });
 
 describe('Obsidian sync', () => {
+  it('resumes on startup and retries only failures without resetting unchanged exports', async () => {
+    await enable();
+    const unchanged = db.prepare('SELECT revision FROM obsidian_exports WHERE meeting_id=?').get('one');
+    const read = vi.spyOn(fs, 'openSync');
+    sync.start(); await idle();
+    sync.retry(); await idle();
+    expect(db.prepare('SELECT revision FROM obsidian_exports WHERE meeting_id=?').get('one')).toEqual(unchanged);
+    expect(read.mock.calls.filter(([file]) => typeof file === 'string' && file.endsWith('summary.md'))).toHaveLength(0);
+    sync.retry(true); await idle();
+    expect(read.mock.calls.some(([file]) => typeof file === 'string' && file.endsWith('summary.md'))).toBe(true);
+  });
+  it('rechecks content when options change, including a previously used destination', async () => {
+    await enable(); expect(fs.readFileSync(exported(),'utf8')).not.toContain('A long transcript');
+    sync.enable(sync.preview({...opts(),transcript: true}).token); await idle();
+    expect(fs.readFileSync(exported(),'utf8')).toContain('A long transcript');
+    sync.enable(sync.preview({...opts(),folder: 'Other'}).token); await idle();
+    sync.enable(sync.preview(opts()).token); await idle();
+    expect(fs.readFileSync(exported(),'utf8')).not.toContain('A long transcript');
+  });
   it('upgrades an existing v18 library additively and seeds catch-up revisions', () => {
     const original = meetings.findById('one');
     const triggers = db
@@ -96,11 +115,11 @@ describe('Obsidian sync', () => {
       .all() as { name: string }[];
     for (const t of triggers) db.exec(`DROP TRIGGER "${t.name}"`);
     db.exec(
-      'DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
+      'DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 19 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 20 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,

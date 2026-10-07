@@ -56,8 +56,10 @@ import type { ArtifactCache } from '../library/artifact-cache.js';
 import { createCountsCache } from '../library/page-counts.js';
 import type { TerminologyService } from '../terminology/service.js';
 import { registerTerminologyHandlers } from './terminology-handlers.js';
+import type { NotesHistory } from '../storage/notes-history.js';
 
 export interface IpcServices {
+  notesHistory?: NotesHistory;
   terminology?: TerminologyService;
   meetings: MeetingsRepo;
   groups: GroupsRepo;
@@ -414,6 +416,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Clear stale artifacts & DB rows for the stage we're rewinding to, so the
     // UI doesn't keep showing yesterday's bad transcript while the retry runs.
     const meeting = s.meetings.findById(parsed.id);
+    if (!meeting || meeting.deletedAt) throw new Error('Meeting no longer exists');
+    if (meeting.status === 'processing') throw new Error('Wait for processing to finish before restarting');
+    if (shouldClearActionItems(parsed.fromStage)) s.notesHistory?.capture(parsed.id, 'Before reprocessing');
     if (meeting) {
       const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
       clearArtifactsFromStage(folder, parsed.fromStage, s.artifactCache);
@@ -510,6 +515,16 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.artifactCache.invalidate(summaryPath);
     fs.writeFileSync(summaryPath, markdown);
     return markdown;
+  });
+
+  ipc.handle(IPC_CHANNELS.notesHistoryList, (_e, id: unknown) => s.notesHistory?.list(z.string().min(1).max(200).parse(id)) ?? []);
+  ipc.handle(IPC_CHANNELS.notesHistoryCompare, (_e, id: unknown, version: unknown) => {
+    if (!s.notesHistory) throw new Error('Notes history is unavailable');
+    return s.notesHistory.compare(z.string().min(1).max(200).parse(id), z.string().uuid().parse(version));
+  });
+  ipc.handle(IPC_CHANNELS.notesHistoryRestore, (_e, id: unknown, version: unknown, revision: unknown) => {
+    if (!s.notesHistory) throw new Error('Notes history is unavailable');
+    s.notesHistory.restore(z.string().min(1).max(200).parse(id), z.string().uuid().parse(version), z.string().length(64).parse(revision));
   });
 
   ipc.handle(IPC_CHANNELS.meetingsStartMany, (_e, ids: unknown) => {
@@ -833,6 +848,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof meetingId !== 'string' || meetingId.length === 0) throw new Error('invalid args');
     const meeting = s.meetings.findById(meetingId);
     if (!meeting) throw new Error('meeting not found');
+    if (meeting.deletedAt || meeting.status === 'processing') throw new Error('Wait for processing to finish before re-extracting');
+    const revision = s.notesHistory?.revision(meetingId);
     // Re-run ONLY the extract step against the current on-disk summary.md,
     // via the same shared helper the pipeline's extract stage uses.
     // Deliberately state-neutral: we never touch pipelineStage/status, so a
@@ -840,7 +857,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, meeting.slug);
     const { count } = await extractActionItemsFromSummary(
       { ...s, onResample: (retry, words) =>
-        s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
+        s.logger.warn('reextract:reasoning-retry', { meetingId, retry, reasoningWords: words }),
+        beforeReplace: () => {
+          const current = s.meetings.findById(meetingId);
+          if (!current || current.deletedAt || current.status === 'processing' || (revision && revision !== s.notesHistory?.revision(meetingId)))
+            throw new Error('Meeting changed during extraction. Retry to use the latest notes and action items.');
+          s.notesHistory?.capture(meetingId, 'Before action items replaced');
+        } },
       meetingId,
       folder,
       'save a summary (with an Action Items section) before re-extracting.',

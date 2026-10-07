@@ -55,7 +55,7 @@ export function ObsidianSettings(): JSX.Element {
       await action();
       setStatus(await api.obsidian.status());
     } catch (e) {
-      setError((e as Error).message);
+      setError((e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''));
     } finally {
       setBusy(false);
     }
@@ -357,7 +357,11 @@ export function ObsidianSettings(): JSX.Element {
                         disabled={busy || !enabled || status.running}
                         onClick={() => void perform(() => api.obsidian.retry())}
                       >
-                        Sync now / retry
+                        Sync pending / retry failed
+                      </button>
+                      <button className={button} disabled={busy || !enabled || status.running}
+                        onClick={() => void perform(() => api.obsidian.retry(true))}>
+                        Recheck all notes
                       </button>
                       <button
                         className={button}

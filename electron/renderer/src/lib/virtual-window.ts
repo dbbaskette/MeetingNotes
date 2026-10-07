@@ -6,6 +6,19 @@ interface VirtualWindowInput {
   overscan: number;
 }
 
+/** Unlike an owning scroll container, a section may be entirely outside the
+ * viewport. Do not clamp an offscreen section to its first or last rows. */
+export function sectionWindow(input: VirtualWindowInput): {start: number; end: number; totalHeight: number} {
+  const totalHeight = input.count * input.rowHeight;
+  if (input.viewportHeight <= 0 || input.scrollTop + input.viewportHeight <= 0 || input.scrollTop >= totalHeight)
+    return {start: 0, end: 0, totalHeight};
+  return {
+    start: Math.max(0, Math.floor(Math.max(0, input.scrollTop) / input.rowHeight) - input.overscan),
+    end: Math.min(input.count, Math.ceil((input.scrollTop + input.viewportHeight) / input.rowHeight) + input.overscan),
+    totalHeight,
+  };
+}
+
 /** Fixed-height slots, with an exclusive end index. Clamp stale scroll
  * positions after resize/removal before computing the visible range. */
 export function virtualWindow({ count, rowHeight, scrollTop, viewportHeight, overscan }: VirtualWindowInput): {

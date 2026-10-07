@@ -69,6 +69,7 @@ export class TerminologyService {
       speakers: SpeakersRepo;
       artifactCache: ArtifactCache;
       userName: () => string;
+      beforeSummaryChange?: (id: string) => void;
     },
   ) {}
 
@@ -125,7 +126,8 @@ export class TerminologyService {
 
   /** SQLite records the intention before atomic rename; restart can finish it
    * only when the on-disk fingerprint still agrees. Never overwrite new edits. */
-  private persist(id: string, artifact: TermArtifact, doc: Document, output: string): void {
+  private persist(id: string, artifact: TermArtifact, doc: Document, output: string, recordHistory = true): void {
+    if (artifact === 'summary' && recordHistory) this.deps.beforeSummaryChange?.(id);
     const file = this.file(id, artifact);
     const previous = this.repo.read<Document>(id, artifact);
     doc.outputRevision = hash(output);
@@ -152,7 +154,7 @@ export class TerminologyService {
       if (current === hash(pending.output))
         this.repo.write(row.meeting_id, row.artifact, pending.next);
       else if (current === pending.before)
-        this.persist(row.meeting_id, row.artifact, pending.next, pending.output);
+        this.persist(row.meeting_id, row.artifact, pending.next, pending.output, false);
       else
         this.repo.write(row.meeting_id, row.artifact, {
           ...(pending.previous ?? fresh([])),
@@ -426,5 +428,13 @@ export class TerminologyService {
   }
   stale(id: string): boolean {
     return this.repo.read<Document>(id, 'transcript')?.stale ?? false;
+  }
+  restoreSummary(id: string, text: string, stale: boolean): void {
+    this.recover();
+    this.ensureEditable(id);
+    this.persist(id, 'summary', fresh([text]), text, false);
+    const transcript = this.repo.read<Document>(id, 'transcript') ?? fresh([]);
+    transcript.stale = stale;
+    this.repo.write(id, 'transcript', transcript);
   }
 }

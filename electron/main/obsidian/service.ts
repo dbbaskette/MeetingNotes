@@ -70,6 +70,7 @@ export class ObsidianSync {
   private running = false;
   private stopped = false;
   private error: string | null = null;
+  private checkIndex = true;
   private previewed?: {
     token: string;
     options: ObsidianOptions;
@@ -173,7 +174,14 @@ export class ObsidianSync {
     }
     this.root(d);
     if (!d.browse_hash) this.updateBrowse(d);
+    const policy = JSON.stringify([p.options.actionItems, p.options.transcript]);
+    const key = `options:${d.id}`;
+    const previous = this.db.prepare('SELECT value FROM obsidian_meta WHERE key=?').get(key) as {value: string} | undefined;
+    // Queue the revision reset before publishing new content options. A crash
+    // between the settings and manifest stores must not skip the new policy.
+    if (previous?.value !== policy) this.db.prepare('UPDATE obsidian_exports SET revision=0 WHERE destination=?').run(d.id);
     this.deps.settings.set('obsidian', { ...p.options, destination: d.id, enabled: true });
+    this.db.prepare('INSERT OR REPLACE INTO obsidian_meta VALUES (?,?)').run(key, policy);
     this.previewed = undefined;
     this.retry();
     return this.status();
@@ -184,8 +192,9 @@ export class ObsidianSync {
     return this.status();
   }
   start(): void {
+    if (this.timer) return;
     this.stopped = false;
-    this.retry();
+    void this.run();
     this.timer = setInterval(() => {
       void this.run();
     }, 5000);
@@ -194,14 +203,16 @@ export class ObsidianSync {
   stop(): void {
     this.stopped = true;
     clearInterval(this.timer);
+    this.timer = undefined;
   }
-  retry(): void {
+  retry(recheckAll = false): void {
     const c = this.config();
     if (!c?.enabled) return;
     this.db
-      .prepare('UPDATE obsidian_exports SET revision=0 WHERE destination=?')
+      .prepare(`UPDATE obsidian_exports SET revision=0 WHERE destination=?${recheckAll ? '' : ' AND error IS NOT NULL'}`)
       .run(c.destination);
     this.error = null;
+    this.checkIndex = true;
     void this.run();
   }
   status(): ObsidianStatus {
@@ -451,7 +462,8 @@ export class ObsidianSync {
             .run(String((error as Error).message), candidate.revision, d.id, candidate.id);
         }
       }
-      if (candidates.length && this.config()?.enabled && !this.stopped) {
+      if ((candidates.length || this.checkIndex) && this.config()?.enabled && !this.stopped) {
+        this.checkIndex = false;
         this.updateBrowse(d);
         this.error = null;
         if (

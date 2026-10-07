@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { NotesVersion, NotesComparison } from '../shared/notes-history';
 import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
 import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
 
@@ -113,6 +114,10 @@ const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsChooseFolder: 'settings:choose-folder',
+  notesHistoryList: 'notes-history:list',
+  notesHistoryCompare: 'notes-history:compare',
+  notesHistoryRestore: 'notes-history:restore',
   settingsRevealStorage: 'settings:reveal-storage',
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
@@ -158,7 +163,7 @@ const api = {
     preview: (options: ObsidianOptions): Promise<ObsidianPreview> => ipcRenderer.invoke(IPC_CHANNELS.obsidianPreview, options),
     enable: (token: string): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianEnable, token),
     disable: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianDisable),
-    retry: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRetry),
+    retry: (recheckAll = false): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRetry, recheckAll),
     open: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianOpen),
     compare: (id: string): Promise<ObsidianComparison> => ipcRenderer.invoke(IPC_CHANNELS.obsidianCompare, id),
     replace: (id: string, revision: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianReplace, id, revision),
@@ -435,6 +440,7 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.dialogSave, opts) as Promise<string | null>,
   },
   settings: {
+    chooseFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.settingsChooseFolder),
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
     set: (key: string, value: unknown) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, key, value),
     /** Reveal a storage location in Finder. `key` is one of
@@ -442,6 +448,11 @@ const api = {
      *  missing and shows it in Finder. */
     revealStorage: (key: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.settingsRevealStorage, key) as Promise<void>,
+  },
+  notesHistory: {
+    list: (id: string): Promise<Omit<NotesVersion, 'summary' | 'items'>[]> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryList, id),
+    compare: (id: string, version: string): Promise<NotesComparison> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryCompare, id, version),
+    restore: (id: string, version: string, revision: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryRestore, id, version, revision),
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),

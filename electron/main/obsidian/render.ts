@@ -193,7 +193,13 @@ export function browse(
     );
   const link = (r: (typeof active)[number]) =>
     `- [${text(r.snapshot.data.title)}](${r.filename.split('/').map(encodeURIComponent).join('/')}) — ${r.snapshot.data.date.slice(0, 10)}`;
-  const groups = [...new Set(active.map((r) => r.snapshot.data.group))].sort((a, b) =>
+  const buckets = new Map<string, typeof active>();
+  for (const row of active) {
+    const group = row.snapshot.data.group;
+    const bucket = buckets.get(group);
+    if (bucket) bucket.push(row); else buckets.set(group, [row]);
+  }
+  const groups = [...buckets.keys()].sort((a, b) =>
     a === 'Ungrouped' ? -1 : b === 'Ungrouped' ? 1 : a.localeCompare(b),
   );
   return [
@@ -206,7 +212,7 @@ export function browse(
     ...groups.flatMap((g) => [
       `### ${text(g)}`,
       '',
-      ...active.filter((r) => r.snapshot.data.group === g).map(link),
+      ...buckets.get(g)!.map(link),
       '',
     ]),
     '## By date',
