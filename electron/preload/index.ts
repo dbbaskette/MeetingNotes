@@ -1,12 +1,68 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { NotesVersion, NotesComparison } from '../shared/notes-history';
+import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
+import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
+
+interface RecoveryItem {
+  id: string; targetLabel: string; startedAt: string; outputPath: string;
+  status: string; reason: 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
+  durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
+}
+let recoveryRequest = 0;
+
+// Keep these structural types local: importing main contracts makes the CJS
+// compiler emit main-process modules again.
+type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+type MeetingListQuery = {
+  filter: MeetingListFilter;
+  sort: 'newest' | 'oldest' | 'longest' | 'title';
+  cursor?: string;
+  pageSize?: number;
+  groupId?: string | null;
+};
+type MeetingSummary = {
+  id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
+  groupId: string | null; groupName: string | null;
+  pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
+  unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
+  stageEtaRough: boolean; skipSpeakerId: boolean;
+  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[];
+};
+type MeetingSummaryPage = {
+  items: MeetingSummary[]; nextCursor: string | null; total: number;
+  counts: { all: number; pending: number; processing: number; done: number; failed: number };
+};
 
 // Inlined to keep the preload (CJS) and main (ESM) builds independent — sharing
 // a compiled module across both modes causes the file in dist/ to flip between
 // formats depending on tsc invocation order. The constants here MUST match
 // electron/main/ipc/contracts.ts; a unit test enforces parity.
 const IPC_CHANNELS = {
+  obsidianStatus: 'obsidian:status',
+  obsidianChoose: 'obsidian:choose',
+  obsidianPreview: 'obsidian:preview',
+  obsidianEnable: 'obsidian:enable',
+  obsidianDisable: 'obsidian:disable',
+  obsidianRetry: 'obsidian:retry',
+  obsidianOpen: 'obsidian:open',
+  obsidianCompare: 'obsidian:compare',
+  obsidianReplace: 'obsidian:replace',
+  obsidianRepair: 'obsidian:repair',
+  obsidianExportComparison: 'obsidian:export-comparison',
+  terminologyList: 'terminology:list',
+  terminologySave: 'terminology:save',
+  terminologyDelete: 'terminology:delete',
+  terminologyOffers: 'terminology:offers',
+  terminologyPreview: 'terminology:preview',
+  terminologyCommit: 'terminology:commit',
+  terminologyUndo: 'terminology:undo',
   meetingsList: 'meetings:list',
+  meetingsListPage: 'meetings:list-page',
+  meetingsGetMany: 'meetings:get-many',
+  meetingsListIds: 'meetings:list-ids',
   meetingsGet: 'meetings:get',
+  meetingsGetTranscript: 'meetings:get-transcript',
+  meetingsGetSpeakerReview: 'meetings:get-speaker-review',
   meetingsGetStatus: 'meetings:get-status',
   meetingsRename: 'meetings:rename',
   meetingsDelete: 'meetings:delete',
@@ -15,15 +71,28 @@ const IPC_CHANNELS = {
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
   meetingsStartMany: 'meetings:start-many',
+  meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
+  groupsList: 'groups:list',
+  groupsCreate: 'groups:create',
+  groupsRename: 'groups:rename',
+  groupsDelete: 'groups:delete',
+  groupsAssign: 'groups:assign',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
   recordingState: 'recording:state',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  recoveryList: 'recovery:list',
+  recoveryItem: 'recovery:item',
+  recoveryRecover: 'recovery:recover',
+  recoveryTrim: 'recovery:trim',
+  recoveryPreview: 'recovery:preview',
+  recoveryReveal: 'recovery:reveal',
+  recoveryDismiss: 'recovery:dismiss',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
@@ -33,6 +102,7 @@ const IPC_CHANNELS = {
   speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
+  speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
@@ -44,6 +114,10 @@ const IPC_CHANNELS = {
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsChooseFolder: 'settings:choose-folder',
+  notesHistoryList: 'notes-history:list',
+  notesHistoryCompare: 'notes-history:compare',
+  notesHistoryRestore: 'notes-history:restore',
   settingsRevealStorage: 'settings:reveal-storage',
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
@@ -71,6 +145,7 @@ const IPC_CHANNELS = {
   pipelineClear: 'pipeline:clear',
   pipelineStatus: 'pipeline:status',
   pipelineStatusEvent: 'pipeline:status-change',
+  meetingStageEvent: 'meeting:stage-change',
   meetingsAddedEvent: 'meetings:added',
   appGetVersion: 'app:get-version',
   logsTail: 'logs:tail',
@@ -82,9 +157,64 @@ const IPC_CHANNELS = {
 } as const;
 
 const api = {
+  obsidian: {
+    status: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianStatus),
+    choose: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.obsidianChoose),
+    preview: (options: ObsidianOptions): Promise<ObsidianPreview> => ipcRenderer.invoke(IPC_CHANNELS.obsidianPreview, options),
+    enable: (token: string): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianEnable, token),
+    disable: (): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianDisable),
+    retry: (recheckAll = false): Promise<ObsidianStatus> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRetry, recheckAll),
+    open: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianOpen),
+    compare: (id: string): Promise<ObsidianComparison> => ipcRenderer.invoke(IPC_CHANNELS.obsidianCompare, id),
+    replace: (id: string, revision: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianReplace, id, revision),
+    repair: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianRepair),
+    exportComparison: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.obsidianExportComparison, id),
+  },
+  terminology: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.terminologyList) as Promise<TermRule[]>,
+    save: (input: TermInput, id?: string) => ipcRenderer.invoke(IPC_CHANNELS.terminologySave, input, id) as Promise<TermRule>,
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.terminologyDelete, id) as Promise<void>,
+    offers: (enabled?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.terminologyOffers, enabled) as Promise<boolean>,
+    preview: (input: TermPreviewInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyPreview, input) as Promise<TermReview>,
+    commit: (input: TermCommitInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyCommit, input) as Promise<TermReview>,
+    undo: (input: {meetingId: string; artifact: TermArtifact; historyId: string; revision: string}) => ipcRenderer.invoke(IPC_CHANNELS.terminologyUndo, input) as Promise<TermReview>,
+  },
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
+    /** Live keyset page; restart after changing filters/sorts or refreshing. */
+    listPage: (query: MeetingListQuery) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsListPage, query) as Promise<MeetingSummaryPage>,
+    /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted. */
+    /** At most 1,000 input IDs; first occurrence wins, missing/deleted IDs omitted.
+     *  Pass `{ shell: true }` for Needs Attention — skips speaker/action joins. */
+    getMany: (ids: string[], opts?: { shell?: boolean }) =>
+      opts?.shell
+        ? ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids, opts) as Promise<MeetingSummary[]>
+        : ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
+    listIds: (filter: MeetingListFilter, groupId?: string | null) =>
+      (groupId === undefined
+        ? ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter)
+        : ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter, groupId)) as Promise<string[]>,
     get: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsGet, id),
+    getTranscript: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetTranscript, id) as Promise<{
+        transcriptMd: string | null;
+        rawTranscriptText: string | null;
+      } | null>,
+    getSpeakerReview: (id: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsGetSpeakerReview, id) as Promise<{
+        speakers: {
+          localLabel: string;
+          rosterId: string | null;
+          displayName: string | null;
+          confidence: number | null;
+          state: 'unknown' | 'probable' | 'confirmed';
+          needsReview: boolean;
+          segmentCount: number;
+          durationS: number;
+          lineCount: number;
+        }[];
+      } | null>,
     /** Light status snapshot for processing polls — DB fields + eta only,
      *  no transcript/summary file reads. The detail view polls this every
      *  2s while processing and only re-fetches the full `get` payload when
@@ -109,8 +239,9 @@ const api = {
      *  but recoverable via `undoDelete` (undo toast or the Library's
      *  "Recently deleted" section) for 30 days. After the retention
      *  window, a periodic purge job in the main process hard-deletes the
-     *  files and the row. */
-    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<void>,
+     *  files and the row. Returns true only for a new soft deletion; false
+     *  means the row was already deleted/missing and must not enter Undo. */
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsDelete, id) as Promise<boolean>,
     /** Restore a soft-deleted meeting. Returns true if the files were
      *  moved back and the row's deleted_at cleared; false if the
      *  retention window already expired. */
@@ -119,6 +250,10 @@ const api = {
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
     startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
+    /** Pending-only snapshot operation. At most 1,000 raw IDs per batch;
+     * missing, deleted, non-pending, and failed items remain retryable. */
+    startManyDetailed: (ids: string[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.meetingsStartManyDetailed, ids) as Promise<{ startedIds: string[]; failedIds: string[] }>,
     // Toggles the per-meeting speaker-ID gate. When `skip` is true and the
     // meeting is currently parked at `awaiting_speaker_id`, the main process
     // also re-enqueues it so the pipeline sails past the gate immediately.
@@ -165,6 +300,21 @@ const api = {
       return () => ipcRenderer.off(IPC_CHANNELS.meetingsAddedEvent, wrapped);
     },
   },
+  groups: {
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.groupsList) as Promise<{
+      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string }[];
+      allCount: number; ungroupedCount: number;
+    }>,
+    create: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsCreate, name) as Promise<{
+      id: string; name: string; count: number; createdAt: string; updatedAt: string;
+    }>,
+    rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsRename, id, name) as Promise<void>,
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsDelete, id) as Promise<boolean>,
+    assign: (ids: string[], groupId: string | null, expectedGroupId?: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.groupsAssign, { ids, groupId, expectedGroupId }) as Promise<{
+        moved: { id: string; previousGroupId: string | null }[]; failedIds: string[];
+      }>,
+  },
   trash: {
     /** Soft-deleted meetings still inside the retention window, newest
      *  first. The main process purges expired entries before answering,
@@ -178,20 +328,43 @@ const api = {
   },
   recording: {
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
-    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) =>
+    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
     stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
     state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
-    onLevel: (cb: (e: { sessionId: string; peakDb: number }) => void) => {
-      const wrapped = (_e: unknown, payload: { sessionId: string; peakDb: number }): void => cb(payload);
+    onLevel: (cb: (e: { sessionId: string; source: 'mic' | 'system' | 'mixed'; peakDb: number }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; source: 'mic' | 'system' | 'mixed'; peakDb: number }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.recordingLevelEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingLevelEvent, wrapped);
     },
-    onStateChange: (cb: (e: { sessionId: string; state: string }) => void) => {
-      const wrapped = (_e: unknown, payload: { sessionId: string; state: string }): void => cb(payload);
+    onStateChange: (cb: (e: { sessionId: string; state: string; reason?: string }) => void) => {
+      const wrapped = (_e: unknown, payload: { sessionId: string; state: string; reason?: string }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
     },
+  },
+  recovery: {
+    list: async (onProgress?: (items: RecoveryItem[]) => void): Promise<RecoveryItem[]> => {
+      const requestId = String(++recoveryRequest);
+      const items: RecoveryItem[] = [];
+      const listener = (_event: unknown, update: { requestId: string; item: RecoveryItem; index: number }): void => {
+        if (update.requestId !== requestId) return;
+        items[update.index] = update.item;
+        onProgress?.(items.filter(Boolean));
+      };
+      if (onProgress) ipcRenderer.on(IPC_CHANNELS.recoveryItem, listener);
+      try {
+        return await ipcRenderer.invoke(IPC_CHANNELS.recoveryList, onProgress ? requestId : undefined);
+      } finally {
+        if (onProgress) ipcRenderer.off(IPC_CHANNELS.recoveryItem, listener);
+      }
+    },
+    recover: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryRecover, id) as Promise<{ meetingId: string }>,
+    trim: (id: string, endSeconds: number, startSeconds = 0) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recoveryTrim, { id, endSeconds, startSeconds }) as Promise<{ meetingId: string }>,
+    preview: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryPreview, id) as Promise<{ url: string; durationS: number }>,
+    reveal: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryReveal, id) as Promise<void>,
+    dismiss: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryDismiss, id) as Promise<void>,
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
@@ -224,6 +397,8 @@ const api = {
       rosterId?: string;
       displayName?: string;
     }) => ipcRenderer.invoke(IPC_CHANNELS.speakersAssign, input) as Promise<string>,
+    assignBulk: (input: { meetingId: string; localLabels: string[]; rosterId: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.speakersAssignBulk, input) as Promise<{ assigned: number; impactedLines: number }>,
     // Ranked "might be X" guesses for one unidentified speaker, computed
     // from the same voice embeddings the auto-matcher uses — just without
     // its MATCH_THRESHOLD gate, since this is for a human to confirm.
@@ -265,6 +440,7 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.dialogSave, opts) as Promise<string | null>,
   },
   settings: {
+    chooseFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS.settingsChooseFolder),
     getAll: () => ipcRenderer.invoke(IPC_CHANNELS.settingsGet),
     set: (key: string, value: unknown) => ipcRenderer.invoke(IPC_CHANNELS.settingsSet, key, value),
     /** Reveal a storage location in Finder. `key` is one of
@@ -272,6 +448,11 @@ const api = {
      *  missing and shows it in Finder. */
     revealStorage: (key: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.settingsRevealStorage, key) as Promise<void>,
+  },
+  notesHistory: {
+    list: (id: string): Promise<Omit<NotesVersion, 'summary' | 'items'>[]> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryList, id),
+    compare: (id: string, version: string): Promise<NotesComparison> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryCompare, id, version),
+    restore: (id: string, version: string, revision: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryRestore, id, version, revision),
   },
   models: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.modelsList),
@@ -337,8 +518,8 @@ const api = {
      *  transcript. Each result carries the meeting id, the matched
      *  snippet, and a `seconds` offset when the hit was on a specific
      *  transcript line (so callers can jump to the timestamp). */
-    query: (q: string, limit?: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20) as Promise<{
+    query: (q: string, limit?: number, groupId?: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20, groupId) as Promise<{
         meetingId: string;
         title: string;
         source: 'title' | 'summary' | 'transcript';
@@ -418,6 +599,11 @@ const api = {
       }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.pipelineStatusEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.pipelineStatusEvent, wrapped);
+    },
+    onMeetingStageChange: (cb: (meetingId: string) => void) => {
+      const wrapped = (_e: unknown, meetingId: string): void => cb(meetingId);
+      ipcRenderer.on(IPC_CHANNELS.meetingStageEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.meetingStageEvent, wrapped);
     },
   },
   llm: {
