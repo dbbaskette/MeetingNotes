@@ -10,6 +10,11 @@ files into disposable storage; unrelated untracked files, local credentials,
 node_modules, and the user's installed app/library are not used. Its log records
 the source commit/tree, dirty status, actual OS, Node, npm, and Electron versions.
 
+For a fixture-only follow-up after an unchanged product source has passed the
+full suite, `bash scripts/ci/tart-macos.sh --renderer-only` installs fresh
+dependencies and reruns selection/grouped/Settings/history fixtures. Its log
+explicitly records renderer-only coverage; it is not a replacement for full CI.
+
 Coverage: clean dependency installation, Node-native rebuild, full Vitest suite,
 renderer type checks, production build, scoped changed-file lint, synthetic Browse
 benchmark against the reviewed baseline, Electron-native rebuild, and isolated
