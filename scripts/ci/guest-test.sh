@@ -46,7 +46,7 @@ if ((${#lint_files[@]})); then run_check changed-lint npx eslint "${lint_files[@
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 run_check native-electron npm run rebuild:electron
 else
-  export MN_FIXTURE_MODES=selection,grouped,startup,settings
+  export MN_FIXTURE_MODES=selection,grouped,startup,settings,sources
 fi
 run_check renderer-fixtures env MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
 printf 'Electron: ' >> "$results_root/environment.txt"
