@@ -117,7 +117,11 @@ export class WebhookExporter implements Exporter {
         lastError = `HTTP ${resp.status} from endpoint`;
         this.deps.log?.('webhook:retryable-error', { url: redactUrl(cfg.url), status: resp.status, attempt });
       } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
+        // Fetch errors can echo the request URL or Authorization header.
+        // Persist only a controlled description, never the raw error text.
+        lastError = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')
+          ? 'Webhook request timed out — check connectivity and retry'
+          : 'Webhook network request failed — check URL, connectivity, and authentication';
         lastStatus = null;
         this.deps.log?.('webhook:network-error', { url: redactUrl(cfg.url), err: lastError, attempt });
       }
@@ -251,16 +255,16 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Hide query strings and userinfo (?token=…, https://user:pw@…) in log
- *  output. The endpoint host + path remain so the user can see where
- *  the request went without leaking the secret. */
+/** Hide everything that can carry a credential in log output: userinfo,
+ *  query string, AND the path — Slack incoming-webhook URLs and Telegram
+ *  bot URLs put their secret in the path (/services/T/B/TOKEN, /bot<TOKEN>/),
+ *  which the docs explicitly tell users to configure. Scheme + host + port
+ *  remain so the user can still see where the request went. */
 export function redactUrl(url: string): string {
   try {
     const u = new URL(url);
-    u.username = '';
-    u.password = '';
-    u.search = '';
-    return u.toString();
+    const hasPath = u.pathname && u.pathname !== '/';
+    return `${u.protocol}//${u.host}${hasPath ? '/…' : ''}`;
   } catch {
     return '[invalid url]';
   }

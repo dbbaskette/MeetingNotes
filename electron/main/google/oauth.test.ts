@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   buildConsentUrl, pkceChallenge, randomUrlSafe, parseCallbackUrl,
   exchangeCodeForTokens, refreshAccessToken, fetchAccountEmail,
-  GOOGLE_TOKEN_ENDPOINT, GOOGLE_SCOPES,
+  GOOGLE_TOKEN_ENDPOINT, GOOGLE_SCOPES, GoogleTokenError,
 } from './oauth.js';
 
 describe('buildConsentUrl', () => {
@@ -79,6 +79,15 @@ describe('exchangeCodeForTokens', () => {
 });
 
 describe('refreshAccessToken', () => {
+  it('preserves a structured error code and status without free-form descriptions', async () => {
+    const failure = await refreshAccessToken(fakeFetchOnce(400, {
+      error: 'invalid_grant', error_description: 'revoked token FIXTURE_REFRESH_SECRET',
+    }), { clientId: 'c', clientSecret: 's', refreshToken: 'RT' }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(GoogleTokenError);
+    expect(failure).toMatchObject({ status: 400, code: 'invalid_grant' });
+    expect(String(failure)).not.toContain('FIXTURE_REFRESH_SECRET');
+  });
+
   it('returns a fresh access token', async () => {
     const fetchImpl = fakeFetchOnce(200, { access_token: 'AT2', expires_in: 3600 });
     const out = await refreshAccessToken(fetchImpl, { clientId: 'c', clientSecret: 's', refreshToken: 'RT' });
