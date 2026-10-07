@@ -234,4 +234,44 @@ describe('Epic 243 data boundaries', () => {
       f.close();
     }
   });
+  it('rejects recordings or notes added after preview and permits a fresh complete preview', async () => {
+    const f = fixture();
+    try {
+      const backup = new LibraryBackup({
+        db: f.db,
+        settingsDb: f.settingsDb,
+        root: f.library,
+        version: '1.14.0',
+        assertIdle: assertNoLibraryMutations,
+        pause: () => () => {},
+      });
+      const preview = await backup.preview(f.root);
+      const added = path.join(f.library, 'new.m4a');
+      fs.writeFileSync(added, 'new recording');
+      f.meetings.insert({
+        id: 'new',
+        slug: 'new',
+        title: 'New',
+        startedAt: '2026-10-07T12:00:00Z',
+        durationS: 5,
+        audioPath: added,
+        status: 'done',
+        pipelineStage: 'done',
+      });
+      const stale = await backup.run(preview.destination);
+      expect(stale.state).toBe('failed');
+      expect(stale.error).toMatch(/changed after preview/);
+      expect(fs.existsSync(path.join(preview.destination, 'INCOMPLETE'))).toBe(true);
+      expect(backupIsLocked()).toBe(false);
+      const fresh = await backup.preview(f.root);
+      expect((await backup.run(fresh.destination)).state).toBe('complete');
+      const manifest = await validateBackup(fresh.destination);
+      expect(manifest.paths.some((mapping) => mapping.original === added)).toBe(true);
+      manifest.paths = manifest.paths.filter((mapping) => mapping.original !== added);
+      fs.writeFileSync(path.join(fresh.destination, 'manifest.json'), JSON.stringify(manifest));
+      await expect(validateBackup(fresh.destination)).rejects.toThrow(/audio mapping/);
+    } finally {
+      f.close();
+    }
+  });
 });

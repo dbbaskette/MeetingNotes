@@ -10,6 +10,18 @@ interface FileEntry {
   bytes: number;
   modified: number;
 }
+interface Inventory {
+  entries: FileEntry[];
+  links: { path: string; source: string }[];
+  missing: string[];
+}
+function inventorySignature(inventory: Inventory): string {
+  return JSON.stringify({
+    entries: [...inventory.entries].sort((a, b) => a.relative.localeCompare(b.relative)),
+    links: [...inventory.links].sort((a, b) => a.path.localeCompare(b.path)),
+    missing: [...new Set(inventory.missing)].sort(),
+  });
+}
 async function digest(file: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
@@ -46,6 +58,20 @@ export class LibraryBackup {
       canonical,
       `MeetingNotes-backup-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`,
     );
+    const { entries, links, missing } = await this.inventory(root);
+    const preview = {
+      destination,
+      bytes:
+        entries.reduce((sum, entry) => sum + entry.bytes, 0) +
+        fs.statSync(this.deps.db.name).size +
+        fs.statSync(this.deps.settingsDb.name).size,
+      files: entries.length + 2,
+      missing: [...new Set(missing)],
+    };
+    this.previewed = { preview, entries, links };
+    return preview;
+  }
+  private async inventory(root: string): Promise<Inventory> {
     const entries: FileEntry[] = [],
       links: { path: string; source: string }[] = [],
       missing: string[] = [];
@@ -123,17 +149,7 @@ export class LibraryBackup {
           );
       await add(resolved, relative);
     }
-    const preview = {
-      destination,
-      bytes:
-        entries.reduce((sum, entry) => sum + entry.bytes, 0) +
-        fs.statSync(this.deps.db.name).size +
-        fs.statSync(this.deps.settingsDb.name).size,
-      files: entries.length + 2,
-      missing: [...new Set(missing)],
-    };
-    this.previewed = { preview, entries, links };
-    return preview;
+    return { entries, links, missing };
   }
   async run(destination: string): Promise<BackupStatus> {
     if (!this.previewed || destination !== this.previewed.preview.destination)
@@ -162,6 +178,14 @@ export class LibraryBackup {
         'Backup is not validated yet. Do not restore.\n',
         { flag: 'wx' },
       );
+      // Preview is not a lock. Recheck under the write lock so newly added
+      // recordings, notes, stems or references cannot silently be omitted.
+      const current = await this.inventory(await fs.promises.realpath(this.deps.root));
+      if (
+        inventorySignature(current) !==
+        inventorySignature({ entries, links, missing: preview.missing })
+      )
+        throw new Error('The Library changed after preview. Preview again before backing up.');
       await this.deps.db.backup(path.join(destination, 'library', 'db.sqlite'));
       this.status.completed++;
       await this.deps.settingsDb.backup(path.join(destination, 'settings.sqlite'));
@@ -190,7 +214,8 @@ export class LibraryBackup {
         .all() as { file: string }[]) {
         const canonical = await fs.promises.realpath(row.file);
         const relative = paths.get(canonical);
-        if (relative) paths.set(row.file, relative);
+        if (!relative) throw new Error(`A referenced audio file was not copied: ${row.file}.`);
+        paths.set(row.file, relative);
       }
       const portableLinks = links.map((link) => {
         const target = paths.get(link.source);
@@ -308,6 +333,16 @@ export async function validateBackup(root: string): Promise<BackupManifest> {
     try {
       if (db.pragma('integrity_check', { simple: true }) !== 'ok')
         throw new Error('Backup database failed integrity check.');
+      if (relative === 'library/db.sqlite') {
+        const mapped = new Set(manifest.paths.map((mapping) => mapping.original));
+        for (const row of db
+          .prepare(
+            'SELECT audio_path AS file FROM meetings UNION SELECT output_path AS file FROM recording_sessions',
+          )
+          .all() as { file: string }[])
+          if (!mapped.has(row.file))
+            throw new Error('Backup is missing a referenced audio mapping.');
+      }
     } finally {
       db.close();
     }
