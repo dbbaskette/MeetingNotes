@@ -44,7 +44,7 @@ export class AppEnumerator {
     };
     const sources = (payload.items ?? []).map((it) => ({
       pid: it.pid,
-      bundleId: it.bundle_id ?? it.owner_bundle_id ?? null,
+      bundleId: it.owner_bundle_id ?? it.bundle_id ?? null,
       name: it.name ?? null,
       isMeetingApp: it.is_meeting_app ?? false,
       // Default true when the helper doesn't emit the field (older binary):

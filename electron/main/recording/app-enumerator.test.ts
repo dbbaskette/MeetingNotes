@@ -75,7 +75,7 @@ describe('AppEnumerator', () => {
   });
 
   it('retains two audible siblings and falls back to the owner bundle for detection', async () => {
-    const items = [501, 502].map(pid => ({ pid, is_running_output: true, is_meeting_app: true, is_user_app: true, owner_pid: 500, owner_name: 'Zoom', owner_bundle_id: 'us.zoom.xos' }));
+    const items = [501, 502].map(pid => ({ pid, bundle_id: 'us.zoom.helper', is_running_output: true, is_meeting_app: true, is_user_app: true, owner_pid: 500, owner_name: 'Zoom', owner_bundle_id: 'us.zoom.xos' }));
     const enumerator = new AppEnumerator({ helperPath: '/h', runner: async () => ({ stdout: JSON.stringify({ event: 'processes', items }), stderr: '' }) });
     const sources = await enumerator.list();
     expect(sources.map(s => s.pid)).toEqual([501, 502]);
