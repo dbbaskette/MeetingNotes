@@ -10,7 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   buildConsentUrl, exchangeCodeForTokens, refreshAccessToken, fetchAccountEmail,
-  parseCallbackUrl, pkceChallenge, randomUrlSafe, type FetchImpl,
+  parseCallbackUrl, pkceChallenge, randomUrlSafe, GoogleTokenError, type FetchImpl,
 } from './oauth.js';
 
 export interface GoogleCredentials { clientId: string; clientSecret: string; }
@@ -123,11 +123,11 @@ export class GoogleAuth {
       // (revoked/expired) — that's the one case where forcing re-sign-in
       // helps. Network blips and Google 5xxs must NOT destroy the stored
       // token, or a captive portal logs the user out of Google.
-      if (String(e).includes('invalid_grant')) {
+      if (e instanceof GoogleTokenError && e.status === 400 && e.code === 'invalid_grant') {
         this.signOut();
         throw new Error('Google session expired — reconnect your account in Settings.');
       }
-      throw new Error(`Google token refresh failed (kept your session): ${String(e)}`);
+      throw new Error('Google token refresh failed (kept your session). Check connectivity and Google credentials, then retry.');
     }
   }
 

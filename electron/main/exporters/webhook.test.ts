@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import {
   WebhookExporter,
   buildPayloadFromMeeting,
@@ -163,6 +164,38 @@ describe('renderWebhookBody', () => {
 });
 
 describe('WebhookExporter.deliverPayload', () => {
+  it.each(['Error', 'TimeoutError', 'AbortError'])('never logs or persists credential-bearing %s messages', async (name) => {
+    const endpoint = new URL('https://hooks.slack.com/services/T0/B0/FIXTURE_PATH?token=FIXTURE_QUERY#FIXTURE_FRAGMENT');
+    // Generate inert userinfo per test rather than commit a credential-shaped
+    // literal. The injected fetch never contacts this endpoint.
+    endpoint.username = `fixture-${randomUUID()}`;
+    endpoint.password = `fixture-${randomUUID()}`;
+    const url = endpoint.toString();
+    const error = new Error(`Request ${url} failed with Bearer FIXTURE_BEARER`);
+    error.name = name;
+    const d = makeDeps({ config: { url, secret: 'FIXTURE_BEARER' }, fetchResponses: [error] });
+    const result = await d.exporter.deliverPayload(makePayload());
+    expect(result.status).toBeNull();
+    expect(result.error).toContain(name === 'Error' ? 'network request failed' : 'timed out');
+    expect(d.fetchMock).toHaveBeenCalledTimes(4);
+    expect(d.sleeps).toEqual([1000, 5000, 30000]);
+    expect(d.lastResult.current).toEqual(result);
+    const diagnostics = JSON.stringify({ result, persisted: d.lastResult.current, logs: d.log.mock.calls });
+    for (const credential of [endpoint.username, endpoint.password, 'FIXTURE_PATH', 'FIXTURE_QUERY', 'FIXTURE_FRAGMENT', 'FIXTURE_BEARER']) {
+      expect(diagnostics).not.toContain(credential);
+    }
+    expect(diagnostics).toContain('https://hooks.slack.com/…');
+  });
+
+  it('keeps success diagnostics credential-free after a network retry', async () => {
+    const url = 'https://api.telegram.org/bot123:FIXTURE_TOKEN/sendMessage';
+    const d = makeDeps({ config: { url }, fetchResponses: [new Error(url), new Response('ok')] });
+    const result = await d.exporter.deliverPayload(makePayload());
+    expect(result.error).toBeNull();
+    expect(d.fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(d.log.mock.calls)).not.toContain('FIXTURE_TOKEN');
+  });
+
   it('posts the payload with the chosen template', async () => {
     const d = makeDeps({ config: { url: 'https://example.com/hook', template: 'compact' } });
     const r = await d.exporter.deliverPayload(makePayload());

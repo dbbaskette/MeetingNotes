@@ -45,9 +45,8 @@ export class AppleRemindersExporter implements Exporter {
       const body = escapeAppleScript(it.text);
       const owner = it.ownerName ? ` (${escapeAppleScript(it.ownerName)})` : '';
       const name = body + owner;
-      // AppleScript's `date "2026-01-15"` literal does NOT parse ISO dates —
-      // on an en_US Mac it silently yields October 12183 and the reminder
-      // never alerts. Build the date from numeric components instead; the
+      // AppleScript date-string parsing depends on the user's locale.
+      // Build the date from numeric components instead; the
       // ISO_DATE regex guarantees the split below is three integers.
       let script: string;
       if (it.dueDate && ISO_DATE.test(it.dueDate)) {

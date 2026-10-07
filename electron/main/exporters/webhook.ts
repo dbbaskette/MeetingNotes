@@ -117,7 +117,11 @@ export class WebhookExporter implements Exporter {
         lastError = `HTTP ${resp.status} from endpoint`;
         this.deps.log?.('webhook:retryable-error', { url: redactUrl(cfg.url), status: resp.status, attempt });
       } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
+        // Fetch errors can echo the request URL or Authorization header.
+        // Persist only a controlled description, never the raw error text.
+        lastError = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')
+          ? 'Webhook request timed out — check connectivity and retry'
+          : 'Webhook network request failed — check URL, connectivity, and authentication';
         lastStatus = null;
         this.deps.log?.('webhook:network-error', { url: redactUrl(cfg.url), err: lastError, attempt });
       }
