@@ -326,8 +326,9 @@ export function SettingsView({
           <TestButton kind="stt" url={s.sttUrl} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
-          Default http://127.0.0.1:8080. MeetingNotes auto-launches whisper-server
-          on first transcription and shuts it down after 10 minutes of inactivity.
+          Default http://127.0.0.1:8080. Local HTTP endpoints auto-launch whisper-server
+          on first transcription and shut it down after 10 minutes of inactivity.
+          Remote, HTTPS, or proxy endpoints must already be running. Restart MeetingNotes after changing this URL.
         </div>
       </Field>
       <Field label="STT Model name">
