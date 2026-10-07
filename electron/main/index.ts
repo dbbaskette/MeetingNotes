@@ -422,7 +422,7 @@ app.whenReady().then(async () => {
       if (e instanceof InvalidAudioError && onDisk && discoverGate.recordFailure(audioPath, onDisk) === 'quarantined') {
         logger.warn('library:discover-quarantined', { audioPath, err: String(e), note: 'Invalid media; retry after file changes or app restart. The file has not been moved or deleted.' });
       } else {
-        if (onDisk) discoverGate.recordTransientFailure(audioPath, onDisk);
+        if (onDisk && !(e instanceof InvalidAudioError)) discoverGate.recordTransientFailure(audioPath, onDisk);
         logger.error('library:discover-fail', { audioPath, err: String(e) });
       }
     }
