@@ -522,6 +522,7 @@ export function LibraryView({
         <div className="flex-1" />
         <RecordButton
           active={active}
+          recordingActive={!!liveRecording}
           groupId={groupId}
           onStarted={({ sessionId, label, startInput }) => onStartRecording({
             sessionId, label, startInput, startedAt: new Date().toISOString(),

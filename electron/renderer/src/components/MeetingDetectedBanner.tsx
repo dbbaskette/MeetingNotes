@@ -10,6 +10,7 @@ import { api } from '../ipc/client';
 import type { RecordingStartInput } from '../App';
 import { GroupPicker } from './GroupPicker';
 import { useGroupsStore } from '../store/groups';
+import { recordingStartFeedback, type RecordingStartFeedback } from '../lib/recording-start-feedback';
 
 export interface BrowserDetected {
   source: 'browser-tab';
@@ -37,7 +38,7 @@ export function MeetingDetectedBanner({
 }): JSX.Element | null {
   const [detected, setDetected] = useState<Detected | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<RecordingStartFeedback | null>(null);
   const [saveGroupId, setSaveGroupId] = useState<string | null>(groupId ?? null);
   const { groups } = useGroupsStore();
   useEffect(() => { setSaveGroupId(groupId ?? null); }, [groupId]);
@@ -45,7 +46,7 @@ export function MeetingDetectedBanner({
   useEffect(() => {
     const unsub = api.meetingDetector.onDetected((m) => {
       setDetected(m);
-      setError(null);
+      setFeedback(null);
     });
     return () => { unsub(); };
   }, []);
@@ -54,7 +55,7 @@ export function MeetingDetectedBanner({
 
   async function record(): Promise<void> {
     if (!detected) return;
-    setBusy(true); setError(null);
+    setBusy(true); setFeedback(null);
     try {
       const label = detected.source === 'browser-tab'
         ? `${detected.browserLabel} — ${detected.platform}`
@@ -67,7 +68,7 @@ export function MeetingDetectedBanner({
       onStartRecording({ sessionId, label, startInput: input });
       setDetected(null);
     } catch (e) {
-      setError((e as Error).message);
+      setFeedback(await recordingStartFeedback(e, api.recording));
     } finally {
       setBusy(false);
     }
@@ -103,8 +104,8 @@ export function MeetingDetectedBanner({
         <div className="text-xs text-ink-muted truncate">
           {subline}
         </div>
-        {error && <div className="text-xs text-danger mt-1">{error}</div>}
-        {!error && (
+        {feedback && <div role={feedback.kind === 'info' ? 'status' : 'alert'} className={`text-xs mt-1 ${feedback.kind === 'info' ? 'text-ink-muted' : 'text-danger'}`}>{feedback.message}</div>}
+        {!feedback && (
           <div className="text-[11px] text-ink-muted mt-1">
             {captureHint}
           </div>
