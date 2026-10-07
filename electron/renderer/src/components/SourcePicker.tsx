@@ -138,7 +138,8 @@ function SourceRows({ sources, onPick }: { sources: SourceItem[]; onPick: (sourc
   const row = (source: SourceItem) => <button key={source.pid} type="button" onClick={() => onPick(source)}
     data-source-pid={source.pid} title={audioSourceLabel(source)}
     className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm flex items-center gap-2">
-    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${source.isRunningOutput ? 'bg-status-ok' : 'bg-ink-muted/40'}`} />
+    <span title={source.isRunningOutput ? 'Currently audible' : 'Not currently playing audio'} aria-label={source.isRunningOutput ? 'Currently audible' : 'Not currently playing audio'}
+      className={`w-1.5 h-1.5 rounded-full shrink-0 ${source.isRunningOutput ? 'bg-status-ok' : 'bg-ink-muted/40'}`} />
     <span className="flex-1 min-w-0 truncate">{audioSourceLabel(source)}</span>
     {source.isMeetingApp && <span className="text-[10px] text-brand-indigo font-semibold">MEETING</span>}
   </button>;
