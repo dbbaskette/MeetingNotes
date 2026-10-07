@@ -2,22 +2,23 @@
 
 Approved scope: GitHub #242 and its 12 child issues. Base: b28a1e7.
 Branch: codex/epic-242. Publish as a PR and merge after required gates.
-No release/version bump, installation, real-account export or ambient recording.
+The owner subsequently requested a 1.14.0 minor-version bump and combined release
+notes. No release publication, installation, real-account export or ambient recording.
 
 ## Slices
 
-- [ ] #167/#168/#216/#232: start arbitration, URL validation, detector latches,
+- [x] #167/#168/#216/#232: start arbitration, URL validation, detector latches,
   stop/restart reconciliation, preserved intent, source refresh.
-- [ ] #173: clock-driven bounded native mix; aligned stems; decoded synthetic
+- [x] #173: clock-driven bounded native mix; aligned stems; decoded synthetic
   fidelity/gap/stop tests. Keep mixed-input processing until stem acceptance.
-- [ ] #169/#172: ownership parity, transport/templates, stable delivery IDs,
+- [x] #169/#172: ownership parity, transport/templates, stable delivery IDs,
   paginated single-flight task-list resolution.
-- [ ] #183: compact readiness, shared model picker/download verification,
+- [x] #183: compact readiness, shared model picker/download verification,
   explicitly initiated disposable recording test, quiet stream diagnostics.
-- [ ] #180/#231: primary guided status, bounded inline speaker review, full
+- [x] #180/#231: primary guided status, bounded inline speaker review, full
   attention backlog, technical details and retry history.
-- [ ] #198: opt-in processing only for finalized new native sessions.
-- [ ] #36: packaged compatibility baseline; safe resource policy; synthetic
+- [x] #198: opt-in processing only for finalized new native sessions.
+- [x] #36: packaged compatibility baseline; safe resource policy; synthetic
   packaged smoke, measured sizes/build time and documented rollback.
 
 ## UI contract
@@ -40,4 +41,14 @@ deferring live hardware checks; document that limitation and provide the checkli
 
 ## Progress/evidence
 
-Implementation in progress.
+Implementation and automated verification complete. Source full-suite gates at
+`0ff5e2a`: 1,166 pass / six skipped, native AAC/timeline/TTS, types/build/lint,
+benchmark and seven UI fixtures. Affected 1.14.0 renderer/package follow-up at
+`8d1a144`: PASS on a disposable clean Mac. Actual packaged normal/software Library
+rendering on the granted host, real permission-gate rendering in the ungranted
+VM, helper enumeration and offline synthetic-speech diarization pass.
+
+The checked #173 slice reflects owner-authorized completion with live hardware
+acceptance deferred, not hardware PASS. Mixed processing remains intentional;
+independent stems are disabled. See the [verification report](../epic-242-verification.md)
+and [device checklist](../reliable-capture-processing.md#user-verification-checklist-deferred-by-request).

@@ -12,7 +12,7 @@ Product implementation: `c80426b`; packaged smoke contract correction:
 mocks, not shipped capture/processing behavior. Clean-Mac full-suite source:
 `0ff5e2a`. Version/notes commit `5ef2741` changes only metadata and documents;
 the 1.14.0 app bundle was rebuilt and independently rechecked. Final portable
-package follow-up source: `af2023a`. Documentation-only completion updates
+package follow-up source: `8d1a144`. Documentation-only completion updates
 reuse this evidence.
 
 The host is arm64 macOS 27.0.1 (26A434), Electron 30.5.1. Verification uses
@@ -47,11 +47,18 @@ stopped Golden Gate base; it does not modify the base or other running VMs.
 Host packaged logs/screenshots: `/private/tmp/meetingnotes-epic242-package-smoke-final`.
 The rebuilt 1.14.0 bundle also passes the same host package/runtime checks,
 with actual Library version text and bundle metadata both showing 1.14.0:
-`/private/tmp/meetingnotes-epic242-v1.14-smoke`.
+`/private/tmp/meetingnotes-epic242-v1.14-smoke` and the final permission-aware
+smoke at `/private/tmp/meetingnotes-epic242-v1.14-final-smoke`.
 Targeted logs: `/private/tmp/meetingnotes-epic242-final-targeted.log` and
 `/private/tmp/meetingnotes-epic242-targeted.log`.
 Native/UI logs: `/private/tmp/meetingnotes-epic242-native.log`,
 `/private/tmp/meetingnotes-epic242-ui-3.log`.
+
+Dependency versions are unchanged. Clean `npm ci` reports 49 audit findings
+(two low, eight moderate, 35 high, four critical), including development
+dependencies. This is not a runtime exploitability assessment or a clean
+security audit. No unreviewed `npm audit fix`/dependency upgrades are applied
+as part of this epic; dependency remediation remains separate release work.
 
 ### Full clean-Mac gate
 
@@ -69,9 +76,21 @@ baseline, not a new production guarantee or an isolated epic-only speedup.
 Source logs: `/private/tmp/meetingnotes-epic242-ci/meetingnotes-test-20261007123709-78201-1e6fc6be`.
 That run's packaged gate failed before launch while copying framework extended
 attributes through VirtioFS. Earlier runs also exposed and corrected outdated
-IPC/migration fixtures. No failed overall run is represented as a full PASS.
+IPC/migration fixtures. A subsequent smoke incorrectly required Library on an
+ungranted VM; the production permission-gate path is now explicitly checked
+against real microphone status, without granting/faking TCC. No failed overall
+run is represented as a full PASS.
 The unchanged source-suite evidence is reused; the affected renderer/package
-follow-up with 1.14.0 is pending final completion before publication.
+follow-up at `8d1a144` with 1.14.0 **passes** (exit 0, `result.txt: PASS`): clean
+dependency install, all six selected UI fixtures and actual normal/SwiftShader
+packaged permission rendering, IPC paging, helper enumeration, synthetic
+provider transport and real offline diarization with finite/nonzero embeddings.
+Logs/screenshots: `/private/tmp/meetingnotes-epic242-ci/meetingnotes-test-20261007125037-88665-0ebd4122`.
+The environment is the same macOS 27.0/arm64, Node 22.23.2, Electron 30.5.1.
+The runner deleted its disposable clone; logs remain. Populated
+packaged Library evidence comes from the granted host; permission-gate evidence
+comes from the clean VM. The source UI fixture separately verifies the populated
+Library in the VM. These are distinct claims.
 
 ## Measured disposable packaging baseline
 

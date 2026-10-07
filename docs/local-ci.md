@@ -55,3 +55,9 @@ offline sidecar diarization of TTS speech. No real LLM/STT inference or signed-i
 export is claimed by the transport fixture. Packaged runs never register the
 global URL handler or touch the installed app's data. Results include screenshots
 and sidecar logs; the temporary app/profile are removed after testing.
+
+The packaged view must match the real microphone permission state: populated
+Library on an already-granted host, or the production Permissions needed screen
+on an ungranted clean VM. Both verify real preload paging and no active capture.
+Permission-gate rendering is reported separately from populated-Library rendering;
+the test never grants/fakes TCC or initiates recording to reach Library.
