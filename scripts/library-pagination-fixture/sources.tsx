@@ -1,14 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
-const fixture = { picks: [] as unknown[] };
+const fixture = { picks: [] as unknown[], fail: false, refreshes: 0 };
 Object.assign(window, { fixture });
 window.api = {
-  recording: { listSources: async () => [
+  recording: { listSources: async () => { fixture.refreshes++; if (fixture.fail) throw new Error('Synthetic refresh failure'); return [
     ...[501,502].map(pid => ({ pid, name: 'Audio helper', ownerPid: 500, ownerName: 'Zoom', bundleId: 'us.zoom.xos', isUserApp: true, isMeetingApp: true, isRunningOutput: true })),
     { pid: 600, name: 'Teams', bundleId: 'com.microsoft.teams2', isUserApp: true, isMeetingApp: true, isRunningOutput: false },
     { pid: 700, name: 'callservicesd', bundleId: null, isUserApp: false, isMeetingApp: false, isRunningOutput: true },
-  ] },
+  ]; } },
   groups: { list: async () => ({ groups: [{ id: 'g', name: 'Synthetic group', count: 0 }], ungroupedCount: 0 }) },
 } as unknown as typeof window.api;
 const { SourcePicker } = await import('../../electron/renderer/src/components/SourcePicker');

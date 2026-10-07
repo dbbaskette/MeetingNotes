@@ -27,8 +27,9 @@ function makeDepsImpl(over: {
   const enumeratorList = vi.fn(async () => over.sources ?? []);
   const findById = vi.fn(() => over.meeting ?? null);
   const logger = { info: vi.fn(), error: vi.fn() };
+  let revision = 0;
   const dispatcher = new SchemeDispatcher({
-    recordingManager: { start, stop } as never,
+    recordingManager: { start, stop, get startRevision() { return revision; }, cancelPendingStarts: () => { revision++; } } as never,
     appEnumerator: { list: enumeratorList } as never,
     recordingSessionsRepo: { findOpen } as never,
     meetings: { findById } as never,
@@ -41,12 +42,21 @@ function makeDepsImpl(over: {
 }
 
 describe('SchemeDispatcher', () => {
+  it('cancels a pending source enumeration when Stop arrives before any helper starts', async () => {
+    const d = makeDeps();
+    let resolve!: (rows: Awaited<ReturnType<typeof d.enumeratorList>>) => void;
+    d.enumeratorList.mockImplementation(() => new Promise(done => { resolve = done; }));
+    const start = d.dispatcher.dispatch('meetingnotes://record?source=zoom');
+    await d.dispatcher.dispatch('meetingnotes://stop');
+    resolve([{ pid: 12, bundleId: 'us.zoom.xos', name: 'Zoom', isMeetingApp: true, isRunningOutput: true }]);
+    expect((await start).ok).toBe(false); expect(d.start).not.toHaveBeenCalled();
+  });
   describe('record', () => {
     it('starts a system-audio recording for source=all', async () => {
       const d = makeDeps();
       const r = await d.dispatcher.dispatch('meetingnotes://record');
       expect(r.ok).toBe(true);
-      expect(d.start).toHaveBeenCalledWith({ targetPid: 'system', targetLabel: 'System Audio', mic: true });
+      expect(d.start).toHaveBeenCalledWith({ targetPid: 'system', targetLabel: 'System Audio', mic: true }, { expectedRevision: 0 });
       expect(d.focusMainWindow).toHaveBeenCalled();
     });
 
@@ -58,7 +68,7 @@ describe('SchemeDispatcher', () => {
       });
       const r = await d.dispatcher.dispatch('meetingnotes://record?source=zoom');
       expect(r.ok).toBe(true);
-      expect(d.start).toHaveBeenCalledWith({ targetPid: 7777, targetLabel: 'zoom.us', mic: true });
+      expect(d.start).toHaveBeenCalledWith({ targetPid: 7777, targetLabel: 'zoom.us', mic: true }, { expectedRevision: 0 });
     });
 
     it('resolves a bundle id directly', async () => {
@@ -69,7 +79,7 @@ describe('SchemeDispatcher', () => {
       });
       const r = await d.dispatcher.dispatch('meetingnotes://record?source=com.microsoft.teams2');
       expect(r.ok).toBe(true);
-      expect(d.start).toHaveBeenCalledWith({ targetPid: 9000, targetLabel: 'Microsoft Teams', mic: true });
+      expect(d.start).toHaveBeenCalledWith({ targetPid: 9000, targetLabel: 'Microsoft Teams', mic: true }, { expectedRevision: 0 });
     });
 
     it('refuses to start when a recording is already active', async () => {
@@ -111,7 +121,7 @@ describe('SchemeDispatcher', () => {
       const d = makeDeps();
       await d.dispatcher.dispatch('meetingnotes://record');
       expect(d.logger.info).toHaveBeenCalledWith('url-scheme:dispatch', expect.objectContaining({
-        url: 'meetingnotes://record',
+        parsed: { kind: 'record', source: 'all', hasTitle: false },
       }));
     });
 
@@ -158,6 +168,19 @@ describe('SchemeDispatcher', () => {
   });
 
   describe('errors', () => {
+    it.each(['constructor', 'toString', '__proto__'])('rejects inherited source %s without crashing', async source => {
+      const d = makeDeps();
+      const result = await d.dispatcher.dispatch(`meetingnotes://record?source=${source}`);
+      expect(result.ok).toBe(false);
+      expect(d.start).not.toHaveBeenCalled();
+      expect(d.notify).toHaveBeenCalled();
+    });
+    it('contains asynchronous dispatch errors and redacts titles from audit logs', async () => {
+      const d = makeDeps();
+      d.findOpen.mockImplementation(() => { throw new Error('db failure'); });
+      await expect(d.dispatcher.dispatch('meetingnotes://record?title=private-notes')).resolves.toMatchObject({ ok: false });
+      expect(JSON.stringify(d.logger.info.mock.calls)).not.toContain('private-notes');
+    });
     it('reports malformed URLs without crashing', async () => {
       const d = makeDeps();
       const r = await d.dispatcher.dispatch('meetingnotes://launch');

@@ -19,6 +19,7 @@
 // an argument instead of closing over it — a per-row arrow function in
 // the parent would defeat the memo.
 import { memo } from 'react';
+import { processingDiagnosis } from '../../../shared/processing-recovery';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
@@ -33,6 +34,7 @@ interface Meeting {
   durationS: number | null;
   pipelineStage: string;
   status: string;
+  errorMessage?: string | null;
   stageStartedAt: string | null;
   unidentifiedCount: number;
   actionItemsCount: number;
@@ -267,7 +269,7 @@ function StatusChip({ meeting }: { meeting: Meeting }): JSX.Element {
 
   if (status === 'failed') {
     return (
-      <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-danger-bg text-danger-text shrink-0">
+      <span title={`${processingDiagnosis(meeting.errorMessage).title}. ${processingDiagnosis(meeting.errorMessage).action}`} className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-danger-bg text-danger-text shrink-0">
         FAILED
       </span>
     );

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { GroupPicker } from './GroupPicker';
 import { audioSourceLabel, groupAudioSources, type SourceItem } from '../lib/audio-source-groups';
@@ -7,8 +7,8 @@ export interface PickedSource { targetPid: number | 'system'; targetLabel: strin
 
 
 export function SourcePicker({
-  onPick, onCancel, initialGroupId,
-}: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null }): JSX.Element {
+  onPick, onCancel, initialGroupId, showGroupPicker = true,
+}: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null; showGroupPicker?: boolean }): JSX.Element {
   const [groupId, setGroupId] = useState<string | null>(initialGroupId ?? null);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,18 +18,20 @@ export function SourcePicker({
   // can hang its meeting-join device negotiation (issue #33).
   const [confirmIdle, setConfirmIdle] = useState<SourceItem | null>(null);
 
-  useEffect(() => {
-    void (async () => {
+  const request = useRef(0);
+  const refresh = useCallback(async () => {
+    const token = ++request.current;
+    setLoading(true); setError(null);
       try {
         const list = (await api.recording.listSources()) as SourceItem[];
-        setSources(list);
+        if (token === request.current) setSources(list);
       } catch (e) {
-        setError((e as Error).message);
+        if (token === request.current) setError((e as Error).message);
       } finally {
-        setLoading(false);
+        if (token === request.current) setLoading(false);
       }
-    })();
   }, []);
+  useEffect(() => { void refresh(); return () => { request.current++; }; }, [refresh]);
 
   // Daemons and unattributed helpers (isUserApp === false) hide behind a
   // disclosure — the default list reads like System Settings → Sound: real
@@ -64,16 +66,18 @@ export function SourcePicker({
 
   return (
     <div className="absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
-      <div className="text-[11px] font-mono uppercase tracking-wider text-ink-muted px-2 py-1">
-        Recording from
+      <div className="flex items-center justify-between text-xs text-ink-muted px-2 py-1">
+        <span>Recording from</span>
+        <button type="button" disabled={loading} onClick={() => void refresh()}
+          className="rounded px-2 py-1 font-semibold hover:text-ink disabled:opacity-50">{loading ? 'Refreshing…' : 'Refresh'}</button>
       </div>
-      {loading && <div className="px-2 py-3 text-sm text-ink-muted">Looking…</div>}
-      {error && <div className="px-2 py-3 text-sm text-danger">{error}</div>}
+      {loading && sources.length === 0 && <div role="status" className="px-2 py-3 text-sm text-ink-muted">Looking for audio sources…</div>}
+      {error && <div role="alert" className="px-2 py-3 text-xs text-danger">Could not refresh sources. {error} <button type="button" onClick={() => void refresh()} className="underline">Retry</button></div>}
       <div className="max-h-[45vh] overflow-y-auto">
       {!loading && audible.length === 0 && (
         <div className="px-2 py-2 text-[11px] text-ink-muted italic">
           Nothing is currently playing audio. Start a meeting or play a sound,
-          then reopen this picker.
+          then choose Refresh.
         </div>
       )}
       <SourceRows sources={audible} onPick={pickOrConfirm} />
@@ -111,10 +115,10 @@ export function SourcePicker({
         All system audio (catch-all)
       </button>
       <div className="border-t border-surface-border my-1" />
-      <div className="px-2 py-1">
+      {showGroupPicker && <div className="px-2 py-1">
         <div className="text-[10px] font-mono uppercase tracking-wider text-ink-muted mb-1">Save to group</div>
         <GroupPicker value={groupId} onSelect={(choice) => setGroupId(choice ?? null)} compact />
-      </div>
+      </div>}
       <button onClick={onCancel} className="w-full text-left px-2 py-1.5 rounded-md text-sm text-ink-muted hover:text-ink">
         Cancel
       </button>

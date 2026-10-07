@@ -47,6 +47,7 @@ export interface NativeAppDetectorDeps {
   /** Required sustained-audio duration before the banner fires. Filters
    *  out notification beeps / 1-2-second app pings. */
   silenceMs?: number;
+  getSilenceMs?: () => number;
   /** Returns true while a recording is in progress or the renderer is
    *  busy with the banner — same role as MeetingDetector.isSuppressed. */
   isSuppressed?: () => boolean;
@@ -68,6 +69,8 @@ export class NativeAppDetector {
   // bundleId → wall-clock ms after which the dismissal lapses.
   private dismissedUntil = new Map<string, number>();
   private listeners = new Set<Listener>();
+  private busy = false;
+  private generation = 0;
 
   constructor(private readonly deps: NativeAppDetectorDeps) {}
 
@@ -81,6 +84,7 @@ export class NativeAppDetector {
   }
 
   stop(): void {
+    this.generation++;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     this.deps.log?.('native-detector:stop');
   }
@@ -99,6 +103,7 @@ export class NativeAppDetector {
 
   /** Exposed for tests. Run one detection sweep deterministically. */
   async tick(): Promise<void> {
+    if (this.busy) return;
     if (this.deps.isSuppressed?.()) {
       // Log a suppression note only when the state would otherwise have
       // triggered work, so a fully-idle machine doesn't fill the log.
@@ -107,10 +112,12 @@ export class NativeAppDetector {
       }
       return;
     }
-    const silenceMs = this.deps.silenceMs ?? DEFAULT_NATIVE_SILENCE_MS;
+    const silenceMs = this.deps.getSilenceMs?.() ?? this.deps.silenceMs ?? DEFAULT_NATIVE_SILENCE_MS;
     const now = this.now();
 
     let sources: Awaited<ReturnType<AppEnumerator['list']>>;
+    const generation = this.generation;
+    this.busy = true;
     try {
       sources = await this.deps.appEnumerator.list();
     } catch (e) {
@@ -118,9 +125,16 @@ export class NativeAppDetector {
       // but leave a breadcrumb so users can see why detection is silent.
       this.deps.log?.('native-detector:enumerate-failed', { err: String(e) });
       return;
+    } finally {
+      this.busy = false;
     }
+    if (generation !== this.generation || this.deps.isSuppressed?.()) return;
 
     const currentlyActive = new Set<string>();
+    for (const s of sources) if (s.isMeetingApp && s.isRunningOutput && s.bundleId) currentlyActive.add(s.bundleId);
+    for (const id of this.firstSeenAt.keys()) if (!currentlyActive.has(id)) {
+      this.firstSeenAt.delete(id); this.emitted.delete(id);
+    }
     for (const s of sources) {
       if (!s.isMeetingApp || !s.isRunningOutput || !s.bundleId) continue;
       currentlyActive.add(s.bundleId);

@@ -14,6 +14,7 @@ export function deriveCaptureHealth(input: {
   lastAudibleAt: Partial<Record<CaptureLevelSource, number>>;
   graceMs?: number;
   windowMs?: number;
+  micEnabled?: boolean;
 }): CaptureHealth {
   const graceMs = input.graceMs ?? 5_000;
   const windowMs = input.windowMs ?? 20_000;
@@ -26,6 +27,7 @@ export function deriveCaptureHealth(input: {
   ) as Record<CaptureLevelSource, boolean>;
 
   if (input.nowMs - input.startedAtMs < graceMs) return { state: 'checking', active };
+  if (input.micEnabled === false && active.system && active.mixed) return { state: 'healthy', active };
   if (active.mic && active.system && active.mixed) return { state: 'healthy', active };
   if (active.mic && !active.system) {
     return {
@@ -33,13 +35,13 @@ export function deriveCaptureHealth(input: {
       message: 'Microphone is recording, but app audio is not detected.',
     };
   }
-  if (active.system && !active.mic) {
+  if (active.system && !active.mic && input.micEnabled !== false) {
     return {
       state: 'warning', warning: 'mic-silent', active,
       message: 'App audio is recording, but microphone audio is not detected.',
     };
   }
-  if (active.mic && active.system && !active.mixed) {
+  if ((active.mic || input.micEnabled === false) && active.system && !active.mixed) {
     return {
       state: 'warning', warning: 'output-silent', active,
       message: 'Audio inputs are active, but the recording output is not updating.',

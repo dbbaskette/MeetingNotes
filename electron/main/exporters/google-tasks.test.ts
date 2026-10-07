@@ -26,6 +26,37 @@ function input(over: Partial<ExportInput> = {}): ExportInput {
 }
 
 describe('GoogleTasksExporter', () => {
+  it('follows empty and nonempty pages before reusing a later list', async () => {
+    const fetchImpl = route([
+      { match: /lists$/, status: 200, body: { items: Array.from({ length: 25 }, (_, i) => ({ id: String(i), title: 'Other' })), nextPageToken: 'a b' } },
+      { match: /pageToken=a%20b$/, status: 200, body: { nextPageToken: 'last' } },
+      { match: /pageToken=last$/, status: 200, body: { items: [{ id: 'L1', title: 'MeetingNotes' }] } },
+      { match: /lists\/L1\/tasks$/, status: 200, body: { id: 't' } },
+    ]);
+    await new GoogleTasksExporter({ auth, fetchImpl }).export(input());
+    expect(vi.mocked(fetchImpl).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+  });
+
+  it('single-flights creation for simultaneous exports without caching across accounts', async () => {
+    let creations = 0;
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      await Promise.resolve();
+      const body = url.endsWith('/tasks') ? { id: 'task' }
+        : init.method === 'POST' ? (creations++, { id: 'NEW' }) : { items: [] };
+      return new Response(JSON.stringify(body));
+    }) as unknown as typeof fetch;
+    const exporter = new GoogleTasksExporter({ auth, fetchImpl });
+    await Promise.all([exporter.export(input()), exporter.export(input())]);
+    expect(creations).toBe(1);
+    await exporter.export(input());
+    expect(creations).toBe(2); // no stale list ID retained after resolution
+  });
+
+  it('does not create a duplicate when pagination repeats or fails', async () => {
+    const fetchImpl = route([{ match: /lists/, status: 200, body: { nextPageToken: 'repeat' } }]);
+    await expect(new GoogleTasksExporter({ auth, fetchImpl }).export(input())).rejects.toThrow(/pagination/);
+    expect(vi.mocked(fetchImpl).mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true);
+  });
   it('reuses an existing MeetingNotes list and inserts each item', async () => {
     const exported: string[] = [];
     const fetchImpl = route([

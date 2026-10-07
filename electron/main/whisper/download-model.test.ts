@@ -9,17 +9,26 @@ beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-whisper-')); 
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
 function okResponse(body: string): Response {
-  return new Response(body, { status: 200 });
+  return new Response(`lmgg${'A'.repeat(28)}${body}`, { status: 200 });
 }
 
 describe('downloadWhisperModel', () => {
+  it('keeps the prior model intact when a server returns HTML or a truncated response', async () => {
+    const existing = path.join(dir, 'ggml-small.en.bin');
+    fs.writeFileSync(existing, 'prior-fixture');
+    for (const response of [new Response('<html>error</html>'), new Response('lmggshort', { headers: { 'content-length': '100' } })]) {
+      await expect(downloadWhisperModel('small.en', { dir, fetchImpl: (async () => response) as typeof fetch })).rejects.toThrow();
+      expect(fs.readFileSync(existing, 'utf8')).toBe('prior-fixture');
+      expect(fs.readdirSync(dir).filter(name => name.endsWith('.download'))).toEqual([]);
+    }
+  });
   it('streams the ggml file to whisper-models/ggml-<model>.bin', async () => {
     const seen: string[] = [];
     const fetchImpl = (async (url: string) => { seen.push(url); return okResponse('MODELBYTES'); }) as unknown as typeof fetch;
     const { path: dest } = await downloadWhisperModel('medium.en', { dir, fetchImpl });
     expect(seen[0]).toBe(`${WHISPER_GGML_BASE}/ggml-medium.en.bin`);
     expect(dest).toBe(path.join(dir, 'ggml-medium.en.bin'));
-    expect(fs.readFileSync(dest, 'utf8')).toBe('MODELBYTES');
+    expect(fs.readFileSync(dest, 'utf8')).toBe(`lmgg${'A'.repeat(28)}MODELBYTES`);
     // No leftover .download temp file.
     expect(fs.readdirSync(dir)).toEqual(['ggml-medium.en.bin']);
   });
@@ -41,7 +50,7 @@ describe('downloadWhisperModel', () => {
   });
 
   it('reports progress with cumulative bytes and a final call where received === total', async () => {
-    const chunks = ['AAAA', 'BBBB', 'CC'];
+    const chunks = [`lmgg${'A'.repeat(28)}`, 'BBBB', 'CC'];
     const totalBytes = chunks.join('').length;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -71,7 +80,7 @@ describe('downloadWhisperModel', () => {
   it('passes total=null when content-length is absent', async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode('DATA'));
+        controller.enqueue(new TextEncoder().encode(`lmgg${'A'.repeat(28)}DATA`));
         controller.close();
       },
     });
@@ -83,7 +92,7 @@ describe('downloadWhisperModel', () => {
     });
     expect(calls.length).toBeGreaterThanOrEqual(1);
     expect(calls.every(([, total]) => total === null)).toBe(true);
-    expect(calls[calls.length - 1]![0]).toBe(4);
+    expect(calls[calls.length - 1]![0]).toBe(36);
   });
 
   it('dedups concurrent downloads of the same model (fetch invoked once)', async () => {
@@ -102,7 +111,7 @@ describe('downloadWhisperModel', () => {
     const [r1, r2] = await Promise.all([p1, p2]);
     expect(fetchCount).toBe(1);
     expect(r1.path).toBe(r2.path);
-    expect(fs.readFileSync(r1.path, 'utf8')).toBe('MODELBYTES');
+    expect(fs.readFileSync(r1.path, 'utf8')).toBe(`lmgg${'A'.repeat(28)}MODELBYTES`);
 
     // After settling, a fresh call re-downloads (the guard is in-flight only).
     await downloadWhisperModel('base.en', { dir, fetchImpl });

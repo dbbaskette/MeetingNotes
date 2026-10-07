@@ -84,6 +84,9 @@ const IPC_CHANNELS = {
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
   recordingState: 'recording:state',
+  recordingTest: 'recording:test',
+  recordingActive: 'recording:active',
+  setupHealth: 'setup:health',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
   recoveryList: 'recovery:list',
@@ -327,6 +330,14 @@ const api = {
       }[]>,
   },
   recording: {
+    active: () => ipcRenderer.invoke(IPC_CHANNELS.recordingActive) as Promise<{
+      sessionId: string; state: string; label: string; startedAt: string;
+      startInput: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null };
+      disposable: boolean; outputPath: string;
+    }[]>,
+    test: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) => ipcRenderer.invoke(IPC_CHANNELS.recordingTest, input) as Promise<{
+      durationS: number | null; streams: Record<string, { peakDb: number | null; playable: boolean }>; message: string;
+    }>,
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
     start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
@@ -641,6 +652,7 @@ const api = {
       >,
   },
   permissions: {
+    setupHealth: () => ipcRenderer.invoke(IPC_CHANNELS.setupHealth) as Promise<{ label: string; state: string; detail: string; section: string }[]>,
     audio: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsAudioGet) as Promise<{
       mic: 'granted' | 'denied' | 'not-determined' | 'unknown';
       audioCapture: 'granted' | 'denied' | 'not-determined' | 'unknown';
@@ -716,7 +728,7 @@ const api = {
    *  auto-record bundle) and settings.autoRecordZoom is on. Renderer
    *  routes the payload into its LiveRecording state so the in-progress
    *  card appears without a manual click. (#78 follow-up) */
-  onAutoRecordingStarted: (cb: (info: { sessionId: string; label: string; startedAt: string }) => void) => {
+  onAutoRecordingStarted: (cb: (info: { sessionId: string; label: string; startedAt: string; startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null } }) => void) => {
     const wrapped = (_e: unknown, payload: { sessionId: string; label: string; startedAt: string }): void => cb(payload);
     ipcRenderer.on('mn:auto-recording-started', wrapped);
     return () => ipcRenderer.off('mn:auto-recording-started', wrapped);

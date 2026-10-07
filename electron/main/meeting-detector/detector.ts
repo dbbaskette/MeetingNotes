@@ -34,7 +34,9 @@ export class MeetingDetector {
   private dismissed = new Set<string>();
   // The URL we last emitted for. Prevents a steady-state poll loop from
   // firing the same event every tick.
-  private lastEmittedUrl: string | null = null;
+  private emitted = new Set<string>();
+  private busy = false;
+  private generation = 0;
 
   constructor(private readonly deps: DetectorDeps = {}) {}
 
@@ -47,6 +49,7 @@ export class MeetingDetector {
   }
 
   stop(): void {
+    this.generation++;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
   }
 
@@ -61,20 +64,28 @@ export class MeetingDetector {
 
   // Exposed for tests to drive the loop deterministically.
   async tick(): Promise<void> {
-    if (this.deps.isSuppressed?.()) return;
+    if (this.busy || this.deps.isSuppressed?.()) return;
+    this.busy = true;
+    const generation = this.generation;
     const query = this.deps.queryBrowsers ?? queryAllBrowsers;
     let tabs: ActiveTab[];
     try {
       tabs = await query();
     } catch {
       return;
+    } finally {
+      this.busy = false;
     }
+    if (generation !== this.generation || this.deps.isSuppressed?.()) return;
+    const active = new Set(tabs.filter(t => matchMeeting(t.url)).map(t => t.url));
+    for (const url of this.emitted) if (!active.has(url)) this.emitted.delete(url);
+    for (const url of this.dismissed) if (!active.has(url)) this.dismissed.delete(url);
     for (const tab of tabs) {
       const platform = matchMeeting(tab.url);
       if (!platform) continue;
       if (this.dismissed.has(tab.url)) continue;
-      if (this.lastEmittedUrl === tab.url) continue;
-      this.lastEmittedUrl = tab.url;
+      if (this.emitted.has(tab.url)) continue;
+      this.emitted.add(tab.url);
       const detected: DetectedMeeting = {
         platform,
         url: tab.url,
@@ -89,7 +100,6 @@ export class MeetingDetector {
     }
     // No active meeting URL — clear the "lastEmitted" latch so re-opening
     // the same tab later triggers a fresh prompt.
-    if (tabs.every((t) => !matchMeeting(t.url))) this.lastEmittedUrl = null;
   }
 }
 

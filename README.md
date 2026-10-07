@@ -178,10 +178,10 @@ brew install whisper-cpp ffmpeg
 ## 🎬 Recording a meeting
 
 1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
-2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Optionally choose **Save to group** (preselected when you are browsing a group), then pick an app or **All system audio** as a catch-all. Choosing the source still starts recording in one click.
+2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. **Refresh** updates sources without reopening or losing the group. Optionally choose **Save to group**, then pick an app or **All system audio**. Choosing the source starts recording.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
-4. Click **■ Stop** — the new row lands in your library instantly.
-5. Click **▶ Process** to run the pipeline.
+4. Click **■ Stop**, then confirm — finalized audio is cataloged in Library. If exit cannot be confirmed, keep the controls open and retry Stop.
+5. Click **▶ Process**, or explicitly enable **Process recordings automatically when recording stops** in Processing Settings (default off). Automation applies only to newly finalized built-in captures, not imports/recovery/history, and respects queue pause and speaker review.
 
 Each recording writes up to three AAC files to the Library's `recordings/` directory (by default `~/Documents/MeetingNotes/recordings/`; mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
 
@@ -246,7 +246,7 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
 - <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.
-- **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings are prioritized in one compact panel with a next action and age.
+- **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings have prioritized next actions. **View all** or **+N more** opens the entire backlog with bounded pages.
 </details>
 
 ## 📤 Integrations & export
@@ -264,6 +264,8 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 ## 🔧 Configuration
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](docs/usability-improvements.md).
+
+**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing Settings includes the shared Whisper download/model picker; custom paths stay in Advanced. See [capture, processing and delivery guide](docs/reliable-capture-processing.md) for retry history, audio limitations and deferred hardware checks.
 
 **Notes history:** the Notes tab's **Notes & action-item history…** compares and restores the latest 20 saved versions. Regeneration and re-extraction preserve existing notes/tasks before replacing them; restore includes completion status, ownership, due dates, and export markers while leaving the transcript/audio unchanged.
 
@@ -300,7 +302,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `webhookUrl` | `""` | Destination (HTTPS, or localhost). |
 | `webhookSecret` | `""` | Optional bearer token; redacted from logs. |
 | `webhookTemplate` | `compact` | `compact` / `full` (JSON), `slack-blocks`, `telegram-markdown`. |
-| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (by `userSpeakerId`) / `all` / `none`. |
+| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (roster ID or normalized owner name) / `all` / `none`, for both manual and automatic delivery. |
 | `googleClientId` / `googleClientSecret` | `""` | BYO Google OAuth desktop client for Tasks/Docs export. |
 
 </details>

@@ -90,6 +90,10 @@ const MODEL_PREFERENCE = [
  *  installed, fall back to the auto-picked preference order so the
  *  app still works even when settings are stale. */
 export function resolveModelPath(modelId: string | null | undefined): string {
+  if (modelId && path.isAbsolute(modelId)) {
+    if (fs.existsSync(modelId) && fs.statSync(modelId).isFile()) return modelId;
+    throw new Error('Custom Whisper model path does not exist. Update Processing Settings.');
+  }
   const dir = modelsDir();
   const candidates: string[] = [];
   if (modelId && modelId !== 'whisper-1' /* placeholder default */) {
@@ -107,7 +111,7 @@ export function resolveModelPath(modelId: string | null | undefined): string {
     if (found) return path.join(dir, found);
   }
   throw new Error(
-    `No whisper model installed. Run the onboarding wizard or ` +
+    `No whisper model installed. Download one in Processing Settings or run ` +
     `./scripts/whisper-server.sh install medium.en`,
   );
 }

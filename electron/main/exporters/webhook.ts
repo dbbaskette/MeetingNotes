@@ -16,6 +16,8 @@
 // Issue #79.
 
 import type { Exporter, ExportInput } from './interface.js';
+import { randomUUID } from 'node:crypto';
+import { isMyItem } from './owner-filter.js';
 import { renderWebhookBody, type WebhookPayload, type WebhookTemplate } from './webhook-templates.js';
 
 export interface WebhookConfig {
@@ -85,9 +87,14 @@ export class WebhookExporter implements Exporter {
   }
 
   private async deliver(cfg: WebhookConfig, payload: WebhookPayload): Promise<WebhookDeliveryResult> {
+    // One logical delivery, including every transport retry. A deliberate new
+    // export creates a new identity; receivers must deduplicate this key.
+    const deliveryId = randomUUID();
+    payload = { ...payload, delivery_id: deliveryId };
     const rendered = renderWebhookBody(payload, cfg.template);
     const headers: Record<string, string> = {
       'content-type': rendered.contentType,
+      'idempotency-key': deliveryId,
       'user-agent': 'MeetingNotes/0.2 (+https://github.com/dbbaskette/MeetingNotes)',
     };
     if (cfg.secret) headers['authorization'] = `Bearer ${cfg.secret}`;
@@ -101,6 +108,7 @@ export class WebhookExporter implements Exporter {
       try {
         const resp = await fetcher(cfg.url, {
           method: 'POST', headers, body: rendered.body,
+          redirect: 'error',
           signal: AbortSignal.timeout(15_000),
         });
         lastStatus = resp.status;
@@ -157,10 +165,11 @@ export interface BuildPayloadOpts {
     status: string;
   }[];
   userSpeakerId: string | null;
+  userDisplayName?: string | null;
 }
 
 export function buildPayloadFromMeeting(opts: BuildPayloadOpts, cfg: WebhookConfig): WebhookPayload {
-  const filtered = filterActionItems(opts.actionItems, opts.userSpeakerId, cfg.ownerFilter);
+  const filtered = filterActionItems(opts.actionItems, opts.userSpeakerId, cfg.ownerFilter, opts.userDisplayName);
   const transcriptUrl = opts.transcriptMd != null ? toFileUrl(opts.meetingFolder, 'transcript.md') : null;
   const summaryUrl = opts.summaryMd != null ? toFileUrl(opts.meetingFolder, 'summary.md') : null;
   return {
@@ -192,12 +201,15 @@ export function buildPayloadFromMeeting(opts: BuildPayloadOpts, cfg: WebhookConf
 // ExportInput coming from the manual IPC path can't carry every field
 // buildPayloadFromMeeting needs, so we adapt down to what the interface
 // has. The auto-fire path uses buildPayloadFromMeeting directly.
-function buildPayload(input: ExportInput, _cfg: WebhookConfig): WebhookPayload {
+function buildPayload(input: ExportInput, cfg: WebhookConfig): WebhookPayload {
+  if (!input.meetingId) throw new Error('A meeting ID is required for webhook delivery');
+  const items = filterActionItems(input.items, input.ownerIdentity?.userSpeakerId ?? null,
+    cfg.ownerFilter, input.ownerIdentity?.userDisplayName);
   return {
     event: 'meeting.completed',
     meeting: {
-      id: '',
-      slug: '',
+      id: input.meetingId,
+      slug: input.meetingSlug ?? '',
       title: input.meetingTitle,
       started_at: null,
       duration_s: null,
@@ -205,7 +217,7 @@ function buildPayload(input: ExportInput, _cfg: WebhookConfig): WebhookPayload {
     },
     summary_markdown: input.summaryMd ?? null,
     transcript_markdown: null,
-    action_items: input.items.map((it) => ({
+    action_items: items.map((it) => ({
       text: it.text,
       owner: it.ownerName,
       due_date: it.dueDate,
@@ -214,20 +226,21 @@ function buildPayload(input: ExportInput, _cfg: WebhookConfig): WebhookPayload {
       audio: null,
       transcript_md: null,
       summary_md: null,
-      open_in_app: 'meetingnotes://open',
+      open_in_app: `meetingnotes://open?id=${encodeURIComponent(input.meetingId)}`,
     },
   };
 }
 
-export function filterActionItems<T extends { ownerSpeakerId: string | null }>(
+export function filterActionItems<T extends { ownerSpeakerId?: string | null; ownerName?: string | null }>(
   items: T[],
   userSpeakerId: string | null,
   filter: 'mine' | 'all' | 'none',
+  userDisplayName?: string | null,
 ): T[] {
   if (filter === 'none') return [];
   if (filter === 'all') return items;
-  if (!userSpeakerId) return []; // user opted into "mine" but never tagged themselves — best-effort none
-  return items.filter((it) => it.ownerSpeakerId === userSpeakerId);
+  return items.filter((it) => isMyItem({ ownerSpeakerId: it.ownerSpeakerId ?? null, ownerName: it.ownerName ?? null },
+    { userSpeakerId, userDisplayName: userDisplayName ?? null }));
 }
 
 export interface UrlValidation {
@@ -245,7 +258,7 @@ export function validateUrl(url: string): UrlValidation {
   if (parsed.protocol === 'https:') return { ok: true, reason: '' };
   if (parsed.protocol === 'http:') {
     const host = parsed.hostname.toLowerCase();
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return { ok: true, reason: '' };
+    if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return { ok: true, reason: '' };
     return { ok: false, reason: 'webhook URL must be HTTPS (plaintext only allowed for localhost dev)' };
   }
   return { ok: false, reason: `webhook URL must be HTTPS (got ${parsed.protocol})` };

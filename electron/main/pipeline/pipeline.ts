@@ -1,5 +1,6 @@
 // electron/main/pipeline/pipeline.ts
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
+import { processingDiagnosis } from '../../shared/processing-recovery.js';
 import path from 'node:path';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
 import { bucketForChars } from '../lib/stage-eta.js';
@@ -187,7 +188,7 @@ export class Pipeline {
             this.deps.ctx.meetings.recordFailure(id, String(e));
             this.notifyMeeting(id);
           }
-          this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e) });
+          this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e), ...processingDiagnosis(String(e)) });
         } finally {
           this.currentId = null;
           this.notify();

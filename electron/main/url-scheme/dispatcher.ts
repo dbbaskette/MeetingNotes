@@ -52,21 +52,29 @@ export class SchemeDispatcher {
 
   async dispatch(url: string): Promise<DispatchResult> {
     const parsed = parseSchemeUrl(url);
-    this.deps.logger.info('url-scheme:dispatch', { url, parsed: redactCommand(parsed) });
+    this.deps.logger.info('url-scheme:dispatch', { parsed: redactCommand(parsed) });
     if (parsed.kind === 'error') {
       const message = `Ignored meetingnotes:// — ${parsed.reason}`;
       this.deps.notify({ title: 'MeetingNotes', body: message });
       return { ok: false, message };
     }
     this.deps.focusMainWindow();
-    switch (parsed.kind) {
-      case 'record': return this.handleRecord(parsed.source, parsed.title);
-      case 'stop': return this.handleStop();
-      case 'open': return this.handleOpen(parsed.meetingId);
+    try {
+      switch (parsed.kind) {
+        case 'record': return await this.handleRecord(parsed.source, parsed.title);
+        case 'stop': return await this.handleStop();
+        case 'open': return this.handleOpen(parsed.meetingId);
+      }
+    } catch {
+      const message = 'Could not complete the recording command. Check the active recording and try again.';
+      this.deps.logger.error('url-scheme:dispatch-failed', { kind: parsed.kind });
+      this.deps.notify({ title: 'MeetingNotes', body: message });
+      return { ok: false, message };
     }
   }
 
   private async handleRecord(source: string, _title: string | null): Promise<DispatchResult> {
+    const expectedRevision = this.deps.recordingManager.startRevision;
     const openSessions = this.deps.recordingSessionsRepo.findOpen();
     if (openSessions.length > 0) {
       const label = openSessions[0]!.targetLabel;
@@ -75,6 +83,7 @@ export class SchemeDispatcher {
       return { ok: false, message };
     }
     const resolved = await this.resolveSource(source);
+    if (expectedRevision !== this.deps.recordingManager.startRevision) return { ok: false, message: 'Recording request cancelled while loading sources.' };
     if (!resolved.ok) {
       this.deps.notify({ title: 'MeetingNotes', body: resolved.reason });
       return { ok: false, message: resolved.reason };
@@ -85,7 +94,7 @@ export class SchemeDispatcher {
         targetPid: resolved.targetPid,
         targetLabel: resolved.label,
         mic: true,
-      });
+      }, { expectedRevision });
     } catch (e) {
       const message = `Could not start recording: ${(e as Error).message}`;
       this.deps.logger.error('url-scheme:record-failed', { source, err: String(e) });
@@ -100,6 +109,7 @@ export class SchemeDispatcher {
   }
 
   private async handleStop(): Promise<DispatchResult> {
+    this.deps.recordingManager.cancelPendingStarts();
     const open = this.deps.recordingSessionsRepo.findOpen();
     if (open.length === 0) {
       const message = 'No active recording to stop.';
@@ -151,7 +161,7 @@ export class SchemeDispatcher {
     let candidateBundles: string[] = [];
     if (looksLikeBundleId(source)) {
       candidateBundles = [source];
-    } else if (SOURCE_KEYWORD_TO_BUNDLE_IDS[trimmed]) {
+    } else if (Object.hasOwn(SOURCE_KEYWORD_TO_BUNDLE_IDS, trimmed)) {
       candidateBundles = SOURCE_KEYWORD_TO_BUNDLE_IDS[trimmed]!;
     } else {
       return { ok: false, reason: `Unknown source "${source}". Try zoom, teams, slack, facetime, discord, whatsapp, all, or a bundle id.` };
@@ -162,9 +172,8 @@ export class SchemeDispatcher {
     } catch (e) {
       return { ok: false, reason: `Could not enumerate audio sources: ${(e as Error).message}` };
     }
-    const match = sources.find(
-      (s) => s.bundleId != null && candidateBundles.includes(s.bundleId),
-    );
+    const candidates = sources.filter((s) => s.bundleId != null && candidateBundles.includes(s.bundleId));
+    const match = candidates.find((s) => s.isRunningOutput) ?? candidates[0];
     if (!match) {
       return {
         ok: false,
@@ -184,7 +193,7 @@ export class SchemeDispatcher {
 
 function humanizeSource(original: string, lowered: string): string {
   if (lowered === 'facetime') return 'FaceTime';
-  if (lowered in SOURCE_KEYWORD_TO_BUNDLE_IDS) return lowered[0]!.toUpperCase() + lowered.slice(1);
+  if (Object.hasOwn(SOURCE_KEYWORD_TO_BUNDLE_IDS, lowered)) return lowered[0]!.toUpperCase() + lowered.slice(1);
   return original;
 }
 

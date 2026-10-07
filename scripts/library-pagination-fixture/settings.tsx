@@ -1,12 +1,17 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
-const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED'};
+const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED', captures: 0, installed: ['small.en'], downloads: [] as string[]};
 (window as any).fixture = fixture;
 window.api = {
   settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
     set: async (key: string,value: unknown) => {fixture.saves.push({key,value}); if(fixture.fail) throw new Error('Fixture save failed'); return value;},chooseFolder: async () => fixture.chosen},
-  models: {list: async () => []},permissions: {audio: async () => ({mic: 'granted',audioCapture: 'granted'})},speakers: {list: async () => []},
+  models: {list: async () => []},permissions: {audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [
+    {label: 'Transcription', state: 'check', detail: 'Managed local service may be idle', section: 'Processing'},
+    {label: 'Exporters', state: 'optional', detail: 'Optional; does not block recording', section: 'Integrations'},
+  ]},speakers: {list: async () => []},
+  recording: { listSources: async () => [], test: async () => {fixture.captures++; return {durationS: 8, streams: {Mic: {playable: true,peakDb: -12},App: {playable: false,peakDb: null},File: {playable: true,peakDb: -18}}, message: 'Test audio discarded; no Library meeting'};} },
+  onboarding: {listWhisperModels: async () => fixture.installed, onWhisperProgress: () => () => {}, installWhisperModel: async (model: string) => {fixture.downloads.push(model); fixture.installed.push(model);} },
   llm: {probe: async (url: string) => {fixture.probes.push(url); return {ok: false,error: 'fetch failed',code: fixture.probeCode};},detectProviders: async () => ({lmStudio: {binary: true,running: false},ollama: {binary: true,running: false}})},
   terminology: {list: async () => [],offers: async () => true},groups: {list: async () => ({groups: [],ungroupedCount: 0})},
   obsidian: {status: async () => ({config: null,running: false,lastSuccess: null,error: null,pending: 0,synced: 0,issues: []})},

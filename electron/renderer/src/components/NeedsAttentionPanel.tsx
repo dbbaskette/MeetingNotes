@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../ipc/client';
 import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
 import { useToast } from './Toasts';
@@ -36,14 +36,26 @@ export function NeedsAttentionPanel({
   onChanged: () => void | Promise<void>;
 }): JSX.Element | null {
   const toast = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [limits, setLimits] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const allGroups = useMemo(() => buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }), [meetings, recovery]);
   const groups = useMemo(
-    () => capAttentionGroups(buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }), ATTENTION_GROUP_CAP),
-    [meetings, recovery],
+    () => expanded ? allGroups.map(group => {
+      const start = Math.min(limits[group.kind] ?? 0, Math.max(0, Math.floor((group.items.length - 1) / 20) * 20));
+      return { ...group, items: group.items.slice(start, start + 20), totalCount: group.items.length, hiddenCount: Math.max(0, group.items.length - start - 20) };
+    })
+      : capAttentionGroups(allGroups, ATTENTION_GROUP_CAP),
+    [allGroups, expanded, limits],
   );
   if (groups.length === 0 && !error) return null;
 
   const recoveryById = new Map(recovery.map((item) => [item.id, item]));
   async function primaryAction(kind: string, id: string): Promise<void> {
+    if (busy) return;
+    setBusy(id); setActionError(null);
+    try {
     if (kind === 'pending') {
       await api.meetings.start(id);
       toast.show({ message: 'Meeting added to the processing queue.' });
@@ -51,6 +63,8 @@ export function NeedsAttentionPanel({
       return;
     }
     onOpen(id);
+    } catch (error) { setActionError((error as Error).message); }
+    finally { setBusy(null); }
   }
 
   return (
@@ -59,10 +73,12 @@ export function NeedsAttentionPanel({
         <span className="w-2 h-2 rounded-full bg-status-warn" />
         <h2 className="text-sm font-semibold text-ink">Needs attention</h2>
         <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.totalCount, 0)}</span>
+        <button type="button" aria-expanded={expanded} aria-controls="attention-items" className="ml-auto text-xs font-semibold underline"
+          onClick={() => { setExpanded(!expanded); setLimits({}); }}>{expanded ? 'Show compact inbox' : 'View all'}</button>
       </div>
       {error && (
         <div role="alert" className="px-4 py-2.5 text-xs text-danger border-b border-status-warn/20">
-          Couldn't refresh this inbox: {error}
+          Couldn&apos;t refresh this inbox: {error}
           {onRetry && (
             <>
               {' '}
@@ -71,10 +87,11 @@ export function NeedsAttentionPanel({
           )}
         </div>
       )}
-      <div className="max-h-64 overflow-y-auto divide-y divide-surface-border">
+      {actionError && <p role="alert" className="px-4 py-2 text-xs text-danger">Could not complete this action: {actionError}. Try again.</p>}
+      <div id="attention-items" className={`${expanded ? 'max-h-[65vh]' : 'max-h-64'} overflow-y-auto divide-y divide-surface-border`}>
         {groups.map((group) => (
           <div key={group.kind} className="px-4 py-2.5">
-            <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted mb-1.5">{group.label}</div>
+            <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted mb-1.5">{group.label} · {group.totalCount}</div>
             <div className="space-y-2">
               {group.items.map((item) => {
                 const rec = item.kind === 'recovery' ? recoveryById.get(item.id) : undefined;
@@ -90,6 +107,8 @@ export function NeedsAttentionPanel({
                       </div>
                     </div>
                     <button
+                      disabled={busy !== null}
+                      aria-label={`${item.actionLabel}: ${item.title}`}
                       className="shrink-0 px-2.5 py-1 rounded-md bg-surface border border-surface-border text-xs font-medium text-ink hover:border-brand-indigo/40 disabled:opacity-40"
                       onClick={() => void primaryAction(item.kind, item.id)}
                     >
@@ -99,8 +118,12 @@ export function NeedsAttentionPanel({
                 );
               })}
               {group.hiddenCount > 0 && (
-                <div className="text-xs text-ink-muted">+{group.hiddenCount} more</div>
+                <button type="button" className="text-xs text-brand-indigo underline" onClick={() => {
+                  if (!expanded) setExpanded(true);
+                  else setLimits(current => ({ ...current, [group.kind]: group.totalCount - group.items.length - group.hiddenCount + 20 }));
+                }}>{expanded ? `Show next ${Math.min(20, group.hiddenCount)} of ${group.hiddenCount} remaining` : `+${group.hiddenCount} more — view all`}</button>
               )}
+              {expanded && group.totalCount - group.items.length - group.hiddenCount > 0 && <button type="button" className="ml-3 text-xs text-brand-indigo underline" onClick={() => setLimits(current => ({ ...current, [group.kind]: Math.max(0, group.totalCount - group.items.length - group.hiddenCount - 20) }))}>Previous 20</button>}
             </div>
           </div>
         ))}

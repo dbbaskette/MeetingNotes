@@ -31,6 +31,14 @@ app.whenReady().then(async () => {
     assert.deepEqual(errors, []);
     assert.equal(await run('document.querySelectorAll("section [aria-expanded=true]").length'), 3);
     assert.ok(await run('document.body.innerText.includes("Needs attention") && document.body.innerText.includes("Planning")'));
+    await run(`${button('View all')}.click()`); await settle();
+    assert.equal(await run('document.querySelectorAll("#attention-items button").length < 100'),true,'Full inbox keeps bounded pages');
+    for (let page = 0; page < 5; page++) {
+      await run('Array.from(document.querySelectorAll("#attention-items button")).find(b => b.textContent.startsWith("Show next")).click()'); await settle();
+    }
+    assert(await run('document.querySelector("#attention-items").textContent.includes("Capture recovery · 113")'));
+    assert.equal(await run('document.querySelectorAll("#attention-items button").length < 100'),true);
+    await run(`${button('Show compact inbox')}.click()`); await settle();
     if (jitter) {
       const before = await run('window.fixture.geometry.reads');
       await run('new Promise(r => setTimeout(r, 250))');

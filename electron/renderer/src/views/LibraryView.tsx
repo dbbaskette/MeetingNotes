@@ -517,6 +517,7 @@ export function LibraryView({
             label={liveRecording.label}
             startedAt={liveRecording.startedAt}
             groupId={liveRecording.startInput?.groupId}
+            micEnabled={liveRecording.startInput?.mic}
             onStopped={(summary) => {
               onRecordingStopped(summary);
               void invalidate();
@@ -1222,11 +1223,11 @@ function QueueBanner({
         <div className="text-sm font-semibold truncate">
           {status.paused
             ? (status.currentId
-              ? <>Paused — finishing <span className="opacity-80">"{currentTitle}"</span></>
+              ? <>Paused — finishing <span className="opacity-80">&quot;{currentTitle}&quot;</span></>
               : <>Paused</>
             )
             : (status.currentId
-              ? <>Processing <span className="opacity-80">"{currentTitle}"</span></>
+              ? <>Processing <span className="opacity-80">&quot;{currentTitle}&quot;</span></>
               : <>Queue holding</>
             )}
         </div>

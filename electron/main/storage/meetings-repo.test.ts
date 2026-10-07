@@ -71,6 +71,17 @@ function expectedIds(filter: MeetingListFilter, sort: MeetingListSort): string[]
 }
 
 describe('MeetingsRepo', () => {
+  it('retains bounded durable failure/retry history when the current error is cleared', () => {
+    insertMeeting('history');
+    for (let i = 0; i < 25; i++) repo.recordFailure('history', `failure ${i}`);
+    repo.recordProcessingEvent('history', 'retry', 'summarizing', 'Retry requested');
+    repo.updateStatus('history', 'processing');
+    expect(repo.findById('history')?.errorMessage).toBeNull();
+    const history = repo.processingHistory('history');
+    expect(history).toHaveLength(20); expect(history[0]?.kind).toBe('retry');
+    expect(history[1]?.message).toBe('failure 24');
+    expect(new MeetingsRepo(db).processingHistory('history')).toEqual(history);
+  });
   describe('listPage', () => {
     for (const sort of sorts) {
       for (const filter of filters) {

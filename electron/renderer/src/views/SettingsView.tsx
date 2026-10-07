@@ -5,6 +5,8 @@ import { api } from '../ipc/client';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { WhisperStep } from './OnboardingView';
+import { SetupHealth } from '../components/SetupHealth';
 import { Icon } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
@@ -37,6 +39,7 @@ interface Settings {
     silenceMs: number;
   };
   autoRecordZoom: boolean;
+  autoProcessRecordings: boolean;
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
@@ -176,7 +179,21 @@ export function SettingsView({
         </div>)}
         {loadError && <p role="alert">Some Settings information could not load: {loadError}</p>}
       </div>
+      <SetupHealth />
       <SettingsNavigation>
+      <SettingsSection section="Processing" keywords="Whisper models download transcription STT setup">
+        <details><summary className="cursor-pointer text-sm font-semibold">Whisper model management</summary>
+          <div className="mt-3"><WhisperStep activeModel={s.sttModel} onStatus={() => {}} onUse={model => update('sttModel', model)} /></div>
+        </details>
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="automatic auto process recordings queue">
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" checked={s.autoProcessRecordings ?? false} onChange={e => void update('autoProcessRecordings', e.target.checked)} />
+          <span>Process recordings automatically when capture finishes
+            <span className="block text-xs text-ink-muted mt-1">Off by default. Applies only to new built-in recordings with usable finalized audio, not imports or recovery. Queue pause and voice review still apply.</span>
+          </span>
+        </label>
+      </SettingsSection>
       <SettingsSection section="Organization" keywords="dictionary terminology corrections words">
         <TerminologySettings />
       </SettingsSection>
@@ -373,9 +390,7 @@ export function SettingsView({
           className="input"
         />
         <div className="text-xs text-ink-muted mt-1">
-          The model file to load when starting whisper-server. Must be installed in
-          ~/Library/Application Support/MeetingNotes/whisper-models/ggml-&lt;name&gt;.bin
-          (use the setup wizard&apos;s Whisper step to download one).
+          Managed model name or absolute custom model file path. Download models in Processing → Whisper model management. External STT uses its own model configuration. Restart MeetingNotes after changing this value; active processing must finish first.
         </div>
       </Field>
       </SettingsSection>

@@ -12,7 +12,7 @@ const server = await createServer({ configFile: false, root, plugins: [react()],
 try {
   await server.listen();
   const origin = server.resolvedUrls.local[0];
-  const modes = ['rows', 'selection', 'grouped', 'startup', 'settings', 'sources'];
+  const modes = ['rows', 'selection', 'grouped', 'startup', 'settings', 'sources', 'capture'];
   const selected = process.env.MN_FIXTURE_MODES?.split(',') ?? modes;
   if (selected.some(mode => !modes.includes(mode))) throw new Error('Unknown fixture mode');
   for (const mode of selected) {

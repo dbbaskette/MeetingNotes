@@ -34,3 +34,23 @@ The audio-helper gate builds the complete Swift helper and runs synthetic AAC
 writer checks without microphone or process-tap access. Its framework-free
 harness shares the exact assertions used by the developer XCTest target, since
 the Command Line Tools-only clean VM does not include XCTest.
+
+The shared assertions now cover bounded shared-clock mic/system mixing, startup
+silence, gaps/resumption and decoded tone plus offline TTS speech levels, gain,
+clipping and duration alignment. They do not capture a microphone.
+
+For an explicitly requested packaged-runtime gate, build a disposable unsigned
+package and run `node scripts/ci/prepare-package-fixture.mjs /absolute/path/MeetingNotes.app /absolute/path/synthetic-speech.wav`.
+This creates the ignored `.ci-package-fixture/` payload with the current source
+commit. Only three cached pyannote model directories are copied (dereferenced);
+credentials and user meetings are never copied. The guest rejects stale commit
+metadata. Do not put a release installer or real audio in this payload.
+
+With the payload present, the normal full runner additionally exercises the
+actual packaged main/preload/renderer using a marked, temporary 600-meeting
+library, normal and SwiftShader startup, helper enumeration without capture,
+configured STT/summary transport with synthetic loopback responses, and actual
+offline sidecar diarization of TTS speech. No real LLM/STT inference or signed-in
+export is claimed by the transport fixture. Packaged runs never register the
+global URL handler or touch the installed app's data. Results include screenshots
+and sidecar logs; the temporary app/profile are removed after testing.

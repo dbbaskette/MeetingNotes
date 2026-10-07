@@ -8,6 +8,14 @@ const visibility = createContext<{ section: Section; query: string }>({ section:
 export function SettingsNavigation({ children }: { children: ReactNode }): JSX.Element {
   const [section, setSection] = useState<Section>('Recording');
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    const choose = (event: Event): void => {
+      const name = (event as CustomEvent<Section>).detail;
+      if (sections.includes(name)) { setSection(name); setQuery(''); }
+    };
+    window.addEventListener('meetingnotes:settings-section', choose);
+    return () => window.removeEventListener('meetingnotes:settings-section', choose);
+  }, []);
   const normalized = query.trim().toLowerCase();
   const matches = Children.toArray(children).filter(child => isValidElement<{section: string; keywords: string}>(child)
     && `${child.props.section} ${child.props.keywords}`.toLowerCase().includes(normalized)).length;

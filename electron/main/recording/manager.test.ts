@@ -46,6 +46,73 @@ afterEach(() => {
 });
 
 describe('RecordingManager', () => {
+  it('rejects a stale start intent after a Stop command', async () => {
+    const spawn = vi.fn();
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo: fakeRepo(), spawn });
+    const expectedRevision = mgr.startRevision; mgr.cancelPendingStarts();
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true }, { expectedRevision })).rejects.toThrow(/cancelled/);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+  it('releases a never-ready capture after a late exit beyond the Stop deadline, without auto-processing', async () => {
+    vi.useFakeTimers(); const repo = fakeRepo(), finalized = vi.fn();
+    const { proc } = fakeRecordingProcess({ emitStarted: false, autoExitOnTerm: false });
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc, onFinalized: finalized });
+    const rejected = expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: false })).rejects.toThrow(/15 seconds/);
+    await vi.advanceTimersByTimeAsync(22001); await rejected;
+    expect(mgr.active()).toHaveLength(1); proc.emit('exit', 0);
+    expect(mgr.active()).toHaveLength(0); expect(repo.finalize).toHaveBeenCalledOnce(); expect(finalized).not.toHaveBeenCalled();
+  });
+  it('isolates explicit disposable capture while sharing the global slot', async () => {
+    const repo = fakeRepo(), finalized = vi.fn();
+    const { proc } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/library', repo, spawn: () => proc, onFinalized: finalized });
+    const input = { targetPid: 'system' as const, targetLabel: 'All', mic: true };
+    const result = await manager.start(input, { outputDir: '/tmp/owned-test', disposable: true });
+    expect(result.outputPath.startsWith('/tmp/owned-test/')).toBe(true);
+    expect(repo.insert).not.toHaveBeenCalled();
+    await expect(manager.start(input)).rejects.toThrow(/Already recording/);
+    await manager.stop(result.sessionId);
+    expect(repo.finalize).not.toHaveBeenCalled(); expect(finalized).not.toHaveBeenCalled();
+  });
+  it('retains the slot after startup timeout until exit and allows a later retry', async () => {
+    vi.useFakeTimers();
+    const repo = fakeRepo(); const { proc } = fakeRecordingProcess({ emitStarted: false, autoExitOnTerm: false });
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const input = { targetPid: 'system' as const, targetLabel: 'All', mic: true };
+    const rejected = expect(manager.start(input)).rejects.toThrow(/15 seconds/);
+    await vi.advanceTimersByTimeAsync(15000); await rejected;
+    await expect(manager.start(input)).rejects.toThrow(/Already recording/);
+    proc.emit('exit', 0); await Promise.resolve(); await Promise.resolve();
+    expect(manager.active()).toEqual([]);
+  });
+  it('claims one slot across concurrent starts, including startup and stopping', async () => {
+    const repo = fakeRepo();
+    const { proc, stdout } = fakeRecordingProcess({ emitStarted: false, autoExitOnTerm: false });
+    const spawn = vi.fn(() => proc);
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn });
+    const input = { targetPid: 'system' as const, targetLabel: 'All', mic: true };
+    const pending = mgr.start(input);
+    await expect(mgr.start(input)).rejects.toThrow(/Already recording/);
+    stdout.emit('data', '{"event":"started"}\n');
+    const { sessionId } = await pending;
+    const stop = mgr.stop(sessionId);
+    await expect(mgr.start(input)).rejects.toThrow(/Already recording/);
+    proc.emit('exit', 0); await stop;
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+  it('never finalizes an unconfirmed helper exit, and permits retry Stop', async () => {
+    vi.useFakeTimers();
+    const repo = fakeRepo();
+    const { proc } = fakeRecordingProcess({ autoExitOnTerm: false });
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const { sessionId } = await mgr.start({ targetPid: 'system', targetLabel: 'All', mic: false });
+    const rejection = expect(mgr.stop(sessionId)).rejects.toThrow(/not confirmed exit/);
+    await vi.advanceTimersByTimeAsync(7000); await rejection;
+    expect(repo.finalize).not.toHaveBeenCalled();
+    expect(mgr.state(sessionId)).toBe('stopping');
+    const retry = mgr.stop(sessionId); proc.emit('exit', 0); await retry;
+    expect(repo.finalize).toHaveBeenCalledTimes(1);
+  });
   it('marks the session row error and clears state when the helper exits before started', async () => {
     const { proc } = fakeRecordingProcess({ emitStarted: false });
     proc.pid = 4242;
@@ -134,6 +201,7 @@ describe('RecordingManager', () => {
           if (attempts !== 1) return fakeRecordingProcess().proc;
           if (failure === 'spawn-throw') throw new Error('spawn refused');
           const { proc } = fakeRecordingProcess({ emitStarted: false });
+          if (failure === 'spawn-error') Object.assign(proc, { pid: undefined }); // ENOENT never spawns a process
           queueMicrotask(() => failure === 'spawn-error'
             ? proc.emit('error', new Error('ENOENT')) : proc.emit('exit', 1));
           return proc;

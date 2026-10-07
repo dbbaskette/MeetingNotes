@@ -29,6 +29,10 @@ export async function catalogAudio(audioPath: string, deps: {
   if (existing) return { kind: 'existing', meeting: existing };
 
   const info = await (deps.probe ?? probeAudio)(audioPath);
+  // Watcher and confirmed-stop observers can probe the same file together.
+  // Inserts below are synchronous: recheck after the only async boundary.
+  const concurrent = deps.meetings.findByAudioPath(audioPath);
+  if (concurrent) return { kind: 'existing', meeting: concurrent };
   const parsed = parseAudioHijackFilename(audioPath);
   const dateIso = parsed.startedAtIso?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
   const createFolder = deps.createFolder ?? createMeetingFolder;

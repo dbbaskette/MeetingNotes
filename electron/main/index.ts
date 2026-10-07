@@ -27,6 +27,8 @@ import { WeeklySummariesRepo } from './storage/weekly-summaries-repo.js';
 import { WeeklyAggregator } from './weekly/aggregator.js';
 import { createNarrativeGenerator } from './weekly/prompt.js';
 import { RecordingManager } from './recording/manager.js';
+import { AutoProcessRecordings } from './recording/auto-process.js';
+import { probeAudio } from './library/ffprobe.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
 import { recoverOrphans } from './recording/orphan-recovery.js';
@@ -64,9 +66,12 @@ import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
 import { shouldNotifyGate } from './pipeline/gate-alert.js';
 import { ArtifactCache } from './library/artifact-cache.js';
+import { packageSmokeRoot, seedPackageSmoke, verifyPackageSmoke } from './lib/package-smoke.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
+const smokeRoot = packageSmokeRoot();
+if (smokeRoot) app.setPath('userData', smokeRoot);
 
 // Register meetingnotes:// as our protocol scheme. Doing this before
 // app.whenReady() — and before the single-instance lock — so:
@@ -76,7 +81,7 @@ const isDev = !app.isPackaged;
 //       buffered into `pendingSchemeUrls` and replayed once the
 //       dispatcher is ready inside whenReady().
 // Issue #77.
-if (!app.isDefaultProtocolClient('meetingnotes')) {
+if (!smokeRoot && !app.isDefaultProtocolClient('meetingnotes')) {
   app.setAsDefaultProtocolClient('meetingnotes');
 }
 const pendingSchemeUrls: string[] = [];
@@ -170,8 +175,9 @@ app.whenReady().then(async () => {
   // bridge and routes them to local state changes.
   installAppMenu();
 
-  const settingsDb = openDb(path.join(os.homedir(), 'Documents', 'MeetingNotes', 'db.sqlite'));
+  const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
+  if (smokeRoot) seedPackageSmoke(smokeRoot, settings);
   const s = settings.getAll();
 
   // Restore the window where the user left it — but only if that position
@@ -189,11 +195,12 @@ app.whenReady().then(async () => {
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));
   const meetings = new MeetingsRepo(db);
+  if (smokeRoot) seedPackageSmoke(smokeRoot, settings, meetings);
   const groups = new GroupsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
-  const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
+  const logger = new Logger(path.join(smokeRoot ?? path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes'), 'app.log'));
   const artifactCache = new ArtifactCache();
   const terminology = new TerminologyService(new TerminologyRepo(db), {
     libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
@@ -283,6 +290,11 @@ app.whenReady().then(async () => {
     helperPath,
     recordingsDir,
     repo: recordingSessionsRepo,
+    onFinalized: (id, audioPath) => {
+      activeRecordings.delete(id);
+      app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
+      void completedCapture.finalized(id, audioPath);
+    },
     onAutoStop: (sessionId, silenceMs) =>
       logger.info('recording:auto-stop-silence', { sessionId, silenceMs }),
   });
@@ -312,7 +324,7 @@ app.whenReady().then(async () => {
   recordingManager.on('state-change', (sessionId, state, reason) => {
     BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state, reason }));
-    if (state === 'starting' || state === 'recording') activeRecordings.add(sessionId);
+    if (state === 'starting' || state === 'recording' || state === 'stopping') activeRecordings.add(sessionId);
     else activeRecordings.delete(sessionId);
     app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
   });
@@ -384,7 +396,7 @@ app.whenReady().then(async () => {
   // are still cataloged. The optional user-configured audioWatchPath is appended
   // last (deduped). Watching all keeps the Library a single source of truth.
   const watcher = new LibraryWatcher({
-    paths: libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
+    paths: smokeRoot ? [recordingsDir] : libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
   });
   const notifyMeetingAdded = (id: string): void => {
     for (const w of BrowserWindow.getAllWindows()) {
@@ -406,6 +418,14 @@ app.whenReady().then(async () => {
     return result;
   };
   const discoverGate = new DiscoverFailureGate(3);
+  const completedCapture = new AutoProcessRecordings({
+    enabled: () => settings.get('autoProcessRecordings'),
+    catalog: catalogRecording,
+    verify: probeAudio,
+    queued: (id) => { meetings.updateStatus(id, 'processing'); notifyMeetingAdded(id); },
+    enqueue: (id) => pipeline.enqueue(id),
+    failed: (sessionId, error) => logger.warn('recording:completion-catalog-failed', { sessionId, error: String(error), note: 'Audio retained for recovery; not auto-processed.' }),
+  });
   watcher.onStableFile(async (audioPath) => {
     const onDisk = fileState(audioPath);
     if (onDisk && discoverGate.shouldSkip(audioPath, onDisk)) {
@@ -476,7 +496,7 @@ app.whenReady().then(async () => {
   // object. Both broadcast on the same renderer event channel so the
   // banner can switch on `source` to pick its copy.
   const meetingDetector = new MeetingDetector({
-    isSuppressed: () => recordingSessionsRepo.findOpen().length > 0,
+    isSuppressed: () => recordingManager.active().length > 0 || recordingSessionsRepo.findOpen().length > 0,
   });
   meetingDetector.onDetected((m) => {
     BrowserWindow.getAllWindows().forEach((w) =>
@@ -484,8 +504,8 @@ app.whenReady().then(async () => {
   });
   const nativeAppDetector = new NativeAppDetector({
     appEnumerator,
-    silenceMs: s.autoDetectMeetings.silenceMs,
-    isSuppressed: () => recordingSessionsRepo.findOpen().length > 0,
+    getSilenceMs: () => settings.get('autoDetectMeetings').silenceMs,
+    isSuppressed: () => recordingManager.active().length > 0 || recordingSessionsRepo.findOpen().length > 0,
     log: (msg, data) => logger.info(msg, data),
   });
   nativeAppDetector.onDetected((m) => {
@@ -511,6 +531,7 @@ app.whenReady().then(async () => {
           for (const w of BrowserWindow.getAllWindows()) {
             w.webContents.send('mn:auto-recording-started', {
               sessionId, label: m.appName, startedAt,
+              startInput: { targetPid: m.pid, targetLabel: m.appName, mic: true },
             });
           }
         } catch (err) {
@@ -685,6 +706,7 @@ app.whenReady().then(async () => {
         status: ai.status,
       })),
       userSpeakerId: settings.get('userSpeakerId'),
+      userDisplayName: speakers.list().find((sp) => sp.id === settings.get('userSpeakerId'))?.displayName ?? null,
     }, {
       url: settings.get('webhookUrl'),
       secret: settings.get('webhookSecret'),
@@ -798,6 +820,10 @@ app.whenReady().then(async () => {
       }
     })();
   });
+  if (smokeRoot) {
+    try { await verifyPackageSmoke(smokeRoot, mainWin, app.isPackaged); app.quit(); }
+    catch (error) { fs.writeFileSync(path.join(smokeRoot, 'failure.txt'), String(error)); app.exit(1); }
+  }
 });
 
 app.on('window-all-closed', () => {

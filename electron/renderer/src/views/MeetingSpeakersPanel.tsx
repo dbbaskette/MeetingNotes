@@ -13,10 +13,11 @@ function MiniSpinner(): JSX.Element {
 interface RosterEntry { id: string; displayName: string; }
 
 export function SpeakersPanel({
-  meeting, onReload,
+  meeting, onReload, compact = false,
 }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
+  compact?: boolean;
 }): JSX.Element {
   const [roster, setRoster] = useState<RosterEntry[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export function SpeakersPanel({
     void (async () => {
       const list = (await api.speakers.list()) as { id: string; displayName: string }[];
       setRoster(list);
-    })();
+    })().catch(error => setBulkError((error as Error).message));
   }, [version]);
 
   async function reloadMeeting(): Promise<void> {
@@ -50,6 +51,7 @@ export function SpeakersPanel({
     () => partitionSpeakerReview(meeting.speakers.map((speaker, colorIdx) => ({ ...speaker, colorIdx }))),
     [meeting.speakers],
   );
+  const reviewRows = compact ? groupedSpeakers.needsReview.slice(0, 3) : groupedSpeakers.needsReview;
   function toggleSelected(label: string): void {
     setSelected((current) => {
       const next = new Set(current);
@@ -120,7 +122,7 @@ export function SpeakersPanel({
         {groupedSpeakers.needsReview.length > 0 && groupedSpeakers.rest.length > 0 && (
           <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted">Needs review</div>
         )}
-        {groupedSpeakers.needsReview.map((sp) => (
+        {reviewRows.map((sp) => (
           <SpeakerRow
             key={sp.localLabel}
             meetingId={meeting.id}
@@ -142,10 +144,10 @@ export function SpeakersPanel({
             onSelect={() => toggleSelected(sp.localLabel)}
           />
         ))}
-        {groupedSpeakers.rest.length > 0 && groupedSpeakers.needsReview.length > 0 && (
+        {!compact && groupedSpeakers.rest.length > 0 && groupedSpeakers.needsReview.length > 0 && (
           <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted pt-1">Named</div>
         )}
-        {groupedSpeakers.rest.map((sp) => (
+        {!compact && groupedSpeakers.rest.map((sp) => (
           <SpeakerRow
             key={sp.localLabel}
             meetingId={meeting.id}
@@ -168,6 +170,8 @@ export function SpeakersPanel({
           />
         ))}
       </div>
+      {compact && <a href="#meeting-speakers" className="inline-block text-xs font-semibold text-brand-indigo underline">Open full speaker review{groupedSpeakers.needsReview.length > 3 ? ` (${groupedSpeakers.needsReview.length - 3} more need review)` : ''}</a>}
+      {bulkError && !selected.size && <p role="alert" className="text-xs text-danger">Could not load speaker roster: {bulkError}</p>}
     </div>
   );
 }

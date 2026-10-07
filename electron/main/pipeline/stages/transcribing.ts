@@ -13,18 +13,10 @@ export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   ctx.logger.info('transcribe:start', { meetingId });
 
-  // Stem-aware transcription was tried in #13 Phase 3 but rolled back in
-  // #27 — the voice stem currently writes effectively silent audio despite
-  // the mic being captured correctly (provable via the mixed file which
-  // has the user's voice). Feeding a silent voice stem to Whisper produced
-  // only "Thank you." boilerplate. Until the Swift-side voice-stem bug is
-  // found, we always transcribe the mixed file — it contains both user +
-  // remote speakers, speaker attribution comes from diarization + the
-  // roster matcher as it did before Phase 3.
-  //
-  // Stem-aware diarization is still active (diarizing.ts uses the system
-  // stem when present) because that path works fine and gives cleaner
-  // pyannote input.
+  // Deliberately consume the SAME primary mixed timeline as diarization.
+  // #173 repairs clocked capture but does not enable independent stem STT:
+  // cross-device speech fidelity/overlap attribution require separate proof.
+  // .voice/.system files remain compatible recovery/diagnostic artifacts.
 
   // Wake whisper-server on demand. First call after a cold app start
   // pays the model-load wait (~5–15s depending on model size);

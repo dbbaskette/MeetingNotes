@@ -256,9 +256,10 @@ function whisperDownloadLabel(
   return `Downloading… ${mb(progress.received)} MB so far`;
 }
 
-function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
+export function WhisperStep({ onStatus, activeModel, onUse }: { onStatus: (s: StepStatus) => void;
+  activeModel?: string; onUse?: (model: string) => Promise<boolean> }): JSX.Element {
   const [installed, setInstalled] = useState<string[] | null>(null);
-  const [picked, setPicked] = useState<string>('medium.en');
+  const [picked, setPicked] = useState<string>(WHISPER_MODELS.some(m => m.name === activeModel) ? activeModel! : 'medium.en');
   const [installing, setInstalling] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // The model that just finished downloading this session — drives the
@@ -273,10 +274,10 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
   // while a download is running, and unmounting (wizard nav) unsubscribes.
   useEffect(() => {
     const off = api.onboarding.onWhisperProgress((e) => {
-      setProgress({ received: e.received, total: e.total });
+      if (e.model === picked) setProgress({ received: e.received, total: e.total });
     });
     return () => { off(); };
-  }, []);
+  }, [picked]);
 
   async function refresh(): Promise<string[]> {
     try {
@@ -338,6 +339,7 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
           </option>
         ))}
       </select>
+      {onUse && <p className="text-xs text-ink-muted mb-2">Configured model: {activeModel || 'Automatic'}. Changes apply after restarting MeetingNotes; finish active processing first.</p>}
       <div className="text-xs text-ink-muted mb-2 h-4">
         {pickedInstalled && `${picked} is already installed — you're set.`}
       </div>
@@ -350,6 +352,11 @@ function WhisperStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.E
           : pickedInstalled ? `Re-download ${picked}`
             : `Download ${picked}`}
       </button>
+      {onUse && <button type="button" disabled={installing || !pickedInstalled || activeModel === picked}
+        className="mt-2 text-xs font-semibold underline disabled:opacity-40"
+        onClick={() => void onUse(picked).then(ok => { if (!ok) setErr('Could not select this model. Finish processing and correct any Settings errors, then retry.'); }).catch(e => setErr((e as Error).message))}>
+        {activeModel === picked ? 'Selected for transcription' : `Use ${picked}`}
+      </button>}
       {installing && progress && (
         <div className="mt-2" aria-hidden>
           <div className="h-1.5 rounded-full bg-surface-sunken overflow-hidden">

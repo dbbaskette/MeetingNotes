@@ -108,11 +108,9 @@ mac:
     NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
 # Post-package hook trims dead weight from Chromium's bundled Electron
 # Framework. Strips ~55 unused locale .lproj dirs (~37 MB across 50+
-# languages) AND the software-WebGL fallback libs `libvk_swiftshader.dylib`
-# + `libGLESv2.dylib` (~23 MB), since MeetingNotes renders no
-# WebGL/Canvas3D surface and Apple Silicon's hardware path always wins.
-# See build/trim-electron-framework.cjs for the full rationale + risk
-# tradeoffs.
+# languages). Keep software-rendering libraries/manifests for supported
+# VM and GPU-disabled startup; hardware-only success is insufficient proof
+# that these fallback resources are unused. Licenses and notices are retained.
 afterPack: build/trim-electron-framework.cjs
 
 # Maximum compression on dmg/zip. Slower build (adds ~30–60s of LZMA at

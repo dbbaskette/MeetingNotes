@@ -22,6 +22,7 @@ import { TranscriptPanel } from './MeetingTranscriptPanel';
 import { RememberTerms, TerminologyPanel } from '../components/Terminology';
 import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
 import { NotesHistory } from '../components/NotesHistory';
+import { processingDiagnosis, primaryProcessingStatus } from '../../../shared/processing-recovery';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
 // center pane so playback stays alive while the user reads the summary
@@ -39,6 +40,7 @@ export interface MeetingDetail {
   pipelineStage: string;
   status: string;
   errorMessage: string | null;
+  processingHistory?: { createdAt: string; kind: string; stage: string; message: string }[];
   stageStartedAt: string | null;
   stageEtaMs: number | null;
   stageEtaRough: boolean;
@@ -437,7 +439,7 @@ export function MeetingDetailView({
           decision; hiding it below 8 pipeline chips hurt the time-to-
           action. Returns null when not parked. */}
       <div className="shrink-0">
-        <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />
+        {primaryProcessingStatus(m) === 'speaker' && <SpeakerIdControls meeting={m} onReload={reload} placement="above-timeline" />}
       </div>
 
       {/* Failure banner: when a run failed, surface WHY (the error string the
@@ -461,7 +463,7 @@ export function MeetingDetailView({
       {/* Quiet pre-gate skip-toggle row. Returns null when parked — the
           parked banner above already exposes the same control. */}
       <div className="shrink-0">
-        <SpeakerIdControls meeting={m} onReload={reload} placement="below-timeline" />
+        {m.status !== 'failed' && <SpeakerIdControls meeting={m} onReload={reload} placement="below-timeline" />}
       </div>
 
       {/* Responsive layout: stack single-column below lg (1024px) so the
@@ -827,7 +829,7 @@ function SpeakerIdControls({
   if (placement === 'above-timeline' && !parked) return null;
   if (placement === 'below-timeline' && !preGate) return null;
 
-  const unidentified = meeting.speakers.filter((s) => !s.rosterId).length;
+  const unidentified = meeting.speakers.filter((s) => s.needsReview || !s.rosterId).length;
   const totalSpeakers = meeting.speakers.length;
 
   async function setSkip(skip: boolean): Promise<void> {
@@ -841,7 +843,8 @@ function SpeakerIdControls({
 
   if (parked) {
     return (
-      <div ref={bannerRef} className="px-5 py-4 border-b border-surface-border bg-status-warnBg flex items-center gap-4">
+      <div ref={bannerRef} className="px-5 py-4 border-b border-surface-border bg-status-warnBg">
+        <div className="flex flex-wrap items-center gap-4">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-status-warnText text-sm">
             Paused — name your speakers before summarize runs
@@ -851,7 +854,7 @@ function SpeakerIdControls({
               ? 'No speakers detected yet.'
               : unidentified === 0
                 ? `All ${totalSpeakers} voices identified. Click Continue to finish processing.`
-                : `${unidentified} of ${totalSpeakers} voices still unidentified. Use the Speakers panel on the right to label them, then Continue.`}
+                : `${unidentified} of ${totalSpeakers} voices need review. Name them below or open the full speaker panel. Existing audio and transcript are kept.`}
           </div>
         </div>
         <label className="flex items-center gap-2 text-xs text-status-warnText cursor-pointer select-none">
@@ -869,6 +872,8 @@ function SpeakerIdControls({
         >
           Continue →
         </button>
+        </div>
+        {unidentified > 0 && <div className="mt-3 max-w-xl"><SpeakersPanel meeting={meeting} onReload={onReload} compact /></div>}
       </div>
     );
   }
@@ -896,16 +901,18 @@ function SpeakerIdControls({
 // Retry re-runs from there via api.meetings.rerun — which clears stale
 // artifacts before re-enqueuing; updateStatus clears the stored error so the
 // banner disappears once the retry starts.
-function FailureBanner({
+export function FailureBanner({
   meeting, onReload,
 }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
 }): JSX.Element | null {
   const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
   if (meeting.status !== 'failed') return null;
 
   const failedStep = USER_STEPS[stepIndexFor(meeting.pipelineStage)] ?? null;
+  const diagnosis = processingDiagnosis(meeting.errorMessage);
 
   // Gate the inline recovery controls on the reasoning-runaway failure
   // signature so they only appear for the failure they actually fix, not
@@ -916,6 +923,7 @@ function FailureBanner({
   async function retry(): Promise<void> {
     if (retrying) return;
     setRetrying(true);
+    setRetryError(null);
     try {
       // Retry from wherever the pipeline left us on failure, via the same
       // primitive the left rail's "Re-run pipeline from…" buttons use.
@@ -926,7 +934,8 @@ function FailureBanner({
       // failed attempt before re-enqueuing.
       await api.meetings.rerun(meeting.id, meeting.pipelineStage);
       await onReload(); // bumps the poll loop; status flips to 'processing'
-    } finally {
+    } catch (error) { setRetryError((error as Error).message); }
+    finally {
       setRetrying(false);
     }
   }
@@ -935,8 +944,11 @@ function FailureBanner({
     <div className="px-5 py-4 border-b border-surface-border bg-danger-bg flex items-start gap-4">
       <div className="flex-1 min-w-0">
         <div className="font-semibold text-danger-text text-sm">
-          Processing failed{failedStep ? ` during ${failedStep}` : ''}
+          {diagnosis.title}{failedStep ? ` · ${failedStep}` : ''}
         </div>
+        <p className="text-xs text-danger-text/90 mt-1">{diagnosis.action}</p>
+        <p className="text-xs text-ink-muted mt-1">Retry replaces generated results from this step onward. Original audio is retained; existing notes and action items are saved in Notes history. Replaced transcripts are preserved as snapshots in the meeting folder. Dictionary corrections remain available.</p>
+        <details className="mt-2 text-xs"><summary className="cursor-pointer">Technical details and retry history</summary>
         {meeting.errorMessage ? (
           <pre className="mt-1.5 text-xs text-danger-text/90 bg-danger-bg/60 border border-danger-border rounded-md px-2.5 py-1.5 max-h-28 overflow-auto whitespace-pre-wrap font-mono">
             {meeting.errorMessage}
@@ -946,6 +958,9 @@ function FailureBanner({
             No error detail was recorded. Check the logs in Settings → Diagnostics.
           </div>
         )}
+        {(meeting.processingHistory ?? []).map((entry, index) => <div key={index} className="mt-2 text-xs text-ink-muted break-words">{new Date(entry.createdAt).toLocaleString()} · {entry.kind} · {entry.stage}<pre className="whitespace-pre-wrap font-mono">{entry.message}</pre></div>)}
+        </details>
+        {retryError && <p role="alert" className="text-xs text-danger mt-2">Could not retry: {retryError}. Your previous results remain available.</p>}
         {isReasoningLoopFailure && <ReasoningRecoveryControls />}
       </div>
       <button
@@ -1141,13 +1156,20 @@ function LeftRail({
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
 }): JSX.Element {
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [rerunStage, setRerunStage] = useState<string | null>(null);
   async function startProcessing(): Promise<void> {
-    await api.meetings.start(meeting.id);
-    await onReload();
+    setBusy(true); setOperationError(null);
+    try { await api.meetings.start(meeting.id); await onReload(); }
+    catch (error) { setOperationError((error as Error).message); }
+    finally { setBusy(false); }
   }
   async function rerunFrom(stage: string): Promise<void> {
-    await api.meetings.rerun(meeting.id, stage);
-    await onReload();
+    setRerunStage(null); setBusy(true); setOperationError(null);
+    try { await api.meetings.rerun(meeting.id, stage); await onReload(); }
+    catch (error) { setOperationError((error as Error).message); }
+    finally { setBusy(false); }
   }
 
   // "Never been processed" = still sitting in the Inbox. The appropriate
@@ -1165,6 +1187,8 @@ function LeftRail({
   // section headers, plain small caps for fields.
   return (
     <div className="border-r border-surface-border p-4 space-y-3">
+      {operationError && <p role="alert" className="text-xs text-danger">Could not queue processing: {operationError}</p>}
+      <ConfirmDialog open={rerunStage !== null} title="Re-run processing?" body="Generated results from the selected stage onward will be replaced. Notes and action items are saved in history. When a transcript is replaced, its previous version (including edits) is kept as a snapshot in the meeting folder. Original audio and remembered terminology are kept." confirmLabel="Re-run" onCancel={() => setRerunStage(null)} onConfirm={() => { if (rerunStage) void rerunFrom(rerunStage); }}/>
       <div>
         <div className="text-[11px] text-ink-muted font-medium">Title</div>
         <div className="font-semibold">{meeting.title}</div>
@@ -1182,6 +1206,7 @@ function LeftRail({
         {neverProcessed ? (
           <button
             onClick={startProcessing}
+            disabled={busy}
             className="w-full bg-brand-indigo text-white text-sm font-semibold rounded-lg py-2 hover:bg-brand-indigo/90 transition inline-flex items-center justify-center gap-1.5"
           >
             <Icon name="play" className="w-3.5 h-3.5" />
@@ -1202,7 +1227,8 @@ function LeftRail({
             ] as const).map(([stage, label]) => (
               <button
                 key={stage}
-                onClick={() => rerunFrom(stage)}
+                onClick={() => setRerunStage(stage)}
+                disabled={busy}
                 className="group w-full text-left bg-surface border-l-2 border-l-brand-indigo/40 border border-surface-border rounded-lg py-2 px-3 text-[13px] text-ink-soft transition-all duration-150 hover:border-l-brand-indigo hover:bg-brand-indigo/5 hover:text-brand-indigo hover:shadow-sm"
                 title={label}
               >
@@ -1429,10 +1455,11 @@ function SummaryPanel({
   return (
     <div className="flex flex-col gap-3">
       <NotesHistory meetingId={meeting.id} disabled={dirty || saving || mode === 'edit' || meeting.status === 'processing'} onRestored={async summary => {onBaseline(summary); onDraft(summary); await onReload();}}/>
-      {meeting.summaryStale && <div className="text-xs rounded-lg bg-status-warnBg text-status-warnText p-3">
+      {meeting.summaryStale && <details className="text-xs text-ink-muted">
+        <summary className="cursor-pointer">Notes may need refreshing</summary>
         The transcript was corrected after these notes were generated. Regenerating replaces the notes and action items.
         <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty || meeting.status === 'processing'} onClick={() => setConfirmRegenerate(true)}>Regenerate notes…</button>
-      </div>}
+      </details>}
       <ConfirmDialog open={confirmRegenerate} title="Regenerate notes from the corrected transcript?" body="The current notes and action items will be saved in history before being replaced. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(false)} onConfirm={() => {
         setConfirmRegenerate(false);
         void api.meetings.rerun(meeting.id, 'summarizing').then(onReload).catch(e => setError((e as Error).message));
@@ -1615,7 +1642,7 @@ function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview
   speakerReviewState: DetailArtifactState<unknown>;
   onRetrySpeakerReview: () => void;
 }): JSX.Element {
-  return <div className="border-l border-surface-border p-4 space-y-3">
+  return <div id="meeting-speakers" tabIndex={-1} className="border-l border-surface-border p-4 space-y-3">
     <ArtifactFeedback label="speaker review" state={speakerReviewState} onRetry={onRetrySpeakerReview} />
     <SpeakersPanel meeting={meeting} onReload={onReload} />
     <MeetingExportPanel meeting={meeting} onReload={onReload} />
