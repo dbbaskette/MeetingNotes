@@ -1,13 +1,13 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
-const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen'};
+const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED'};
 (window as any).fixture = fixture;
 window.api = {
-  settings: {getAll: async () => ({summaryProvider: 'external',summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
+  settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
     set: async (key: string,value: unknown) => {fixture.saves.push({key,value}); if(fixture.fail) throw new Error('Fixture save failed'); return value;},chooseFolder: async () => fixture.chosen},
   models: {list: async () => []},permissions: {audio: async () => ({mic: 'granted',audioCapture: 'granted'})},speakers: {list: async () => []},
-  llm: {detectProviders: async () => ({lmStudio: {binary: false,running: false},ollama: {binary: false,running: false}})},
+  llm: {probe: async (url: string) => {fixture.probes.push(url); return {ok: false,error: 'fetch failed',code: fixture.probeCode};},detectProviders: async () => ({lmStudio: {binary: true,running: false},ollama: {binary: true,running: false}})},
   terminology: {list: async () => [],offers: async () => true},groups: {list: async () => ({groups: [],ungroupedCount: 0})},
   obsidian: {status: async () => ({config: null,running: false,lastSuccess: null,error: null,pending: 0,synced: 0,issues: []})},
   google: {authStatus: async () => ({signedIn: false,email: null,hasCredentials: false})},logs: {tail: async () => ({path: '/fixture/log',entries: []})},
