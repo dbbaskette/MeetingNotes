@@ -4,6 +4,18 @@ import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import type { SettingsRepo } from '../storage/settings-repo.js';
 import type { MeetingsRepo } from '../storage/meetings-repo.js';
+import type { MeetingNotesApi } from '../../preload/index.js';
+
+// Serialized into the real renderer; type-check against the actual preload
+// contract so the smoke cannot confuse repository rows with IPC page items.
+async function rendererSnapshot(): Promise<{ rows: number; hasNext: boolean; active: number; autoProcess: boolean; title: string; text: string }> {
+  const api = (globalThis as unknown as { api: MeetingNotesApi }).api;
+  const page = await api.meetings.listPage({ filter: 'all', sort: 'newest', pageSize: 50 });
+  const active = await api.recording.active();
+  const settings = await api.settings.getAll();
+  return { rows: page.items.length, hasNext: !!page.nextCursor, active: active.length, autoProcess: settings.autoProcessRecordings,
+    title: document.title, text: document.body.innerText.slice(0, 1200) };
+}
 
 /** Opt-in CI only: an explicit argument AND an owned temporary fixture marker
  * are required. Normal launches ignore the environment. Never use real data,
@@ -43,13 +55,7 @@ export async function verifyPackageSmoke(root: string, win: BrowserWindow, packa
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   if (!painted) throw new Error('Packaged Library did not render synthetic meetings');
-  const state = await win.webContents.executeJavaScript(`(async () => {
-    const page = await window.api.meetings.listPage({filter:'all',sort:'newest',pageSize:50});
-    const active = await window.api.recording.active();
-    const settings = await window.api.settings.getAll();
-    return {rows:page.rows.length,hasNext:!!page.nextCursor,active:active.length,autoProcess:settings.autoProcessRecordings,
-      title:document.title,text:document.body.innerText.slice(0,1200)};
-  })()`);
+  const state = await win.webContents.executeJavaScript(`(${rendererSnapshot.toString()})()`);
   if (state.rows !== 50 || !state.hasNext || state.active !== 0 || state.autoProcess !== false) throw new Error('Packaged IPC smoke assertion failed');
   const png = (await win.webContents.capturePage()).toPNG();
   if (png.byteLength < 10000) throw new Error('Packaged render screenshot is unexpectedly empty');
