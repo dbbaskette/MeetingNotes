@@ -628,7 +628,7 @@ export function LibraryView({
         </div>}
 
         <SearchFilters facets={facets} onChange={setFacets} query={query} onQuery={setQuery}/>
-        {searchCompletion&&<p role="status" className="shrink-0 text-xs text-status-warnText mb-2">{searchCompletion}</p>}
+        {isSearching&&searchCompletion&&<p role="status" className="shrink-0 text-xs text-status-warnText mb-2">{searchCompletion}</p>}
         {/* Filter chips — always rendered so the surface is discoverable
             even on a fresh install; chips with a zero count are disabled
             (greyed + non-clickable) rather than hidden, which keeps the
