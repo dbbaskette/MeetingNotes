@@ -115,11 +115,11 @@ describe('Obsidian sync', () => {
       .all() as { name: string }[];
     for (const t of triggers) db.exec(`DROP TRIGGER "${t.name}"`);
     db.exec(
-      'DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
+      'DROP TABLE processing_history; DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 20 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 21 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,
