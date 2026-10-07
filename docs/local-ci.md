@@ -15,7 +15,7 @@ full suite, `bash scripts/ci/tart-macos.sh --renderer-only` installs fresh
 dependencies and reruns selection/grouped/Settings/history fixtures. Its log
 explicitly records renderer-only coverage; it is not a replacement for full CI.
 
-Coverage: clean dependency installation, Node-native rebuild, full Vitest suite,
+Coverage: clean dependency installation, Node-native rebuild, Swift audio-helper build and synthetic writer tests, full Vitest suite,
 renderer type checks, production build, scoped changed-file lint, synthetic Browse
 benchmark against the reviewed baseline, Electron-native rebuild, and isolated
 Library/Settings/history renderer fixtures. All UI/API data is synthetic; no
@@ -29,3 +29,8 @@ not evidence that a populated Library renders successfully.
 
 The guest writes PASS only after all checks finish. Results are retained under
 `~/Library/Logs/MacOS Test Suite/meetingnotes/`. Required GitHub gates still apply.
+
+The audio-helper gate builds the complete Swift helper and runs synthetic AAC
+writer checks without microphone or process-tap access. Its framework-free
+harness shares the exact assertions used by the developer XCTest target, since
+the Command Line Tools-only clean VM does not include XCTest.

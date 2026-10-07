@@ -34,6 +34,8 @@ import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
 import { catalogAudio } from './library/catalog.js';
+import { DiscoverFailureGate, fileState } from './library/discover-failure-gate.js';
+import { InvalidAudioError } from './library/ffprobe.js';
 import { RecordingRecoveryService, revealPathInFinder } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
@@ -403,14 +405,26 @@ app.whenReady().then(async () => {
     }
     return result;
   };
+  const discoverGate = new DiscoverFailureGate(3);
   watcher.onStableFile(async (audioPath) => {
+    const onDisk = fileState(audioPath);
+    if (onDisk && discoverGate.shouldSkip(audioPath, onDisk)) {
+      watcher.release(audioPath);
+      return;
+    }
     try {
       await catalogRecording(audioPath);
+      discoverGate.clear(audioPath);
     } catch (e) {
       // The built-in helper may stop appending samples before it finalizes the
       // M4A's moov atom. Let the finalization change event retry this path.
       watcher.release(audioPath);
-      logger.error('library:discover-fail', { audioPath, err: String(e) });
+      if (e instanceof InvalidAudioError && onDisk && discoverGate.recordFailure(audioPath, onDisk) === 'quarantined') {
+        logger.warn('library:discover-quarantined', { audioPath, err: String(e), note: 'Invalid media; retry after file changes or app restart. The file has not been moved or deleted.' });
+      } else {
+        if (onDisk && !(e instanceof InvalidAudioError)) discoverGate.recordTransientFailure(audioPath, onDisk);
+        logger.error('library:discover-fail', { audioPath, err: String(e) });
+      }
     }
   });
   await watcher.start();
