@@ -6,6 +6,7 @@ export interface RecordingSessionInsert {
   targetPid: number | null;
   targetLabel: string;
   outputPath: string;
+  groupId?: string | null;
 }
 
 export interface RecordingSessionRow {
@@ -14,9 +15,11 @@ export interface RecordingSessionRow {
   targetPid: number | null;
   targetLabel: string;
   outputPath: string;
+  groupId: string | null;
   startedAt: string;
   finalizedAt: string | null;
   status: 'recording' | 'finalized' | 'orphaned' | 'error';
+  dismissedAt: string | null;
 }
 
 export class RecordingSessionsRepo {
@@ -25,9 +28,13 @@ export class RecordingSessionsRepo {
   insert(s: RecordingSessionInsert): void {
     this.db.prepare(`
       INSERT INTO recording_sessions
-        (id, helper_pid, target_pid, target_label, output_path, started_at, status)
-      VALUES (?, ?, ?, ?, ?, ?, 'recording')
-    `).run(s.id, s.helperPid, s.targetPid, s.targetLabel, s.outputPath, new Date().toISOString());
+        (id, helper_pid, target_pid, target_label, output_path, group_id, started_at, status)
+      VALUES (?, ?, ?, ?, ?, (SELECT id FROM groups WHERE id = ?), ?, 'recording')
+    `).run(s.id, s.helperPid, s.targetPid, s.targetLabel, s.outputPath, s.groupId ?? null, new Date().toISOString());
+  }
+
+  updateHelperPid(id: string, helperPid: number): void {
+    this.db.prepare('UPDATE recording_sessions SET helper_pid = ? WHERE id = ?').run(helperPid, id);
   }
 
   finalize(id: string): void {
@@ -55,6 +62,31 @@ export class RecordingSessionsRepo {
     return (this.db.prepare("SELECT * FROM recording_sessions WHERE status = 'orphaned'").all() as Record<string, unknown>[])
       .map(rowToSession);
   }
+
+  findById(id: string): RecordingSessionRow | null {
+    const row = this.db.prepare('SELECT * FROM recording_sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+    return row ? rowToSession(row) : null;
+  }
+
+  findByOutputPath(outputPath: string): RecordingSessionRow | null {
+    const row = this.db.prepare('SELECT * FROM recording_sessions WHERE output_path = ? ORDER BY started_at DESC LIMIT 1')
+      .get(outputPath) as Record<string, unknown> | undefined;
+    return row ? rowToSession(row) : null;
+  }
+
+  findRecoverable(): RecordingSessionRow[] {
+    return (this.db.prepare(`
+      SELECT * FROM recording_sessions
+       WHERE status IN ('finalized', 'orphaned', 'error')
+         AND dismissed_at IS NULL
+       ORDER BY started_at DESC
+    `).all() as Record<string, unknown>[]).map(rowToSession);
+  }
+
+  dismissRecovery(id: string): void {
+    this.db.prepare('UPDATE recording_sessions SET dismissed_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), id);
+  }
 }
 
 function rowToSession(r: Record<string, unknown>): RecordingSessionRow {
@@ -64,8 +96,10 @@ function rowToSession(r: Record<string, unknown>): RecordingSessionRow {
     targetPid: (r.target_pid as number) ?? null,
     targetLabel: r.target_label as string,
     outputPath: r.output_path as string,
+    groupId: (r.group_id as string) ?? null,
     startedAt: r.started_at as string,
     finalizedAt: (r.finalized_at as string) ?? null,
     status: r.status as RecordingSessionRow['status'],
+    dismissedAt: (r.dismissed_at as string) ?? null,
   };
 }

@@ -1,10 +1,19 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { recoveryMediaHandler } from './recording/recovery-media.js';
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
+import { GroupsRepo } from './storage/groups-repo.js';
+import { ObsidianSync } from './obsidian/service.js';
+import { registerObsidianHandlers } from './ipc/obsidian-handlers.js';
+import { TerminologyRepo } from './storage/terminology-repo.js';
+import { TerminologyService } from './terminology/service.js';
+import { NotesHistory } from './storage/notes-history.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
@@ -24,6 +33,8 @@ import { recoverOrphans } from './recording/orphan-recovery.js';
 import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
 import { LibraryWatcher } from './library/watcher.js';
+import { catalogAudio } from './library/catalog.js';
+import { RecordingRecoveryService, revealPathInFinder } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
 import { Pipeline } from './pipeline/pipeline.js';
@@ -42,16 +53,15 @@ import { buildExporterRegistry } from './exporters/registry.js';
 import { GoogleAuth } from './google/auth.js';
 import { buildPayloadFromMeeting, type WebhookDeliveryResult } from './exporters/webhook.js';
 import { Logger } from './logging/logger.js';
-import { createMeetingFolder, meetingFolderPath } from './storage/meeting-folder.js';
+import { meetingFolderPath } from './storage/meeting-folder.js';
 import { parseAudioHijackFilename } from './lib/title-from-filename.js';
 import { createPeakThrottle } from './lib/peak-throttle.js';
-import { makeSlug, shortId } from './lib/slug.js';
-import { probeAudio } from './library/ffprobe.js';
 import { boundsVisibleOn, sanitizeBounds, type WindowBounds } from './lib/window-bounds.js';
 import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
 import { shouldNotifyGate } from './pipeline/gate-alert.js';
+import { ArtifactCache } from './library/artifact-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -177,10 +187,22 @@ app.whenReady().then(async () => {
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));
   const meetings = new MeetingsRepo(db);
+  const groups = new GroupsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
+  const artifactCache = new ArtifactCache();
+  const terminology = new TerminologyService(new TerminologyRepo(db), {
+    libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
+    beforeSummaryChange: id => notesHistory.capture(id, 'Before notes changed'),
+  });
+  const notesHistory = new NotesHistory(db, {libraryRoot, meetings, items: actionItems, terminology});
+  terminology.recover();
+  try { notesHistory.recover(); } catch (e) { logger.error('notes-history:recovery', {error: String(e)}); }
+  const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
+  registerObsidianHandlers(ipcMain, obsidian);
+  obsidian.start();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -268,21 +290,22 @@ app.whenReady().then(async () => {
   // the meter still catches transients but each window's webContents.send
   // rate drops ~5x. The manager keeps emitting per-line (Electron-free,
   // unit-testable); the throttle lives at the IPC boundary.
-  const levelThrottle = createPeakThrottle(100, (sessionId, peakDb) => {
+  const levelThrottle = createPeakThrottle(100, (key, peakDb) => {
+    const [sessionId, source] = key.split(':') as [string, 'mic' | 'system' | 'mixed'];
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, peakDb }));
+      w.webContents.send(IPC_CHANNELS.recordingLevelEvent, { sessionId, source, peakDb }));
   });
-  recordingManager.on('level', (sessionId, peakDb) => {
-    levelThrottle.push(sessionId, peakDb);
+  recordingManager.on('level', (sessionId, source, peakDb) => {
+    levelThrottle.push(`${sessionId}:${source}`, peakDb);
   });
   // Dock badge while recording: "REC" whenever at least one session is
   // actively capturing ('starting' counts — the helper is already attached
   // by then), cleared when the last one ends. app.dock is macOS-only, so
   // guard it for the (hypothetical) non-Mac build.
   const activeRecordings = new Set<string>();
-  recordingManager.on('state-change', (sessionId, state) => {
+  recordingManager.on('state-change', (sessionId, state, reason) => {
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state }));
+      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state, reason }));
     if (state === 'starting' || state === 'recording') activeRecordings.add(sessionId);
     else activeRecordings.delete(sessionId);
     app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
@@ -313,7 +336,10 @@ app.whenReady().then(async () => {
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
+    notesHistory,
+    terminology,
     libraryRoot,
+    artifactCache,
     lmStudio,
     stt,
     diarization,
@@ -354,51 +380,28 @@ app.whenReady().then(async () => {
   const watcher = new LibraryWatcher({
     paths: libraryWatchPaths({ libraryRoot, audioWatchPath: s.audioWatchPath, home: os.homedir() }),
   });
+  const notifyMeetingAdded = (id: string): void => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
+    }
+  };
+  const catalogRecording = async (audioPath: string) => {
+    const result = await catalogAudio(audioPath, {
+      meetings,
+      sessions: recordingSessionsRepo,
+      libraryRoot,
+      onSlugCollision: (slug, attempt) =>
+        logger.info('library:slug-collision-retry', { slug, attempt }),
+    });
+    if (result.kind === 'added') {
+      logger.info('library:discovered', { id: result.meeting.id, audioPath });
+      notifyMeetingAdded(result.meeting.id);
+    }
+    return result;
+  };
   watcher.onStableFile(async (audioPath) => {
     try {
-      // Dedupe: skip files we've already cataloged. Lets us catalog backlog
-      // on first run and quietly no-op on every restart afterward.
-      if (meetings.findByAudioPath(audioPath)) return;
-      const info = await probeAudio(audioPath);
-      const parsed = parseAudioHijackFilename(audioPath);
-      const dateIso = parsed.startedAtIso?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
-      // Retry on the (now extremely rare) UNIQUE(slug) collision rather than
-      // dropping the recording silently.
-      let inserted = false;
-      let id = '';
-      let slug = '';
-      for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
-        id = shortId();
-        slug = makeSlug(dateIso, parsed.autoTitle, id);
-        try {
-          createMeetingFolder(libraryRoot, slug, audioPath);
-          meetings.insert({
-            id, slug,
-            title: parsed.autoTitle,
-            startedAt: parsed.startedAtIso,
-            durationS: info.durationS,
-            audioPath,
-            // Cataloged only. The user picks which to process from the
-            // library — no auto-enqueueing.
-            status: 'pending',
-            pipelineStage: 'discovered',
-          });
-          inserted = true;
-        } catch (e) {
-          if (!String(e).includes('UNIQUE')) throw e;
-          logger.info('library:slug-collision-retry', { slug, attempt });
-        }
-      }
-      if (!inserted) throw new Error('slug collision retry exhausted');
-      logger.info('library:discovered', { id, slug, audioPath });
-      // Tell every open renderer window that a new meeting row exists.
-      // Without this, the Library view stays stale after a Stop because
-      // its post-stop refresh fires before chokidar's stability debounce
-      // — and with no live recording or pending meetings yet in state,
-      // the conditional 3s poll never starts.
-      for (const w of BrowserWindow.getAllWindows()) {
-        w.webContents.send(IPC_CHANNELS.meetingsAddedEvent, { id });
-      }
+      await catalogRecording(audioPath);
     } catch (e) {
       // The built-in helper may stop appending samples before it finalizes the
       // M4A's moov atom. Let the finalization change event retry this path.
@@ -408,6 +411,14 @@ app.whenReady().then(async () => {
   });
   await watcher.start();
 
+  const recordingRecovery = new RecordingRecoveryService({
+    sessions: recordingSessionsRepo,
+    meetings,
+    catalog: catalogRecording,
+    reveal: (audioPath) => revealPathInFinder(audioPath, shell),
+  });
+  protocol.handle('recovery-audio', recoveryMediaHandler(recordingRecovery));
+
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
   // Broadcast queue state changes to all renderer windows so the
@@ -416,6 +427,11 @@ app.whenReady().then(async () => {
   pipeline.onStatusChange((status) => {
     for (const w of BrowserWindow.getAllWindows()) {
       w.webContents.send(IPC_CHANNELS.pipelineStatusEvent, status);
+    }
+  });
+  pipeline.onMeetingStageChange((meetingId) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.meetingStageEvent, meetingId);
     }
   });
 
@@ -681,7 +697,10 @@ app.whenReady().then(async () => {
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
+    notesHistory,
+    terminology,
     meetings,
+    groups,
     speakers,
     actionItems,
     stageDurations,
@@ -689,6 +708,7 @@ app.whenReady().then(async () => {
     lmStudio,
     llmSupervisor,
     recordingManager,
+    recordingRecovery,
     appEnumerator,
     helperPath,
     roster,
@@ -700,6 +720,7 @@ app.whenReady().then(async () => {
     weeklyAggregator,
     logger,
     googleAuth,
+    artifactCache,
     gateNotified,
   });
 
@@ -727,6 +748,7 @@ app.whenReady().then(async () => {
     shuttingDown = true;
     e.preventDefault();
     pipeline.drain();
+    obsidian.stop();
     void (async () => {
       // Stop any active recordings cleanly so finalize is written, instead of
       // leaving the helper to die on parent-watch (which works but leaves an

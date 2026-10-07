@@ -13,7 +13,9 @@ export const runExtracting: StageHandler = async ({ meetingId }, ctx) => {
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   const { count } = await extractActionItemsFromSummary(
     { ...ctx, onResample: (retry, words) =>
-      ctx.logger.warn('extract:reasoning-retry', { meetingId, retry, reasoningWords: words }) },
+      ctx.logger.warn('extract:reasoning-retry', { meetingId, retry, reasoningWords: words }),
+      beforeReplace: () => { if (ctx.notesHistory && ctx.actionItems.listByMeeting(meetingId).length) ctx.notesHistory.capture(meetingId, 'Before action items replaced'); },
+    },
     meetingId,
     folder,
     're-run processing so the summarize stage regenerates it before action-item extraction.',
