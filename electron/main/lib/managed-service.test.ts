@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { ManagedService, killPortCommand, type ProbeResult } from './managed-service.js';
 
@@ -42,9 +43,146 @@ const okProbe = async (): Promise<ProbeResult> => ({ ok: true });
 
 const baseLaunch = (): { cmd: string; args: string[] } => ({ cmd: '/bin/true', args: [] });
 
+describe('ManagedService launcher handoff', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('coalesces starts and waits for health without restarting a successful launcher', async () => {
+    vi.useFakeTimers();
+    let healthy = false;
+    const proc = fakeProc();
+    const kill = vi.spyOn(proc, 'kill');
+    const spawn = vi.fn(() => {
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc as unknown as ChildProcess;
+    });
+    const svc = new ManagedService({
+      name: 'launcher', port: 9200, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: true, healthProbe: async () => ({ ok: healthy }),
+      restartDelayMs: 10, startupTimeoutMs: 100, startupPollIntervalMs: 5,
+    });
+    let ready = false;
+    const starting = Promise.all([svc.ensureReady(), svc.ensureReady()]).then(() => { ready = true; });
+    await vi.advanceTimersByTimeAsync(30);
+    expect(ready).toBe(false);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    healthy = true;
+    await vi.advanceTimersByTimeAsync(5);
+    await starting;
+    expect(svc.isRunning()).toBe(true);
+    await svc.ensureReady();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await svc.stop();
+    expect(kill).not.toHaveBeenCalled();
+    expect(svc.isRunning()).toBe(false);
+  });
+
+  it('adopts the daemon when health succeeds before the launcher exits', async () => {
+    vi.useFakeTimers();
+    const proc = fakeProc();
+    const spawn = vi.fn(() => proc as unknown as ChildProcess);
+    let probes = 0;
+    const svc = new ManagedService({
+      name: 'launcher', port: 9201, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: true, healthProbe: async () => ({ ok: ++probes > 1 }),
+      restartDelayMs: 10,
+    });
+    await svc.ensureReady();
+    proc.emit('exit', 0, null);
+    await vi.advanceTimersByTimeAsync(30);
+    expect(svc.isRunning()).toBe(true);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await svc.stop();
+  });
+
+  it.each([
+    { launcherExitsOk: true, code: 7, signal: null },
+    { launcherExitsOk: true, code: null, signal: 'SIGTERM' },
+    { launcherExitsOk: false, code: 0, signal: null },
+  ])('rejects a failed/signaled launcher or an exited ordinary daemon: %j', async (exit) => {
+    const spawn = vi.fn(() => {
+      const proc = fakeProc();
+      queueMicrotask(() => proc.emit('exit', exit.code, exit.signal));
+      return proc as unknown as ChildProcess;
+    });
+    const svc = new ManagedService({
+      name: 'launcher', port: 9202, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: exit.launcherExitsOk, healthProbe: noProbe,
+      maxRestarts: 0, startupTimeoutMs: 100, startupPollIntervalMs: 5,
+    });
+    await expect(svc.ensureReady()).rejects.toThrow('process exited before becoming healthy');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    await svc.stop();
+  });
+
+  it('times out after bounded attempts when a successful launcher never becomes healthy', async () => {
+    const spawn = vi.fn(() => {
+      const proc = fakeProc();
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc as unknown as ChildProcess;
+    });
+    const svc = new ManagedService({
+      name: 'launcher', port: 9203, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: true, healthProbe: noProbe,
+      startupMaxAttempts: 2, startupAttemptTimeoutMs: 20, startupPollIntervalMs: 5,
+      restartDelayMs: 0,
+    });
+    await expect(svc.ensureReady()).rejects.toThrow('after 2 attempt(s)');
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(svc.isRunning()).toBe(false);
+    await svc.stop();
+  });
+
+  it('does not adopt a daemon after stop cancels launcher startup', async () => {
+    vi.useFakeTimers();
+    let healthy = false;
+    const spawn = vi.fn(() => {
+      const proc = fakeProc();
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc as unknown as ChildProcess;
+    });
+    const svc = new ManagedService({
+      name: 'launcher', port: 9204, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: true, healthProbe: async () => ({ ok: healthy }),
+      startupTimeoutMs: 100, startupPollIntervalMs: 5,
+    });
+    const starting = svc.ensureReady().then(() => 'ready', () => 'stopped');
+    await vi.advanceTimersByTimeAsync(5);
+    await svc.stop();
+    healthy = true;
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await starting).toBe('stopped');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(svc.isRunning()).toBe(false);
+  });
+
+  it('ignores a health probe that succeeds after stop while the probe is in flight', async () => {
+    vi.useFakeTimers();
+    let finishProbe!: (result: ProbeResult) => void;
+    let calls = 0;
+    const spawn = vi.fn(() => {
+      const proc = fakeProc();
+      queueMicrotask(() => proc.emit('exit', 0, null));
+      return proc as unknown as ChildProcess;
+    });
+    const svc = new ManagedService({
+      name: 'launcher', port: 9205, spawn, resolveLaunch: baseLaunch,
+      launcherExitsOk: true,
+      healthProbe: () => ++calls === 1 ? Promise.resolve({ ok: false })
+        : new Promise<ProbeResult>((resolve) => { finishProbe = resolve; }),
+    });
+    const starting = svc.ensureReady().then(() => 'ready', () => 'stopped');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(2);
+    await svc.stop();
+    finishProbe({ ok: true });
+    expect(await starting).toBe('stopped');
+    expect(svc.isRunning()).toBe(false);
+  });
+});
+
 describe('ManagedService.ensureReady', () => {
   it('spawns and waits for /health to return ok', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     let probeCalls = 0;
     const probe = async (): Promise<ProbeResult> => {
       probeCalls += 1;
@@ -67,7 +205,7 @@ describe('ManagedService.ensureReady', () => {
   });
 
   it('coalesces concurrent ensureReady() calls into one start', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     let probeCalls = 0;
     const probe = async (): Promise<ProbeResult> => {
       probeCalls += 1;
@@ -87,7 +225,7 @@ describe('ManagedService.ensureReady', () => {
   });
 
   it('adopts an externally-running instance instead of spawning', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const svc = new ManagedService({
       name: 'test',
       port: 9002,
@@ -102,7 +240,7 @@ describe('ManagedService.ensureReady', () => {
   });
 
   it('does not kill an externally-owned instance on stop()', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const svc = new ManagedService({
       name: 'test',
       port: 9003,
@@ -117,7 +255,7 @@ describe('ManagedService.ensureReady', () => {
   });
 
   it('build_id mismatch kills the squatter and respawns', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const killOnPort = vi.fn(async () => {});
     let calls = 0;
     const probe = async (): Promise<ProbeResult> => {
@@ -146,7 +284,7 @@ describe('ManagedService.ensureReady', () => {
 describe('ManagedService idle shutdown', () => {
   it('stops the process after idleShutdownMs of no ensureReady calls', async () => {
     const proc = fakeProc();
-    const spawn = vi.fn(() => proc as any);
+    const spawn = vi.fn(() => proc as unknown as ChildProcess);
     const stoppedPromise = new Promise<void>((resolve) => proc.on('exit', () => resolve()));
     const svc = new ManagedService({
       name: 'test',
@@ -184,7 +322,7 @@ describe('ManagedService idle shutdown', () => {
 
   it('idle timer resets on each ensureReady()', async () => {
     const proc = fakeProc();
-    const spawn = vi.fn(() => proc as any);
+    const spawn = vi.fn(() => proc as unknown as ChildProcess);
     let calls = 0;
     const probe = async (): Promise<ProbeResult> => {
       calls += 1;
@@ -211,7 +349,7 @@ describe('ManagedService idle shutdown', () => {
   });
 
   it('idleShutdownMs <= 0 disables the timer', async () => {
-    const spawn = vi.fn(() => fakeProc() as any);
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     let calls = 0;
     const probe = async (): Promise<ProbeResult> => {
       calls += 1;
@@ -241,7 +379,7 @@ describe('ManagedService restart logic', () => {
       const p = fakeProc();
       // Simulate the child exiting before /health ever returns ok.
       setImmediate(() => p.emit('exit', 1, null));
-      return p as any;
+      return p as unknown as ChildProcess;
     });
     const svc = new ManagedService({
       name: 'test',
@@ -270,7 +408,7 @@ describe('ManagedService restart logic', () => {
     let spawnCount = 0;
     const spawn = vi.fn(() => {
       spawnCount += 1;
-      return fakeProc() as any; // stays alive until explicitly killed
+      return fakeProc() as unknown as ChildProcess; // stays alive until explicitly killed
     });
     const probe = async (): Promise<ProbeResult> => ({ ok: spawnCount >= 2 });
     const svc = new ManagedService({
@@ -290,11 +428,7 @@ describe('ManagedService restart logic', () => {
   });
 
   it('throws after exhausting the attempt budget when never healthy', async () => {
-    let spawnCount = 0;
-    const spawn = vi.fn(() => {
-      spawnCount += 1;
-      return fakeProc() as any;
-    });
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
     const svc = new ManagedService({
       name: 'never',
       port: 9101,
@@ -316,7 +450,7 @@ describe('ManagedService restart logic', () => {
     let spawnCount = 0;
     const spawn = vi.fn(() => {
       spawnCount += 1;
-      return fakeProc() as any;
+      return fakeProc() as unknown as ChildProcess;
     });
     const probe = async (): Promise<ProbeResult> => ({ ok: spawnCount >= 2 });
     const svc = new ManagedService({
@@ -351,7 +485,7 @@ describe('ManagedService restart logic', () => {
       p.on('exit', () => {
         serverUp = false;
       });
-      return p as any;
+      return p as unknown as ChildProcess;
     });
     const probe = async (): Promise<ProbeResult> => ({ ok: serverUp });
     const svc = new ManagedService({
@@ -382,7 +516,7 @@ describe('ManagedService restart logic', () => {
         p.stderr.emit('data', Buffer.from('ERROR: [Errno 48] address already in use'));
         p.emit('exit', 1, null);
       });
-      return p as any;
+      return p as unknown as ChildProcess;
     });
     const svc = new ManagedService({
       name: 'test',

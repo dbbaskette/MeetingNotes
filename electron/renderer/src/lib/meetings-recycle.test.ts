@@ -6,6 +6,8 @@ function row(overrides: Partial<MeetingRowLike> & { id: string }): MeetingRowLik
   return {
     slug: `slug-${overrides.id}`,
     title: `Meeting ${overrides.id}`,
+    groupId: null,
+    groupName: null,
     startedAt: '2026-07-01T10:00:00Z',
     durationS: 1800,
     pipelineStage: 'done',
@@ -92,6 +94,8 @@ describe('recycleMeetings', () => {
   it('detects changes in every scalar field, not just the pipeline ones', () => {
     for (const patch of [
       { title: 'Renamed' },
+      { groupId: 'g1' },
+      { groupName: 'Research' },
       { startedAt: '2026-07-02T10:00:00Z' },
       { durationS: 60 },
       { stageEtaMs: 5000 },
