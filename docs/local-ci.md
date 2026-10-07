@@ -42,7 +42,8 @@ clipping and duration alignment. They do not capture a microphone.
 For an explicitly requested packaged-runtime gate, build a disposable unsigned
 package and run `node scripts/ci/prepare-package-fixture.mjs /absolute/path/MeetingNotes.app /absolute/path/synthetic-speech.wav`.
 This creates the ignored `.ci-package-fixture/` payload with the current source
-commit. Only three cached pyannote model directories are copied (dereferenced);
+commit. Only four required cached pyannote model directories are copied as regular
+files (including pyannote 4's small PLDA dependency, not new account downloads);
 credentials and user meetings are never copied. The guest rejects stale commit
 metadata. Do not put a release installer or real audio in this payload.
 
