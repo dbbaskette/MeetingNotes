@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../ipc/client';
+import { GroupPicker } from './GroupPicker';
 
-export interface PickedSource { targetPid: number | 'system'; targetLabel: string; }
+export interface PickedSource { targetPid: number | 'system'; targetLabel: string; groupId?: string | null; }
 
 interface SourceItem {
   pid: number;
@@ -12,8 +13,9 @@ interface SourceItem {
 }
 
 export function SourcePicker({
-  onPick, onCancel,
-}: { onPick: (src: PickedSource) => void; onCancel: () => void }): JSX.Element {
+  onPick, onCancel, initialGroupId,
+}: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null }): JSX.Element {
+  const [groupId, setGroupId] = useState<string | null>(initialGroupId ?? null);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,7 @@ export function SourcePicker({
       setConfirmIdle(s);
       return;
     }
-    onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}` });
+    onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}`, groupId });
   }
 
   return (
@@ -105,11 +107,16 @@ export function SourcePicker({
 
       <div className="border-t border-surface-border my-1" />
       <button
-        onClick={() => onPick({ targetPid: 'system', targetLabel: 'All system audio' })}
+        onClick={() => onPick({ targetPid: 'system', targetLabel: 'All system audio', groupId })}
         className="w-full text-left px-2 py-1.5 rounded-md hover:bg-surface-sunken text-sm"
       >
         All system audio (catch-all)
       </button>
+      <div className="border-t border-surface-border my-1" />
+      <div className="px-2 py-1">
+        <div className="text-[10px] font-mono uppercase tracking-wider text-ink-muted mb-1">Save to group</div>
+        <GroupPicker value={groupId} onSelect={(choice) => setGroupId(choice ?? null)} compact />
+      </div>
       <button onClick={onCancel} className="w-full text-left px-2 py-1.5 rounded-md text-sm text-ink-muted hover:text-ink">
         Cancel
       </button>
@@ -121,7 +128,7 @@ export function SourcePicker({
           onProceed={() => {
             const s = confirmIdle;
             setConfirmIdle(null);
-            onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}` });
+            onPick({ targetPid: s.pid, targetLabel: s.name ?? `PID ${s.pid}`, groupId });
           }}
         />
       )}

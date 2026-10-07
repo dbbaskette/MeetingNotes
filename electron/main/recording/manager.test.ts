@@ -9,6 +9,7 @@ import {
 function fakeRepo(): any {
   return {
     insert: vi.fn(),
+    updateHelperPid: vi.fn(),
     finalize: vi.fn(),
     markError: vi.fn(),
     findOpen: () => [],
@@ -78,6 +79,7 @@ describe('RecordingManager', () => {
   it('start spawns helper with the right args', async () => {
     const spawned: { cmd: string; args: string[] }[] = [];
     const fakeSpawn = (cmd: string, args: string[]): any => {
+      expect(repo.insert).toHaveBeenCalled(); // capture intent is durable before helper starts
       spawned.push({ cmd, args });
       const stdoutCbs: ((c: string) => void)[] = [];
       return {
@@ -100,7 +102,8 @@ describe('RecordingManager', () => {
       spawn: fakeSpawn,
       clock: () => new Date('2026-04-20T19:23:00Z'),
     });
-    const { sessionId } = await mgr.start({ targetPid: 999, targetLabel: 'Zoom', mic: true });
+    const groupId = '6d73201f-33ab-45ba-b021-39140ee219d7';
+    const { sessionId } = await mgr.start({ targetPid: 999, targetLabel: 'Zoom', mic: true, groupId });
     expect(sessionId).toBeTruthy();
     expect(spawned).toHaveLength(1);
     expect(spawned[0]!.cmd).toBe('/bin/meeting-notes-tap');
@@ -109,6 +112,8 @@ describe('RecordingManager', () => {
     expect(spawned[0]!.args).toContain('--mic');
     expect(spawned[0]!.args).toContain('--out');
     expect(repo.insert).toHaveBeenCalled();
+    expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({ groupId, helperPid: -1 }));
+    expect(repo.updateHelperPid).toHaveBeenCalledWith(sessionId, 12345);
   });
 
   it('start with system-audio passes --system-audio', async () => {
@@ -174,6 +179,24 @@ describe('RecordingManager', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(onAutoStop).toHaveBeenCalledTimes(1);
     expect(repo.finalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards source-aware levels and treats legacy events as mixed', async () => {
+    const repo = fakeRepo();
+    const { proc, stdout } = fakeRecordingProcess();
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const levels: Array<[string, string, number]> = [];
+    mgr.on('level', (sessionId, source, peakDb) => levels.push([sessionId, source, peakDb]));
+
+    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
+    stdout.emit('data', '{"event":"level","source":"mic","peak_db":-12}\n');
+    stdout.emit('data', '{"event":"level","peak_db":-18}\n');
+
+    expect(levels).toEqual([
+      [sessionId, 'mic', -12],
+      [sessionId, 'mixed', -18],
+    ]);
+    await mgr.stop(sessionId);
   });
 
   it('does not reset for a peak exactly at the silence threshold', async () => {

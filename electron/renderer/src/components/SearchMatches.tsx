@@ -15,6 +15,7 @@ import { useMemo } from 'react';
 export interface SearchHit {
   meetingId: string;
   title: string;
+  groupName?: string | null;
   source: 'title' | 'summary' | 'transcript';
   snippet: string;
   seconds?: number;
