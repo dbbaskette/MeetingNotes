@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { recoverOrphans } from './orphan-recovery.js';
+import type { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 
 describe('recoverOrphans', () => {
   it('marks open sessions as orphaned when their PID no longer exists', async () => {
@@ -23,7 +24,7 @@ describe('recoverOrphans', () => {
     };
     const isAlive = vi.fn(() => false);
 
-    await recoverOrphans({ repo: repo as any, isProcessAlive: isAlive });
+    await recoverOrphans({ repo: repo as unknown as RecordingSessionsRepo, isProcessAlive: isAlive });
     expect(repo.markOrphaned).toHaveBeenCalledWith('s1');
   });
 
@@ -39,14 +40,14 @@ describe('recoverOrphans', () => {
       markOrphaned: vi.fn(), finalize: vi.fn(), markError: vi.fn(),
       insert: vi.fn(), findOrphaned: vi.fn(() => []),
     };
-    await recoverOrphans({ repo: repo as any, isProcessAlive: () => true });
+    await recoverOrphans({ repo: repo as unknown as RecordingSessionsRepo, isProcessAlive: () => true });
     // Don't touch sessions whose helper is still running — assume MeetingNotes
     // also running, just slow to handle exit. Don't double-handle.
     expect(repo.markOrphaned).not.toHaveBeenCalled();
     expect(repo.finalize).not.toHaveBeenCalled();
   });
 
-  it('treats pid -1 rows (failed spawns) as dead so they get orphaned', async () => {
+  it.each([-1, 0])('treats invalid pid %s as dead without a process-wide signal probe', async (helperPid) => {
     // Rows written after a failed spawn carry helperPid -1. POSIX
     // kill(-1, 0) succeeds ("signal everything I may signal"), which made
     // these rows immortal: auto-detect stayed suppressed and every
@@ -54,13 +55,17 @@ describe('recoverOrphans', () => {
     // isProcessAlive must short-circuit pid <= 0 without calling kill.
     const repo = {
       findOpen: vi.fn(() => [{
-        id: 'r1', helperPid: -1, outputPath: '/nope.m4a',
+        id: 'r1', helperPid, outputPath: '/nope.m4a',
         targetLabel: 'X', targetPid: null, startedAt: '', finalizedAt: null, status: 'recording' as const,
       }]),
       markOrphaned: vi.fn(), finalize: vi.fn(), markError: vi.fn(),
       insert: vi.fn(), findOrphaned: vi.fn(() => []),
     };
-    await recoverOrphans({ repo: repo as any }); // default isProcessAlive on purpose
-    expect(repo.markOrphaned).toHaveBeenCalledWith('r1');
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      await recoverOrphans({ repo: repo as unknown as RecordingSessionsRepo });
+      expect(repo.markOrphaned).toHaveBeenCalledWith('r1');
+      expect(kill).not.toHaveBeenCalled();
+    } finally { kill.mockRestore(); }
   });
 });

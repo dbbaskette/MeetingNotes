@@ -1,13 +1,19 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openDb } from '../storage/db.js';
+import { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 import {
   RecordingManager,
   SILENCE_THRESHOLD_DB,
   SILENCE_TIMEOUT_MS,
 } from './manager.js';
 
-function fakeRepo(): any {
-  return {
+function fakeRepo() {
+  const repo = {
     insert: vi.fn(),
     updateHelperPid: vi.fn(),
     finalize: vi.fn(),
@@ -15,25 +21,23 @@ function fakeRepo(): any {
     findOpen: () => [],
     findOrphaned: () => [],
   };
+  return repo as typeof repo & RecordingSessionsRepo;
 }
 
-function fakeRecordingProcess(opts: { autoExitOnTerm?: boolean } = {}): {
-  proc: any;
-  stdout: EventEmitter;
-} {
-  const stdout = new EventEmitter();
-  const proc = new EventEmitter() as any;
-  proc.pid = 12345;
-  proc.stdout = stdout;
-  proc.stdout.setEncoding = () => {};
-  proc.stderr = { on: () => {}, setEncoding: () => {} };
-  proc.kill = vi.fn((signal: string) => {
-    if (signal === 'SIGTERM' && opts.autoExitOnTerm !== false) {
-      queueMicrotask(() => proc.emit('exit', 0));
-    }
-    return true;
-  });
-  queueMicrotask(() => stdout.emit('data', '{"event":"started"}\n'));
+function fakeRecordingProcess(opts: { autoExitOnTerm?: boolean; emitStarted?: boolean } = {}) {
+  const stdout = Object.assign(new EventEmitter(), { setEncoding: () => {} });
+  const proc = Object.assign(new EventEmitter(), {
+    pid: 12345,
+    stdout,
+    stderr: { on: () => {}, setEncoding: () => {} },
+    kill: vi.fn((signal: string) => {
+      if (signal === 'SIGTERM' && opts.autoExitOnTerm !== false) {
+        queueMicrotask(() => proc.emit('exit', 0));
+      }
+      return true;
+    }),
+  }) as unknown as ChildProcessWithoutNullStreams;
+  if (opts.emitStarted !== false) queueMicrotask(() => stdout.emit('data', '{"event":"started"}\n'));
   return { proc, stdout };
 }
 
@@ -43,16 +47,12 @@ afterEach(() => {
 
 describe('RecordingManager', () => {
   it('marks the session row error and clears state when the helper exits before started', async () => {
-    const stdout = new EventEmitter();
-    const proc = new EventEmitter() as any;
+    const { proc } = fakeRecordingProcess({ emitStarted: false });
     proc.pid = 4242;
-    proc.stdout = stdout; proc.stdout.setEncoding = () => {};
-    proc.stderr = { on: () => {}, setEncoding: () => {} };
-    proc.kill = vi.fn();
     queueMicrotask(() => proc.emit('exit', 1)); // dies before "started"
     const repo = fakeRepo();
-    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc } as any);
-    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true } as any))
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true }))
       .rejects.toThrow(/exited before started/);
     // The row must not stay 'recording' — it suppresses auto-detect and
     // blocks every later meetingnotes://record with "Already recording".
@@ -62,23 +62,101 @@ describe('RecordingManager', () => {
   });
 
   it('rejects instead of hanging when spawn itself fails (error event, no exit)', async () => {
-    const stdout = new EventEmitter();
-    const proc = new EventEmitter() as any;
+    const { proc } = fakeRecordingProcess({ emitStarted: false });
     proc.pid = undefined; // exactly what node returns for a bad binary path
-    proc.stdout = stdout; proc.stdout.setEncoding = () => {};
-    proc.stderr = { on: () => {}, setEncoding: () => {} };
-    proc.kill = vi.fn();
     queueMicrotask(() => proc.emit('error', new Error('ENOENT'))); // never 'exit'
     const repo = fakeRepo();
-    const mgr = new RecordingManager({ helperPath: '/nonexistent', recordingsDir: '/tmp', repo, spawn: () => proc } as any);
-    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true } as any))
+    const mgr = new RecordingManager({ helperPath: '/nonexistent', recordingsDir: '/tmp', repo, spawn: () => proc });
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true }))
       .rejects.toThrow(/failed to spawn/);
     expect(repo.markError).toHaveBeenCalled();
   });
 
+  it('does not resurrect a stopped startup when a buffered started event arrives', async () => {
+    const repo = fakeRepo();
+    const { proc, stdout } = fakeRecordingProcess({ emitStarted: false, autoExitOnTerm: false });
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const states: string[] = [];
+    mgr.on('state-change', (_id, state) => states.push(state));
+    const start = mgr.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    const rejected = expect(start).rejects.toThrow(/stopped before capture started|exited before started/);
+    const sessionId = repo.insert.mock.calls[0]![0].id;
+    const stop = mgr.stop(sessionId);
+    stdout.emit('data', '{"event":"started"}\n');
+    proc.emit('exit', 0);
+    await Promise.all([rejected, stop]);
+    expect(states).not.toContain('recording');
+    expect(repo.markError).not.toHaveBeenCalled();
+    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    expect(mgr.state(sessionId)).toBe('idle');
+  });
+
+  it('preserves stop finalization when the helper exits without a started event', async () => {
+    const repo = fakeRepo();
+    const { proc } = fakeRecordingProcess({ emitStarted: false, autoExitOnTerm: false });
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    const start = mgr.start({ targetPid: 'system', targetLabel: 'All', mic: false });
+    const rejected = expect(start).rejects.toThrow(/exited before started/);
+    const sessionId = repo.insert.mock.calls[0]![0].id;
+    const stop = mgr.stop(sessionId);
+    proc.emit('exit', 0);
+    await Promise.all([rejected, stop]);
+    expect(repo.markError).not.toHaveBeenCalled();
+    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    expect(mgr.state(sessionId)).toBe('idle');
+  });
+
+  it('rejects a helper that emits started and exits in the same turn', async () => {
+    const repo = fakeRepo();
+    const { proc, stdout } = fakeRecordingProcess({ emitStarted: false });
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc });
+    queueMicrotask(() => {
+      stdout.emit('data', '{"event":"started"}\n');
+      proc.emit('exit', 1);
+    });
+    await expect(mgr.start({ targetPid: 'system', targetLabel: 'All', mic: false }))
+      .rejects.toThrow(/exited before started/);
+    const sessionId = repo.insert.mock.calls[0]![0].id;
+    expect(repo.markError).toHaveBeenCalledWith(sessionId);
+    expect(mgr.state(sessionId)).toBe('idle');
+  });
+
+  it.each(['spawn-throw', 'spawn-error', 'early-exit'])('allows another recording after %s without an open database row', async (failure) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-start-recovery-'));
+    const db = openDb(path.join(dir, 'db.sqlite'));
+    try {
+      const repo = new RecordingSessionsRepo(db);
+      let attempts = 0;
+      const mgr = new RecordingManager({
+        helperPath: '/fake-helper', recordingsDir: dir, repo,
+        spawn: () => {
+          attempts++;
+          if (attempts !== 1) return fakeRecordingProcess().proc;
+          if (failure === 'spawn-throw') throw new Error('spawn refused');
+          const { proc } = fakeRecordingProcess({ emitStarted: false });
+          queueMicrotask(() => failure === 'spawn-error'
+            ? proc.emit('error', new Error('ENOENT')) : proc.emit('exit', 1));
+          return proc;
+        },
+      });
+      await expect(mgr.start({ targetPid: 'system', targetLabel: 'Failed', mic: false })).rejects.toThrow();
+      expect(repo.findOpen()).toHaveLength(0);
+      expect(repo.findRecoverable()).toHaveLength(1);
+      expect(repo.findRecoverable()[0]!.status).toBe('error');
+      const { sessionId } = await mgr.start({ targetPid: 'system', targetLabel: 'Retry', mic: false });
+      expect(repo.findOpen()).toHaveLength(1);
+      expect(mgr.state(sessionId)).toBe('recording');
+      await mgr.stop(sessionId);
+      expect(repo.findOpen()).toHaveLength(0);
+    } finally {
+      db.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('start spawns helper with the right args', async () => {
     const spawned: { cmd: string; args: string[] }[] = [];
-    const fakeSpawn = (cmd: string, args: string[]): any => {
+    const fakeSpawn = (cmd: string, args: string[]): ChildProcessWithoutNullStreams => {
       expect(repo.insert).toHaveBeenCalled(); // capture intent is durable before helper starts
       spawned.push({ cmd, args });
       const stdoutCbs: ((c: string) => void)[] = [];
@@ -89,9 +167,9 @@ describe('RecordingManager', () => {
           setEncoding: () => {},
         },
         stderr: { on: () => {}, setEncoding: () => {} },
-        on: (_ev: string, _cb: any) => {},
+        on: () => {},
         kill: () => {},
-      };
+      } as unknown as ChildProcessWithoutNullStreams;
     };
     const repo = fakeRepo();
 
@@ -118,13 +196,13 @@ describe('RecordingManager', () => {
 
   it('start with system-audio passes --system-audio', async () => {
     const spawned: { cmd: string; args: string[] }[] = [];
-    const fakeSpawn = (cmd: string, args: string[]): any => {
+    const fakeSpawn = (cmd: string, args: string[]): ChildProcessWithoutNullStreams => {
       spawned.push({ cmd, args });
       return {
-        pid: 1, stdout: { on: (_: string, cb: any) => queueMicrotask(() => cb('{"event":"started"}\n')), setEncoding: () => {} },
+        pid: 1, stdout: { on: (_: string, cb: (chunk: string) => void) => queueMicrotask(() => cb('{"event":"started"}\n')), setEncoding: () => {} },
         stderr: { on: () => {}, setEncoding: () => {} },
         on: () => {}, kill: () => {},
-      };
+      } as unknown as ChildProcessWithoutNullStreams;
     };
     const repo = fakeRepo();
     const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: fakeSpawn });

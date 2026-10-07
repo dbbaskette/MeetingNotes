@@ -21,10 +21,12 @@ export const SILENCE_TIMEOUT_MS = 5 * 60_000;
 export const SILENCE_THRESHOLD_DB = -50;
 export type RecordingLevelSource = 'mic' | 'system' | 'mixed';
 
-type SpawnFn = (cmd: string, args: string[]) => ChildProcessWithoutNullStreams | any;
+type SpawnFn = (cmd: string, args: string[]) => ChildProcessWithoutNullStreams;
+type LevelListener = (sessionId: string, source: RecordingLevelSource, peakDb: number) => void;
+type StateListener = (sessionId: string, state: RecordingState, reason?: string) => void;
 
 interface SessionEntry {
-  proc: any;
+  proc: ChildProcessWithoutNullStreams;
   outputPath: string;
   state: RecordingState;
   silenceTimer: ReturnType<typeof setTimeout> | null;
@@ -97,6 +99,7 @@ export class RecordingManager {
     this.sessions.set(sessionId, entry);
 
     // Wait for the started event (helper emits {"event":"started"} when CoreAudio is attached).
+    let startupFailure: Error | undefined;
     try {
       await new Promise<void>((resolve, reject) => {
         let buf = '';
@@ -114,20 +117,29 @@ export class RecordingManager {
         // without this listener the EventEmitter throws uncaught and this
         // promise (and the renderer's Record invoke) hangs forever.
         proc.on('error', (err: Error) => {
-          reject(new Error(`helper failed to spawn: ${err.message}`));
+          startupFailure = new Error(`helper failed to spawn: ${err.message}`);
+          reject(startupFailure);
         });
         proc.on('exit', (code: number | null) => {
           if (this.sessions.get(sessionId)?.state !== 'recording') {
-            reject(new Error(`helper exited before started (code=${code})`));
+            startupFailure = new Error(`helper exited before started (code=${code})`);
+            reject(startupFailure);
           }
         });
       });
+      // A started line and exit/error can arrive in the same event-loop turn.
+      // Promise resolution alone must not declare a dead helper recording.
+      if (startupFailure) throw startupFailure;
     } catch (e) {
       // A failed start must not leave a live-looking session behind: an open
       // 'recording' row suppresses meeting auto-detect and makes every later
       // meetingnotes://record answer "Already recording" until app restart.
-      try { this.deps.repo.markError(sessionId); } catch { /* best-effort */ }
-      this.sessions.delete(sessionId);
+      // An explicit stop owns finalization; don't relabel it as an error or
+      // remove its entry while performStop is still using it.
+      if (entry.state === 'starting') {
+        try { this.deps.repo.markError(sessionId); } catch { /* best-effort */ }
+        if (this.sessions.get(sessionId) === entry) this.sessions.delete(sessionId);
+      }
       throw e;
     }
     // A stop can land while we were still 'starting' (URL-scheme stop knows
@@ -194,11 +206,11 @@ export class RecordingManager {
     return this.sessions.get(sessionId)?.state ?? 'idle';
   }
 
-  on(event: 'level', cb: (sessionId: string, source: RecordingLevelSource, peakDb: number) => void): void;
-  on(event: 'state-change', cb: (sessionId: string, state: RecordingState, reason?: string) => void): void;
-  on(event: 'level' | 'state-change', cb: any): void {
-    if (event === 'level') this.listeners.level.add(cb);
-    else this.listeners.stateChange.add(cb);
+  on(event: 'level', cb: LevelListener): void;
+  on(event: 'state-change', cb: StateListener): void;
+  on(event: 'level' | 'state-change', cb: LevelListener | StateListener): void {
+    if (event === 'level') this.listeners.level.add(cb as LevelListener);
+    else this.listeners.stateChange.add(cb as StateListener);
   }
 
   private transition(sessionId: string, state: RecordingState, reason?: string): void {
