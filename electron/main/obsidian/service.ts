@@ -15,6 +15,7 @@ import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
+import {backupIsLocked} from '../storage/backup-gate.js';
 import { atomicWrite, hash, identity, inside, readText, safePath, validateVault } from './files.js';
 import {
   browse,
@@ -366,7 +367,7 @@ export class ObsidianSync {
   }
   async run(): Promise<void> {
     const c = this.config();
-    if (this.running || this.stopped || !c?.enabled) return;
+    if (this.running || this.stopped || backupIsLocked() || !c?.enabled) return;
     this.running = true;
     try {
       const d = this.dest(c),

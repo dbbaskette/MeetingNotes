@@ -178,7 +178,7 @@ brew install whisper-cpp ffmpeg
 ## 🎬 Recording a meeting
 
 1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
-2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. **Refresh** updates sources without reopening or losing the group. Optionally choose **Save to group**, then pick an app or **All system audio**. Choosing the source starts recording.
+2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. **Refresh** retains the group and optional **Meeting title**. Choose **Save to group**, optionally enter a title, then pick an app or **All system audio**. Choosing the source starts recording. Titles also work in `meetingnotes://record?...&title=Platform%20planning` and remain separate from the audio-source label.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
 4. Click **■ Stop**, then confirm — finalized audio is cataloged in Library. If exit cannot be confirmed, keep the controls open and retry Stop.
 5. Click **▶ Process**, or explicitly enable **Process recordings automatically when recording stops** in Processing Settings (default off). Automation applies only to newly finalized built-in captures, not imports/recovery/history, and respects queue pause and speaker review.
@@ -193,6 +193,8 @@ If a capture is interrupted, finalized incompletely, or never indexed, open **Ne
 The Library opens in **Organized** view: **Ungrouped** appears first, followed by alphabetically sorted named groups, all as expandable sections in the meeting list. Meetings appear only inside their assigned section. Expand a section to browse its meetings, or choose **View** to focus on that group alone; **All groups** returns to the organized list. Use **All meetings** for a flat, sortable list. Status filters and inline search work in either layout; organized search groups matches by their assigned group, while **⌘K** quick search remains global. Use **+ New group** to create a section, and **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.
 
 Every row and the detail-view header has a **⋯** menu with **Move to group…**, **Rename…**, and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
+
+New arrivals in **Ungrouped** have a **New** marker until you explicitly choose **Mark new as seen** or group them. The existing backlog is not marked new on upgrade. Inline **Move…** opens the same confirmation flow; its recent destinations never move anything without confirmation. Nonzero group badges reveal unprocessed, in-progress/review, or failed meetings. Keyboard rows open with Enter/Space; visible checkboxes enter selection mode, and Escape clears it outside active dialogs/editors. After a move, Undo restores only rows that have not moved again. Editor Undo still takes precedence. Drilling into a meeting keeps the Library query, expanded groups, loaded rows, and scroll position; relaunch remembers only lightweight browse preferences unless you explicitly save a named filter.
 </details>
 
 ## 🧠 Bring your own model (and reasoning-model resilience)
@@ -229,6 +231,8 @@ The **Summary editor** has View and Edit modes, with a live preview while editin
 Use **Correct term…** above a transcript or summary to preview and select occurrences. **Review terminology** shows remembered suggestions and applied corrections with Undo. Raw transcription, speaker labels, and audio timing are preserved; corrections survive speaker renaming. If later edits overlap a correction, Undo asks you to correct the passage manually instead of overwriting those edits. Correcting a transcript marks its notes as out of date; regenerating notes is explicit and replaces the existing notes and action items. Saving or changing a dictionary rule does not rewrite historical meetings.
 
 **Action items** are extracted from the summary and carry **provenance**: click one to jump to the exact summary bullet it came from. Edited the summary? Hit **↻ Re-extract** to regenerate the items in seconds without re-running the whole pipeline.
+
+Deleting an individual task offers immediate **Undo**, preserving its identity, source, owner, due date, completion, and export metadata. Undo refuses to overwrite newer task changes.
 </details>
 
 <details>
@@ -237,6 +241,8 @@ Use **Correct term…** above a transcript or summary to preview and select occu
 The **Week** tab rolls up every meeting in the week: an LLM narrative (past weeks only), a **Themes** section synthesizing 3–6 topic threads that run *across* meetings (with clickable chips back to sources), all open action items grouped by owner, and key decisions. It's cached in SQLite by content hash — re-opening is instant; editing any meeting in the week invalidates it. **Export to Markdown** ships the whole rollup.
 
 Set **Settings → "You are…"** to pin *your* open action items to a "You" group at the top. The current week is intentionally narrative-free (it would go stale within hours); the structured rollup still updates live.
+
+Weeks use your Mac's local Monday–Sunday calendar, including DST boundaries. Task checkboxes, owner/due-date edits, **Snooze 1 week**, and Mine/Overdue/Due this week filters work directly in Weekly. Failed saves roll back and offer Retry; successful edits refresh counts and invalidate the narrative. The cache tracks actual summary text, tasks, and roster names; concurrent regenerate requests share one owner and stale generations are not cached.
 </details>
 
 <details>
@@ -245,7 +251,9 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 - **Learned ETAs** — the app records how long each stage takes on *your* machine, bucketed by transcript size, and shows "elapsed · ~estimate" with a "running long" cue. A rough estimate appears after a single run.
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
 - <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
+- Both Library and global search share date/week, speaker, task ownership, status, source, recovery-warning, and notes/transcript filters. Filters apply before result limits; chips remove them individually. Named filters explicitly save their query locally. Cancelled, incomplete, limited, and failed searches do not masquerade as complete results.
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.
+- Large timestamped transcripts render a bounded variable-height window on the existing scrollbar. **Find in transcript** / <kbd>⌘F</kbd>, full-copy and export still cover the whole text. Playback follows the active row unless you scroll manually; explicit seeks and search matches can reach unmounted passages. Per-line and Grouped views retain whole-text corrections and speaker colors.
 - **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings have prioritized next actions. **View all** or **+N more** opens the entire backlog with bounded pages.
 </details>
 
@@ -264,6 +272,8 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 ## 🔧 Configuration
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](docs/usability-improvements.md).
+
+**Settings → Storage → Back up Library** previews size and missing files, then creates a private local backup of the actual library and canonical settings databases, meeting audio (including external capture stems), notes, groups, speakers, and terminology. Model caches are excluded. Backup requires idle recording/processing/sync and protects writes while copying; checksummed manifests validate the result. A changed file inventory requires a fresh preview. Restore only into a new destination with the supplied script, never over a live Library. See [backup, privacy, restore, and rollback](docs/library-backup.md).
 
 **Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing Settings includes the shared Whisper download/model picker; custom paths stay in Advanced. See [capture, processing and delivery guide](docs/reliable-capture-processing.md) for retry history, audio limitations and deferred hardware checks.
 

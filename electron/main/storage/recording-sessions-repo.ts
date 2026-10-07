@@ -7,6 +7,7 @@ export interface RecordingSessionInsert {
   targetLabel: string;
   outputPath: string;
   groupId?: string | null;
+  title?: string;
 }
 
 export interface RecordingSessionRow {
@@ -16,6 +17,7 @@ export interface RecordingSessionRow {
   targetLabel: string;
   outputPath: string;
   groupId: string | null;
+  title?: string | null;
   startedAt: string;
   finalizedAt: string | null;
   status: 'recording' | 'finalized' | 'orphaned' | 'error';
@@ -28,9 +30,9 @@ export class RecordingSessionsRepo {
   insert(s: RecordingSessionInsert): void {
     this.db.prepare(`
       INSERT INTO recording_sessions
-        (id, helper_pid, target_pid, target_label, output_path, group_id, started_at, status)
-      VALUES (?, ?, ?, ?, ?, (SELECT id FROM groups WHERE id = ?), ?, 'recording')
-    `).run(s.id, s.helperPid, s.targetPid, s.targetLabel, s.outputPath, s.groupId ?? null, new Date().toISOString());
+        (id, helper_pid, target_pid, target_label, output_path, group_id, title, started_at, status)
+      VALUES (?, ?, ?, ?, ?, (SELECT id FROM groups WHERE id = ?), ?, ?, 'recording')
+    `).run(s.id, s.helperPid, s.targetPid, s.targetLabel, s.outputPath, s.groupId ?? null, s.title ?? null, new Date().toISOString());
   }
 
   updateHelperPid(id: string, helperPid: number): void {
@@ -97,6 +99,7 @@ function rowToSession(r: Record<string, unknown>): RecordingSessionRow {
     targetLabel: r.target_label as string,
     outputPath: r.output_path as string,
     groupId: (r.group_id as string) ?? null,
+    title: (r.title as string) ?? null,
     startedAt: r.started_at as string,
     finalizedAt: (r.finalized_at as string) ?? null,
     status: r.status as RecordingSessionRow['status'],

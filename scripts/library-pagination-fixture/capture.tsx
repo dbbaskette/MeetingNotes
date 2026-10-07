@@ -14,7 +14,7 @@ const meeting:any={id:'fixture',status:'failed',pipelineStage:'summarizing',erro
 function Fixture():JSX.Element {
   const [show,setShow]=useState(true),[revision,setRevision]=useState(0);
   return <main className="p-5 space-y-5"><button onClick={()=>{setShow(true);setRevision(v=>v+1);}}>Reset live fixture</button><button onClick={()=>setShow(false)}>Unmount live fixture</button>
-    {show&&<LiveRecordingRow key={revision} sessionId="capture" label="Synthetic app" startedAt={new Date(Date.now()-40000).toISOString()} groupId="preserved-group" onStopped={()=>{fixture.stopped++;setShow(false);}} onRestarted={()=>{fixture.reloads++;}}/>}
+    {show&&<LiveRecordingRow key={revision} sessionId="capture" label="Synthetic app" title="Preserved meeting title" startedAt={new Date(Date.now()-40000).toISOString()} groupId="preserved-group" onStopped={()=>{fixture.stopped++;setShow(false);}} onRestarted={()=>{fixture.reloads++;}}/>}
     <FailureBanner meeting={meeting} onReload={async()=>{fixture.reloads++;}}/>
     <div style={{maxWidth:480}}><SpeakersPanel meeting={meeting} compact onReload={async()=>{fixture.reloads++;}}/></div><div id="meeting-speakers" tabIndex={-1}>Full roster target</div>
   </main>;

@@ -13,13 +13,13 @@ export interface DueLabel {
  *  tripped up by time-of-day (a task due "today" should not read as
  *  overdue just because it's already 3pm). */
 function dateOnly(d: Date): number {
-  return new Date(d.toISOString().slice(0, 10)).getTime();
+  return Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());
 }
 
 export function fmtDueLabel(due: string | null, rangeEnd: string, now: Date = new Date()): DueLabel {
   if (!due) return { label: 'No due date', tier: 'none' };
   const dueT = new Date(due).getTime();
-  const endT = new Date(rangeEnd).getTime();
+  const endT = rangeEnd.length===10 ? Date.parse(rangeEnd) : dateOnly(new Date(rangeEnd));
   const todayT = dateOnly(now);
   const tier: DueTier = dueT < todayT ? 'overdue' : dueT <= endT ? 'this-week' : 'later';
   const fmtDate = (): string =>

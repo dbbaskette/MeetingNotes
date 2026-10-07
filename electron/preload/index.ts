@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { SearchRequest, SearchResponse } from '../shared/search';
+import type {BackupPreview,BackupStatus} from '../shared/backup';
 import type { NotesVersion, NotesComparison } from '../shared/notes-history';
 import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
 import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
@@ -21,6 +23,7 @@ type MeetingListQuery = {
   groupId?: string | null;
 };
 type MeetingSummary = {
+  createdAt?: string;
   id: string; slug: string; title: string; startedAt: string | null; durationS: number | null;
   groupId: string | null; groupName: string | null;
   pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
@@ -80,6 +83,14 @@ const IPC_CHANNELS = {
   groupsRename: 'groups:rename',
   groupsDelete: 'groups:delete',
   groupsAssign: 'groups:assign',
+  groupsUndo: 'groups:undo',
+  searchCancel: 'search:cancel',
+  actionItemsUndoDelete: 'action-items:undo-delete',
+  appUndoEdit: 'app:undo-edit',
+  backupPreview: 'backup:preview',
+  backupRun: 'backup:run',
+  backupStatus: 'backup:status',
+  recordingMeeting: 'recording:meeting',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
   recordingStop: 'recording:stop',
@@ -305,8 +316,8 @@ const api = {
   },
   groups: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.groupsList) as Promise<{
-      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string }[];
-      allCount: number; ungroupedCount: number;
+      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string; statusCounts?: {pending:number;processing:number;failed:number} }[];
+      allCount: number; ungroupedCount: number; ungroupedStatus?: {pending:number;processing:number;failed:number};
     }>,
     create: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsCreate, name) as Promise<{
       id: string; name: string; count: number; createdAt: string; updatedAt: string;
@@ -315,8 +326,10 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsDelete, id) as Promise<boolean>,
     assign: (ids: string[], groupId: string | null, expectedGroupId?: string | null) =>
       ipcRenderer.invoke(IPC_CHANNELS.groupsAssign, { ids, groupId, expectedGroupId }) as Promise<{
-        moved: { id: string; previousGroupId: string | null }[]; failedIds: string[];
+        moved: { id: string; previousGroupId: string | null; revision?: number }[]; failedIds: string[];
       }>,
+    undo: (items: { id: string; previousGroupId: string | null; revision: number }[]) =>
+      ipcRenderer.invoke(IPC_CHANNELS.groupsUndo, items) as Promise<{ moved: { id: string; previousGroupId: string | null; revision?: number }[]; failedIds: string[] }>,
   },
   trash: {
     /** Soft-deleted meetings still inside the retention window, newest
@@ -330,16 +343,17 @@ const api = {
       }[]>,
   },
   recording: {
+    meeting: (sessionId:string)=>ipcRenderer.invoke(IPC_CHANNELS.recordingMeeting,sessionId) as Promise<{id:string;title:string}|null>,
     active: () => ipcRenderer.invoke(IPC_CHANNELS.recordingActive) as Promise<{
       sessionId: string; state: string; label: string; startedAt: string;
-      startInput: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null };
+      startInput: { targetPid: number | 'system'; targetLabel: string; mic: boolean; title?: string; groupId?: string | null };
       disposable: boolean; outputPath: string;
     }[]>,
     test: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean }) => ipcRenderer.invoke(IPC_CHANNELS.recordingTest, input) as Promise<{
       durationS: number | null; streams: Record<string, { peakDb: number | null; playable: boolean }>; message: string;
     }>,
     listSources: () => ipcRenderer.invoke(IPC_CHANNELS.recordingListSources),
-    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null }) =>
+    start: (input: { targetPid: number | 'system'; targetLabel: string; mic: boolean; title?: string; groupId?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.recordingStart, input),
     stop: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingStop, sessionId),
     state: (sessionId: string) => ipcRenderer.invoke(IPC_CHANNELS.recordingState, sessionId),
@@ -426,10 +440,10 @@ const api = {
      *  for fields you want to leave unchanged, null to clear. */
     update: (id: string, patch: { text?: string; ownerName?: string | null; dueDate?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.actionItemsUpdate, id, patch) as Promise<void>,
-    /** Hard-delete a single action item. No undo (these are cheap to
-     *  retype; the undo budget is spent on meeting-level delete). */
+    undoDelete: (token:string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsUndoDelete,token) as Promise<boolean>,
+    /** Delete with a short-lived identity-preserving Undo token. */
     delete: (id: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.actionItemsDelete, id) as Promise<void>,
+      ipcRenderer.invoke(IPC_CHANNELS.actionItemsDelete, id) as Promise<string|null>,
     /** Create a single action item for the "Add item" button. */
     create: (meetingId: string, patch: { text: string; ownerName?: string | null; dueDate?: string | null }) =>
       ipcRenderer.invoke(IPC_CHANNELS.actionItemsCreate, meetingId, patch) as Promise<void>,
@@ -524,6 +538,9 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.onboardingOpenExternal, url) as Promise<void>,
   },
   search: {
+    run: (q:string, limit:number, groupId:string|null|undefined, request:SearchRequest) =>
+      ipcRenderer.invoke(IPC_CHANNELS.searchQuery,q,limit,groupId,request) as Promise<SearchResponse>,
+    cancel: (clientId:string, requestId:number) => ipcRenderer.invoke(IPC_CHANNELS.searchCancel,{clientId,requestId}) as Promise<void>,
     /** Full-text search across meeting titles + summaries + transcripts.
      *  Returns at most `limit` results, sorted title > summary >
      *  transcript. Each result carries the meeting id, the matched
@@ -661,7 +678,13 @@ const api = {
     micStatus: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsMicStatus) as Promise<'granted' | 'denied' | 'not-determined' | 'unknown'>,
   },
   app: {
+    undoEdit: () => ipcRenderer.invoke(IPC_CHANNELS.appUndoEdit) as Promise<void>,
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.appGetVersion) as Promise<string>,
+  },
+  backup: {
+    preview:()=>ipcRenderer.invoke(IPC_CHANNELS.backupPreview) as Promise<BackupPreview|null>,
+    run:(destination:string)=>ipcRenderer.invoke(IPC_CHANNELS.backupRun,destination) as Promise<BackupStatus>,
+    status:()=>ipcRenderer.invoke(IPC_CHANNELS.backupStatus) as Promise<BackupStatus>,
   },
   google: {
     /** Start interactive sign-in (opens the system browser). Resolves with
@@ -728,7 +751,7 @@ const api = {
    *  auto-record bundle) and settings.autoRecordZoom is on. Renderer
    *  routes the payload into its LiveRecording state so the in-progress
    *  card appears without a manual click. (#78 follow-up) */
-  onAutoRecordingStarted: (cb: (info: { sessionId: string; label: string; startedAt: string; startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null } }) => void) => {
+  onAutoRecordingStarted: (cb: (info: { sessionId: string; label: string; startedAt: string; startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; title?: string; groupId?: string | null } }) => void) => {
     const wrapped = (_e: unknown, payload: { sessionId: string; label: string; startedAt: string }): void => cb(payload);
     ipcRenderer.on('mn:auto-recording-started', wrapped);
     return () => ipcRenderer.off('mn:auto-recording-started', wrapped);

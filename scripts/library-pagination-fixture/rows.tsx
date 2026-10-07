@@ -31,9 +31,11 @@ await store.getState().setQuery({ filter: 'all', sort: 'newest', pageSize: 100 }
 while (store.getState().hasMore) await store.getState().loadMore();
 requests.length = 0;
 const mutations: unknown[] = [];
+let finishDelete: (() => void) | null = null;
+let holdDelete = false;
 window.api = { meetings: {
   rename: async (id: string, title: string) => { mutations.push({ rename: id, title }); const row = data.find((row) => row.id === id)!; row.title = title; },
-  delete: async (id: string) => { mutations.push({ delete: id }); },
+  delete: async (id: string) => { mutations.push({ delete: id }); if (holdDelete) await new Promise<void>(resolve => { finishDelete = resolve; }); },
   undoDelete: async () => true,
 } } as any;
 const { LibraryRow } = await import('../../electron/renderer/src/components/LibraryRow');
@@ -46,6 +48,8 @@ const fixture = {
   async paging() { hold = true; requests.length = 0; await store.getState().setQuery({ filter: 'all', sort: 'oldest', pageSize: 50 }); resetList(); },
   succeed() { const request = pending!; pending = null; request.resolve(request.response); },
   fail() { const request = pending!; pending = null; request.reject(new Error('Fixture page failure')); },
+  set holdDelete(value: boolean) { holdDelete = value; },
+  finishDelete() { holdDelete = false; finishDelete?.(); finishDelete = null; },
 };
 (window as any).fixture = fixture;
 

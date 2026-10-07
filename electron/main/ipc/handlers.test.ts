@@ -124,6 +124,18 @@ describe('paginated meeting summaries', () => {
     } finally { fsSync.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('returns truthful guidance for content-only filters without text and preserves metadata facets before caps',async()=>{
+    const sender={id:99,once:vi.fn()},event={sender} as unknown as IpcMainInvokeEvent;
+    const search=handlers.get('search:query')!;
+    const response=await search(event,'',20,undefined,{clientId:'fixture',requestId:1,facets:{content:'summary'}});
+    expect(response).toEqual({hits:[],status:'partial',message:expect.stringContaining('at least two')});
+    for(let i=0;i<100;i++)insert(`done${i}`);
+    insert('wanted','failed');
+    const filtered=await search(event,'',1,undefined,{clientId:'fixture',requestId:2,facets:{status:'failed'}});
+    expect(filtered.status).toBe('complete');expect(filtered.hits.map((hit:{meetingId:string})=>hit.meetingId)).toEqual(['wanted']);
+    await expect(search(event,42,20,undefined,{clientId:'fixture',requestId:3})).rejects.toThrow(/text/);
+  });
+
   it.each([
     { filter: 'bogus', sort: 'newest' }, { filter: 'all', sort: 'DROP TABLE meetings' },
     { filter: 'all', sort: 'newest', pageSize: 0 }, { filter: 'all', sort: 'newest', pageSize: 1.5 },
@@ -896,7 +908,8 @@ describe('registerIpcHandlers', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
-      actionItems: { listByMeeting: () => [], setStatus },
+      actionItems: { listByMeeting: () => [], setStatus, findById:()=>({meetingId:'m'}) },
+      meetings:{findById:()=>({id:'m',status:'done',deletedAt:null})},
     });
     registerIpcHandlers(fakeIpc, services);
     const call = handle.mock.calls.find((c) => c[0] === 'action-items:set-status');

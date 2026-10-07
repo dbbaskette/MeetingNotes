@@ -6,7 +6,6 @@
 // un-themed OS chrome that clashed with the app's styled modals
 // (DeleteDialog, ExportPickerModal) and blocked the renderer thread.
 
-import { useEffect, useRef } from 'react';
 import { ModalShell } from './ModalShell';
 
 export function ConfirmDialog({
@@ -34,25 +33,14 @@ export function ConfirmDialog({
   // Esc cancels — matches DeleteDialog and the other modals. Focus the
   // cancel button on open so Enter doesn't immediately fire the
   // destructive action on an impatient second keypress.
-  const cancelRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [open, onCancel]);
-
   if (!open) return null;
   return (
-    <ModalShell onClose={onCancel}>
+    <ModalShell title={title} busy={busy} onClose={onCancel}>
       <div className="text-sm font-semibold mb-2">{title}</div>
       <div className="text-sm text-ink-muted mb-4">{body}</div>
       <div className="flex justify-end gap-2">
         <button
-          ref={cancelRef}
+          data-dialog-initial-focus disabled={busy}
           onClick={onCancel}
           className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink rounded-lg"
         >

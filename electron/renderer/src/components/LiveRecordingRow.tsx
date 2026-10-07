@@ -15,16 +15,17 @@ import {
 const CONFIRM_STOP_MS = 3000;
 
 export function LiveRecordingRow({
-  sessionId, label, startedAt, groupId, micEnabled = true, onStopped, onRestarted,
+  sessionId, label, startedAt, groupId, title, micEnabled = true, onStopped, onRestarted,
 }: {
   sessionId: string;
   label: string;
   startedAt: string;
   groupId?: string | null;
+  title?: string;
   micEnabled?: boolean;
   onStopped: (summary: string) => void;
   onRestarted: (recording: { sessionId: string; label: string; startedAt: string;
-    startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null } }) => void;
+    startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null; title?: string } }) => void;
 }): JSX.Element {
   const elapsed = useElapsed(startedAt, true);
   const [peaks, setPeaks] = useState<Record<CaptureLevelSource, number>>({ mic: -60, system: -60, mixed: -60 });
@@ -96,7 +97,7 @@ export function LiveRecordingRow({
       const result = await stopRecording(sessionId, api.recording);
       if (!mounted.current) return;
       if (!result.stopped) { setRestartError(result.message); return; }
-      const startInput = { targetPid: 'system' as const, targetLabel: 'All system audio', mic: true, groupId };
+      const startInput = { targetPid: 'system' as const, targetLabel: 'All system audio', mic: true, groupId, title };
       const next = await api.recording.start(startInput) as { sessionId: string };
       if (mounted.current) onRestarted({ sessionId: next.sessionId, label: 'All system audio', startedAt: new Date().toISOString(), startInput });
     } catch (error) {

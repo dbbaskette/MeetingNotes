@@ -8,7 +8,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { SearchFilters } from './SearchFilters';
+import type { SearchFacets } from '../../../shared/search';
 import { api } from '../ipc/client';
+import { useDialogSurface } from '../lib/dialog-surface';
 import { shortcutMod } from '../lib/shortcut';
 import { paletteSearchView } from '../lib/palette-search';
 
@@ -39,12 +42,17 @@ export function SearchPalette({
   onClose: () => void;
   onOpenMeeting: (t: PaletteTarget) => void;
 }): JSX.Element | null {
+  const [facets,setFacets]=useState<SearchFacets>({});
+  const clientId=useRef(`palette-${crypto.randomUUID()}`),requestId=useRef(0);
+  const [completion,setCompletion]=useState<string|null>(null);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selected, setSelected] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogSurface(dialogRef, { active: open, onClose });
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Reset state when the palette opens. Focus the input on the next
@@ -60,13 +68,16 @@ export function SearchPalette({
   // that each keystroke doesn't fire an IPC on a big library.
   useEffect(() => {
     if (!open) return;
-    if (q.trim().length < 2) { setResults([]); setError(null); return; }
-    let cancelled = false;
+    if (q.trim().length < 2 && Object.keys(facets).length === 0) { setResults([]); setError(null); setLoading(false); return; }
+    let cancelled = false, dispatched=false;
+    const id=++requestId.current;
+    setCompletion(null);
     setLoading(true);
     const t = window.setTimeout(async () => {
       try {
-        const r = (await api.search.query(q, 20)) as SearchResult[];
-        if (!cancelled) { setResults(r); setSelected(0); setError(null); }
+        dispatched=true;
+        const r = await api.search.run(q,20,undefined,{clientId:clientId.current,requestId:id,facets});
+        if (!cancelled) { setResults(r.hits); setSelected(0); setError(r.status==='failed'?r.message??'Search failed':null); setCompletion(r.status==='complete'?null:r.message??r.status); }
       } catch (caught) {
         if (!cancelled) {
           setResults([]);
@@ -76,8 +87,8 @@ export function SearchPalette({
         if (!cancelled) setLoading(false);
       }
     }, 150);
-    return () => { cancelled = true; window.clearTimeout(t); };
-  }, [q, open, retryToken]);
+    return () => { cancelled = true; window.clearTimeout(t); if(dispatched)void api.search.cancel(clientId.current,id); };
+  }, [q, open, retryToken, facets]);
 
   function openResult(r: SearchResult, withTimestamp: boolean): void {
     onOpenMeeting({
@@ -90,6 +101,7 @@ export function SearchPalette({
 
   function onKey(e: React.KeyboardEvent<HTMLDivElement>): void {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    if((e.target as HTMLElement).closest('[data-search-filters]'))return;
     if (results.length === 0) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setSelected((s) => Math.min(s + 1, results.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setSelected((s) => Math.max(s - 1, 0)); }
@@ -104,6 +116,7 @@ export function SearchPalette({
 
   return createPortal(
     <div
+      ref={dialogRef} role="dialog" aria-modal="true" aria-label="Search meetings" tabIndex={-1}
       onClick={onClose}
       className="fixed inset-0 z-[1050] bg-black/30 flex items-start justify-center pt-24 px-4"
     >
@@ -118,6 +131,7 @@ export function SearchPalette({
           </svg>
           <input
             ref={inputRef}
+            maxLength={500}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search across all meetings…"
@@ -130,9 +144,10 @@ export function SearchPalette({
             Esc
           </kbd>
         </div>
+        <div className="px-4 py-2"><SearchFilters facets={facets} onChange={setFacets} query={q} onQuery={setQ}/>{completion&&<p role="status" className="text-xs text-status-warnText">{completion}</p>}</div>
         <div className="max-h-[60vh] overflow-y-auto">
           {(() => {
-            const view = paletteSearchView({ query: q, loading, error, results });
+            const view = paletteSearchView({ query: q || (Object.keys(facets).length ? 'filtered meetings' : ''), loading, error, results });
             if (view.kind === 'hint') {
               return (
                 <div className="px-4 py-6 text-xs text-ink-muted">
@@ -146,7 +161,7 @@ export function SearchPalette({
             if (view.kind === 'error') {
               return (
                 <div role="alert" className="px-4 py-6 text-sm text-ink-muted">
-                  Couldn't search: <span className="text-ink">{view.message}</span>
+                  Couldn&apos;t search: <span className="text-ink">{view.message}</span>
                   {' '}
                   <button
                     type="button"
@@ -161,7 +176,8 @@ export function SearchPalette({
             if (view.kind === 'empty') {
               return (
                 <div className="px-4 py-6 text-sm text-ink-muted italic">
-                  No matches for <span className="text-ink font-semibold">“{view.query}”</span>.
+                  {completion?'Search incomplete; no matches found so far for ':'No matches for '}<span className="text-ink font-semibold">“{view.query}”</span>.
+                  {completion&&<button onClick={()=>setRetryToken(token=>token+1)} className="ml-2 underline">Retry</button>}
                 </div>
               );
             }

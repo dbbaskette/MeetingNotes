@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { rememberGroupUndo } from '../lib/group-undo';
+import { recentGroups, rememberDestination, pruneDestinations } from '../lib/recent-groups';
 import { api } from '../ipc/client';
 import { assignGroupInBatches, completedGroupAssignmentIds } from '../lib/group-assignment';
 import { filteredMoveDestinations, type GroupDestination } from '../lib/group-move-options';
@@ -35,6 +37,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
   const [previewTitles, setPreviewTitles] = useState<string[]>([]);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (!loaded) void refresh(); }, [loaded, refresh]);
+  useEffect(()=>{if(loaded&&!groupsError)pruneDestinations(groups.map(group=>group.id));},[loaded,groupsError,groups]);
   useEffect(() => {
     if (meeting || moveIds.length === 0) return;
     let active = true;
@@ -77,7 +80,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
       }
       await refresh();
       librarySelection.getState().removeSucceeded(completed);
-      if (moved > 0) onChanged();
+      if (moved > 0) { rememberDestination(target.id); onChanged(); }
       onClose();
       if (moved === 0) {
         toast.show({
@@ -88,22 +91,22 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
         });
         return;
       }
+      const undoThisMove=rememberGroupUndo(async () => {
+        let restored = 0, failed = 0;
+        const items = result.moved.filter((item): item is typeof item & { revision: number } => item.revision !== undefined);
+        try {
+          for (let start = 0; start < items.length; start += 1000) {
+            const outcome = await api.groups.undo(items.slice(start, start + 1000));
+            restored += outcome.moved.length; failed += outcome.failedIds.length;
+          }
+          await refresh(); onChanged();
+          toast.show({ message: failed ? `Restored ${restored} of ${moved}. Later moves or deleted groups were left unchanged.` : `Restored ${restored} group assignments.`, variant: failed ? 'error' : 'default' });
+        } catch (cause) { toast.show({ message: `Undo failed: ${(cause as Error).message}`, variant: 'error' }); }
+      });
       toast.show({
         message: `${moved} meeting${moved === 1 ? '' : 's'} moved to “${target.name}”${alreadyAssigned ? `; ${alreadyAssigned} already there` : ''}${failures ? `; ${failures} still selected for retry` : ''}.`,
         variant: failures ? 'error' : 'default', durationMs: 10_000,
-        action: { label: 'Undo', onClick: async () => {
-          const byPrevious = new Map<string | null, string[]>();
-          for (const item of result.moved) {
-            const list = byPrevious.get(item.previousGroupId) ?? [];
-            list.push(item.id); byPrevious.set(item.previousGroupId, list);
-          }
-          const outcomes = await Promise.allSettled([...byPrevious].map(([previousId, groupIds]) =>
-            assignGroupInBatches(groupIds, previousId, api.groups.assign, target.id)));
-          const restored = outcomes.reduce((count, outcome) => count +
-            (outcome.status === 'fulfilled' ? outcome.value.moved.length : 0), 0);
-          await refresh(); onChanged();
-          if (restored < moved) toast.show({ message: `Restored ${restored} of ${moved} group assignments.`, variant: 'error' });
-        } },
+        action: { label: 'Undo', onClick: undoThisMove },
       });
     } catch (cause) {
       setError((cause as Error).message);
@@ -131,8 +134,8 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
     }
   }
 
-  return <ModalShell onClose={() => { if (!busy) onClose(); }}>
-    <div role="dialog" aria-modal="true" aria-labelledby="move-group-title">
+  return <ModalShell title="Move meetings to a group" busy={busy} onClose={onClose}>
+    <div>
       <h2 id="move-group-title" className="text-base font-semibold">Move {countLabel}</h2>
       <div className="mt-3 rounded-lg bg-surface-sunken px-3 py-2.5 text-sm">
         {meeting ? <>
@@ -174,7 +177,11 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
           {groupsError && <div role="alert" className="px-3 py-2 text-xs text-danger-text">
             Could not load groups. <button type="button" onClick={() => void refresh()} className="font-semibold underline">Retry</button>
           </div>}
-          {destinations.map((option) => <button key={option.id ?? 'ungrouped'} type="button" disabled={busy}
+          {!search && recentGroups().map(id => destinations.find(option => option.id === id)).filter((option): option is GroupDestination => !!option).map(option => <button key={`recent-${option.id}`} type="button" disabled={busy || meeting?.groupId === option.id}
+            onClick={() => { setDestination(option); setError(null); }} className="rounded-lg border border-surface-border px-3 py-2 mr-1 text-xs disabled:opacity-40">
+            Recent: {option.name}
+          </button>)}
+          {destinations.map((option) => <button key={option.id ?? 'ungrouped'} type="button" disabled={busy || meeting?.groupId === option.id}
             aria-pressed={destination?.id === option.id}
             onClick={() => { setDestination(option); setError(null); }}
             className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 disabled:opacity-50

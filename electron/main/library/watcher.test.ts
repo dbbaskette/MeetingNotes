@@ -80,10 +80,14 @@ describe('LibraryWatcher', () => {
     await w.start();
     expect(seen).toEqual([file]);
 
+    // Chokidar 'ready' describes its scan, not fs.watchFile's asynchronous
+    // initial stat. Let two default binary polling periods (300 ms each)
+    // establish that baseline before testing a later released-path change.
+    // The event itself is still condition-waited and must actually arrive.
+    await new Promise(resolve=>setTimeout(resolve,600));
     w.release(file);
-    fs.appendFileSync(file, Buffer.alloc(10));
-    await waitFor(() => seen.length === 2);
-    await w.stop();
+    try{fs.appendFileSync(file, Buffer.alloc(10));await waitFor(() => seen.length === 2);}
+    finally{await w.stop();}
     expect(seen).toEqual([file, file]);
   });
 

@@ -80,6 +80,10 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
       const key = event.key.toLowerCase();
       if (key !== 'j' && key !== 'k') return;
       const target = event.target as HTMLElement | null;
+      // Retained Library views can be hidden while detail/Weekly is active.
+      // Their global shortcuts must not move the background list or leak
+      // through an open portal dialog.
+      if (!scrollRef.current?.getClientRects().length || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       event.preventDefault();
       const currentIndex = focusedId === null ? null : items.findIndex((item) => item.id === focusedId);

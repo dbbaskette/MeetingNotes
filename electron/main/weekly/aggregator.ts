@@ -118,7 +118,7 @@ export class WeeklyAggregator {
     isoWeek: number,
     opts: { force?: boolean } = {},
   ): Promise<WeeklyNarrative> {
-    const key = `${isoYear}:${isoWeek}:${opts.force ? 'force' : 'normal'}`;
+    const key = `${isoYear}:${isoWeek}`;
     const existing = this.narrativeInFlight.get(key);
     if (existing) return existing;
     const promise = this.runGetOrGenerate(isoYear, isoWeek, opts)
@@ -161,9 +161,6 @@ export class WeeklyAggregator {
     if (meetings.length === 0) {
       return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
-    if (opts.force) {
-      this.deps.weeklySummaries.clear(isoYear, isoWeek);
-    }
     const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
     const openActionGroups = this.collectOpenActions(meetings);
     const out = await this.regenerate(
@@ -204,8 +201,11 @@ export class WeeklyAggregator {
   /** Forces narrative regeneration even when the input hash is
    *  unchanged. Used by the renderer's "Regenerate" button. */
   async regenerateWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
-    this.deps.weeklySummaries.clear(isoYear, isoWeek);
-    return this.getWeek(isoYear, isoWeek);
+    const [structured, narrative] = await Promise.all([
+      this.getStructuredWeek(isoYear, isoWeek), this.getOrGenerateNarrative(isoYear, isoWeek, { force: true }),
+    ]);
+    const { hasFreshCache: _drop, ...out } = structured; void _drop;
+    return { ...out, ...narrative };
   }
 
   // ──────── Internals ────────
@@ -285,6 +285,8 @@ export class WeeklyAggregator {
           isYou,
           status: it.status,
           dueDate: it.dueDate,
+          ownerName: ownerLabel,
+          sourceQuote: it.sourceQuote,
           meetingStartedAt: m.startedAt ?? m.createdAt,
         });
         byOwner.set(key, group);
@@ -315,7 +317,18 @@ export class WeeklyAggregator {
 
   private computeInputHash(meetings: readonly MeetingRow[]): string {
     const sorted = [...meetings].sort((a, b) => a.id.localeCompare(b.id));
-    const payload = sorted.map((m) => `${m.id}:${m.updatedAt}`).join('|');
+    // Hash the actual source content, not incidental timestamp mutations.
+    // This catches summary/terminology/history edits and all task/roster paths.
+    const payload = JSON.stringify({
+      meetings: sorted.map(m => {
+        let summary: string | null = null;
+        try { summary = fs.readFileSync(path.join(meetingFolderPath(this.deps.libraryRoot, m.slug), 'summary.md'), 'utf8'); } catch { /* absent summary */ }
+        return { id: m.id, title: m.title, startedAt: m.startedAt, durationS: m.durationS,
+          updatedAt: m.updatedAt, summary, actions: this.deps.actionItems.listByMeeting(m.id).sort((a, b) => a.id.localeCompare(b.id)) };
+      }),
+      roster: this.deps.speakers.list().map(s => [s.id, s.displayName]).sort((a, b) => a[0]!.localeCompare(b[0]!)),
+      userSpeakerId: this.deps.settings.get('userSpeakerId'),
+    });
     return crypto.createHash('sha256').update(payload).digest('hex');
   }
 
@@ -366,6 +379,11 @@ export class WeeklyAggregator {
       openActions,
     });
 
+    const { start, end } = isoWeekRange(isoYear, isoWeek);
+    const current = this.deps.meetings.listInRange(start.toISOString(), end.toISOString());
+    if (this.computeInputHash(current) !== inputHash) {
+      throw new Error('This week changed while its overview was being generated. Refresh to generate from the current notes and tasks.');
+    }
     this.deps.weeklySummaries.upsert({
       isoYear,
       isoWeek,

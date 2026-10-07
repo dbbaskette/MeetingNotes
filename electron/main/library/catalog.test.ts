@@ -44,7 +44,7 @@ describe('catalogAudio', () => {
     const groupId = 'e0db3539-78e0-4d71-bb8c-1d622b67bd0b';
     const original = '/recordings/recording-20260924-120000-xyz.m4a';
     const recovered = '/recordings/recording-20260924-120000-xyz.recovered-trimmed-123e4567-e89b-12d3-a456-426614174000.m4a';
-    const findByOutputPath = vi.fn((audioPath: string) => audioPath === original ? { groupId } : null);
+    const findByOutputPath = vi.fn((audioPath: string) => audioPath === original ? { groupId,title:'User capture title' } : null);
     const deps = {
       meetings: { findByAudioPath: (audioPath: string) => rows.get(audioPath) ?? null,
         insert: (row: MeetingInsert) => rows.set(row.audioPath, row) } as unknown as MeetingsRepo,
@@ -54,7 +54,7 @@ describe('catalogAudio', () => {
     };
     const first = await catalogAudio(recovered, deps);
     const retry = await catalogAudio(recovered, deps);
-    expect(first.meeting).toMatchObject({ groupId });
+    expect(first.meeting).toMatchObject({ groupId,title:'User capture title',titleExplicit:true });
     expect(retry.kind).toBe('existing');
     expect(deps.createFolder).toHaveBeenCalledTimes(1);
     expect(findByOutputPath).toHaveBeenCalledWith(original);

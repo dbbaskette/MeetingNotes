@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useDialogSurface } from '../lib/dialog-surface';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { Icon } from '../components/icons';
@@ -249,6 +250,8 @@ function ExportPickerModal({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogSurface(dialogRef, { busy, onClose });
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -301,8 +304,9 @@ function ExportPickerModal({
 
   return (
     <div
+      ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Export ${exporter.label}`} tabIndex={-1}
       className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40"
-      onClick={onClose}
+      onClick={() => { if (!busy) onClose(); }}
     >
       <div
         className="bg-surface rounded-2xl shadow-2xl border border-surface-border w-full max-w-xl max-h-[80vh] flex flex-col"
@@ -315,11 +319,11 @@ function ExportPickerModal({
           </span>
           <div className="flex-1" />
           <button
-            onClick={selectAll}
+            disabled={busy} onClick={selectAll}
             className="text-[11px] font-semibold text-brand-indigo hover:underline"
           >All</button>
           <button
-            onClick={selectNone}
+            disabled={busy} onClick={selectNone}
             className="text-[11px] font-semibold text-ink-muted hover:underline"
           >None</button>
         </div>
@@ -359,6 +363,7 @@ function ExportPickerModal({
               >
                 <input
                   type="checkbox"
+                  disabled={busy}
                   checked={checked}
                   onChange={() => toggle(it.id)}
                   className="mt-1 w-4 h-4 accent-brand-indigo shrink-0"
@@ -407,7 +412,7 @@ function ExportPickerModal({
           ) : null}
           {!error && !result && <div className="flex-1" />}
           <button
-            onClick={onClose}
+            disabled={busy} onClick={onClose}
             className="text-sm text-ink-muted hover:text-ink px-3 py-1.5 rounded-lg hover:bg-surface-sunken transition"
           >
             {result ? 'Close' : 'Cancel'}

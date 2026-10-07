@@ -4,6 +4,7 @@ import { createMeetingFolder } from '../storage/meeting-folder.js';
 import { makeSlug, shortId } from '../lib/slug.js';
 import { parseAudioHijackFilename } from '../lib/title-from-filename.js';
 import { probeAudio } from './ffprobe.js';
+import { waitForBackup } from '../storage/backup-gate.js';
 
 export interface CatalogMeeting {
   id: string;
@@ -29,6 +30,7 @@ export async function catalogAudio(audioPath: string, deps: {
   if (existing) return { kind: 'existing', meeting: existing };
 
   const info = await (deps.probe ?? probeAudio)(audioPath);
+  await waitForBackup();
   // Watcher and confirmed-stop observers can probe the same file together.
   // Inserts below are synchronous: recheck after the only async boundary.
   const concurrent = deps.meetings.findByAudioPath(audioPath);
@@ -38,16 +40,17 @@ export async function catalogAudio(audioPath: string, deps: {
   const createFolder = deps.createFolder ?? createMeetingFolder;
   const makeId = deps.id ?? shortId;
   const recoveryOriginal = audioPath.replace(/\.recovered-(?:mic|system|trimmed)-[0-9a-f-]{36}(?=\.[^.]+$)/i, '');
-  const groupId = deps.sessions?.findByOutputPath(audioPath)?.groupId
-    ?? (recoveryOriginal !== audioPath ? deps.sessions?.findByOutputPath(recoveryOriginal)?.groupId : null)
-    ?? null;
+  const session = deps.sessions?.findByOutputPath(audioPath)
+    ?? (recoveryOriginal !== audioPath ? deps.sessions?.findByOutputPath(recoveryOriginal) : null);
+  const groupId = session?.groupId ?? null;
+  const title = session?.title || parsed.autoTitle;
   for (let attempt = 0; attempt < 5; attempt++) {
     const id = makeId();
     const slug = makeSlug(dateIso, parsed.autoTitle, id);
     try {
       createFolder(deps.libraryRoot, slug, audioPath);
       const meeting = {
-        id, slug, title: parsed.autoTitle, startedAt: parsed.startedAtIso,
+        id, slug, title, titleExplicit: !!session?.title, startedAt: parsed.startedAtIso,
         durationS: info.durationS, audioPath, status: 'pending', pipelineStage: 'discovered',
         groupId,
       };

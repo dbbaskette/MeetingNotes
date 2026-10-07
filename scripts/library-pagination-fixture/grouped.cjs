@@ -18,7 +18,7 @@ app.whenReady().then(async () => {
   }
   await win.loadURL(base); await settle(); await until('document.querySelectorAll("[data-meeting-id]").length > 0');
   if (process.env.MN_FIXTURE_FOCUS === '1') {win.show(); win.focus(); app.focus({steal: true}); win.webContents.focus(); await until('document.hasFocus()');}
-  await run('document.querySelector("[data-meeting-id=m-0] button[aria-label=Select]").focus()');
+  await run('document.querySelector("[data-meeting-id=m-0] button[role=checkbox]").focus()');
   await settle();
   await run('document.querySelector("#viewport").scrollTop=108000'); await settle();
   assert(await count()<40); if (process.env.MN_FIXTURE_FOCUS === '1') assert.equal(await run('document.activeElement.closest("[data-meeting-id]")?.dataset.meetingId'),'m-0');

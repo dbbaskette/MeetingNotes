@@ -14,9 +14,8 @@
 //      meeting recorder defaults.
 //      e.g. "Voice Chat 20260410 1200.mp3"
 //
-// All three produce a local-time ISO timestamp (no Z suffix). The
-// recording was started in the user's local timezone — preserving
-// that semantics matters for the Weekly view's ISO-week grouping.
+// Return UTC instants: external filename wall clocks are interpreted locally;
+// built-in filenames encode UTC (RecordingManager uses toISOString).
 //
 // `parseAudioHijackFilename` is the legacy export retained for
 // backward compatibility with callers + tests. Prefer the new
@@ -24,6 +23,7 @@
 // formats supported.
 
 import path from 'node:path';
+import { meetingInstant } from './meeting-instant.js';
 
 const AH_REGEX = /^(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d{2})\.(\d{2})$/;
 const BUILTIN_REGEX = /^recording-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-[A-Za-z0-9]+)?$/;
@@ -35,9 +35,7 @@ export interface ParsedFilename {
   /** Title to show in the library before the user (or summarizer)
    *  renames it. Falls back to the basename without extension. */
   autoTitle: string;
-  /** Local-time ISO timestamp ("YYYY-MM-DDTHH:MM:SS") or null if
-   *  the filename didn't match a known pattern. No Z suffix —
-   *  these are local times, not UTC. */
+  /** UTC ISO instant, or null for an unknown/invalid filename clock. */
   startedAtIso: string | null;
 }
 
@@ -50,7 +48,7 @@ export function parseRecordingFilename(filename: string): ParsedFilename {
     const [, title, date, hh, mm] = ah;
     return {
       autoTitle: title!.trim(),
-      startedAtIso: `${date}T${hh}:${mm}:00`,
+      startedAtIso: meetingInstant(`${date}T${hh}:${mm}:00`, filename),
     };
   }
 
@@ -63,7 +61,7 @@ export function parseRecordingFilename(filename: string): ParsedFilename {
       // basename so the user can recognize the row before the
       // summarizer auto-titles it.
       autoTitle: base,
-      startedAtIso: `${y}-${mo}-${d}T${hh}:${mm}:${ss}`,
+      startedAtIso: meetingInstant(`${y}-${mo}-${d}T${hh}:${mm}:${ss}`, filename),
     };
   }
 
@@ -74,7 +72,7 @@ export function parseRecordingFilename(filename: string): ParsedFilename {
     const [, title, y, mo, d, hh, mm] = cd;
     return {
       autoTitle: title!.trim(),
-      startedAtIso: `${y}-${mo}-${d}T${hh}:${mm}:00`,
+      startedAtIso: meetingInstant(`${y}-${mo}-${d}T${hh}:${mm}:00`, filename),
     };
   }
 

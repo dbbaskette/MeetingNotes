@@ -23,6 +23,7 @@ sidecar/.venv*/
 # Build artifacts
 release/
 .ci-package-fixture/
+.ci-*-results/
 sidecar/dist/
 sidecar/build/
 sidecar/*.spec

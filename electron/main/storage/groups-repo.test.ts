@@ -69,7 +69,7 @@ describe('GroupsRepo', () => {
     groups.assign(['a'], first.id);
     const result = groups.assign(['a', 'b', 'deleted', 'missing'], second.id);
     expect(result.moved).toEqual([
-      { id: 'a', previousGroupId: first.id }, { id: 'b', previousGroupId: null },
+      { id: 'a', previousGroupId: first.id, revision:2 }, { id: 'b', previousGroupId: null, revision:1 },
     ]);
     expect(result.failedIds).toEqual(['deleted', 'missing']);
     expect(groups.assign(['a'], first.id, null).failedIds).toEqual(['a']);

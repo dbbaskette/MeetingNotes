@@ -50,6 +50,9 @@ import { runIdentifying } from './pipeline/stages/identifying.js';
 import { runSummarizing } from './pipeline/stages/summarizing.js';
 import { runExtracting } from './pipeline/stages/extracting.js';
 import { registerIpcHandlers } from './ipc/handlers.js';
+import {guardLibraryIpc} from './ipc/backup-guard.js';
+import {LibraryBackup} from './storage/library-backup.js';
+import {assertNoLibraryMutations,backupIsLocked} from './storage/backup-gate.js';
 import { MeetingDetector } from './meeting-detector/detector.js';
 import { NativeAppDetector } from './meeting-detector/native-app-detector.js';
 import { purgeTrashDir, TRASH_RETENTION_MS } from './storage/trash.js';
@@ -210,7 +213,8 @@ app.whenReady().then(async () => {
   terminology.recover();
   try { notesHistory.recover(); } catch (e) { logger.error('notes-history:recovery', {error: String(e)}); }
   const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
-  registerObsidianHandlers(ipcMain, obsidian);
+  const guardedIpc=guardLibraryIpc(ipcMain);
+  registerObsidianHandlers(guardedIpc, obsidian);
   obsidian.start();
 
   // Collapse roster entries with matching display names (case + whitespace
@@ -480,6 +484,7 @@ app.whenReady().then(async () => {
   // The trash:list IPC also purges before answering, so the "Recently
   // deleted" section never offers a restore that can't succeed.
   const purgeExpiredTrash = (): void => {
+    if(backupIsLocked())return;
     const cutoff = new Date(Date.now() - TRASH_RETENTION_MS).toISOString();
     const expired = meetings.findSoftDeleted(cutoff);
     for (const m of expired) {
@@ -736,7 +741,12 @@ app.whenReady().then(async () => {
     ),
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
-  registerIpcHandlers(ipcMain, {
+  const backup=new LibraryBackup({db,settingsDb,root:libraryRoot,version:app.getVersion(),
+    assertIdle:()=>{assertNoLibraryMutations();if(recordingManager.active().length||pipeline.getStatus().currentId||obsidian.status().running)throw new Error('Wait for recording, processing, or vault sync to finish before backing up. Nothing was interrupted.');},
+    pause:()=>{const paused=pipeline.getStatus().paused;pipeline.pause();return()=>{if(!paused)pipeline.resume();};},
+  });
+  registerIpcHandlers(guardedIpc, {
+    backup,
     notesHistory,
     terminology,
     meetings,

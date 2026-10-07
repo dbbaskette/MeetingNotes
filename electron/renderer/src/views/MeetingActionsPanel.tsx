@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
+import { useToast } from '../components/Toasts';
 import { Icon } from '../components/icons';
 import { shortcutMod } from '../lib/shortcut';
 import type { MeetingDetail } from './MeetingDetailView';
@@ -203,6 +204,7 @@ function ActionItemEditor({
   onSaved: () => Promise<void>;
   onDeleted?: () => Promise<void>;
 }): JSX.Element {
+  const toast=useToast();
   const [text, setText] = useState(initial?.text ?? '');
   const [owner, setOwner] = useState(initial?.ownerName ?? '');
   const [due, setDue] = useState(initial?.dueDate ?? '');
@@ -240,7 +242,11 @@ function ActionItemEditor({
     if (!initial) return;
     setBusy(true); setErr(null);
     try {
-      await api.actionItems.delete(initial.id);
+      const token=await api.actionItems.delete(initial.id);
+      if(token)toast.show({message:'Action item deleted',durationMs:10000,action:{label:'Undo',onClick:async()=>{
+        try {const restored=await api.actionItems.undoDelete(token);if(!restored)toast.show({message:'Could not restore: this meeting’s tasks changed, processing started, or Undo expired.',variant:'error'});await onDeleted?.();}
+        catch(error){toast.show({message:`Undo failed: ${(error as Error).message}`,variant:'error'});}
+      }}});
       await onDeleted?.();
     } catch (e) {
       setErr((e as Error).message);

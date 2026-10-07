@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
     await run(`document.querySelector('#viewport').style.height = '700px'`); await settle();
     assert.equal(await count(), 20);
     await scroll(0);
-    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Select"]').focus()`);
+    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"]').focus()`);
     await scroll(36000);
     stats.pinned = await count(); assert.equal(stats.pinned, 21);
     assert.equal(await run(`document.activeElement.closest('[data-meeting-id]').dataset.meetingId`), 'fixture-0');
@@ -46,9 +46,9 @@ app.whenReady().then(async () => {
     assert.equal(await count(), 20);
     assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"]')`), false);
     await scroll(0);
-    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Select"]').click()`); await settle();
+    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"]').click()`); await settle();
     await scroll(36000); await scroll(0);
-    assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Deselect"]')`), true);
+    assert.equal(await run(`!!document.querySelector('[data-meeting-id="fixture-0"] button[role="checkbox"][aria-checked="true"]')`), true);
     await run(`document.querySelector('#outside').click()`); await settle();
     await run(`document.querySelector('[data-meeting-id="fixture-0"] .group').click()`);
     assert.deepEqual(await run('window.fixture.opened'), ['fixture-0']);
@@ -66,15 +66,35 @@ app.whenReady().then(async () => {
     const headingPoint = await run(`(() => { const heading = [...document.querySelectorAll('div')].find(node => node.textContent === 'Rename meeting'); const rect = heading.getBoundingClientRect(); return { x: Math.round(rect.left + 15), y: Math.round(rect.top + rect.height / 2) }; })()`);
     win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...headingPoint });
     win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...headingPoint }); await settle();
-    assert.equal(await run(`document.activeElement.tagName`), 'BODY');
+    assert.equal(await run(`!!document.activeElement.closest('[role="dialog"]')`), true, 'Blurred control focus must remain within the open modal');
+    assert.equal(await run(`document.activeElement === window.fixture.originalDialogInput`), false);
     await scroll(36000);
+    const dialogScroll = await run(`document.querySelector('#viewport > div').scrollTop`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J' }); await settle();
+    assert.equal(await run(`document.querySelector('#viewport > div').scrollTop`), dialogScroll, 'Dialog keys must not move the background library');
     assert.equal(await run(`document.querySelector('input.input')?.value`), `Unsaved fixture title ${width}`, 'Open Rename dialog must retain its unsaved value after control focus leaves');
     assert.equal(await run(`document.querySelector('input.input') === window.fixture.originalDialogInput`), true);
     assert.equal(await count(), 21);
     fs.writeFileSync(path.join(profile, `blurred-dialog-${width}.png`), (await win.webContents.capturePage()).toPNG());
     await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Cancel').click()`); await settle();
     assert.equal(await run(`!!document.querySelector('input.input')`), false);
+    assert.equal(await run(`document.activeElement.closest('[data-meeting-id]')?.dataset.meetingId`), 'fixture-0', 'Closing Rename restores the triggering row control');
+    await run(`document.querySelector('#outside').focus()`); await scroll(36000);
     assert.equal(await count(), 20);
+    await run(`document.querySelector('#viewport').style.display = 'none'; document.querySelector('#outside').focus()`); await settle();
+    const hiddenCommits = await run(`window.fixture.commits.length`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J' }); await settle();
+    assert.equal(await run(`window.fixture.commits.length`), hiddenCommits, 'Hidden retained libraries do not own navigation keys');
+    await run(`document.querySelector('#viewport').style.display = 'flex'`); await settle();
+    await scroll(0);
+    await run(`window.fixture.holdDelete = true; document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Actions"]').click()`); await settle();
+    await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Delete…').click()`); await settle();
+    await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Delete').click()`); await settle();
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' }); await settle();
+    await run(`document.querySelector('[role="dialog"]').click()`); await settle();
+    assert.equal(await run(`document.querySelectorAll('[role="dialog"]').length`), 1, 'Busy deletion owns Escape and backdrop');
+    await run(`window.fixture.finishDelete()`); await settle();
+    assert.equal(await run(`document.querySelectorAll('[role="dialog"]').length`), 0);
     // Native Tab moves through the final currently rendered row, mounting
     // more rows as browser focus scrolling approaches the overscan edge.
     await scroll(0);

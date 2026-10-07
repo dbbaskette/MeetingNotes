@@ -3,8 +3,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runSummarizing, extractTitleFromSummary, stripSummaryPreamble } from './summarizing.js';
+type SummaryContext = Parameters<typeof runSummarizing>[1];
+/** These isolated tests deliberately supply only the dependencies used by this stage. */
+function summaryContext<T extends object>(mock: T): T & SummaryContext {
+  return mock as T & SummaryContext;
+}
 
 describe('runSummarizing', () => {
+  it('does not overwrite a user rename made during generation, even when it resembles a default filename',async()=>{
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mn-title-race-')),folder=path.join(dir,'meetings','slug');
+    try{
+      fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'transcript.md'),'[Dan 00:00] Synthetic discussion.');
+      const meeting={slug:'slug',title:'recording-20260421-163203-47c0c0f5',titleExplicit:false},updateTitle=vi.fn();
+      const ctx:Parameters<typeof runSummarizing>[1]={libraryRoot:dir,llmSupervisor:{ensureReady:async()=>{}},lmStudio:{chat:async()=>{meeting.titleExplicit=true;return '## Overview\nGenerated title.';}},meetings:{findById:()=>meeting,updateTitle},settings:{get:()=>''},logger:{info:()=>{}}} as unknown as Parameters<typeof runSummarizing>[1];
+      await runSummarizing({meetingId:'m'},ctx);expect(updateTitle).not.toHaveBeenCalled();
+    }finally{fs.rmSync(dir,{recursive:true,force:true});}
+  });
   it('reads transcript.md, calls LLM, writes summary.md', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-'));
     const f = path.join(dir, 'meetings', 'slug');
@@ -12,14 +26,14 @@ describe('runSummarizing', () => {
     fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
 
     const chat = vi.fn(async () => '## Overview\nshort meeting.');
-    const ctx: any = {
+    const ctx = summaryContext({
       libraryRoot: dir,
       llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: { findById: () => ({ slug: 'slug', title: 'Team sync' }), updateTitle: vi.fn() },
       settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : '') },
       logger: { info: () => {} },
-    };
+    });
     await runSummarizing({ meetingId: 'm' }, ctx);
     expect(fs.readFileSync(path.join(f, 'summary.md'), 'utf8')).toContain('Overview');
     expect(chat).toHaveBeenCalled();
@@ -36,7 +50,7 @@ describe('runSummarizing', () => {
 
     const chat = vi.fn(async () => '## Overview\nQuarterly engineering review covering the migration plan and rollout timing.\n\n## Decisions\n- Ship Tuesday.');
     const updateTitle = vi.fn();
-    const ctx: any = {
+    const ctx = summaryContext({
       libraryRoot: dir,
       llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
@@ -46,7 +60,7 @@ describe('runSummarizing', () => {
       },
       settings: { get: () => 'llama-3.1-8b' },
       logger: { info: () => {} },
-    };
+    });
     await runSummarizing({ meetingId: 'm' }, ctx);
     expect(updateTitle).toHaveBeenCalledOnce();
     const newTitle = updateTitle.mock.calls[0][1] as string;
@@ -60,14 +74,14 @@ describe('runSummarizing', () => {
     fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
 
     const chat = vi.fn(async () => '## Overview\nshort meeting.');
-    const ctx: any = {
+    const ctx = summaryContext({
       libraryRoot: dir,
       llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: { findById: () => ({ slug: 'slug', title: 'Team sync' }), updateTitle: vi.fn() },
       settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : 'detailed') },
       logger: { info: () => {} },
-    };
+    });
     await runSummarizing({ meetingId: 'm' }, ctx);
     const systemMsg = chat.mock.calls[0][0].messages[0].content as string;
     expect(systemMsg).toContain('This meeting is about: **Team sync**');
@@ -80,7 +94,7 @@ describe('runSummarizing', () => {
     fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
 
     const chat = vi.fn(async () => '## Overview\nshort meeting.');
-    const ctx: any = {
+    const ctx = summaryContext({
       libraryRoot: dir,
       llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
@@ -90,7 +104,7 @@ describe('runSummarizing', () => {
       },
       settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : 'detailed') },
       logger: { info: () => {} },
-    };
+    });
     await runSummarizing({ meetingId: 'm' }, ctx);
     const systemMsg = chat.mock.calls[0][0].messages[0].content as string;
     expect(systemMsg).toContain("Infer the meeting's main purpose");
@@ -104,14 +118,14 @@ describe('runSummarizing', () => {
     fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
 
     const chat = vi.fn(async () => '## Overview\nx.\n\n# Off-topic Conversation\n- Weekend plans.');
-    const ctx: any = {
+    const ctx = summaryContext({
       libraryRoot: dir,
       llmSupervisor: { ensureReady: async () => {} },
       lmStudio: { chat },
       meetings: { findById: () => ({ slug: 'slug', title: 'Team sync' }), updateTitle: vi.fn() },
       settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : 'detailed') },
       logger: { info: () => {} },
-    };
+    });
     await runSummarizing({ meetingId: 'm' }, ctx);
     const out = fs.readFileSync(path.join(f, 'summary.md'), 'utf8');
     expect(out).toContain('## Off-topic Conversation');

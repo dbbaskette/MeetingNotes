@@ -7,16 +7,20 @@ export interface MeetingGroup {
   count: number;
   createdAt: string;
   updatedAt: string;
+  statusCounts?: ActionableCounts;
 }
+export interface ActionableCounts { pending: number; processing: number; failed: number }
 export interface GroupListSnapshot {
   groups: MeetingGroup[];
   allCount: number;
   ungroupedCount: number;
+  ungroupedStatus?: ActionableCounts;
 }
 
 export interface GroupAssignment {
   id: string;
   previousGroupId: string | null;
+  revision?: number;
 }
 
 export interface GroupAssignResult {
@@ -50,7 +54,14 @@ export class GroupsRepo {
     const totals = this.db.prepare(`SELECT COUNT(*) AS all_count,
       COUNT(CASE WHEN group_id IS NULL THEN 1 END) AS ungrouped_count
       FROM meetings WHERE deleted_at IS NULL`).get() as { all_count: number; ungrouped_count: number };
-    return { groups: this.list(), allCount: totals.all_count, ungroupedCount: totals.ungrouped_count };
+    const statuses = this.db.prepare(`SELECT group_id,
+      SUM(status = 'pending') AS pending,
+      SUM(status IN ('processing', 'awaiting_user')) AS processing,
+      SUM(status = 'failed') AS failed FROM meetings WHERE deleted_at IS NULL GROUP BY group_id
+    `).all() as ({ group_id: string | null } & ActionableCounts)[];
+    const byGroup = new Map(statuses.map(({ group_id, ...counts }) => [group_id, counts]));
+    return { groups: this.list().map(group => ({ ...group, statusCounts: byGroup.get(group.id) })),
+      allCount: totals.all_count, ungroupedCount: totals.ungrouped_count, ungroupedStatus: byGroup.get(null) };
   }
 
   exists(id: string): boolean {
@@ -98,20 +109,36 @@ export class GroupsRepo {
     return this.db.transaction(() => {
       const moved: GroupAssignment[] = [];
       const failedIds: string[] = [];
-      const get = this.db.prepare('SELECT group_id FROM meetings WHERE id = ? AND deleted_at IS NULL');
+      const get = this.db.prepare('SELECT group_id, group_revision FROM meetings WHERE id = ? AND deleted_at IS NULL');
       // Grouping does not change meeting content. Leave updated_at alone so
       // weekly-summary input hashes do not regenerate on organization alone.
       const set = this.db.prepare('UPDATE meetings SET group_id = ? WHERE id = ? AND deleted_at IS NULL');
       for (const id of unique) {
-        const row = get.get(id) as { group_id: string | null } | undefined;
+        const row = get.get(id) as { group_id: string | null; group_revision: number } | undefined;
         if (!row) { failedIds.push(id); continue; }
         if (expectedGroupId !== undefined && row.group_id !== expectedGroupId) {
           failedIds.push(id); continue;
         }
         if (row.group_id !== groupId) {
           set.run(groupId, id);
-          moved.push({ id, previousGroupId: row.group_id });
+          moved.push({ id, previousGroupId: row.group_id, revision: row.group_revision + 1 });
         }
+      }
+      return { moved, failedIds };
+    })();
+  }
+
+  /** Revision fencing rejects later moves, including A → B → A. */
+  undo(items: { id: string; previousGroupId: string | null; revision: number }[]): GroupAssignResult {
+    return this.db.transaction(() => {
+      const moved: GroupAssignment[] = [], failedIds: string[] = [];
+      const get = this.db.prepare('SELECT group_revision FROM meetings WHERE id = ? AND deleted_at IS NULL');
+      for (const item of items) {
+        const row = get.get(item.id) as { group_revision: number } | undefined;
+        if (!row || row.group_revision !== item.revision || (item.previousGroupId !== null && !this.exists(item.previousGroupId))) {
+          failedIds.push(item.id); continue;
+        }
+        moved.push(...this.assign([item.id], item.previousGroupId).moved);
       }
       return { moved, failedIds };
     })();

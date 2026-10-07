@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { useDialogSurface } from '../lib/dialog-surface';
 import { api } from '../ipc/client';
 
 type State = 'granted' | 'denied' | 'not-determined' | 'unknown';
 
 export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void }): JSX.Element {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogSurface(dialogRef, { busy: true, onClose: () => {} });
   const [mic, setMic] = useState<State>('unknown');
   const [audioCapture, setAudioCapture] = useState<State>('unknown');
 
@@ -44,7 +47,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Permissions needed" tabIndex={-1} className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6">
       <div className="bg-surface rounded-2xl shadow-pop max-w-md w-full p-6">
         <h2 className="text-lg font-semibold mb-2">Permissions needed</h2>
         <p className="text-sm text-ink-muted mb-4">

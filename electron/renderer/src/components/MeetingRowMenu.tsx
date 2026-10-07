@@ -173,7 +173,7 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
   );
 }
 
-function RenameDialog({
+export function RenameDialog({
   meeting, onClose, onSaved,
 }: {
   meeting: { id: string; title: string };
@@ -205,10 +205,11 @@ function RenameDialog({
   }
 
   return (
-    <ModalShell onClose={onClose}>
+    <ModalShell title="Rename meeting" busy={busy} onClose={onClose}>
       <div className="text-sm font-semibold mb-3">Rename meeting</div>
       <input
         ref={inputRef}
+        disabled={busy}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -222,6 +223,7 @@ function RenameDialog({
       <div className="flex justify-end gap-2 mt-4">
         <button
           onClick={onClose}
+          disabled={busy}
           className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink rounded-lg"
         >
           Cancel
@@ -284,7 +286,7 @@ function DeleteDialog({
   }
 
   return (
-    <ModalShell onClose={onClose}>
+    <ModalShell title="Delete meeting" busy={busy} onClose={onClose}>
       <div className="text-sm font-semibold mb-2">Delete this meeting?</div>
       <div className="text-sm text-ink-muted mb-4">
         <span className="font-mono text-ink">{meeting.title}</span>
@@ -297,6 +299,7 @@ function DeleteDialog({
       <div className="flex justify-end gap-2">
         <button
           onClick={onClose}
+          disabled={busy}
           className="px-3 py-1.5 text-sm text-ink-muted hover:text-ink rounded-lg"
         >
           Cancel

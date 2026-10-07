@@ -7,6 +7,7 @@
 // dispatcher. (Same trust model as a manual Record click — see issue #77.)
 
 import { z } from 'zod';
+import { captureTitle } from '../../shared/capture-title.js';
 
 const SourceSchema = z.string()
   .trim()
@@ -16,8 +17,8 @@ const SourceSchema = z.string()
 
 const TitleSchema = z.string()
   .trim()
-  .min(1)
   .max(200)
+  .refine(value => { try { captureTitle(value); return true; } catch { return false; } }, 'title must be on one line')
   .optional();
 
 // Meeting IDs from `meetings-repo` are short random alphanumeric strings.
@@ -82,7 +83,7 @@ export function parseSchemeUrl(input: string): ParseResult {
       return {
         kind: 'record',
         source: sourceResult.data ?? 'all',
-        title: titleResult.data ?? null,
+        title: captureTitle(titleResult.data) ?? null,
       };
     }
     case 'stop':

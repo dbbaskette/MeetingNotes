@@ -17,17 +17,20 @@ app.whenReady().then(async () => {
   await win.loadURL(url);
   await until('!!document.querySelector("[data-source-pid=\\"502\\"]")');
   assert(await run('document.body.innerText.includes("Zoom · 2 audio streams")'));
+  await run(`const title=document.querySelector('input[placeholder="Use the default title"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(title,'Platform planning');title.dispatchEvent(new Event('input',{bubbles:true}));`);
   await run('window.fixture.fail=true; Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Refresh").click()');
   await until('document.body.innerText.includes("Could not refresh sources")');
   assert.equal(await run('!!document.querySelector("[data-source-pid=\\"502\\"]")'),true,'Failed refresh keeps usable sources');
   await run('window.fixture.fail=false; Array.from(document.querySelectorAll("button")).find(b => b.textContent === "Retry").click()');
   await until('!document.body.innerText.includes("Could not refresh sources")');
   assert.equal(await run('window.fixture.refreshes'),3);
+  assert.equal(await run('document.querySelector("input[placeholder=\\"Use the default title\\"]").value'),'Platform planning');
   assert.equal(await run('window.fixture.picks.length'),0,'Refreshing never silently chooses a source');
   for (const pid of [501,502]) {
     await run(`document.querySelector('[data-source-pid="${pid}"]').click()`);
     assert.equal(await run('window.fixture.picks.at(-1).targetPid'), pid);
     assert.equal(await run('window.fixture.picks.at(-1).groupId'), 'g');
+    assert.equal(await run('window.fixture.picks.at(-1).title'), 'Platform planning');
   }
   assert.equal(await run('!!document.querySelector("[data-source-pid=\\"700\\"]")'), false);
   await run('Array.from(document.querySelectorAll("button")).find(b => b.textContent.includes("Background processes")).click()');

@@ -1,5 +1,6 @@
 // electron/renderer/src/App.tsx
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { RenameDialog } from './components/MeetingRowMenu';
 import { LibraryView } from './views/LibraryView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost, useToast } from './components/Toasts';
@@ -38,6 +39,7 @@ type View =
  *  recording state so an unexpected termination can offer "Record again"
  *  with the same source (#191) instead of making the user re-pick. */
 export interface RecordingStartInput {
+  title?: string;
   targetPid: number | 'system';
   targetLabel: string;
   mic: boolean;
@@ -144,6 +146,7 @@ function AppInner(): JSX.Element {
   // any view but only acts when the recording UI is mounted.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       // Skip when the user is editing text — Cmd+R inside a textarea
       // shouldn't trigger Record.
       const target = e.target as HTMLElement | null;
@@ -288,7 +291,17 @@ function AppInner(): JSX.Element {
   // actions; we map them to local state. (#5 from the UX review.)
   useEffect(() => {
     const off = api.onMenuAction((action) => {
+      if(action!=='undo'&&document.querySelector('[role="dialog"][aria-modal="true"]'))return;
       switch (action) {
+        case 'undo':
+          if ((document.activeElement as HTMLElement)?.closest('input,textarea,[contenteditable="true"]')) { void api.app.undoEdit(); break; }
+          // A modal owns its operation; background group Undo must not run.
+          if (document.querySelector('[role="dialog"][aria-modal="true"]')) break;
+          window.dispatchEvent(new CustomEvent('mn:undo-group-move'));
+          break;
+        case 'undo-group-move':
+          if (!document.querySelector('[role="dialog"][aria-modal="true"]')) window.dispatchEvent(new CustomEvent('mn:undo-group-move'));
+          break;
         case 'toggle-record':
           window.dispatchEvent(new CustomEvent('mn:toggle-record'));
           break;
@@ -411,35 +424,44 @@ function AppInner(): JSX.Element {
     };
   }, [toast]);
 
+  const [renameAfterStop,setRenameAfterStop]=useState<{id:string;title:string}|null>(null);
+  function stopped(summary:string):void {
+    const sessionId=liveRecording?.sessionId;setLiveRecording(null);
+    toast.show({message:summary,durationMs:5000});
+    if(sessionId)void api.recording.meeting(sessionId).then(meeting=>{if(meeting)toast.show({message:'Recording saved to Library',durationMs:15000,action:{label:'Rename',onClick:()=>setRenameAfterStop(meeting)}});}).catch(()=>{});
+  }
+  const visitedWeekly = useRef(false);
+  if (view.kind === 'weekly') visitedWeekly.current = true;
+  const readyForViews = onboardStatus === 'done' && permsOk;
+  const libraryView = (
+    <div className="h-full" hidden={view.kind !== 'library'}>
+    <LibraryView
+      active={view.kind === 'library'}
+      onOpen={(id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
+      onNav={(target) => { if (target !== 'library') void navigate({ kind: target }); }}
+      onOpenSearch={() => setSearchOpen(true)} liveRecording={liveRecording}
+      onStartRecording={setLiveRecording}
+      onRecordingStopped={stopped}
+    /></div>
+  );
+  const weeklyView = visitedWeekly.current && (
+    <div className="h-full" hidden={view.kind !== 'weekly'}>
+    <WeeklyView active={view.kind === 'weekly'} onNav={(target) => { if (target !== 'weekly') void navigate({ kind: target }); }}
+      onOpenMeeting={(id) => void navigate({ kind: 'detail', id })} />
+    </div>
+  );
   const activeView = onboardStatus === null ? (
     <div className="p-8 text-sm text-ink-muted">Loading…</div>
   ) : onboardStatus === 'needed' ? (
     <OnboardingView onFinished={() => { setForceOpenSetup(false); setOnboardStatus('done'); }} />
   ) : !permsOk ? (
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
-  ) : view.kind === 'library' ? (
-    <LibraryView
-      onOpen={(id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
-      onNav={(target) => { if (target !== 'library') void navigate({ kind: target }); }}
-      onOpenSearch={() => setSearchOpen(true)}
-      liveRecording={liveRecording}
-      onStartRecording={setLiveRecording}
-      onRecordingStopped={(summary) => {
-        setLiveRecording(null);
-        toast.show({ message: summary, durationMs: 5000 });
-      }}
-    />
-  ) : view.kind === 'detail' ? (
+  ) : view.kind === 'library' || view.kind === 'weekly' ? null : view.kind === 'detail' ? (
     <MeetingDetailView
       id={view.id}
       seekSeconds={view.seekSeconds}
       hint={view.hint}
-      onBack={() => void goBack()}
-    />
-  ) : view.kind === 'weekly' ? (
-    <WeeklyView
-      onNav={(target) => { if (target !== 'weekly') void navigate({ kind: target }); }}
-      onOpenMeeting={(id) => void navigate({ kind: 'detail', id })}
+      onBack={() => void (navRef.current!.canBack() ? goBack() : navigate({ kind: 'library' }))}
     />
   ) : (
     <SettingsView
@@ -447,7 +469,7 @@ function AppInner(): JSX.Element {
       onRunSetupAgain={() => { void navigate({ kind: 'library' }); setForceOpenSetup(true); }}
     />
   );
-  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{activeView}</Suspense>;
+  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{readyForViews && libraryView}{readyForViews && weeklyView}{activeView}</Suspense>;
 
   // Persistent recording banner on views that don't show the LibraryView's
   // inline live row. Keeps the user aware that capture is still going even
@@ -470,11 +492,9 @@ function AppInner(): JSX.Element {
               label={liveRecording!.label}
               startedAt={liveRecording!.startedAt}
               groupId={liveRecording!.startInput?.groupId}
+              title={liveRecording!.startInput?.title}
               micEnabled={liveRecording!.startInput?.mic}
-              onStopped={(summary) => {
-                setLiveRecording(null);
-                toast.show({ message: summary, durationMs: 5000 });
-              }}
+              onStopped={stopped}
               onRestarted={setLiveRecording}
             />
           </div>
@@ -491,6 +511,7 @@ function AppInner(): JSX.Element {
         onClose={() => setSearchOpen(false)}
         onOpenMeeting={onPaletteOpen}
       />
+      {renameAfterStop&&<RenameDialog meeting={renameAfterStop} onClose={()=>setRenameAfterStop(null)} onSaved={()=>{setRenameAfterStop(null);}}/>}
       {dragActive && <DropOverlay />}
     </>
   );

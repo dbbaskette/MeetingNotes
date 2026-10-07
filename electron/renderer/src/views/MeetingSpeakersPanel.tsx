@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { api } from '../ipc/client';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { partitionSpeakerReview, speakerReviewLayout } from '../lib/speaker-review-layout';
@@ -287,6 +288,7 @@ function SpeakerEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<{ id: string; displayName: string; confidence: number }[]>([]);
+  const [pendingAssignment, setPendingAssignment] = useState<{ rid: string; impact: string } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Lazy-load the sample the first time the row expands; keeps Library scroll
@@ -322,14 +324,14 @@ function SpeakerEditor({
     return () => { alive = false; };
   }, [meetingId, localLabel]);
 
-  async function assignExisting(rid: string): Promise<void> {
+  async function assignExisting(rid: string, confirmed = false): Promise<void> {
     const impact = lineCount === undefined ? 'Transcript lines for this voice will change.'
       : `${lineCount} transcript line${lineCount === 1 ? '' : 's'} will change.`;
-    if (rosterId && rid !== rosterId
-      && !window.confirm(`Reassign this voice? ${impact}`)) return;
+    if (rosterId && rid !== rosterId && !confirmed) { setPendingAssignment({ rid, impact }); return; }
     setBusy(true); setError(null);
     try {
       await api.speakers.assign({ meetingId, localLabel, mode: 'existing', rosterId: rid });
+      setPendingAssignment(null);
       onChanged();
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -466,6 +468,12 @@ function SpeakerEditor({
         </button>
       )}
 
+      {pendingAssignment && <ConfirmDialog
+        open title="Reassign this voice?" body={pendingAssignment.impact}
+        confirmLabel="Reassign" busy={busy}
+        onCancel={() => setPendingAssignment(null)}
+        onConfirm={() => void assignExisting(pendingAssignment.rid, true)}
+      />}
       {error && <div className="text-[11px] text-danger">{error}</div>}
     </div>
   );

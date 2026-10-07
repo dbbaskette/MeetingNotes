@@ -158,7 +158,9 @@ export function MeetingDetailView({
   }, []);
   // Stable identity: passed down to every (memoized) transcript row —
   // a fresh function per render would defeat React.memo on the rows.
+  const [seekRevision,setSeekRevision]=useState(0);
   const seekTo = useCallback((seconds: number): void => {
+    setCurrentTime(seconds);setSeekRevision(value=>value+1);
     const el = audioRef.current;
     if (!el) return;
     el.currentTime = seconds;
@@ -404,7 +406,7 @@ export function MeetingDetailView({
           onClick={onBack}
           className="text-ink-muted hover:text-ink text-sm shrink-0"
         >
-          ← Library
+          ← Back
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
             forcing the flex row to overflow — otherwise a long title would
@@ -490,6 +492,7 @@ export function MeetingDetailView({
             tab={tab}
             onTab={setTab}
             currentTime={currentTime}
+            seekRevision={seekRevision}
             onSeek={seekTo}
             onReload={reload}
             onShowSource={showSource}
@@ -688,7 +691,7 @@ function DetailSkeleton({
       {/* Title bar — uses real title when available */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
-          ← Library
+          ← Back
         </button>
         <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
           {hint?.title ?? (
@@ -1264,7 +1267,7 @@ function ArtifactFeedback({ label, state, onRetry }: {
 }
 
 function CenterPane({
-  meeting, tab, onTab, currentTime, onSeek, onReload, onShowSource, provenance,
+  meeting, tab, onTab, currentTime, seekRevision, onSeek, onReload, onShowSource, provenance,
   summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
   transcriptState, onRetryTranscript,
 }: {
@@ -1272,6 +1275,7 @@ function CenterPane({
   tab: Tab;
   onTab: (t: Tab) => void;
   currentTime: number;
+  seekRevision: number;
   onSeek: (seconds: number) => void;
   onReload: () => Promise<void>;
   onShowSource: (quote: string) => void;
@@ -1332,6 +1336,7 @@ function CenterPane({
             {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="transcript" version={meeting.transcriptMd}
               groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing'} onReload={onReload}/>}
             {transcriptState.data !== undefined && <TranscriptPanel
+              seekRevision={seekRevision}
               meeting={meeting}
               showRaw={showRaw}
               currentTime={currentTime}

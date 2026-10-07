@@ -11,6 +11,7 @@ import { SpeakersRepo } from '../storage/speakers-repo.js';
 import { ActionItemsRepo } from '../storage/action-items-repo.js';
 import { SettingsRepo } from '../storage/settings-repo.js';
 import { ObsidianSync } from './service.js';
+import {acquireBackup} from '../storage/backup-gate.js';
 import { atomicWrite, hash, safePath } from './files.js';
 import { snapshot, newNote, mergeNote, type NoteData } from './render.js';
 
@@ -89,6 +90,14 @@ afterEach(async () => {
 });
 
 describe('Obsidian sync', () => {
+  it('defers automatic sync writes while a library backup owns the idle lock',async()=>{
+    await enable();const before=fs.readFileSync(exported(),'utf8');
+    fs.writeFileSync(path.join(library,'meetings','one','summary.md'),'Changed during backup');
+    meetings.updateTitle('one','Changed title');const release=acquireBackup();
+    try{await sync.run();expect(sync.status().running).toBe(false);expect(fs.readFileSync(exported(),'utf8')).toBe(before);}
+    finally{release();}
+    await sync.run();expect(fs.readFileSync(exported(),'utf8')).toContain('Changed during backup');
+  });
   it('resumes on startup and retries only failures without resetting unchanged exports', async () => {
     await enable();
     const unchanged = db.prepare('SELECT revision FROM obsidian_exports WHERE meeting_id=?').get('one');
@@ -114,12 +123,15 @@ describe('Obsidian sync', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'obsidian_%'")
       .all() as { name: string }[];
     for (const t of triggers) db.exec(`DROP TRIGGER "${t.name}"`);
+    db.exec(`DROP TRIGGER meetings_group_revision; DROP TRIGGER actions_insert_revision; DROP TRIGGER actions_update_revision; DROP TRIGGER actions_delete_revision;
+      ALTER TABLE meetings DROP COLUMN group_revision; ALTER TABLE meetings DROP COLUMN action_revision; ALTER TABLE meetings DROP COLUMN title_explicit;
+      ALTER TABLE recording_sessions DROP COLUMN title;`);
     db.exec(
       'DROP TABLE processing_history; DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 21 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 22 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,
