@@ -6,7 +6,9 @@ mkdir -p "$results_root"
 task_smoke_root="$(mktemp -d /tmp/meetingnotes-package-smoke-XXXXXX)"
 task_profile=''
 trap 'if [[ -n "$task_profile" ]]; then rm -rf "$task_profile"; fi; rm -rf "$task_smoke_root"' EXIT
-cp -R "$fixture_root/MeetingNotes.app" "$task_smoke_root/MeetingNotes.app"
+# VirtioFS does not reliably expose framework-link extended attributes. The
+# unsigned disposable fixture needs bytes and relative links, not host xattrs.
+cp -RX "$fixture_root/MeetingNotes.app" "$task_smoke_root/MeetingNotes.app"
 task_app="$task_smoke_root/MeetingNotes.app"
 task_bin="$task_app/Contents/MacOS/MeetingNotes"
 for rendering in hardware software; do
