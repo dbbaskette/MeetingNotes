@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { OBSIDIAN_SCHEMA } from '../obsidian/schema.js';
 
 interface Migration { version: number; up: string; }
 
@@ -275,6 +276,85 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE recording_sessions ADD COLUMN dismissed_at TEXT;
     `,
   },
+  {
+    version: 16,
+    // Paginated Library (#210): equality on deleted_at followed by the exact
+    // status/newest/ID order avoids a full live-library temporary sort.
+    // The 10k-row fixture reduced warm first-page queries from 0.43–0.93ms
+    // to 0.09–0.13ms. A partial-index candidate was not selected by SQLite.
+    // Keep the CASE expression in sync with MeetingsRepo's status ranking.
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_meetings_browse_newest ON meetings (
+        deleted_at,
+        CASE status WHEN 'pending' THEN 0 WHEN 'awaiting_user' THEN 1
+          WHEN 'processing' THEN 2 WHEN 'failed' THEN 3 WHEN 'done' THEN 4 ELSE 9 END,
+        started_at DESC,
+        id ASC
+      );
+    `,
+  },
+  {
+    version: 17,
+    // Meeting groups are organizational metadata only. Audio and meeting
+    // folders stay where they are; deleting a group unassigns recordings.
+    up: `
+      CREATE TABLE groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        name_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      ALTER TABLE meetings ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL;
+      ALTER TABLE recording_sessions ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL;
+      CREATE INDEX idx_meetings_group_browse_newest ON meetings (
+        group_id,
+        deleted_at,
+        CASE status WHEN 'pending' THEN 0 WHEN 'awaiting_user' THEN 1
+          WHEN 'processing' THEN 2 WHEN 'failed' THEN 3 WHEN 'done' THEN 4 ELSE 9 END,
+        started_at DESC,
+        id ASC
+      );
+      CREATE INDEX idx_recording_sessions_output_path ON recording_sessions(output_path);
+    `,
+  },
+  {
+    version: 18,
+    up: `
+      CREATE TABLE terminology_rules (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        replacement TEXT NOT NULL,
+        group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL CHECK(mode IN ('suggest', 'automatic')),
+        case_sensitive INTEGER NOT NULL,
+        enabled INTEGER NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE terminology_documents (
+        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        artifact TEXT NOT NULL CHECK(artifact IN ('transcript', 'summary')),
+        state_json TEXT NOT NULL,
+        pending_json TEXT,
+        PRIMARY KEY(meeting_id, artifact)
+      );
+      CREATE TABLE terminology_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `,
+  },
+  { version: 19, up: OBSIDIAN_SCHEMA },
+  { version: 20, up: `
+    CREATE TABLE notes_versions (
+      id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL, reason TEXT NOT NULL, snapshot TEXT NOT NULL
+    );
+    CREATE INDEX notes_versions_meeting ON notes_versions(meeting_id, created_at DESC);
+    CREATE TABLE notes_restore_pending (
+      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+      before_json TEXT NOT NULL, after_json TEXT NOT NULL
+    );
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

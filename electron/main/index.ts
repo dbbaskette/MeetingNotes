@@ -1,10 +1,19 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { recoveryMediaHandler } from './recording/recovery-media.js';
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'recovery-audio', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }]);
 import { openDb } from './storage/db.js';
 import { MeetingsRepo } from './storage/meetings-repo.js';
+import { GroupsRepo } from './storage/groups-repo.js';
+import { ObsidianSync } from './obsidian/service.js';
+import { registerObsidianHandlers } from './ipc/obsidian-handlers.js';
+import { TerminologyRepo } from './storage/terminology-repo.js';
+import { TerminologyService } from './terminology/service.js';
+import { NotesHistory } from './storage/notes-history.js';
 import { SpeakersRepo } from './storage/speakers-repo.js';
 import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
@@ -52,6 +61,7 @@ import { createSplash } from './splash.js';
 import { installAppMenu } from './menu.js';
 import { SchemeDispatcher } from './url-scheme/dispatcher.js';
 import { shouldNotifyGate } from './pipeline/gate-alert.js';
+import { ArtifactCache } from './library/artifact-cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -177,10 +187,22 @@ app.whenReady().then(async () => {
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));
   const meetings = new MeetingsRepo(db);
+  const groups = new GroupsRepo(db);
   const speakers = new SpeakersRepo(db);
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes', 'app.log'));
+  const artifactCache = new ArtifactCache();
+  const terminology = new TerminologyService(new TerminologyRepo(db), {
+    libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
+    beforeSummaryChange: id => notesHistory.capture(id, 'Before notes changed'),
+  });
+  const notesHistory = new NotesHistory(db, {libraryRoot, meetings, items: actionItems, terminology});
+  terminology.recover();
+  try { notesHistory.recover(); } catch (e) { logger.error('notes-history:recovery', {error: String(e)}); }
+  const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
+  registerObsidianHandlers(ipcMain, obsidian);
+  obsidian.start();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -281,9 +303,9 @@ app.whenReady().then(async () => {
   // by then), cleared when the last one ends. app.dock is macOS-only, so
   // guard it for the (hypothetical) non-Mac build.
   const activeRecordings = new Set<string>();
-  recordingManager.on('state-change', (sessionId, state) => {
+  recordingManager.on('state-change', (sessionId, state, reason) => {
     BrowserWindow.getAllWindows().forEach((w) =>
-      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state }));
+      w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state, reason }));
     if (state === 'starting' || state === 'recording') activeRecordings.add(sessionId);
     else activeRecordings.delete(sessionId);
     app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
@@ -314,7 +336,10 @@ app.whenReady().then(async () => {
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
+    notesHistory,
+    terminology,
     libraryRoot,
+    artifactCache,
     lmStudio,
     stt,
     diarization,
@@ -363,6 +388,7 @@ app.whenReady().then(async () => {
   const catalogRecording = async (audioPath: string) => {
     const result = await catalogAudio(audioPath, {
       meetings,
+      sessions: recordingSessionsRepo,
       libraryRoot,
       onSlugCollision: (slug, attempt) =>
         logger.info('library:slug-collision-retry', { slug, attempt }),
@@ -391,6 +417,7 @@ app.whenReady().then(async () => {
     catalog: catalogRecording,
     reveal: (audioPath) => revealPathInFinder(audioPath, shell),
   });
+  protocol.handle('recovery-audio', recoveryMediaHandler(recordingRecovery));
 
   recoverPendingMeetings({ meetings, enqueue: (id) => pipeline.enqueue(id), logger });
 
@@ -400,6 +427,11 @@ app.whenReady().then(async () => {
   pipeline.onStatusChange((status) => {
     for (const w of BrowserWindow.getAllWindows()) {
       w.webContents.send(IPC_CHANNELS.pipelineStatusEvent, status);
+    }
+  });
+  pipeline.onMeetingStageChange((meetingId) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      w.webContents.send(IPC_CHANNELS.meetingStageEvent, meetingId);
     }
   });
 
@@ -665,7 +697,10 @@ app.whenReady().then(async () => {
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });
   registerIpcHandlers(ipcMain, {
+    notesHistory,
+    terminology,
     meetings,
+    groups,
     speakers,
     actionItems,
     stageDurations,
@@ -685,6 +720,7 @@ app.whenReady().then(async () => {
     weeklyAggregator,
     logger,
     googleAuth,
+    artifactCache,
     gateNotified,
   });
 
@@ -712,6 +748,7 @@ app.whenReady().then(async () => {
     shuttingDown = true;
     e.preventDefault();
     pipeline.drain();
+    obsidian.stop();
     void (async () => {
       // Stop any active recordings cleanly so finalize is written, instead of
       // leaving the helper to die on parent-watch (which works but leaves an

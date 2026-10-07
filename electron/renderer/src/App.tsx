@@ -1,19 +1,22 @@
 // electron/renderer/src/App.tsx
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { LibraryView } from './views/LibraryView';
-import { MeetingDetailView } from './views/MeetingDetailView';
-import { SettingsView } from './views/SettingsView';
-import { WeeklyView } from './views/WeeklyView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost, useToast } from './components/Toasts';
 import { LiveRecordingRow } from './components/LiveRecordingRow';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { PipelineStatusBar } from './components/PipelineStatusBar';
-import { OnboardingView } from './views/OnboardingView';
+import { Icon } from './components/icons';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
-import { confirmLeave } from './lib/unsaved-guard';
+import { requestLeave } from './lib/unsaved-guard';
+import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
+
+const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
+const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
+const WeeklyView = lazy(() => import('./views/WeeklyView').then((m) => ({ default: m.WeeklyView })));
+const OnboardingView = lazy(() => import('./views/OnboardingView').then((m) => ({ default: m.OnboardingView })));
 
 type View =
   | { kind: 'library' }
@@ -30,6 +33,17 @@ type View =
     }
   | { kind: 'settings' }
   | { kind: 'weekly' };
+
+/** The exact arguments a recording was started with. Kept on the live-
+ *  recording state so an unexpected termination can offer "Record again"
+ *  with the same source (#191) instead of making the user re-pick. */
+export interface RecordingStartInput {
+  targetPid: number | 'system';
+  targetLabel: string;
+  mic: boolean;
+  groupId?: string | null;
+}
+
 /** Lives at the App level (not inside LibraryView) so navigating between
  *  Library / Detail / Settings doesn't wipe the recording state. The Swift
  *  helper is a separate process and keeps running regardless; this state is
@@ -38,6 +52,8 @@ export interface LiveRecording {
   sessionId: string;
   label: string;
   startedAt: string;
+  /** How the capture was started — powers the "Record again" retry. */
+  startInput?: RecordingStartInput;
 }
 
 /** Outer wrapper just mounts ToastHost — the rest of the app lives in
@@ -52,8 +68,33 @@ export function App(): JSX.Element {
 
 function AppInner(): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'library' });
+
+  // Navigation history (#190). Semantics live in lib/nav-history (unit-
+  // tested there): de-dup via viewsEqual, forward-truncation on navigate,
+  // 50-entry cap, and guard gating on every transition so a dirty summary
+  // draft blocks back/forward/navigate exactly once — callers must not
+  // pre-guard, or the discard dialog would appear twice.
+  const navRef = useRef<NavHistory<View> | null>(null);
+  if (navRef.current === null) {
+    navRef.current = createNavHistory<View>({ kind: 'library' }, {
+      equal: viewsEqual,
+      guard: requestLeave,
+      onChange: setView,
+    });
+  }
+  // Methods are closures over the history's internal state (no `this`),
+  // so destructuring is safe.
+  const { navigate, back: goBack, forward: goForward } = navRef.current;
+
   const [permsOk, setPermsOk] = useState(true);
-  const [liveRecording, setLiveRecording] = useState<LiveRecording | null>(null);
+  const [liveRecording, setLiveRecordingState] = useState<LiveRecording | null>(null);
+  // Ref mirror so the once-registered onStateChange listener can read the
+  // current session without re-subscribing on every state change.
+  const liveRecordingRef = useRef<LiveRecording | null>(null);
+  const setLiveRecording = useCallback((r: LiveRecording | null): void => {
+    liveRecordingRef.current = r;
+    setLiveRecordingState(r);
+  }, []);
   // Cmd+K global search palette state (#45). Opens over any view.
   const [searchOpen, setSearchOpen] = useState(false);
   // Drag-and-drop import state (#1 from the UX review). Tracks whether
@@ -119,15 +160,29 @@ function AppInner(): JSX.Element {
         window.dispatchEvent(new CustomEvent('mn:toggle-record'));
         return;
       }
+      // History navigation (#190). ⌘[ back / ⌘] forward — the same
+      // convention Safari and Finder use. The menu items in menu.ts emit
+      // the same actions via mn:menu-action; this listener covers the
+      // bare keystroke.
+      if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+        e.preventDefault();
+        void goBack();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === ']') {
+        e.preventDefault();
+        void goForward();
+        return;
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [goBack, goForward]);
   const onPaletteOpen = (t: PaletteTarget): void => {
     // Meeting switch is destructive to an in-flight summary edit session in
     // the detail view — it registers an unsaved-edits guard while dirty.
-    if (!confirmLeave()) return;
-    setView({
+    // navigate() itself consults the guard, so no separate check here.
+    void navigate({
       kind: 'detail',
       id: t.meetingId,
       seekSeconds: t.seekSeconds,
@@ -164,17 +219,50 @@ function AppInner(): JSX.Element {
   }, []);
 
   // If the helper exits on its own (target app quit, parent-watch timeout,
-  // idle stop), the main process broadcasts a state change. Clear the UI's
-  // live-recording memory so the banner disappears and the next Record
-  // click starts fresh.
+  // idle stop), the main process broadcasts a state change. A USER-initiated
+  // stop never produces an 'idle'/'error' broadcast (that path goes through
+  // 'stopping' and the LiveRecordingRow's own onStopped callback), so seeing
+  // one here means the capture died unexpectedly — surface it loudly with
+  // the helper's reason instead of silently swallowing the banner (#191).
+  // The partial audio file still lands in the library via the watcher.
   useEffect(() => {
-    const off = api.recording.onStateChange(({ sessionId, state }) => {
-      if (state === 'idle' || state === 'error') {
-        setLiveRecording((cur) => (cur?.sessionId === sessionId ? null : cur));
-      }
+    const off = api.recording.onStateChange(({ sessionId, state, reason }) => {
+      if (state !== 'idle' && state !== 'error') return;
+      const cur = liveRecordingRef.current;
+      if (cur?.sessionId !== sessionId) return;
+      setLiveRecording(null);
+      const why = state === 'error'
+        ? reason ?? 'the recorder hit an error'
+        : reason ?? 'the capture process exited';
+      toast.show({
+        message: `Recording stopped unexpectedly — ${why}. Audio captured so far was saved.`,
+        variant: 'error',
+        durationMs: 10_000,
+        action: cur.startInput
+          ? {
+              label: 'Record again',
+              onClick: async () => {
+                try {
+                  const r = await api.recording.start(cur.startInput!) as { sessionId: string };
+                  setLiveRecording({
+                    sessionId: r.sessionId,
+                    label: cur.label,
+                    startedAt: new Date().toISOString(),
+                    startInput: cur.startInput,
+                  });
+                } catch (e) {
+                  toast.show({
+                    message: `Couldn't restart recording: ${(e as Error).message}`,
+                    variant: 'error',
+                  });
+                }
+              },
+            }
+          : undefined,
+      });
     });
     return () => { off(); };
-  }, []);
+  }, [toast, setLiveRecording]);
 
   // Application menu actions. Items in the View / File menus emit named
   // actions; we map them to local state. (#5 from the UX review.)
@@ -185,13 +273,19 @@ function AppInner(): JSX.Element {
           window.dispatchEvent(new CustomEvent('mn:toggle-record'));
           break;
         case 'view-library':
-          setView({ kind: 'library' });
+          void navigate({ kind: 'library' });
           break;
         case 'view-weekly':
-          setView({ kind: 'weekly' });
+          void navigate({ kind: 'weekly' });
           break;
         case 'view-settings':
-          setView({ kind: 'settings' });
+          void navigate({ kind: 'settings' });
+          break;
+        case 'nav-back':
+          void goBack();
+          break;
+        case 'nav-forward':
+          void goForward();
           break;
         case 'open-search':
           setSearchOpen(true);
@@ -199,17 +293,17 @@ function AppInner(): JSX.Element {
       }
     });
     return () => { off(); };
-  }, []);
+  }, [goBack, goForward, navigate]);
 
   // meetingnotes://open?id=… — main process emits this when an external
   // caller invokes the URL scheme (#77). Navigate to the detail view.
+  // navigate() consults the unsaved-edits guard.
   useEffect(() => {
     const off = api.onOpenMeeting((id) => {
-      if (!confirmLeave()) return;
-      setView({ kind: 'detail', id });
+      void navigate({ kind: 'detail', id });
     });
     return () => { off(); };
-  }, []);
+  }, [navigate]);
 
   // Auto-record-started — main process started a recording on its own
   // (Zoom + autoRecordZoom). Route into LiveRecording so the in-progress
@@ -219,7 +313,7 @@ function AppInner(): JSX.Element {
       setLiveRecording({ sessionId, label, startedAt });
     });
     return () => { off(); };
-  }, []);
+  }, [setLiveRecording]);
 
   // Window-level drag-and-drop. We listen on document so a drop anywhere
   // in the window works — not just over the library list. The dragCounter
@@ -297,7 +391,7 @@ function AppInner(): JSX.Element {
     };
   }, [toast]);
 
-  const body = onboardStatus === null ? (
+  const activeView = onboardStatus === null ? (
     <div className="p-8 text-sm text-ink-muted">Loading…</div>
   ) : onboardStatus === 'needed' ? (
     <OnboardingView onFinished={() => { setForceOpenSetup(false); setOnboardStatus('done'); }} />
@@ -305,9 +399,8 @@ function AppInner(): JSX.Element {
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
   ) : view.kind === 'library' ? (
     <LibraryView
-      onOpen={(id, hint, opts) => setView({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
-      onSettings={() => setView({ kind: 'settings' })}
-      onWeekly={() => setView({ kind: 'weekly' })}
+      onOpen={(id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
+      onNav={(target) => { if (target !== 'library') void navigate({ kind: target }); }}
       onOpenSearch={() => setSearchOpen(true)}
       liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
@@ -321,19 +414,20 @@ function AppInner(): JSX.Element {
       id={view.id}
       seekSeconds={view.seekSeconds}
       hint={view.hint}
-      onBack={() => setView({ kind: 'library' })}
+      onBack={() => void goBack()}
     />
   ) : view.kind === 'weekly' ? (
     <WeeklyView
-      onBack={() => setView({ kind: 'library' })}
-      onOpenMeeting={(id) => setView({ kind: 'detail', id })}
+      onNav={(target) => { if (target !== 'weekly') void navigate({ kind: target }); }}
+      onOpenMeeting={(id) => void navigate({ kind: 'detail', id })}
     />
   ) : (
     <SettingsView
-      onBack={() => setView({ kind: 'library' })}
-      onRunSetupAgain={() => { setView({ kind: 'library' }); setForceOpenSetup(true); }}
+      onNav={(target) => { if (target !== 'settings') void navigate({ kind: target }); }}
+      onRunSetupAgain={() => { void navigate({ kind: 'library' }); setForceOpenSetup(true); }}
     />
   );
+  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{activeView}</Suspense>;
 
   // Persistent recording banner on views that don't show the LibraryView's
   // inline live row. Keeps the user aware that capture is still going even
@@ -367,7 +461,7 @@ function AppInner(): JSX.Element {
           {body}
         </div>
         {onboardStatus === 'done' && (
-          <PipelineStatusBar onOpenMeeting={(id) => { if (confirmLeave()) setView({ kind: 'detail', id }); }} />
+          <PipelineStatusBar onOpenMeeting={(id) => void navigate({ kind: 'detail', id })} />
         )}
       </div>
       <SearchPalette
@@ -387,7 +481,7 @@ function DropOverlay(): JSX.Element {
   return (
     <div className="fixed inset-0 z-[2000] pointer-events-none flex items-center justify-center bg-brand-indigo/15 backdrop-blur-[2px]">
       <div className="bg-surface rounded-2xl shadow-pop border-2 border-dashed border-brand-indigo px-10 py-8 flex flex-col items-center gap-3 max-w-md text-center">
-        <div className="text-3xl">⬇︎</div>
+        <Icon name="download" className="w-9 h-9 text-ink-muted opacity-60 mb-1" />
         <div className="text-base font-semibold">Drop audio to import</div>
         <div className="text-xs text-ink-muted">
           .m4a, .mp3, .wav, .aac, .flac — files land in your inbox as

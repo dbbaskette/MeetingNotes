@@ -5,11 +5,11 @@
 <h1>MeetingNotes</h1>
 
 <p><strong>Record, transcribe, diarize, summarize, and extract action items from any meeting — entirely on your Mac.</strong><br/>
-No cloud. No uploads. No API keys at inference time. No third-party recorder to install.</p>
+Capture and inference run locally. Optional exports send only the meeting data you choose; Obsidian sync writes local Markdown into your vault. No third-party recorder to install.</p>
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.10.0-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.13.2-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -42,7 +42,7 @@ Local **whisper.cpp** transcription + **pyannote** diarization, then a local LLM
 <td width="33%" valign="top">
 
 ### 🗂️ Organize
-Name voices once and they're recognized across meetings. A **Needs attention** panel gathers recovery, failure, speaker-review, and pending work, while **Weekly** stitches the week into a narrative with cross-meeting themes and your open action items.
+Name voices once and they're recognized across meetings. Put related recordings into optional **groups** within the Library; recordings remain in place on disk. A **Needs attention** panel gathers recovery, failure, speaker-review, and pending work, while **Weekly** stitches the week into a narrative with cross-meeting themes and your open action items.
 
 </td>
 </tr>
@@ -56,7 +56,7 @@ Auto-detect meetings in browsers and native apps, or fire `meetingnotes://record
 <td valign="top">
 
 ### 📤 Export
-Push action items to **Apple Reminders**, **Google Tasks**, or **Google Docs**; the summary to **Markdown**; or a JSON payload to any **webhook** (n8n, Zapier, Slack…).
+Push action items to **Apple Reminders** or **Google Tasks**; export meeting notes to **PDF**, **Markdown**, or **Google Docs**; automatically sync to an **Obsidian vault**; or send a JSON payload to a **webhook** (n8n, Zapier, Slack…). PDF can include selected action items or notes alone.
 
 </td>
 <td valign="top">
@@ -176,19 +176,21 @@ brew install whisper-cpp ffmpeg
 ## 🎬 Recording a meeting
 
 1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
-2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Pick one, or **All system audio** as a catch-all.
+2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. Optionally choose **Save to group** (preselected when you are browsing a group), then pick an app or **All system audio** as a catch-all. Choosing the source still starts recording in one click.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
 4. Click **■ Stop** — the new row lands in your library instantly.
 5. Click **▶ Process** to run the pipeline.
 
-Each recording writes up to three AAC files to `~/Music/MeetingNotes/` (mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
+Each recording writes up to three AAC files to the Library's `recordings/` directory (by default `~/Documents/MeetingNotes/recordings/`; mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
 
 If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Finder**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched.
 
 <details>
 <summary><strong>Managing recordings</strong></summary>
 
-Every row and the detail-view header has a **⋯** menu with **Rename…** and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
+The Library opens in **Organized** view: **Ungrouped** appears first, followed by alphabetically sorted named groups, all as expandable sections in the meeting list. Meetings appear only inside their assigned section. Expand a section to browse its meetings, or choose **View** to focus on that group alone; **All groups** returns to the organized list. Use **All meetings** for a flat, sortable list. Status filters and inline search work in either layout; organized search groups matches by their assigned group, while **⌘K** quick search remains global. Use **+ New group** to create a section, and **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.
+
+Every row and the detail-view header has a **⋯** menu with **Move to group…**, **Rename…**, and **Delete…**. Delete moves the meeting and its files to **Recently deleted** for a 30-day recovery window; the Library can restore it or purge it after retention expires.
 </details>
 
 ## 🧠 Bring your own model (and reasoning-model resilience)
@@ -218,7 +220,11 @@ After diarize + identify, the pipeline pauses at `awaiting_speaker_id`; the libr
 
 Summaries are structured into **Overview · Key Discussion Points · Decisions · Action Items · Follow-ups · Open Questions**, skipping empty sections. Opening/closing small talk is moved (not duplicated) into an **Off-topic Conversation** section at the end. Verbosity is a one-time **detail level** (concise / standard / detailed) that pins the target length in the prompt so different models don't drift.
 
-The **Summary editor** has Preview / Split / Edit modes — fix a hallucination or redact in place and Save (writes to `summary.md`).
+The **Summary editor** has View and Edit modes, with a live preview while editing — fix a hallucination or redact in place and Save (writes to `summary.md`).
+
+**Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. **Settings → Dictionary** shows a compact count and learning-offers toggle. Choose **Manage dictionary…** to search, filter by group, and add/edit/disable/delete rules in a dedicated scrollable dialog. The dictionary no longer pushes other settings down as it grows. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
+
+Use **Correct term…** above a transcript or summary to preview and select occurrences. **Review terminology** shows remembered suggestions and applied corrections with Undo. Raw transcription, speaker labels, and audio timing are preserved; corrections survive speaker renaming. If later edits overlap a correction, Undo asks you to correct the passage manually instead of overwriting those edits. Correcting a transcript marks its notes as out of date; regenerating notes is explicit and replaces the existing notes and action items. Saving or changing a dictionary rule does not rewrite historical meetings.
 
 **Action items** are extracted from the summary and carry **provenance**: click one to jump to the exact summary bullet it came from. Edited the summary? Hit **↻ Re-extract** to regenerate the items in seconds without re-running the whole pipeline.
 </details>
@@ -248,10 +254,20 @@ Set **Settings → "You are…"** to pin *your* open action items to a "You" gro
 | **Apple Reminders** | Push action items into a Reminders list. |
 | **Google Tasks / Docs** | Send action items to Google Tasks, or the full summary to a Google Doc (BYO OAuth client — see [`docs/google-setup.md`](docs/google-setup.md)). |
 | **Markdown** | Export the summary as a `.md` file, editor + live preview built in. |
+| **PDF** | Save formatted meeting notes as a `.pdf`; select which action items to include, or choose **None** for notes only. Generated locally. |
+| **[Obsidian](docs/obsidian-sync.md)** | Automatically maintain one Markdown note per completed meeting in your vault, with group/date Bases views and a plain Markdown index. Action items are optional; transcripts default off; audio is never copied. |
 | **[Webhook](docs/exporters.md)** | POST a `meeting.completed` JSON payload to any HTTPS/localhost endpoint. Templates: compact JSON · full JSON · Slack blocks · Telegram markdown. **Send test payload** verifies the round-trip. |
 | **[URL scheme](docs/url-scheme.md)** | `meetingnotes://record?source=zoom.us`, `…?source=ask`, `meetingnotes://stop` — drive recording from Shortcuts, `osascript`, Stream Deck, or a calendar trigger. |
 
 ## 🔧 Configuration
+
+**Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](docs/usability-improvements.md).
+
+**Notes history:** the Notes tab's **Notes & action-item history…** compares and restores the latest 20 saved versions. Regeneration and re-extraction preserve existing notes/tasks before replacing them; restore includes completion status, ownership, due dates, and export markers while leaving the transcript/audio unchanged.
+
+**Obsidian:** open **Settings → Integrations → Obsidian sync → Configure…**, select the root of an existing vault, then **Preview sync → Enable and sync**. MeetingNotes creates a dedicated `MeetingNotes/` folder with `Meetings.md`, a three-view `Meetings.base`, `Browse.md`, and canonical files in `Notes/`. Groups are properties, so moving a meeting between groups does not duplicate or move its note. Enable Obsidian's built-in Bases plugin for group/date views; the link-only index works without plugins. Startup resumes pending work; **Sync pending / retry failed** leaves unchanged exports alone. Use **Recheck all notes** for a full scan.
+
+Sync is one-way and runs while MeetingNotes is open. Write annotations under **Personal notes**; edits to generated text, task checkboxes, or `mn_` properties pause that note until reviewed. **Configure…** shows progress, errors, comparison, retry, and backup-before-replace controls. Existing notes are retained when sync is disabled or the source meeting is removed. A vault's own cloud/Git sync may distribute exported content outside this Mac. See [setup, preservation, limits, and rollback](docs/obsidian-sync.md).
 
 Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`). Edit them in the app's **Settings** view or via `setup.sh`.
 
@@ -272,6 +288,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `audioWatchPath` | `~/Music/MeetingNotes` | Folder watched for new recordings. |
 | `recordingBitrateKbps` | `128` | AAC bitrate (96 / 128 / 192). |
 | `theme` | `system` | UI appearance: `system` / `light` / `dark`. |
+| `obsidian` | `null` (off) | Vault, owned subfolder, content options, and sync state. Configure through the preview/confirmation flow, not generic settings writes. |
 | `userName` | `""` | Your name, substituted into transcripts after speaker-ID. |
 | `userSpeakerId` | `null` | The roster speaker that represents you; pins your action items in Weekly. Set via Settings → "You are…". |
 | `autoDetectMeetings` | `{browserTabs:false, nativeApps:false, silenceMs:5000}` | `browserTabs` polls the frontmost browser for meeting URLs; `nativeApps` polls CoreAudio for Zoom/Teams/Webex/FaceTime; `silenceMs` debounces beeps. |
@@ -300,7 +317,7 @@ Create a **fine-grained** token with "Read access to contents of all public gate
 
 ```bash
 npm run dev        # vite + electron with HMR
-npm test           # rebuild native deps, then run the full suite (688 tests)
+npm test           # rebuild native deps, then run the full suite
 npm run lint
 npm run build      # tsc main + preload (CJS) + vite
 npm run dist       # full installer: audio-tap + sidecar + app + .dmg + .zip
@@ -319,14 +336,14 @@ electron/main/        main process: pipeline, storage, IPC, watcher, services
   library/            watcher, catalog service, ffprobe
   meeting-detector/   browser-tab URL polling + native-app detector
   url-scheme/         meetingnotes:// handler
-  exporters/          apple-reminders · google-tasks · google-doc · markdown · webhook
+  exporters/          apple-reminders · google-tasks · google-doc · markdown · pdf · webhook
   llm/                managed LM Studio / Ollama lifecycle
   lm-studio/          OpenAI-compatible client (thinking-strip, re-sample retries)
   whisper/            whisper-server supervisor (lazy spawn, /health probe)
   diarization/        pyannote sidecar supervisor + HTTP client
   weekly/             Mon–Sun aggregator + narrative prompt
   pipeline/stages/    transcribing · diarizing · merging · identifying · summarizing · extracting
-  storage/            SQLite repos + migrations (schema v15)
+  storage/            SQLite repos + migrations (schema v20)
 electron/preload/     CJS IPC bridge (with a parity test)
 electron/renderer/    React UI (views/ · components/ · lib/ · store/)
 sidecar/              Python pyannote diarization sidecar, FastAPI :8765
@@ -338,11 +355,11 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.10.0-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.13.2-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `whisper-server`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.
 
-Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/start.sh --status` (what's running). App logs: `~/Library/Logs/MeetingNotes/app.log`, surfaced in-app under **Settings → Diagnostics**.
+Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/start.sh --status` (what's running). App logs: `~/Library/Logs/MeetingNotes/app.log`, surfaced in-app under **Settings → Advanced → Diagnostics**. Full isolated macOS verification uses [the shared Tart runner](docs/local-ci.md).
 </details>
 
 ## 🔒 Privacy & security
@@ -354,7 +371,9 @@ Runtime tools: `./scripts/doctor.sh` (read-only health check) and `./scripts/sta
 
 ## 📊 Status
 
-**1.10.0** — stable on macOS 14.2+ / Apple Silicon. Full local pipeline working end-to-end, with source-aware capture diagnostics, non-destructive recording recovery, unified attention triage, and faster speaker review. Browser + native-app meeting detection ship enabled-but-off. The "All system audio" capture path remains an explicit fallback for cases where a specific app source is silent.
+**1.13.2** — for macOS 14.2+ / Apple Silicon. Fixes a blank-window crash when the grouped Library opens with existing meetings. Expanded groups render viewport-bounded rows, Settings has searchable sections and reliable save feedback, notes/action items have local compare-and-restore history, and Obsidian sync resumes pending work without rescanning every unchanged export. Quoted and Terminal-escaped folder paths are handled safely. Additive migration 20 stores notes history without relocating recordings.
+
+See the [1.13.2 release notes](docs/releases/v1.13.2.md) for upgrade guidance, verification, and known limitations, or the [source-only GitHub release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.13.2). The experimental remote-processing beta remains separate.
 
 ## 📄 License
 

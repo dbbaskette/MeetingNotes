@@ -27,4 +27,25 @@ describe('catalogAudio', () => {
     expect(meetings.insert).toHaveBeenCalledTimes(1);
     expect(createFolder).toHaveBeenCalledTimes(1);
   });
+
+  it('files a recovered capture under its original session group, even when discovered by the watcher first', async () => {
+    const rows = new Map<string, any>();
+    const groupId = 'e0db3539-78e0-4d71-bb8c-1d622b67bd0b';
+    const original = '/recordings/recording-20260924-120000-xyz.m4a';
+    const recovered = '/recordings/recording-20260924-120000-xyz.recovered-trimmed-123e4567-e89b-12d3-a456-426614174000.m4a';
+    const findByOutputPath = vi.fn((audioPath: string) => audioPath === original ? { groupId } : null);
+    const deps = {
+      meetings: { findByAudioPath: (audioPath: string) => rows.get(audioPath) ?? null,
+        insert: (row: any) => rows.set(row.audioPath, row) } as any,
+      sessions: { findByOutputPath } as any,
+      libraryRoot: '/library', probe: vi.fn(async () => ({ durationS: 30 })),
+      createFolder: vi.fn(), id: () => 'abc2',
+    };
+    const first = await catalogAudio(recovered, deps);
+    const retry = await catalogAudio(recovered, deps);
+    expect(first.meeting).toMatchObject({ groupId });
+    expect(retry.kind).toBe('existing');
+    expect(deps.createFolder).toHaveBeenCalledTimes(1);
+    expect(findByOutputPath).toHaveBeenCalledWith(original);
+  });
 });

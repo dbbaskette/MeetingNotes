@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { api } from '../ipc/client';
-import { buildNeedsAttention } from '../lib/needs-attention';
+import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
 import { useToast } from './Toasts';
+import { RecoveryRow } from './RecoveryRow';
 
 export interface RecoveryInboxItem {
   id: string;
@@ -25,55 +26,24 @@ interface AttentionMeeting {
 }
 
 export function NeedsAttentionPanel({
-  meetings, recovery, onOpen, onChanged,
+  meetings, recovery, error, onRetry, onOpen, onChanged,
 }: {
   meetings: AttentionMeeting[];
   recovery: RecoveryInboxItem[];
+  error?: string | null;
+  onRetry?: () => void;
   onOpen: (id: string) => void;
   onChanged: () => void | Promise<void>;
 }): JSX.Element | null {
   const toast = useToast();
   const groups = useMemo(
-    () => buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }),
+    () => capAttentionGroups(buildNeedsAttention({ meetings, recovery, nowMs: Date.now() }), ATTENTION_GROUP_CAP),
     [meetings, recovery],
   );
-  if (groups.length === 0) return null;
+  if (groups.length === 0 && !error) return null;
 
   const recoveryById = new Map(recovery.map((item) => [item.id, item]));
-  async function recover(id: string): Promise<void> {
-    try {
-      const result = await api.recovery.recover(id);
-      toast.show({ message: 'Recording recovered to the Library.' });
-      await onChanged();
-      onOpen(result.meetingId);
-    } catch (error) {
-      toast.show({ message: `Recovery failed: ${(error as Error).message}`, variant: 'error' });
-    }
-  }
-  async function trim(item: RecoveryInboxItem): Promise<void> {
-    const suggested = item.durationS ? Math.max(1, Math.floor(item.durationS / 60)) : 30;
-    const answer = window.prompt('Keep the first how many minutes?', String(suggested));
-    if (answer === null) return;
-    const minutes = Number(answer);
-    if (!Number.isFinite(minutes) || minutes <= 0) {
-      toast.show({ message: 'Enter a positive number of minutes.', variant: 'error' });
-      return;
-    }
-    try {
-      const result = await api.recovery.trim(item.id, minutes * 60);
-      toast.show({ message: 'Trimmed recording recovered to the Library.' });
-      await onChanged();
-      onOpen(result.meetingId);
-    } catch (error) {
-      toast.show({ message: `Trim failed: ${(error as Error).message}`, variant: 'error' });
-    }
-  }
-  async function dismiss(id: string): Promise<void> {
-    await api.recovery.dismiss(id);
-    await onChanged();
-  }
   async function primaryAction(kind: string, id: string): Promise<void> {
-    if (kind === 'recovery') { await recover(id); return; }
     if (kind === 'pending') {
       await api.meetings.start(id);
       toast.show({ message: 'Meeting added to the processing queue.' });
@@ -88,8 +58,19 @@ export function NeedsAttentionPanel({
       <div className="flex items-center gap-2 px-4 py-3 border-b border-status-warn/20">
         <span className="w-2 h-2 rounded-full bg-status-warn" />
         <h2 className="text-sm font-semibold text-ink">Needs attention</h2>
-        <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.items.length, 0)}</span>
+        <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.totalCount, 0)}</span>
       </div>
+      {error && (
+        <div role="alert" className="px-4 py-2.5 text-xs text-danger border-b border-status-warn/20">
+          Couldn't refresh this inbox: {error}
+          {onRetry && (
+            <>
+              {' '}
+              <button type="button" className="font-semibold underline" onClick={onRetry}>Retry</button>
+            </>
+          )}
+        </div>
+      )}
       <div className="max-h-64 overflow-y-auto divide-y divide-surface-border">
         {groups.map((group) => (
           <div key={group.kind} className="px-4 py-2.5">
@@ -97,31 +78,29 @@ export function NeedsAttentionPanel({
             <div className="space-y-2">
               {group.items.map((item) => {
                 const rec = item.kind === 'recovery' ? recoveryById.get(item.id) : undefined;
+                if (rec) return <RecoveryRow key={rec.id} item={rec}
+                  detail={`${item.ageLabel} · ${reasonLabel(rec.reason)} · ${formatDuration(rec.durationS)} · ${formatBytes(rec.sizeBytes)}`}
+                  onOpen={onOpen} onChanged={onChanged} />;
                 return (
                   <div key={`${item.kind}:${item.id}`} className="flex items-center gap-3 text-sm">
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium text-ink">{item.title}</div>
                       <div className="text-xs text-ink-muted">
-                        {item.ageLabel}{rec ? ` · ${reasonLabel(rec.reason)} · ${formatDuration(rec.durationS)} · ${formatBytes(rec.sizeBytes)}` : ''}
+                        {item.ageLabel}
                       </div>
                     </div>
-                    {rec && (
-                      <div className="hidden md:flex items-center gap-2 text-xs">
-                        {rec.canTrim && <button className="text-ink-muted hover:text-ink" onClick={() => void trim(rec)}>Trim and recover</button>}
-                        <button className="text-ink-muted hover:text-ink" onClick={() => void api.recovery.reveal(rec.id)}>Finder</button>
-                        <button className="text-ink-muted hover:text-ink" onClick={() => void dismiss(rec.id)}>Dismiss</button>
-                      </div>
-                    )}
                     <button
-                      disabled={rec ? !rec.canRecover : false}
                       className="shrink-0 px-2.5 py-1 rounded-md bg-surface border border-surface-border text-xs font-medium text-ink hover:border-brand-indigo/40 disabled:opacity-40"
                       onClick={() => void primaryAction(item.kind, item.id)}
                     >
-                      {rec && !rec.canRecover ? 'No usable audio' : item.actionLabel}
+                      {item.actionLabel}
                     </button>
                   </div>
                 );
               })}
+              {group.hiddenCount > 0 && (
+                <div className="text-xs text-ink-muted">+{group.hiddenCount} more</div>
+              )}
             </div>
           </div>
         ))}

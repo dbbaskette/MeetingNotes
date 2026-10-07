@@ -16,6 +16,8 @@ describe('RecordingSessionsRepo', () => {
       targetLabel: 'Zoom', outputPath: '/tmp/x.m4a',
     });
     expect(repo.findOpen()).toHaveLength(1);
+    repo.updateHelperPid('sess1', 4321);
+    expect(repo.findById('sess1')?.helperPid).toBe(4321);
 
     repo.finalize('sess1');
     expect(repo.findOpen()).toHaveLength(0);

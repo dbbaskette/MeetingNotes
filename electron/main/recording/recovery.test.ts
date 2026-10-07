@@ -1,12 +1,22 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { RecordingRecoveryService, revealPathInFinder } from './recovery.js';
 
+const fixtureDirs: string[] = [];
+function fixtureDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fixtureDirs.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of fixtureDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 describe('RecordingRecoveryService', () => {
   it('classifies and recovers a microphone-only recording without changing its stem', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-recovery-'));
+    const dir = fixtureDir('mn-recovery-');
     const primary = path.join(dir, 'recording.m4a');
     const voice = path.join(dir, 'recording.voice.m4a');
     fs.writeFileSync(primary, '');
@@ -39,7 +49,7 @@ describe('RecordingRecoveryService', () => {
   });
 
   it('keeps an unreadable session visible with reveal and dismiss', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-recovery-bad-'));
+    const dir = fixtureDir('mn-recovery-bad-');
     const primary = path.join(dir, 'bad.m4a');
     fs.writeFileSync(primary, 'broken');
     const dismissRecovery = vi.fn();
@@ -63,7 +73,7 @@ describe('RecordingRecoveryService', () => {
   });
 
   it('opens the containing folder when the original capture has gone missing', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-recovery-missing-'));
+    const dir = fixtureDir('mn-recovery-missing-');
     const showItemInFolder = vi.fn();
     const openPath = vi.fn(async () => '');
 
@@ -71,5 +81,49 @@ describe('RecordingRecoveryService', () => {
 
     expect(showItemInFolder).not.toHaveBeenCalled();
     expect(openPath).toHaveBeenCalledWith(dir);
+  });
+
+  it('reveals an existing recording without opening its parent or changing its audio', async () => {
+    const dir = fixtureDir('mn-recovery-reveal-');
+    const file = path.join(dir, 'recording with spaces.m4a');
+    fs.writeFileSync(file, 'original audio');
+    const showItemInFolder = vi.fn();
+    const openPath = vi.fn(async () => '');
+    await revealPathInFinder(file, { showItemInFolder, openPath });
+    expect(showItemInFolder).toHaveBeenCalledWith(file);
+    expect(openPath).not.toHaveBeenCalled();
+    expect(fs.readFileSync(file, 'utf8')).toBe('original audio');
+  });
+
+  it('reports Electron folder-open errors, including a missing containing folder', async () => {
+    const dir = fixtureDir('mn-recovery-open-error-');
+    const folder = path.join(dir, 'removed-folder');
+    const showItemInFolder = vi.fn();
+    const openPath = vi.fn(async () => 'The folder does not exist');
+    await expect(revealPathInFinder(path.join(folder, 'gone.m4a'), { showItemInFolder, openPath }))
+      .rejects.toThrow('Could not open the recording folder in Finder: The folder does not exist');
+    expect(showItemInFolder).not.toHaveBeenCalled();
+    expect(openPath).toHaveBeenCalledWith(folder);
+  });
+
+  it('propagates rejected folder-open requests', async () => {
+    const dir = fixtureDir('mn-recovery-open-rejected-');
+    await expect(revealPathInFinder(path.join(dir, 'gone.m4a'), {
+      showItemInFolder: vi.fn(), openPath: vi.fn(async () => { throw new Error('Finder unavailable'); }),
+    })).rejects.toThrow('Finder unavailable');
+  });
+
+  it('does not dismiss a recovery item when Finder fails', async () => {
+    const dir = fixtureDir('mn-recovery-reveal-failed-');
+    const dismissRecovery = vi.fn();
+    const session = { id: 'failed', outputPath: path.join(dir, 'gone.m4a'), dismissedAt: null };
+    const service = new RecordingRecoveryService({
+      sessions: { findById: (id: string) => id === session.id ? session : null, dismissRecovery } as any,
+      meetings: {} as any, catalog: vi.fn(),
+      reveal: async () => { throw new Error('Finder unavailable'); },
+    });
+    await expect(service.reveal('failed')).rejects.toThrow('Finder unavailable');
+    expect(dismissRecovery).not.toHaveBeenCalled();
+    await expect(service.reveal('missing')).rejects.toThrow('Recovery item not found');
   });
 });

@@ -9,6 +9,7 @@ export interface StartInput {
   targetPid: number | 'system';
   targetLabel: string;
   mic: boolean;
+  groupId?: string | null;
 }
 
 export interface StartResult {
@@ -34,7 +35,7 @@ export class RecordingManager {
   private sessions = new Map<string, SessionEntry>();
   private listeners = {
     level: new Set<(sessionId: string, source: RecordingLevelSource, peakDb: number) => void>(),
-    stateChange: new Set<(sessionId: string, state: RecordingState) => void>(),
+    stateChange: new Set<(sessionId: string, state: RecordingState, reason?: string) => void>(),
   };
 
   constructor(private readonly deps: {
@@ -64,11 +65,28 @@ export class RecordingManager {
     if (input.mic) args.push('--mic'); else args.push('--no-mic');
     args.push('--out', outputPath);
 
+    // Persist capture intent before spawning. The helper can create its file
+    // immediately and the watcher may catalog it before start() resolves.
+    this.deps.repo.insert({
+      id: sessionId,
+      helperPid: -1,
+      targetPid: input.targetPid === 'system' ? null : input.targetPid,
+      targetLabel: input.targetLabel,
+      outputPath,
+      groupId: input.groupId ?? null,
+    });
     const spawnFn = this.deps.spawn ?? nodeSpawn;
-    const proc = spawnFn(this.deps.helperPath, args);
-    proc.stdout.setEncoding('utf8');
-    proc.stderr.setEncoding('utf8');
-
+    let proc!: ChildProcessWithoutNullStreams;
+    try {
+      proc = spawnFn(this.deps.helperPath, args);
+      this.deps.repo.updateHelperPid(sessionId, proc.pid ?? -1);
+      proc.stdout.setEncoding('utf8');
+      proc.stderr.setEncoding('utf8');
+    } catch (error) {
+      try { proc?.kill('SIGTERM'); } catch { /* helper may not have spawned */ }
+      this.deps.repo.markError(sessionId);
+      throw error;
+    }
     const entry: SessionEntry = {
       proc,
       outputPath,
@@ -77,13 +95,6 @@ export class RecordingManager {
       stopPromise: null,
     };
     this.sessions.set(sessionId, entry);
-    this.deps.repo.insert({
-      id: sessionId,
-      helperPid: proc.pid ?? -1,
-      targetPid: input.targetPid === 'system' ? null : input.targetPid,
-      targetLabel: input.targetLabel,
-      outputPath,
-    });
 
     // Wait for the started event (helper emits {"event":"started"} when CoreAudio is attached).
     await new Promise<void>((resolve, reject) => {
@@ -108,12 +119,15 @@ export class RecordingManager {
     this.armSilenceTimer(sessionId);
     // Keep draining stdout for level events for the lifetime of the session.
     // The handler installed above keeps running because we never removed it.
-    proc.on('exit', () => {
+    proc.on('exit', (code: number | null) => {
       const cur = this.sessions.get(sessionId);
       if (cur && cur.state === 'recording') {
         // Helper exited on its own (target app quit / parent watchdog).
+        // The reason rides along on the state-change broadcast so the
+        // renderer can tell the user WHY their capture ended instead of
+        // silently swallowing the banner (#191).
         this.clearSilenceTimer(cur);
-        this.transition(sessionId, 'idle');
+        this.transition(sessionId, 'idle', `helper exited unexpectedly (code=${code ?? 'null'})`);
         try { this.deps.repo.finalize(sessionId); } catch { /* best-effort */ }
         this.sessions.delete(sessionId);
       }
@@ -158,16 +172,16 @@ export class RecordingManager {
   }
 
   on(event: 'level', cb: (sessionId: string, source: RecordingLevelSource, peakDb: number) => void): void;
-  on(event: 'state-change', cb: (sessionId: string, state: RecordingState) => void): void;
+  on(event: 'state-change', cb: (sessionId: string, state: RecordingState, reason?: string) => void): void;
   on(event: 'level' | 'state-change', cb: any): void {
     if (event === 'level') this.listeners.level.add(cb);
     else this.listeners.stateChange.add(cb);
   }
 
-  private transition(sessionId: string, state: RecordingState): void {
+  private transition(sessionId: string, state: RecordingState, reason?: string): void {
     const s = this.sessions.get(sessionId);
     if (s) { s.state = state; }
-    for (const cb of this.listeners.stateChange) cb(sessionId, state);
+    for (const cb of this.listeners.stateChange) cb(sessionId, state, reason);
   }
 
   private handleLine(sessionId: string, line: string): void {
