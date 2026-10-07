@@ -4,6 +4,7 @@ import { VuMeter } from './VuMeter';
 import { Icon } from './icons';
 import { ConfirmDialog } from './ConfirmDialog';
 import { stopRecording } from '../lib/stop-recording';
+import { recordingStartFeedback } from '../lib/recording-start-feedback';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import {
   captureSummary, deriveCaptureHealth, type CaptureLevelSource,
@@ -101,7 +102,8 @@ export function LiveRecordingRow({
       const next = await api.recording.start(startInput) as { sessionId: string };
       if (mounted.current) onRestarted({ sessionId: next.sessionId, label: 'All system audio', startedAt: new Date().toISOString(), startInput });
     } catch (error) {
-      if (mounted.current) onStopped(`Capture ended, but could not restart: ${(error as Error).message}. Start a new recording when ready.`);
+      const feedback = await recordingStartFeedback(error, api.recording);
+      if (mounted.current) onStopped(`Capture ended. ${feedback.message}`);
     } finally {
       operation.current = false;
       if (mounted.current) setStopping(false);

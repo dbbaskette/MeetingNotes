@@ -13,6 +13,7 @@ import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
 import { requestLeave } from './lib/unsaved-guard';
 import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
+import { recordingStartFeedback } from './lib/recording-start-feedback';
 
 const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
 const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
@@ -273,9 +274,10 @@ function AppInner(): JSX.Element {
                     startInput: cur.startInput,
                   });
                 } catch (e) {
+                  const feedback = await recordingStartFeedback(e, api.recording);
                   toast.show({
-                    message: `Couldn't restart recording: ${(e as Error).message}`,
-                    variant: 'error',
+                    message: feedback.message,
+                    variant: feedback.kind === 'info' ? 'default' : 'error',
                   });
                 }
               },
