@@ -38,6 +38,34 @@ describe('mergeTranscriptWithDiarization', () => {
     );
     expect(out[0]!.speaker).toBe('VOICE_YOU');
   });
+
+  it('keeps original whisper order and picks max overlap among many non-overlapping turns', () => {
+    const many: DiarSegment[] = Array.from({ length: 4_000 }, (_, i) => ({
+      start: i * 2, end: i * 2 + 1, speaker: `S${i}`,
+    }));
+    const out = mergeTranscriptWithDiarization(
+      [
+        { start: 7_998, end: 7_998.5, text: 'late' },
+        { start: 0, end: 0.5, text: 'early' },
+      ],
+      many,
+    );
+    expect(out.map((row) => row.speaker)).toEqual(['S3999', 'S0']);
+  });
+
+  it('finishes a 4-hour-scale merge without a nested full scan', () => {
+    const whisper: WhisperSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
+      start: i, end: i + 0.9, text: 'x',
+    }));
+    const many: DiarSegment[] = Array.from({ length: 4_800 }, (_, i) => ({
+      start: i * 3, end: i * 3 + 3, speaker: `S${i % 4}`,
+    }));
+    const started = performance.now();
+    const out = mergeTranscriptWithDiarization(whisper, many);
+    expect(performance.now() - started).toBeLessThan(20);
+    expect(out[0]!.speaker).toBe('S0');
+    expect(out[14_399]!.speaker).toBe('S3');
+  });
 });
 
 describe('mergedToMarkdown', () => {

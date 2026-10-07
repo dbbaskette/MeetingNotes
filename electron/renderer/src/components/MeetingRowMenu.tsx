@@ -6,29 +6,41 @@
 // each row. Clicks bubble-stop so they don't also toggle the surrounding
 // row (select / open detail). The refresh callback is fired after each
 // mutation so the containing list re-queries.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 import { useToast } from './Toasts';
+import { ModalShell } from './ModalShell';
+import { RowDialogRetention } from './RowDialogRetention';
+import { MoveToGroupDialog } from './MoveToGroupDialog';
 
 export interface MeetingRowMenuProps {
-  meeting: { id: string; title: string };
+  meeting: { id: string; title: string; groupId?: string | null; groupName?: string | null };
   onChanged: () => void;
   /** Optional: called after a successful delete so the detail view can
    *  route back to Library if the deleted meeting is currently open. */
   onDeleted?: (id: string) => void;
 }
 
-type ModalKind = null | 'rename' | 'delete';
+type ModalKind = null | 'rename' | 'delete' | 'move';
 
 export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenuProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
+  const retainDialog = useContext(RowDialogRetention);
   const [anchor, setAnchor] = useState<
     { top?: number; bottom?: number; right: number } | null
   >(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // A dialog still belongs to this row when clicking its non-focusable
+  // heading/body blurs all controls. Retain its owner until it actually closes.
+  useLayoutEffect(() => {
+    if (modal === null || !retainDialog) return;
+    retainDialog(meeting.id, true);
+    return () => retainDialog(meeting.id, false);
+  }, [modal, meeting.id, retainDialog]);
 
   // Position the popover relative to the trigger button via viewport
   // coordinates. The menu renders in a portal on document.body because the
@@ -43,8 +55,8 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
     // For rows near the window bottom, open upward — a downward menu would
     // land under the app status bar / window edge, and since the popover
     // dismisses on scroll there'd be no way to ever reach its items.
-    // 120px ≈ menu height plus the docked status bar, with margin.
-    if (window.innerHeight - rect.bottom < 120) {
+    // Include the group action and clearance for the docked status bar.
+    if (window.innerHeight - rect.bottom < 160) {
       setAnchor({ bottom: window.innerHeight - rect.top + 6, right });
     } else {
       setAnchor({ top: rect.bottom + 6, right });
@@ -113,6 +125,12 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           "
         >
           <button
+            onClick={() => { setOpen(false); setModal('move'); }}
+            className="w-full text-left px-3 py-1.5 text-brand-indigo hover:bg-surface-sunken"
+          >
+            Move to group…
+          </button>
+          <button
             onClick={() => { setOpen(false); setModal('rename'); }}
             className="w-full text-left px-3 py-1.5 hover:bg-surface-sunken"
           >
@@ -134,6 +152,10 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); onChanged(); }}
         />
+      )}
+
+      {modal === 'move' && (
+        <MoveToGroupDialog ids={[meeting.id]} meeting={meeting} onClose={() => setModal(null)} onChanged={onChanged} />
       )}
 
       {modal === 'delete' && (
@@ -288,28 +310,5 @@ function DeleteDialog({
         </button>
       </div>
     </ModalShell>
-  );
-}
-
-function ModalShell({ children, onClose }: { children: React.ReactNode; onClose: () => void }): JSX.Element {
-  // Portal into document.body for the same reason as the dropdown — the
-  // row's `hover:-translate-y-px` transform creates a stacking context that
-  // also redefines the containing block for any descendant `position: fixed`
-  // element. Without the portal, the modal "follows" the row's hover
-  // transform instead of the viewport, producing a 1px jitter / flicker as
-  // the row's hover state toggles while the mouse moves across the overlay.
-  return createPortal(
-    <div
-      onClick={onClose}
-      className="fixed inset-0 z-[1001] bg-black/30 flex items-center justify-center p-4"
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-surface rounded-xl shadow-pop border border-surface-border p-5 w-full max-w-md"
-      >
-        {children}
-      </div>
-    </div>,
-    document.body,
   );
 }
