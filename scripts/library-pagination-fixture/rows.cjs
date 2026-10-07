@@ -69,6 +69,9 @@ app.whenReady().then(async () => {
     assert.equal(await run(`!!document.activeElement.closest('[role="dialog"]')`), true, 'Blurred control focus must remain within the open modal');
     assert.equal(await run(`document.activeElement === window.fixture.originalDialogInput`), false);
     await scroll(36000);
+    const dialogScroll = await run(`document.querySelector('#viewport > div').scrollTop`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J' }); await settle();
+    assert.equal(await run(`document.querySelector('#viewport > div').scrollTop`), dialogScroll, 'Dialog keys must not move the background library');
     assert.equal(await run(`document.querySelector('input.input')?.value`), `Unsaved fixture title ${width}`, 'Open Rename dialog must retain its unsaved value after control focus leaves');
     assert.equal(await run(`document.querySelector('input.input') === window.fixture.originalDialogInput`), true);
     assert.equal(await count(), 21);
@@ -78,6 +81,11 @@ app.whenReady().then(async () => {
     assert.equal(await run(`document.activeElement.closest('[data-meeting-id]')?.dataset.meetingId`), 'fixture-0', 'Closing Rename restores the triggering row control');
     await run(`document.querySelector('#outside').focus()`); await scroll(36000);
     assert.equal(await count(), 20);
+    await run(`document.querySelector('#viewport').style.display = 'none'; document.querySelector('#outside').focus()`); await settle();
+    const hiddenCommits = await run(`window.fixture.commits.length`);
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'J' }); await settle();
+    assert.equal(await run(`window.fixture.commits.length`), hiddenCommits, 'Hidden retained libraries do not own navigation keys');
+    await run(`document.querySelector('#viewport').style.display = 'flex'`); await settle();
     await scroll(0);
     await run(`window.fixture.holdDelete = true; document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Actions"]').click()`); await settle();
     await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Delete…').click()`); await settle();
