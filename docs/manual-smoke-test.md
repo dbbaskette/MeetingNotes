@@ -24,8 +24,9 @@ Run before merging significant feature work or releasing. ~10 min total.
 
 - [ ] Drop a known-good MP3 in `~/Music/MeetingNotes` (or whichever recordings folder is configured).
 - [ ] Library shows it in Inbox within ~2s.
-- [ ] Click into it → Process. Stages advance: transcribing → diarizing → merging → identifying → awaiting_speaker_id.
-- [ ] At `awaiting_speaker_id`, identify a few speakers OR check "Skip speaker ID" → pipeline continues to summarizing → extracting → done.
+- [ ] Click into it → Process. Stages advance: transcribing → diarizing → merging → identifying. If any voice shows **Needs review** (unknown, below 80% confidence, or fewer than two diarization segments), processing pauses at `awaiting_speaker_id`.
+- [ ] At `awaiting_speaker_id`, identify a few speakers and click Continue OR check "Skip speaker ID" → pipeline continues to summarizing → extracting → done.
+- [ ] A meeting where every voice is named, at least 80% confident, and has two or more diarization segments continues automatically without a naming prompt. Confirm the summary uses the roster names. A recording with no detected voices also continues without an empty naming prompt.
 - [ ] Transcript renders. Summary tab renders properly-styled markdown (headings, bullets — not raw text). Action items show up.
 - [ ] Export to Markdown: file save dialog appears, saved file is well-formatted.
 
