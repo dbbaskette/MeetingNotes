@@ -1,11 +1,12 @@
 import React, {useRef, useState, Profiler} from 'react';
 import {createRoot} from 'react-dom/client';
+import type {MeetingSummary} from '../../electron/renderer/src/lib/paged-meetings';
 import '../../electron/renderer/src/index.css';
 window.api = {meetings: {rename: async () => {}, delete: async () => {}}} as any;
 const {LibraryRow} = await import('../../electron/renderer/src/components/LibraryRow');
 const {VirtualGroupRows} = await import('../../electron/renderer/src/components/VirtualGroupRows');
 const {ToastHost} = await import('../../electron/renderer/src/components/Toasts');
-const rows = Array.from({length: 3000},(_,i) => ({id: `m-${i}`,slug: `m-${i}`,title: `Planning meeting ${i} — roadmap and delivery milestones`, startedAt: '2026-10-06T10:00:00Z',durationS: 600,pipelineStage: 'done',status: 'done',stageStartedAt: null,stageEtaMs: null,stageEtaRough: false,unidentifiedCount: 0,actionItemsCount: 3,speakers: [],errorMessage: null,skipSpeakerId: false}));
+const rows: MeetingSummary[] = Array.from({length: 3000},(_,i) => ({id: `m-${i}`,slug: `m-${i}`,title: `Planning meeting ${i} — roadmap and delivery milestones`, startedAt: '2026-10-06T10:00:00Z',durationS: 600,pipelineStage: 'done',status: 'done',stageStartedAt: null,stageEtaMs: null,stageEtaRough: false,unidentifiedCount: 0,actionItemsCount: 3,speakers: [],errorMessage: null,skipSpeakerId: false,groupId: null,groupName: null}));
 const plain = new URLSearchParams(location.search).has('plain');
 const fixture = {commits: [] as number[]}; (window as any).fixture = fixture;
 function Fixture() {
