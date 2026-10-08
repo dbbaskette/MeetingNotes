@@ -9,7 +9,7 @@ Capture and inference run locally. Optional exports send only the meeting data y
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.14.6-brightgreen)](#-status)
+[![Version](https://img.shields.io/badge/version-1.14.7-brightgreen)](#-status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-30-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -228,7 +228,7 @@ The **Summary editor** has View and Edit modes, with a live preview while editin
 
 **Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. **Settings → Dictionary** shows a compact count and learning-offers toggle. Choose **Manage dictionary…** to search, filter by group, and add/edit/disable/delete rules in a dedicated scrollable dialog. The dictionary no longer pushes other settings down as it grows. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
 
-Use **Correct term…** above a transcript or summary to preview and select occurrences. **Review terminology** shows remembered suggestions and applied corrections with Undo. Raw transcription, speaker labels, and audio timing are preserved; corrections survive speaker renaming. If later edits overlap a correction, Undo asks you to correct the passage manually instead of overwriting those edits. Correcting a transcript marks its notes as out of date; regenerating notes is explicit and replaces the existing notes and action items. Saving or changing a dictionary rule does not rewrite historical meetings.
+Use **Correct terminology…** above either the transcript or summary. Define a replacement once, preview labeled matches and separate counts for both documents, then **Apply to both** in one operation. You can deselect individual occurrences; the Apply label reflects the selected document(s). **Review terminology** uses the same shared dictionary. One **Undo** reverses a combined correction while preserving unrelated edits. Existing notes are corrected directly, not regenerated; action items are unchanged. Raw transcription, speaker labels, and audio timing are preserved, and corrections survive speaker renaming. Unsaved summary edits block corrections in either tab. Overlapping later edits make Undo refuse rather than overwrite them. Updating all matching wording in both documents does not introduce a refresh warning; an existing warning remains, and leaving summary matches unchanged marks notes as potentially stale. Saving or changing a dictionary rule does not rewrite historical meetings.
 
 **Action items** are extracted from the summary and carry **provenance**: click one to jump to the exact summary bullet it came from. Edited the summary? Hit **↻ Re-extract** to regenerate the items in seconds without re-running the whole pipeline.
 
@@ -370,7 +370,7 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 <details>
 <summary><strong>Packaging & the packaged-app PATH</strong></summary>
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.6-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
+`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.7-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer.
 
 The app icon uses a bright tile and bold indigo waveform/chat mark for visibility on dark backgrounds. `npm run build:icons` regenerates its macOS icon family and matching in-app logo from `build/icon-1024.png`.
 
@@ -390,9 +390,9 @@ The doctor reads the stable settings database at `~/Documents/MeetingNotes/db.sq
 
 ## 📊 Status
 
-**1.14.6** — for macOS 14.2+ / Apple Silicon. Record is disabled while a capture is active; duplicate starts receive clear starting/active/stopping guidance instead of technical remote-method errors. Includes the high-contrast application icon and both completed epics: reliable capture/guided processing (#242), and organized Library/trustworthy Weekly workflows (#243). Search facets, named filters, transcript windowing, recording titles, safe task/move Undo and local Library backup join the contributor fixes merged after 1.13.2. Additive migrations 21–22 do not relocate recordings or rewrite historical timestamps; notes/action-item history and one-way Obsidian sync remain available.
+**1.14.7** — for macOS 14.2+ / Apple Silicon. Terminology corrections now update the transcript and summary together, with a shared preview, one Apply and grouped Undo. Record is disabled while a capture is active; duplicate starts receive clear starting/active/stopping guidance instead of technical remote-method errors. Includes the high-contrast application icon and both completed epics: reliable capture/guided processing (#242), and organized Library/trustworthy Weekly workflows (#243). Search facets, named filters, transcript windowing, recording titles, safe task/move Undo and local Library backup join the contributor fixes merged after 1.13.2. Additive migrations 21–22 do not relocate recordings or rewrite historical timestamps; notes/action-item history and one-way Obsidian sync remain available.
 
-See the [1.14.6 release notes](docs/releases/v1.14.6.md), [GitHub source release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.14.6), and [cumulative 1.14.5 notes](docs/releases/v1.14.5.md) for changes, upgrade guidance, verification and deferred device checks. GitHub releases intentionally omit binary assets; installers are built locally. The experimental remote-processing beta remains separate.
+See the [1.14.7 release notes](docs/releases/v1.14.7.md), [GitHub source release](https://github.com/dbbaskette/MeetingNotes/releases/tag/v1.14.7), and [cumulative 1.14.5 notes](docs/releases/v1.14.5.md) for changes, upgrade guidance, verification and deferred device checks. GitHub releases intentionally omit binary assets; installers are built locally. The experimental remote-processing beta remains separate.
 
 ## 📄 License
 

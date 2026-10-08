@@ -3,7 +3,7 @@ import type { SearchRequest, SearchResponse } from '../shared/search';
 import type {BackupPreview,BackupStatus} from '../shared/backup';
 import type { NotesVersion, NotesComparison } from '../shared/notes-history';
 import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
-import type { TermArtifact, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
+import type { TermScope, TermInput, TermRule, TermPreviewInput, TermCommitInput, TermReview } from '../shared/terminology.js';
 
 interface RecoveryItem {
   id: string; targetLabel: string; startedAt: string; outputPath: string;
@@ -191,7 +191,7 @@ const api = {
     offers: (enabled?: boolean) => ipcRenderer.invoke(IPC_CHANNELS.terminologyOffers, enabled) as Promise<boolean>,
     preview: (input: TermPreviewInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyPreview, input) as Promise<TermReview>,
     commit: (input: TermCommitInput) => ipcRenderer.invoke(IPC_CHANNELS.terminologyCommit, input) as Promise<TermReview>,
-    undo: (input: {meetingId: string; artifact: TermArtifact; historyId: string; revision: string}) => ipcRenderer.invoke(IPC_CHANNELS.terminologyUndo, input) as Promise<TermReview>,
+    undo: (input: {meetingId: string; artifact: TermScope; historyId: string; revision: string}) => ipcRenderer.invoke(IPC_CHANNELS.terminologyUndo, input) as Promise<TermReview>,
   },
   meetings: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),

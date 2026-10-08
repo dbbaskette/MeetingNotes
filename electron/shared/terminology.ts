@@ -1,4 +1,5 @@
 export type TermArtifact = 'transcript' | 'summary';
+export type TermScope = TermArtifact | 'meeting';
 export interface TermInput {
   source: string;
   replacement: string;
@@ -12,6 +13,7 @@ export interface TermRule extends TermInput {
   revision: number;
 }
 export interface TermMatch {
+  artifact?: TermArtifact;
   key: string;
   unit: number;
   start: number;
@@ -24,6 +26,7 @@ export interface TermMatch {
 export interface TermHistory extends TermMatch {
   id: string;
   undone: boolean;
+  batchId?: string;
 }
 export interface TermReview {
   revision: string;
@@ -34,7 +37,7 @@ export interface TermReview {
 }
 export interface TermTarget {
   meetingId: string;
-  artifact: TermArtifact;
+  artifact: TermScope;
 }
 export interface TermPreviewInput extends TermTarget {
   source?: string;

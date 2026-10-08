@@ -7,7 +7,7 @@ import type { TerminologyService } from '../terminology/service.js';
 const id = z.string().min(1).max(200);
 const target = z.object({
   meetingId: id,
-  artifact: z.enum(['summary', 'transcript']),
+  artifact: z.enum(['summary', 'transcript', 'meeting']),
   source: z.string().max(80).optional(),
   replacement: z.string().max(80).optional(),
 });
@@ -33,7 +33,7 @@ export function registerTerminologyHandlers(ipc: IpcMain, service: TerminologySe
       target
         .extend({
           revision: z.string().length(64),
-          keys: z.array(z.string().max(300)).min(1).max(2000),
+          keys: z.array(z.string().max(300)).min(1).max(4000),
           dismiss: z.boolean().optional(),
         })
         .parse(input),
@@ -43,11 +43,13 @@ export function registerTerminologyHandlers(ipc: IpcMain, service: TerminologySe
     const p = z
       .object({
         meetingId: id,
-        artifact: z.enum(['summary', 'transcript']),
+        artifact: z.enum(['summary', 'transcript', 'meeting']),
         historyId: id,
         revision: z.string().length(64),
       })
       .parse(input);
-    return service.undo(p.meetingId, p.artifact, p.historyId, p.revision);
+    return p.artifact === 'meeting'
+      ? service.undoMeeting(p.meetingId, p.historyId, p.revision)
+      : service.undo(p.meetingId, p.artifact, p.historyId, p.revision);
   });
 }
