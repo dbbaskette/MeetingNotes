@@ -29,6 +29,7 @@ interface Edit extends TermHistory {
   left: string;
   right: string;
   unitRevision?: string;
+  batchArtifacts?: TermArtifact[];
 }
 interface Document {
   rawRevision: string;
@@ -44,6 +45,13 @@ interface Pending {
   output: string;
   next: Document;
   previous?: Document;
+  batchId?: string;
+  beforeText?: string;
+}
+interface BatchDocument {
+  artifact: TermArtifact;
+  doc: Document;
+  output: string;
 }
 const fresh = (units: string[], rawRevision = ''): Document => ({
   rawRevision,
@@ -126,7 +134,13 @@ export class TerminologyService {
 
   /** SQLite records the intention before atomic rename; restart can finish it
    * only when the on-disk fingerprint still agrees. Never overwrite new edits. */
-  private persist(id: string, artifact: TermArtifact, doc: Document, output: string, recordHistory = true): void {
+  private persist(
+    id: string,
+    artifact: TermArtifact,
+    doc: Document,
+    output: string,
+    recordHistory = true,
+  ): void {
     if (artifact === 'summary' && recordHistory) this.deps.beforeSummaryChange?.(id);
     const file = this.file(id, artifact);
     const previous = this.repo.read<Document>(id, artifact);
@@ -145,10 +159,28 @@ export class TerminologyService {
     }
   }
   recover(): void {
-    for (const row of this.repo.pending()) {
+    const rows = this.repo.pending();
+    const recovered = new Set<string>();
+    for (const row of rows) {
       const meeting = this.deps.meetings.findById(row.meeting_id);
       if (!meeting || meeting.deletedAt) continue;
       const pending = JSON.parse(row.pending_json) as Pending;
+      if (pending.batchId) {
+        if (recovered.has(pending.batchId)) continue;
+        recovered.add(pending.batchId);
+        const batch = rows
+          .filter((r) => r.meeting_id === row.meeting_id)
+          .map((r) => ({ artifact: r.artifact, pending: JSON.parse(r.pending_json) as Pending }))
+          .filter((r) => r.pending.batchId === pending.batchId);
+        // Finish the whole intention only if every file still has the expected
+        // before/after content. Otherwise roll back our writes, never external edits.
+        const conflict = batch.some(({ artifact, pending: p }) => {
+          const current = hash(this.text(this.file(row.meeting_id, artifact)));
+          return current !== p.before && current !== hash(p.output);
+        });
+        this.finishBatch(row.meeting_id, batch, conflict);
+        continue;
+      }
       const file = this.file(row.meeting_id, row.artifact);
       const current = hash(this.text(file));
       if (current === hash(pending.output))
@@ -162,6 +194,106 @@ export class TerminologyService {
         });
       this.deps.artifactCache.invalidate(file);
     }
+  }
+  private replaceFile(file: string, output: string): void {
+    const temp = `${file}.terminology-${randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temp, output);
+      fs.renameSync(temp, file);
+      this.deps.artifactCache.invalidate(file);
+    } finally {
+      if (fs.existsSync(temp)) fs.unlinkSync(temp);
+    }
+  }
+  private finishBatch(
+    id: string,
+    batch: { artifact: TermArtifact; pending: Pending }[],
+    rollback: boolean,
+  ): void {
+    for (const { artifact, pending } of batch) {
+      const file = this.file(id, artifact),
+        current = hash(this.text(file));
+      if (rollback) {
+        if (current === hash(pending.output)) this.replaceFile(file, pending.beforeText!);
+      } else if (current === pending.before) this.replaceFile(file, pending.output);
+      else if (current !== hash(pending.output))
+        throw new Error('Meeting text changed. Reopen the correction preview.');
+    }
+    this.repo.db.transaction(() => {
+      for (const { artifact, pending } of batch) {
+        this.repo.write(id, artifact, rollback ? pending.previous! : pending.next);
+        this.deps.artifactCache.invalidate(this.file(id, artifact));
+      }
+    })();
+  }
+  private persistBatch(id: string, documents: BatchDocument[]): void {
+    if (documents.some((d) => d.artifact === 'summary')) this.deps.beforeSummaryChange?.(id);
+    const batchId = randomUUID();
+    const batch = documents.map(({ artifact, doc, output }) => {
+      const beforeText = this.text(this.file(id, artifact));
+      doc.outputRevision = hash(output);
+      const pending: Pending = {
+        batchId,
+        beforeText,
+        before: hash(beforeText),
+        output,
+        next: doc,
+        previous: this.repo.read<Document>(id, artifact) ?? this.document(id, artifact),
+      };
+      return { artifact, pending };
+    });
+    this.repo.db.transaction(() => {
+      for (const { artifact, pending } of batch)
+        this.repo.write(id, artifact, pending.previous, pending);
+    })();
+    try {
+      this.finishBatch(id, batch, false);
+    } catch (e) {
+      // If rollback also fails, retain the entire journal for restart recovery.
+      try {
+        this.finishBatch(id, batch, true);
+      } catch {
+        /* recover() retries safely */
+      }
+      throw e;
+    }
+  }
+  private meetingDocuments(id: string): { artifact: TermArtifact; doc: Document }[] {
+    return (['transcript', 'summary'] as const)
+      .filter((artifact) => Boolean(this.text(this.file(id, artifact))))
+      .map((artifact) => ({ artifact, doc: this.document(id, artifact) }));
+  }
+  private meetingRevision(
+    id: string,
+    documents: { artifact: TermArtifact; doc: Document }[],
+  ): string {
+    return hash(
+      JSON.stringify(
+        documents.map(({ artifact, doc }) => [artifact, this.revision(id, artifact, doc)]),
+      ),
+    );
+  }
+  private previewMeeting(input: TermPreviewInput): TermReview {
+    const documents = this.meetingDocuments(input.meetingId);
+    return {
+      revision: this.meetingRevision(input.meetingId, documents),
+      matches: documents.flatMap(({ artifact, doc }) =>
+        this.candidates(input.meetingId, doc, input).map((m) => ({
+          ...m,
+          artifact,
+          key: `${artifact}/${m.key}`,
+        })),
+      ),
+      history: documents.flatMap(({ artifact, doc }) =>
+        doc.history.map(({ left: _left, right: _right, ...h }) => ({
+          ...h,
+          artifact,
+          id: `${artifact}/${h.id}`,
+        })),
+      ),
+      stale: this.stale(input.meetingId),
+      previousCorrections: documents.some(({ doc }) => doc.previousCorrections),
+    };
   }
   private document(id: string, artifact: TermArtifact): Document {
     const previous = this.repo.read<Document>(id, artifact);
@@ -218,6 +350,7 @@ export class TerminologyService {
   }
   preview(input: TermPreviewInput): TermReview {
     this.recover();
+    if (input.artifact === 'meeting') return this.previewMeeting(input);
     const doc = this.document(input.meetingId, input.artifact);
     return {
       revision: this.revision(input.meetingId, input.artifact, doc),
@@ -270,6 +403,7 @@ export class TerminologyService {
   commit(input: TermCommitInput): TermReview {
     this.recover();
     this.ensureEditable(input.meetingId);
+    if (input.artifact === 'meeting') return this.commitMeeting(input);
     const doc = this.document(input.meetingId, input.artifact);
     if (input.revision !== this.revision(input.meetingId, input.artifact, doc))
       throw new Error('The text or dictionary changed. Preview again before applying.');
@@ -295,12 +429,117 @@ export class TerminologyService {
     }
     return this.preview({ meetingId: input.meetingId, artifact: input.artifact });
   }
+  private commitMeeting(input: TermCommitInput): TermReview {
+    const documents = this.meetingDocuments(input.meetingId);
+    if (input.revision !== this.meetingRevision(input.meetingId, documents))
+      throw new Error('The text or dictionary changed. Preview again before applying.');
+    const selected = new Set(input.keys);
+    const batchId = randomUUID();
+    let count = 0;
+    const candidates = documents.map(({ artifact, doc }) => {
+      const all = this.candidates(input.meetingId, doc, input);
+      const matches = all.filter((m) => selected.has(`${artifact}/${m.key}`));
+      count += matches.length;
+      return { artifact, doc, all, matches };
+    });
+    if (!count || count !== selected.size)
+      throw new Error('Select valid occurrences from the current preview');
+    if (input.dismiss) {
+      this.repo.db.transaction(() => {
+        for (const { artifact, doc, matches } of candidates) {
+          const revision = hash(JSON.stringify(doc.units));
+          doc.dismissed = [...doc.dismissed, ...matches.map((m) => `${revision}:${m.key}`)].slice(
+            -4000,
+          );
+          this.repo.write(input.meetingId, artifact, doc);
+        }
+      })();
+    } else {
+      const summary = candidates.find((d) => d.artifact === 'summary');
+      const changed = candidates
+        .filter((d) => d.matches.length)
+        .map(({ artifact, doc, matches }) => {
+          const before = doc.history.length;
+          this.apply(doc, matches);
+          for (const h of doc.history.slice(before)) {
+            h.batchId = batchId;
+            h.batchArtifacts = candidates.filter((d) => d.matches.length).map((d) => d.artifact);
+          }
+          // A wording-only change applied throughout both documents needs no
+          // regeneration. Preserve any pre-existing stale flag, however.
+          if (
+            artifact === 'transcript' &&
+            (!summary ||
+              summary.matches.length !== summary.all.length ||
+              summary.all.length === 2000)
+          )
+            doc.stale = true;
+          return {
+            artifact,
+            doc,
+            output: artifact === 'transcript' ? this.render(input.meetingId, doc) : doc.units[0]!,
+          };
+        });
+      this.persistBatch(input.meetingId, changed);
+    }
+    return this.previewMeeting({ meetingId: input.meetingId, artifact: 'meeting' });
+  }
   undo(id: string, artifact: TermArtifact, historyId: string, revision: string): TermReview {
     this.recover();
     this.ensureEditable(id);
     const doc = this.document(id, artifact);
     if (revision !== this.revision(id, artifact, doc))
       throw new Error('The text changed. Refresh corrections before undoing.');
+    this.undoEdit(doc, historyId);
+    if (artifact === 'transcript') doc.stale = true;
+    this.persist(
+      id,
+      artifact,
+      doc,
+      artifact === 'transcript' ? this.render(id, doc) : doc.units[0]!,
+    );
+    return this.preview({ meetingId: id, artifact });
+  }
+  undoMeeting(id: string, historyId: string, revision: string): TermReview {
+    this.recover();
+    this.ensureEditable(id);
+    const documents = this.meetingDocuments(id);
+    if (revision !== this.meetingRevision(id, documents))
+      throw new Error('The text changed. Refresh corrections before undoing.');
+    const source = documents.flatMap(({ artifact, doc }) =>
+      doc.history.filter((h) => !h.undone && `${artifact}/${h.id}` === historyId),
+    );
+    const chosen = source[0];
+    if (!chosen) throw new Error('Correction is no longer available to undo');
+    if (
+      chosen.batchArtifacts?.some(
+        (artifact) =>
+          !documents.some(
+            (d) =>
+              d.artifact === artifact && d.doc.history.some((h) => h.batchId === chosen.batchId),
+          ),
+      )
+    )
+      throw new Error(
+        'A document or its correction history changed. Correct terms manually to preserve newer edits.',
+      );
+    const changed = documents.flatMap(({ artifact, doc }) => {
+      const edits = doc.history.filter(
+        (h) =>
+          !h.undone &&
+          (chosen.batchId ? h.batchId === chosen.batchId : `${artifact}/${h.id}` === historyId),
+      );
+      if (!edits.length) return [];
+      for (const h of edits.slice().reverse()) this.undoEdit(doc, h.id);
+      if (artifact === 'transcript' && !chosen.batchId) doc.stale = true;
+      return [
+        { artifact, doc, output: artifact === 'transcript' ? this.render(id, doc) : doc.units[0]! },
+      ];
+    });
+    this.persistBatch(id, changed);
+    return this.previewMeeting({ meetingId: id, artifact: 'meeting' });
+  }
+  private undoEdit(doc: Document, historyId: string): void {
     const h = doc.history.find((e) => e.id === historyId && !e.undone);
     if (!h) throw new Error('Correction is no longer available to undo');
     const text = doc.units[h.unit]!;
@@ -340,14 +579,6 @@ export class TerminologyService {
         other.right = next.slice(pos + other.after.length, pos + other.after.length + 24);
       }
     }
-    if (artifact === 'transcript') doc.stale = true;
-    this.persist(
-      id,
-      artifact,
-      doc,
-      artifact === 'transcript' ? this.render(id, doc) : doc.units[0]!,
-    );
-    return this.preview({ meetingId: id, artifact });
   }
   generateTranscript(id: string, automatic: boolean): { segments: number; named: number } {
     this.recover();

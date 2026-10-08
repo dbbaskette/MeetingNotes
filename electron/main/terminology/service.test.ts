@@ -76,6 +76,214 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+describe('meeting-wide terminology corrections', () => {
+  const target = {
+    meetingId: 'm',
+    artifact: 'meeting' as const,
+    source: 'Salsa',
+    replacement: 'SLSA',
+  };
+  const preview = () => service.preview(target);
+  const commit = () => {
+    const p = preview();
+    return service.commit({ ...target, revision: p.revision, keys: p.matches.map((m) => m.key) });
+  };
+  beforeEach(() => {
+    service.generateTranscript('m', false);
+    fs.writeFileSync(file('summary.md'), '## Overview\nSalsa compliance.\n\nMy custom notes.');
+  });
+  it('previews both documents, applies once and groups Undo without changing raw data', async () => {
+    const rawBefore = fs.readFileSync(file('transcript.raw.json'), 'utf8');
+    const diarBefore = fs.readFileSync(file('diarization.json'), 'utf8');
+    await cache.readText(file('summary.md'));
+    const p = preview();
+    expect(p.matches.filter((m) => m.artifact === 'transcript')).toHaveLength(2);
+    expect(p.matches.filter((m) => m.artifact === 'summary')).toHaveLength(1);
+    expect(new Set(p.matches.map((m) => m.key)).size).toBe(3);
+    const applied = commit();
+    expect(applied.history).toHaveLength(3);
+    expect(new Set(applied.history.map((h) => h.batchId)).size).toBe(1);
+    expect(await cache.readText(file('summary.md'))).toContain('SLSA compliance.');
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).not.toContain('Salsa');
+    expect(service.stale('m')).toBe(false);
+    expect(repo.list()).toHaveLength(0); // Apply is not permission to remember.
+    service.undoMeeting('m', applied.history[0]!.id, applied.revision);
+    expect(preview().matches).toHaveLength(3);
+    expect(fs.readFileSync(file('transcript.raw.json'), 'utf8')).toBe(rawBefore);
+    expect(fs.readFileSync(file('diarization.json'), 'utf8')).toBe(diarBefore);
+  });
+  it('preserves markup and unrelated manual edits on grouped Undo', () => {
+    const summary =
+      '## Salsa\n**Salsa** [Salsa](https://example.com/Salsa) `Salsa`\n\nMy custom notes.';
+    fs.writeFileSync(file('summary.md'), summary);
+    const applied = commit();
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe(
+      '## SLSA\n**SLSA** [SLSA](https://example.com/Salsa) `Salsa`\n\nMy custom notes.',
+    );
+    service.saveSummary(
+      'm',
+      fs
+        .readFileSync(file('summary.md'), 'utf8')
+        .replace('My custom notes.', 'My updated custom notes.'),
+    );
+    const current = service.preview({ meetingId: 'm', artifact: 'meeting' });
+    service.undoMeeting('m', applied.history[0]!.id, current.revision);
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe(
+      summary.replace('My custom notes.', 'My updated custom notes.'),
+    );
+  });
+  it('refuses Undo for both documents when one corrected passage has changed', () => {
+    const applied = commit();
+    const transcript = fs.readFileSync(file('transcript.md'), 'utf8');
+    service.saveSummary('m', 'A different standard.');
+    const current = service.preview({ meetingId: 'm', artifact: 'meeting' });
+    expect(() => service.undoMeeting('m', applied.history[0]!.id, current.revision)).toThrow(
+      'passage has changed',
+    );
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toBe(transcript);
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe('A different standard.');
+  });
+  it('checks both document revisions and dictionary revisions before writing', () => {
+    const p = preview();
+    fs.writeFileSync(file('summary.md'), 'My newer Salsa notes.');
+    expect(() =>
+      service.commit({ ...target, revision: p.revision, keys: p.matches.map((m) => m.key) }),
+    ).toThrow('changed');
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('Salsa');
+    const next = preview();
+    repo.save(input);
+    expect(() =>
+      service.commit({ ...target, revision: next.revision, keys: next.matches.map((m) => m.key) }),
+    ).toThrow('changed');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe('My newer Salsa notes.');
+  });
+  it('refuses a partial Undo when one document has been removed', () => {
+    const applied = commit();
+    fs.unlinkSync(file('summary.md'));
+    const current = service.preview({ meetingId: 'm', artifact: 'meeting' });
+    expect(() => service.undoMeeting('m', applied.history[0]!.id, current.revision)).toThrow(
+      'history changed',
+    );
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).not.toContain('Salsa');
+    expect(fs.existsSync(file('summary.md'))).toBe(false);
+  });
+  it('refuses a partial Undo after notes regeneration has replaced correction history', () => {
+    const applied = commit();
+    service.generateSummary('m', 'My regenerated SLSA notes.', service.snapshotSummary('m'));
+    const current = service.preview({ meetingId: 'm', artifact: 'meeting' });
+    expect(() => service.undoMeeting('m', applied.history[0]!.id, current.revision)).toThrow(
+      'history changed',
+    );
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).not.toContain('Salsa');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe('My regenerated SLSA notes.');
+  });
+  it('preserves a pre-existing stale flag', () => {
+    const p = service.preview({ ...target, artifact: 'transcript' });
+    service.commit({
+      ...target,
+      artifact: 'transcript',
+      revision: p.revision,
+      keys: [p.matches[0]!.key],
+    });
+    commit();
+    expect(service.stale('m')).toBe(true);
+  });
+  it('marks notes stale when summary matches are deliberately left unchanged', () => {
+    const p = preview();
+    service.commit({
+      ...target,
+      revision: p.revision,
+      keys: p.matches.filter((m) => m.artifact === 'transcript').map((m) => m.key),
+    });
+    expect(service.stale('m')).toBe(true);
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('Salsa');
+  });
+  it('works with a summary-only meeting and no raw transcript', () => {
+    fs.unlinkSync(file('transcript.md'));
+    fs.unlinkSync(file('transcript.raw.json'));
+    const applied = commit();
+    expect(applied.history).toHaveLength(1);
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('SLSA');
+    service.undoMeeting('m', applied.history[0]!.id, applied.revision);
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('Salsa');
+  });
+  it('uses group overrides across both documents and persists dismissals', () => {
+    const g = groups.create('Engineering');
+    groups.assign(['m'], g.id);
+    repo.save({ ...input, replacement: 'Other' });
+    repo.save({ ...input, groupId: g.id });
+    const p = service.preview({ meetingId: 'm', artifact: 'meeting' });
+    expect(p.matches.every((m) => m.after === 'SLSA')).toBe(true);
+    service.commit({
+      meetingId: 'm',
+      artifact: 'meeting',
+      revision: p.revision,
+      keys: p.matches.map((m) => m.key),
+      dismiss: true,
+    });
+    expect(setupService().preview({ meetingId: 'm', artifact: 'meeting' }).matches).toHaveLength(0);
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('Salsa');
+  });
+  it('rejects invalid selections and edits during processing without changing either file', () => {
+    const p = preview();
+    expect(() =>
+      service.commit({
+        ...target,
+        revision: p.revision,
+        keys: [p.matches[0]!.key, 'summary/invalid'],
+      }),
+    ).toThrow('valid occurrences');
+    meetings.updateStatus('m', 'processing');
+    expect(() => commit()).toThrow('processing');
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('Salsa');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('Salsa');
+  });
+  it('rolls back the first file and history when the second write fails', () => {
+    const rename = fs.renameSync;
+    let failed = false;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (to === file('summary.md') && !failed) {
+        failed = true;
+        throw new Error('disk unavailable');
+      }
+      return rename(from, to);
+    });
+    expect(() => commit()).toThrow('disk unavailable');
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('Salsa');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('Salsa');
+    expect(repo.pending()).toHaveLength(0);
+    expect(preview().history).toHaveLength(0);
+  });
+  function interrupt(): void {
+    const rename = fs.renameSync;
+    let writes = 0;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (++writes > 1) throw new Error('disk unavailable');
+      return rename(from, to);
+    });
+    expect(() => commit()).toThrow('disk unavailable');
+    expect(repo.pending()).toHaveLength(2);
+    vi.restoreAllMocks();
+  }
+  it('recovers both documents and grouped history after an interrupted batch', () => {
+    interrupt();
+    service = setupService();
+    service.recover();
+    expect(repo.pending()).toHaveLength(0);
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).not.toContain('Salsa');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toContain('SLSA');
+    expect(preview().history).toHaveLength(3);
+  });
+  it('rolls back its partial write if recovery finds an external edit to the other file', () => {
+    interrupt();
+    fs.writeFileSync(file('summary.md'), 'External edits must survive.');
+    setupService().recover();
+    expect(repo.pending()).toHaveLength(0);
+    expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('Salsa');
+    expect(fs.readFileSync(file('summary.md'), 'utf8')).toBe('External edits must survive.');
+    expect(preview().history).toHaveLength(0);
+  });
+});
 describe('terminology dictionary', () => {
   it('isolates group scope, gives suggest overrides precedence, and deletes group rules safely', () => {
     const g = groups.create('Engineering');

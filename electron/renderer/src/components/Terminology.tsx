@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import type {
-  TermArtifact,
+  TermScope,
+  TermHistory,
   TermInput,
   TermPreviewInput,
   TermReview,
@@ -165,7 +166,7 @@ export function TerminologyPanel({
   onReload,
 }: {
   meetingId: string;
-  artifact: TermArtifact;
+  artifact: TermScope;
   version: string | null;
   groupId: string | null;
   groupName: string | null;
@@ -281,6 +282,32 @@ export function TerminologyPanel({
   }
   const count = review?.matches.length ?? 0,
     history = review?.history.filter((h) => !h.undone) ?? [];
+  const batches = new Map<string, TermHistory[]>();
+  for (const h of history) {
+    const key = h.batchId ?? h.id;
+    batches.set(key, [...(batches.get(key) ?? []), h]);
+  }
+  const counts = (matches: { artifact?: string }[]): string =>
+    `Transcript: ${matches.filter((m) => m.artifact === 'transcript').length} · Summary: ${matches.filter((m) => m.artifact === 'summary').length}`;
+  const selectedArtifacts = new Set(
+    review?.matches.filter((m) => selected.has(m.key)).map((m) => m.artifact),
+  );
+  const applyLabel =
+    artifact !== 'meeting'
+      ? 'Apply selected'
+      : selectedArtifacts.size === 2
+        ? 'Apply to both'
+        : selectedArtifacts.has('transcript')
+          ? 'Apply to transcript'
+          : selectedArtifacts.has('summary')
+            ? 'Apply to summary'
+            : 'Apply corrections';
+  const limited =
+    artifact === 'meeting'
+      ? ['transcript', 'summary'].some(
+          (a) => review?.matches.filter((m) => m.artifact === a).length === 2000,
+        )
+      : count === 2000;
   return (
     <div className="mb-3 space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -293,7 +320,7 @@ export function TerminologyPanel({
             setManual(true);
           }}
         >
-          Correct term…
+          {artifact === 'meeting' ? 'Correct terminology…' : 'Correct term…'}
         </button>
         {(count > 0 || history.length > 0) && (
           <button
@@ -360,12 +387,17 @@ export function TerminologyPanel({
           )}
           {review && (
             <>
+              {artifact === 'meeting' && (
+                <p className="text-xs font-semibold" role="status">
+                  {counts(review.matches)}
+                </p>
+              )}
               <p className="text-xs text-ink-muted">
                 {count
                   ? 'Choose the occurrences to change. The original recording and timing stay intact.'
                   : 'No matching terminology suggestions.'}
-                {count === 2000
-                  ? ' Showing the first 2,000 matches; apply these, then preview again.'
+                {limited
+                  ? ' Showing up to 2,000 matches per document; apply these, then preview again.'
                   : ''}
               </p>
               {count > 0 && (
@@ -397,6 +429,11 @@ export function TerminologyPanel({
                       }
                     />
                     <span className="min-w-0 break-words">
+                      {m.artifact && (
+                        <span className="block text-xs font-semibold text-ink-muted">
+                          {m.artifact === 'transcript' ? 'Transcript' : 'Summary'}
+                        </span>
+                      )}
                       <span>
                         {m.before} → <strong>{m.after}</strong>
                       </span>
@@ -412,7 +449,7 @@ export function TerminologyPanel({
                     disabled={busy || !selected.size}
                     onClick={() => void commit()}
                   >
-                    Apply selected ({selected.size})
+                    {applyLabel} ({selected.size})
                   </button>
                   <button
                     className={button}
@@ -426,20 +463,31 @@ export function TerminologyPanel({
               {history.length > 0 && (
                 <details>
                   <summary className="cursor-pointer text-xs">
-                    Applied corrections ({history.length})
+                    Applied corrections ({batches.size})
                   </summary>
                   <div className="max-h-48 overflow-y-auto mt-2 space-y-2">
-                    {history.map((h) => (
-                      <div key={h.id} className="text-xs flex items-start justify-between gap-3">
-                        <span className="min-w-0 break-words">
-                          {h.before} → <strong>{h.after}</strong>
-                          <span className="block text-ink-muted">{h.context}</span>
-                        </span>
-                        <button className={button} disabled={busy} onClick={() => void undo(h.id)}>
-                          Undo
-                        </button>
-                      </div>
-                    ))}
+                    {[...batches.values()].map((batch) => {
+                      const h = batch[0]!;
+                      return (
+                        <div key={h.id} className="text-xs flex items-start justify-between gap-3">
+                          <span className="min-w-0 break-words">
+                            {[
+                              ...new Set(batch.map((edit) => `${edit.before} → ${edit.after}`)),
+                            ].join('; ')}
+                            <span className="block text-ink-muted">
+                              {artifact === 'meeting' ? counts(batch) : h.context}
+                            </span>
+                          </span>
+                          <button
+                            className={button}
+                            disabled={busy}
+                            onClick={() => void undo(h.id)}
+                          >
+                            Undo
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 </details>
               )}

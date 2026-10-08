@@ -8,7 +8,7 @@ import path from 'node:path';
 import electron from 'electron';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const modes = ['rows', 'selection', 'grouped', 'startup', 'settings', 'sources', 'capture', 'epic243'];
+const modes = ['rows', 'selection', 'grouped', 'startup', 'settings', 'sources', 'capture', 'epic243', 'terminology'];
 const selected = process.env.MN_FIXTURE_MODES?.split(',') ?? modes;
 if (selected.some(mode => !modes.includes(mode))) throw new Error('Unknown fixture mode');
 const baselinePath = path.join(root, 'electron/renderer/src/views/.epic243-baseline-transcript.tsx');

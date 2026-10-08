@@ -1333,8 +1333,8 @@ function CenterPane({
         {tab === 'transcript' && (
           <>
             <ArtifactFeedback label="transcript" state={transcriptState} onRetry={onRetryTranscript} />
-            {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="transcript" version={meeting.transcriptMd}
-              groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing'} onReload={onReload}/>}
+            {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={meeting.transcriptMd + (meeting.summaryMd ?? '')}
+              groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing' || summaryDraft !== summarySaved || summaryMode === 'edit'} onReload={onReload}/>}
             {transcriptState.data !== undefined && <TranscriptPanel
               seekRevision={seekRevision}
               meeting={meeting}
@@ -1471,7 +1471,7 @@ function SummaryPanel({
       }}/>
       {termCandidates.length > 0 && <RememberTerms key={termCandidates.map(c => c.source+c.replacement).join('|')} candidates={termCandidates}
         groupId={meeting.groupId} groupName={meeting.groupName} onClose={() => {for (const c of termCandidates) dismissedTerms.current.add(`${c.source}\0${c.replacement}`); setTermCandidates([]);}}/>}
-      <TerminologyPanel key={`summary-terms-${meeting.id}`} meetingId={meeting.id} artifact="summary" version={meeting.summaryMd}
+      <TerminologyPanel key={`summary-terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={(meeting.summaryMd ?? '') + (meeting.transcriptMd ?? '')}
         groupId={meeting.groupId} groupName={meeting.groupName} disabled={dirty || mode === 'edit' || meeting.status === 'processing'} onReload={onReload}/>
       <SummaryToolbar
         mode={mode}
