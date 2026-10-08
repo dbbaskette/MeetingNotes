@@ -19,3 +19,12 @@ Verification: targeted service/IPC/matcher tests, actual correction-panel fixtur
 full repository source CI, production/type/lint checks, then package identity,
 signature and archive-integrity checks. Installer VM testing is omitted per the
 owner's prior instruction. Real recording/account/vault checks remain deferred.
+
+Completed source verification: commit `95351be3b029daa9cbec1ca87be4a54690085cd2`,
+tree `25f3472bf8d158b9009fcd084393e9fe9c118286`, full shared Tart source runner
+PASS on macOS 27.0 / Node 22.23.2 / Electron 30.5.1. Unit suite: 1,225 passed,
+six skipped. All nine renderer modes, Swift synthetic checks, types, build,
+scoped lint and Browse benchmark passed. The VM was removed; retained logs are
+in the task-owned `.ci-epic243-results/unified-terminology/tart/` directory.
+An earlier worktree-mounted attempt stopped before tests because its Git
+metadata was not mounted; a self-contained temporary clone resolved that.
