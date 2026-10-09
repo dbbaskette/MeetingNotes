@@ -339,6 +339,8 @@ app.whenReady().then(async () => {
     },
     onAutoStop: (sessionId, silenceMs) =>
       logger.info('recording:auto-stop-silence', { sessionId, silenceMs }),
+    onDiagnostic: (sessionId, diagnostic) =>
+      logger.info('recording:capture-timing', { sessionId, ...diagnostic }),
   });
   const appEnumerator = new AppEnumerator({ helperPath });
 

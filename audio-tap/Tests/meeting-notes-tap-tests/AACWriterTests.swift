@@ -8,5 +8,7 @@ final class AACWriterTests: XCTestCase {
     try await AACWriterSmoke.nonemptyWriterKeepsReadableAudio()
   }
   func testCaptureTimelineGapsAndSources() throws { try CaptureTimelineSmoke.gapAndSourceTests() }
+  func testBatchedMicrophoneCallbacks() throws { try CaptureTimelineSmoke.batchedCallbackTests() }
+  func testEncodedBatchedMicFidelity() async throws { try await CaptureTimelineSmoke.encodedBatchedMicFidelity() }
   func testEncodedMicFidelity() async throws { try await CaptureTimelineSmoke.encodedMicFidelity() }
 }

@@ -40,6 +40,8 @@ final class Recorder {
   private var lastSignalAt: Date = .init()
   private var lastLevelEmitAt: [String: TimeInterval] = [:]
   private let levelLock = NSLock()
+  private let timingLock = NSLock()
+  private var lastTimingEmitFrame: [String: Int64] = [:]
   private var stopTask: Task<Void, Never>?
   private let stopLock = NSLock()
   // Task 12 diagnostics: count IOProc invocations to detect "no data flow"
@@ -67,8 +69,8 @@ final class Recorder {
     watchTargetPIDIfNeeded()
     if opts.captureMic { try attachMic() }
     originSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-    startMixClock()
     try startEngine()
+    startMixClock()
     StatusEvent.emit([
       "event": "started",
       "output_mixed": opts.outputPath,
@@ -122,6 +124,13 @@ final class Recorder {
       let end = max(timeline.inputEnd, currentFrame())
       while let chunk = timeline.drain(through: end) { writeChunk(chunk) }
     }
+    let timing = timeline.timing
+    StatusEvent.emit([
+      "event": "diag", "stage": "capture_timing_stop",
+      "holdback_ms": Double(timing.holdbackFrames) / 48,
+      "mic_late_frames": NSNumber(value: timing.micLateFrames),
+      "system_late_frames": NSNumber(value: timing.systemLateFrames),
+    ])
     detachProcessTap()
     // Finalize all three writers. Await each so the encoders flush cleanly;
     // the queue.sync inside AACWriter makes the cost additive but still
@@ -442,7 +451,14 @@ final class Recorder {
       return
     }
     let micConverter = AVAudioConverter(from: micFormat, to: writeFormat)
-    micInput.installTap(onBus: 0, bufferSize: 4096, format: micFormat) { [weak self] buffer, time in
+    let requestedFrames: AVAudioFrameCount = 4096
+    timeline.expectPacket(frames: Int64(ceil(Double(requestedFrames) * writeFormat.sampleRate / micFormat.sampleRate)))
+    StatusEvent.emit([
+      "event": "diag", "stage": "mic_format",
+      "sample_rate": micFormat.sampleRate, "channels": Int(micFormat.channelCount),
+      "requested_frames": Int(requestedFrames),
+    ])
+    micInput.installTap(onBus: 0, bufferSize: requestedFrames, format: micFormat) { [weak self] buffer, time in
       guard let self = self, let conv = micConverter else { return }
       let outFrames = AVAudioFrameCount(Double(buffer.frameLength) * (self.writeFormat.sampleRate / micFormat.sampleRate)) + 1024
       guard let outBuf = AVAudioPCMBuffer(pcmFormat: self.writeFormat, frameCapacity: outFrames) else { return }
@@ -456,7 +472,7 @@ final class Recorder {
       }
       if err != nil { return }
       self.emitLevel(source: "mic", buffer: outBuf)
-      self.enqueue(outBuf, source: .mic, hostTime: time.isHostTimeValid ? time.hostTime : mach_absolute_time())
+      self.enqueue(outBuf, source: .mic, hostTime: time.isHostTimeValid ? time.hostTime : mach_absolute_time(), inputFrames: Int(buffer.frameLength))
     }
     try micEngine.start()
   }
@@ -538,7 +554,7 @@ final class Recorder {
     }
 
     emitLevel(source: "system", buffer: outBuf)
-    enqueue(outBuf, source: .system, hostTime: inputTime.pointee.mHostTime)
+    enqueue(outBuf, source: .system, hostTime: inputTime.pointee.mHostTime, inputFrames: frames)
   }
 
   private func emitLevel(source: String, buffer: AVAudioPCMBuffer) {
@@ -560,22 +576,42 @@ final class Recorder {
     Int64(max(0, AVAudioTime.seconds(forHostTime: mach_absolute_time()) - originSeconds) * 48_000)
   }
 
-  private func enqueue(_ buffer: AVAudioPCMBuffer, source: CaptureTimeline.Source, hostTime: UInt64) {
+  private func enqueue(_ buffer: AVAudioPCMBuffer, source: CaptureTimeline.Source, hostTime: UInt64, inputFrames: Int) {
     guard let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
     let samples = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
     let seconds = AVAudioTime.seconds(forHostTime: hostTime == 0 ? mach_absolute_time() : hostTime)
-    timeline.append(samples, source: source, startFrame: Int64((seconds - originSeconds) * 48_000))
+    let start = Int64((seconds - originSeconds) * 48_000)
+    let arrival = currentFrame()
+    timeline.append(samples, source: source, startFrame: start, arrivalFrame: arrival)
+    let name = source == .mic ? "mic" : "system"
+    // First packet, then at most one metadata event per source every 5s.
+    let shouldEmit = timingLock.withLock { () -> Bool in
+      if let last = lastTimingEmitFrame[name], arrival - last < 240_000 { return false }
+      lastTimingEmitFrame[name] = arrival
+      return true
+    }
+    if shouldEmit {
+      let timing = timeline.timing
+      StatusEvent.emit([
+        "event": "diag", "stage": "capture_timing", "source": name,
+        "input_frames": inputFrames, "converted_frames": samples.count,
+        "callback_age_ms": Double(max(0, arrival - start)) / 48,
+        "holdback_ms": Double(timing.holdbackFrames) / 48,
+        "mic_late_frames": NSNumber(value: timing.micLateFrames),
+        "system_late_frames": NSNumber(value: timing.systemLateFrames),
+      ])
+    }
   }
 
   private func startMixClock() {
-    // 120 ms lookahead allows independent input callback sizes/clocks without
-    // putting AAC work on either real-time audio callback.
+    // The timeline holds back enough for actual source packet durations and
+    // arrival latency. Keep AAC work off both real-time audio callbacks.
     let timer = DispatchSource.makeTimerSource(queue: mixQueue)
     timer.schedule(deadline: .now() + .milliseconds(120), repeating: .milliseconds(20))
     timer.setEventHandler { [weak self] in
       guard let self else { return }
-      let end = self.currentFrame() - 5760
-      while let chunk = self.timeline.drain(through: end) { self.writeChunk(chunk) }
+      let now = self.currentFrame()
+      while let chunk = self.timeline.drainReady(at: now) { self.writeChunk(chunk) }
     }
     mixTimer = timer; timer.resume()
   }

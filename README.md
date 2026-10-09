@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.14.8-brightgreen)](docs/releases/v1.14.8.md)
+[![Version](https://img.shields.io/badge/version-1.14.9-brightgreen)](docs/releases/v1.14.9.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -19,6 +19,7 @@
 ## What you get
 
 - **Capture without a virtual audio device.** One click records any app's audio (Zoom, Teams, FaceTime, a browser tab) mixed with your microphone, using the macOS 14.2 process tap.
+  Microphone timing accounts for delayed buffers; see the [1.14.9 capture fix and playback check](docs/releases/v1.14.9.md).
 - **A transcript with real names.** whisper.cpp transcribes, pyannote separates the voices, and voices you name once are recognised in later meetings.
 - **Notes you can act on.** A local LLM writes an overview, discussion points, decisions and open questions, then extracts action items with owners and due dates. Each item links back to the line it came from.
 - **Notes shaped for your meeting.** Choose General, 1:1, Standup, Customer call, Interview or Decision review templates per group or meeting. Existing notes change only when you explicitly re-run processing.
