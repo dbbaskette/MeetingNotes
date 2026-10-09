@@ -5,6 +5,8 @@ Run before merging significant feature work or releasing. ~10 min total.
 
 ## Prep
 
+- [ ] If this release changes the Library, meeting page, recording row or Weekly view, refresh the README screenshots: `npm run dev:renderer` in one terminal, `npm run screenshots` in another.
+
 - [ ] LM Studio open, a chat model loaded (`qwen/qwen3.5-9b` or similar), local server enabled.
 - [ ] HuggingFace token saved at `~/.cache/huggingface/token` (for diarization).
 - [ ] Whisper server running (`scripts/whisper-server.sh status` reports Running).

@@ -1,7 +1,7 @@
 {
   "name": "meeting-notes",
   "version": "1.14.7",
-  "description": "Local-first meeting notes for macOS — Audio Hijack + LM Studio + pyannote",
+  "description": "Local-first meeting notes for macOS: record, transcribe, name speakers, summarize and extract action items on your own machine",
   "main": "dist/electron/main/index.js",
   "type": "module",
   "scripts": {
@@ -18,6 +18,8 @@
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",
     "test:watch": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs",
     "smoke:source": "npm run build && bash scripts/ci/source-smoke.sh",
+    "check:docs": "node scripts/ci/check-docs.mjs",
+    "screenshots": "electron scripts/capture-screenshots.mjs -ApplePersistenceIgnoreState YES",
     "clean": "rm -rf dist release .ci-package-fixture .ci-*-results",
     "rebuild:electron": "npx -y @electron/rebuild -f -w better-sqlite3",
     "rebuild:node": "npm rebuild better-sqlite3",

@@ -13,7 +13,7 @@ cd "$root"
 [[ -f dist/electron/main/index.js && -f dist/renderer/index.html ]] || { printf 'Run npm run build first.\n' >&2; exit 1; }
 
 MN_PACKAGE_SMOKE_DIR="$fixture" ELECTRON_RUN_AS_NODE='' ELECTRON_ENABLE_LOGGING=1 \
-  ./node_modules/.bin/electron scripts/ci/source-launch.mjs "$root" --meetingnotes-package-smoke > "$fixture/stdout.txt" 2>&1 &
+  ./node_modules/.bin/electron scripts/ci/source-launch.mjs "$root" --meetingnotes-package-smoke -ApplePersistenceIgnoreState YES > "$fixture/stdout.txt" 2>&1 &
 pid=$!
 # The smoke quits by itself within a few seconds. A hang usually means a
 # modal (for example a keychain prompt) is waiting on screen.

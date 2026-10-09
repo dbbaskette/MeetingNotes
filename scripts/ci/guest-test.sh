@@ -43,6 +43,8 @@ run_check renderer-types npx tsc --noEmit -p tsconfig.json
 run_check fixture-types npx tsc --noEmit -p scripts/library-pagination-fixture/tsconfig.json
 run_check build npm run build
 run_check main-types npx tsc --noEmit -p tsconfig.node.json
+# README and guides: links resolve and version/Electron badges match the code.
+run_check docs node scripts/ci/check-docs.mjs
 # Whole repository, zero warnings: new lint debt anywhere fails the run.
 run_check lint npm run lint
 if [[ "$test_mode" == quick ]]; then

@@ -39,7 +39,7 @@ dependencies and reruns selection/grouped/Settings/history fixtures. Its log
 explicitly records renderer-only coverage; it is not a replacement for full CI.
 
 Coverage: clean dependency installation, Electron-native rebuild, Swift audio-helper build and synthetic writer tests, full Vitest suite,
-main and renderer type checks, production build, whole-repository lint, synthetic Browse
+main and renderer type checks, production build, a docs check (links and version badges), whole-repository lint, synthetic Browse
 benchmark against the reviewed baseline, and isolated
 Library/Settings/history renderer fixtures. All UI/API data is synthetic; no
 microphone, real account, vault, or paid service is contacted.

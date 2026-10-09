@@ -203,6 +203,12 @@ function withDefaults(known: Record<string, unknown>, base: object, deep: boolea
       cache.set(key, result);
       return result;
     },
+    // Assignments stick, so tooling can replace a method with richer data
+    // (scripts/capture-screenshots.mjs does this for the meeting page).
+    set(_target, key, value) {
+      if (typeof key === 'string') cache.set(key, value);
+      return true;
+    },
     has: () => true,
   });
 }

@@ -55,6 +55,12 @@ describe('browser preview api', () => {
     await expect(api.notYetInvented!.anything!()).resolves.toBeUndefined();
   });
 
+  it('lets tooling replace a method', async () => {
+    const api = createPreviewApi();
+    api.meetings.get = (async () => ({ id: 'x' })) as unknown as typeof api.meetings.get;
+    await expect(api.meetings.get('x')).resolves.toEqual({ id: 'x' });
+  });
+
   it('returns stable references and is not mistaken for a thenable', () => {
     const api = createPreviewApi();
     expect(api.meetings.list).toBe(api.meetings.list);
