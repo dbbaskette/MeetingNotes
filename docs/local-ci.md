@@ -5,6 +5,29 @@ then `bash scripts/ci/tart-macos.sh`. This uses the existing macos-test-suite
 runner and a stopped Golden Gate base. It owns only its disposable clone,
 stops/deletes it on exit, and retains host logs.
 
+Three tiers share one guest script:
+
+| Command | Runs | Commit status |
+| --- | --- | --- |
+| `bash scripts/ci/tart-macos.sh --quick` | Clean install, native build, full Vitest suite, type checks, production build, whole-repository lint | `tart-ci/quick` |
+| `bash scripts/ci/tart-macos.sh` | Everything in quick, plus the audio helper, Browse benchmark, renderer fixtures and (when a payload is present) the packaged app | `tart-ci` |
+| `bash scripts/ci/tart-macos.sh --renderer-only` | Renderer fixtures only | none |
+
+After a run on a clean committed tree, the host posts the result to GitHub as a
+commit status for the tested commit, so a pull request shows which commit last
+passed. Nothing is posted for `--dry-run`, `--renderer-only`, `--no-status`, or
+when tracked files have uncommitted changes. Posting needs the commit pushed
+and `gh` signed in; a failure to post never changes the run's exit code.
+
+Vitest runs under Electron's own Node (`npm test`), so `better-sqlite3` is
+built once, for Electron, and never rebuilt for system Node. Lint covers the
+whole repository with zero warnings allowed.
+
+For a quick local check that the app still starts, `npm run smoke:source`
+builds and launches the real main process against a disposable synthetic
+library and fails on any logged warning, error or Content-Security-Policy
+violation. It complements the packaged gate below; it does not replace it.
+
 Commit the intended source before a full run. The guest copies only Git-tracked
 files into disposable storage; unrelated untracked files, local credentials,
 node_modules, and the user's installed app/library are not used. Its log records
@@ -15,9 +38,9 @@ full suite, `bash scripts/ci/tart-macos.sh --renderer-only` installs fresh
 dependencies and reruns selection/grouped/Settings/history fixtures. Its log
 explicitly records renderer-only coverage; it is not a replacement for full CI.
 
-Coverage: clean dependency installation, Node-native rebuild, Swift audio-helper build and synthetic writer tests, full Vitest suite,
-renderer type checks, production build, scoped changed-file lint, synthetic Browse
-benchmark against the reviewed baseline, Electron-native rebuild, and isolated
+Coverage: clean dependency installation, Electron-native rebuild, Swift audio-helper build and synthetic writer tests, full Vitest suite,
+main and renderer type checks, production build, whole-repository lint, synthetic Browse
+benchmark against the reviewed baseline, and isolated
 Library/Settings/history renderer fixtures. All UI/API data is synthetic; no
 microphone, real account, vault, or paid service is contacted.
 

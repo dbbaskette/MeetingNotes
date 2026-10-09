@@ -33,6 +33,7 @@ export function SourcePicker({
         if (token === request.current) setLoading(false);
       }
   }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
   useEffect(() => { void refresh(); return () => { request.current++; }; }, [refresh]);
 
   // Daemons and unattributed helpers (isUserApp === false) hide behind a

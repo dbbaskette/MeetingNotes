@@ -149,6 +149,7 @@ function PermissionsStep({ onStatus }: { onStatus: (s: StepStatus) => void }): J
     onStatus(micState === 'granted' && perms.audioCapture !== 'denied' ? 'ok' : 'warn');
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
   useEffect(() => { void refresh(); const t = setInterval(refresh, 2000); return () => clearInterval(t); }, []);
 
   return (
@@ -288,6 +289,7 @@ export function WhisperStep({ onStatus, activeModel, onUse }: { onStatus: (s: St
     }
     catch (e) { setErr((e as Error).message); return []; }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
   useEffect(() => { void refresh(); }, []);
 
   async function install(): Promise<void> {
@@ -537,6 +539,7 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
       onStatus('warn');
     } finally { setChecking(false); }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
   useEffect(() => { void check(); }, []);
 
   // Fire the exact health-check canary Settings runs, and fold its verdict into
@@ -672,6 +675,7 @@ function SttStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
       setUrl(all.sttUrl);
       void probe(all.sttUrl);
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
   }, []);
 
   return (

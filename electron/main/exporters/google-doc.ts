@@ -98,6 +98,7 @@ export class GoogleDocExporter implements Exporter {
     return json.webViewLink ?? (json.id ? `https://docs.google.com/document/d/${json.id}/edit` : 'Google Doc created');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped Google REST JSON, narrowed at each call site
   private async api(token: string, url: string, init: RequestInit = {}): Promise<any> {
     const resp = await this.fetchImpl(url, {
       ...init,

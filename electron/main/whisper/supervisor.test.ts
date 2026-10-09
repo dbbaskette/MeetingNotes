@@ -36,6 +36,7 @@ describe('createWhisperSupervisor', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whisper-test-'));
   });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
 
   it('adopts a healthy whisper-server already running on the port', async () => {
     const spawn = vi.fn(() => fakeProc() as any);

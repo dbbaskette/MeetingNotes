@@ -172,6 +172,7 @@ export function LibraryView({
       changeGroup(undefined);
       toast.show({ message: 'That group is no longer available. Showing all meetings.' });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- depends on the stable `toast.show`, not the toast object
   }, [groupsLoaded, groupsError, groupId, activeGroup, changeGroup, toast.show]);
   // Needs Attention remains global even when browse is filtered or only its
   // first page is loaded. Only actionable status IDs are hydrated, in capped
@@ -217,6 +218,7 @@ export function LibraryView({
   }, []);
   useEffect(() => {
     void refreshRecovery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
     return () => { recoveryGeneration.current++; };
   }, [refreshRecovery]);
   useEffect(() => {
@@ -345,6 +347,7 @@ export function LibraryView({
         if (!cancelled) setSearchPending(false);
       }
     }, 150);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
     return () => { cancelled = true; window.clearTimeout(t); if(dispatched)void api.search.cancel(searchClientId.current,requestId); };
   }, [query, isSearching, searchRevision, groupId, facets,libFilter]);
 

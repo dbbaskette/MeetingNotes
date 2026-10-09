@@ -35,7 +35,7 @@ export function RecoveryRow({ item, detail, onChanged, onOpen }: {
     const result = trim ? await api.recovery.trim(item.id, endS, startS) : await api.recovery.recover(item.id);
     await onChanged(); onOpen(result.meetingId);
   }
-  function usePosition(which: 'start' | 'end'): void {
+  function applyPlaybackPosition(which: 'start' | 'end'): void {
     const position = audio.current?.currentTime;
     if (position === undefined || !Number.isFinite(position)) return;
     (which === 'start' ? setStart : setEnd)(String(Math.min(preview?.durationS ?? 0, Math.round(position * 100) / 100)));
@@ -68,7 +68,7 @@ export function RecoveryRow({ item, detail, onChanged, onOpen }: {
           <input id={`${panelId}-${which}`} type="number" min="0" max={preview.durationS} step="any" value={which === 'start' ? start : end}
             onChange={e => (which === 'start' ? setStart : setEnd)(e.target.value)}
             className="w-full px-2 py-1.5 rounded border border-surface-border bg-surface text-ink" />
-          <button className="text-xs text-brand-indigo mt-1 py-1" onClick={() => usePosition(which)}>Use playback position</button>
+          <button className="text-xs text-brand-indigo mt-1 py-1" onClick={() => applyPlaybackPosition(which)}>Use playback position</button>
         </div>)}
       </fieldset>
       {!valid && <p className="text-xs text-danger" role="status">Choose 0 ≤ start &lt; end ≤ {preview.durationS.toFixed(2)} seconds.</p>}

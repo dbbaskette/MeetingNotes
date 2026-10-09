@@ -159,6 +159,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
 
   useEffect(() => {
     if(active)void load(week);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
     return()=>{fetchSeq.current++;};
   }, [week, load, active]);
 

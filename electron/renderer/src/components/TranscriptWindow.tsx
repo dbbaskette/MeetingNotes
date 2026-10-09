@@ -44,6 +44,7 @@ export function TranscriptWindow({
     pendingFocus = useRef<number | null>(null);
   const offsets = useMemo(
     () => rowOffsets(count, estimate, cache.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `revision` is bumped when the mutable height cache changes
     [count, estimate, revision],
   );
   const positions = useRef(offsets);

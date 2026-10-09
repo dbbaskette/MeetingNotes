@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AppleRemindersExporter } from './apple-reminders.js';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
 async function reminderScript(dueDate: string | null): Promise<string> {
@@ -11,6 +11,14 @@ async function reminderScript(dueDate: string | null): Promise<string> {
   });
   return runner.mock.calls[1]![1][1]!;
 }
+
+// These cases run real AppleScript date arithmetic. Some sandboxes block the
+// scripting additions that `current date` needs; probe with a script that is
+// independent of the exporter so an exporter bug still fails where it can run.
+const canEvaluateAppleScriptDates = process.platform === 'darwin' && (() => {
+  try { execFileSync('osascript', ['-e', 'year of (current date)'], { timeout: 10000, stdio: 'pipe' }); return true; }
+  catch { return false; }
+})();
 
 describe('AppleRemindersExporter', () => {
   it('builds numeric date components before creating the reminder, at 9am local time', async () => {
@@ -24,7 +32,7 @@ describe('AppleRemindersExporter', () => {
     expect(await reminderScript(dueDate)).not.toContain('remind me date');
   });
 
-  it.runIf(process.platform === 'darwin').each(['2026-01-15', '2026-02-28', '2028-02-29'])('evaluates date-only AppleScript correctly for %s without opening Reminders', async (dueDate) => {
+  it.runIf(canEvaluateAppleScriptDates).each(['2026-01-15', '2026-02-28', '2028-02-29'])('evaluates date-only AppleScript correctly for %s without opening Reminders', async (dueDate) => {
     const script = await reminderScript(dueDate);
     // Execute ONLY the numeric date prefix, never a tell/application command.
     const dateOnly = script.split('tell application')[0]!;

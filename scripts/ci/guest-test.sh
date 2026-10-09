@@ -5,7 +5,7 @@ results_root="/Volumes/My Shared Files/results"
 export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export npm_config_userconfig=/dev/null
 test_mode="${1:-full}"
-[[ "$test_mode" == full || "$test_mode" == renderer ]] || exit 2
+[[ "$test_mode" == full || "$test_mode" == renderer || "$test_mode" == quick ]] || exit 2
 task_root="$(mktemp -d /tmp/meetingnotes-ci.XXXXXX)"
 trap 'printf "Guest exit: %s\n" "$?" >> "$results_root/environment.txt"' EXIT
 git_source() { git -c "safe.directory=$source_root" -C "$source_root" "$@"; }
@@ -28,25 +28,33 @@ run_check() {
   printf '%s: PASS\n' "$name" >> "$results_root/checks.txt"
 }
 run_check install npm ci
-if [[ "$test_mode" == full ]]; then
-run_check native-node npm run rebuild:node
+if [[ "$test_mode" != renderer ]]; then
+# One native build serves both the app and the tests: Vitest runs under
+# Electron's own Node, so better-sqlite3 is never rebuilt for system Node.
+run_check native-electron npm run rebuild:electron
 # SQLite/native-addon suites run in isolated processes. Serialize VM workers
 # so concurrent filesystem/SQLite stress fixtures do not starve watcher polls.
-run_check tests npx vitest run --pool=forks --maxWorkers=1 --minWorkers=1
+run_check tests env ELECTRON_RUN_AS_NODE=1 npx electron node_modules/vitest/vitest.mjs run --pool=forks --maxWorkers=1 --minWorkers=1
+fi
+if [[ "$test_mode" == full ]]; then
 run_check audio-helper bash scripts/ci/audio-helper-smoke.sh "$task_root/native-build"
 fi
 run_check renderer-types npx tsc --noEmit -p tsconfig.json
 run_check fixture-types npx tsc --noEmit -p scripts/library-pagination-fixture/tsconfig.json
 run_check build npm run build
-# macOS Bash 3 has no mapfile. Read the scoped changed-file list portably.
-lint_files=()
-while IFS= read -r file; do
-  if [[ "$file" == electron/* && "$file" =~ \.(ts|tsx)$ && -f "$file" ]]; then lint_files+=("$file"); fi
-done < <(git_source diff --name-only a801017 HEAD)
-if ((${#lint_files[@]})); then run_check changed-lint npx eslint "${lint_files[@]}"; fi
+run_check main-types npx tsc --noEmit -p tsconfig.node.json
+# Whole repository, zero warnings: new lint debt anywhere fails the run.
+run_check lint npm run lint
+if [[ "$test_mode" == quick ]]; then
+  # Fast tier for every branch: install, native build, tests, types, build,
+  # lint. It skips the audio helper, benchmark, UI fixtures and packaged app.
+  printf 'Electron: ' >> "$results_root/environment.txt"
+  node -p 'require("electron/package.json").version' >> "$results_root/environment.txt"
+  printf 'PASS\n' > "$results_root/result.txt"
+  exit 0
+fi
 if [[ "$test_mode" == full ]]; then
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
-run_check native-electron npm run rebuild:electron
 else
   export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology
 fi
