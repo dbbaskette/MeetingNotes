@@ -62,6 +62,14 @@ The shared assertions now cover bounded shared-clock mic/system mixing, startup
 silence, gaps/resumption and decoded tone plus offline TTS speech levels, gain,
 clipping and duration alignment. They do not capture a microphone.
 
+The native gate also models callbacks arriving only after their complete buffers
+fill (4096 input frames at 48/44.1/24/16/8kHz), larger-than-requested first
+buffers, delivery jitter, startup silence, absent microphones and pause/resume.
+It checks exact PCM preservation and every interior 20ms decoded AAC tone window
+for periodic dropout, not only average RMS. Timing metadata is allowlisted and
+tested in the recorder manager. See [microphone timing](microphone-timing.md)
+for the 1.14 regression history and remaining hardware acceptance.
+
 For an explicitly requested packaged-runtime gate, build a disposable unsigned
 package and run `node scripts/ci/prepare-package-fixture.mjs /absolute/path/MeetingNotes.app /absolute/path/synthetic-speech.wav`.
 This creates the ignored `.ci-package-fixture/` payload with the current source

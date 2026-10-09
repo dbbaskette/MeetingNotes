@@ -17,6 +17,14 @@ callbacks produce correctly positioned silence; app and mic resumption do not
 splice time together. Mixed gain remains 50/50 with mic enabled and full system
 gain with mic disabled. All stems finalize together after inputs stop.
 
+The output clock now waits for microphone packet duration and observed delivery
+latency, rather than always committing audio after 120ms. Holdback grows only
+within a one-second bound; the rings remain fixed at two seconds. Initial mic
+discovery has a bounded one-second grace so a fast system stream cannot erase
+the first larger mic packet. Real source pauses still become positioned silence.
+See [microphone timing](microphone-timing.md) for the AirPods regression, synthetic
+verification and limits; this is not a claim of live device acceptance.
+
 Live Mic/App/File labels describe observed samples, not a promise that the
 saved file is playable. Stream diagnostics disclose numeric dBFS peaks without
 announcing every sample. A quiet app during a mic-only recording is not the

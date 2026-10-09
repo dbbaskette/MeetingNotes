@@ -46,6 +46,32 @@ afterEach(() => {
 });
 
 describe('RecordingManager', () => {
+  it('retains allowlisted capture timing metadata without paths, names, invalid values or raw helper payloads', async () => {
+    const onDiagnostic = vi.fn(), { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic });
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    stdout.emit('data', JSON.stringify({ event: 'diag', stage: 'mic_format', sample_rate: 24000, channels: 1, requested_frames: 4096, device_name: 'private microphone', output_path: '/private/meeting.m4a' }) + '\n');
+    stdout.emit('data', JSON.stringify({ event: 'diag', stage: 'capture_timing', source: 'mic', input_frames: 4096, converted_frames: 8192, callback_age_ms: 174.2, holdback_ms: 234.2, mic_late_frames: 0, system_late_frames: 0, content: 'private words' }) + '\n');
+    stdout.emit('data', '{"event":"diag","stage":"capture_timing","source":"private-device","holdback_ms":-1,"callback_age_ms":1e400,"input_frames":"4096"}\n');
+    stdout.emit('data', '{"event":"diag","stage":"ioproc","input_frames":123}\n');
+    expect(onDiagnostic.mock.calls).toEqual([
+      [result.sessionId, { stage: 'mic_format', sample_rate: 24000, channels: 1, requested_frames: 4096 }],
+      [result.sessionId, { stage: 'capture_timing', source: 'mic', input_frames: 4096, converted_frames: 8192, callback_age_ms: 174.2, holdback_ms: 234.2, mic_late_frames: 0, system_late_frames: 0 }],
+    ]);
+    stdout.emit('data', '{"event":"diag","stage":"capture_timing_stop","holdback_ms":234.2,"mic_late_frames":10,"system_late_frames":0}\n');
+    expect(onDiagnostic).toHaveBeenLastCalledWith(result.sessionId, { stage: 'capture_timing_stop', holdback_ms: 234.2, mic_late_frames: 10, system_late_frames: 0 });
+    await manager.stop(result.sessionId);
+  });
+  it('isolates timing observer failures from audio levels and capture lifecycle', async () => {
+    const { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic: () => { throw new Error('observer unavailable'); } });
+    const levels = vi.fn(); manager.on('level', levels);
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    expect(() => stdout.emit('data', '{"event":"diag","stage":"capture_timing","holdback_ms":240}\n{"event":"level","source":"mic","peak_db":-10}\n')).not.toThrow();
+    expect(levels).toHaveBeenCalledWith(result.sessionId, 'mic', -10);
+    expect(manager.state(result.sessionId)).toBe('recording');
+    await manager.stop(result.sessionId);
+  });
   it('persists the normalized optional title before spawning and keeps the source label separate',async()=>{
     const repo=fakeRepo(),{proc}=fakeRecordingProcess();
     const spawn=vi.fn(()=>{expect(repo.insert).toHaveBeenCalledWith(expect.objectContaining({title:'Platform planning',targetLabel:'Zoom'}));return proc;});

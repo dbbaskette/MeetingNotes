@@ -23,6 +23,12 @@ export interface StartResult {
 export const SILENCE_TIMEOUT_MS = 5 * 60_000;
 export const SILENCE_THRESHOLD_DB = -50;
 export type RecordingLevelSource = 'mic' | 'system' | 'mixed';
+const CAPTURE_TIMING_FIELDS = ['sample_rate', 'channels', 'requested_frames', 'input_frames',
+  'converted_frames', 'callback_age_ms', 'holdback_ms', 'mic_late_frames', 'system_late_frames'] as const;
+export type CaptureDiagnostic = Partial<Record<typeof CAPTURE_TIMING_FIELDS[number], number>> & {
+  stage: 'mic_format' | 'capture_timing' | 'capture_timing_stop';
+  source?: 'mic' | 'system';
+};
 
 type SpawnFn = (cmd: string, args: string[]) => ChildProcessWithoutNullStreams;
 type LevelListener = (sessionId: string, source: RecordingLevelSource, peakDb: number) => void;
@@ -60,6 +66,7 @@ export class RecordingManager {
     clock?: () => Date;
     onAutoStop?: (sessionId: string, silenceMs: number) => void;
     onFinalized?: (sessionId: string, outputPath: string) => void;
+    onDiagnostic?: (sessionId: string, diagnostic: CaptureDiagnostic) => void;
   }) {}
 
   async start(input: StartInput, internal: { outputDir?: string; disposable?: boolean; expectedRevision?: number } = {}): Promise<StartResult> {
@@ -315,8 +322,22 @@ export class RecordingManager {
 
   private handleLine(sessionId: string, line: string): void {
     if (!line.trim().startsWith('{')) return;
-    let payload: { event?: string; source?: string; peak_db?: number } | undefined;
+    let payload: Record<string, unknown> | undefined;
     try { payload = JSON.parse(line); } catch { return; }
+    if (payload?.event === 'diag' && (payload.stage === 'mic_format'
+      || payload.stage === 'capture_timing' || payload.stage === 'capture_timing_stop')) {
+      // Persist only stable numeric capture metadata. Never forward arbitrary
+      // helper JSON (paths, device names, meeting content or error strings).
+      const diagnostic: CaptureDiagnostic = { stage: payload.stage };
+      if (payload.source === 'mic' || payload.source === 'system') diagnostic.source = payload.source;
+      for (const key of CAPTURE_TIMING_FIELDS) {
+        const value = payload[key];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER) diagnostic[key] = value;
+      }
+      if (Object.keys(diagnostic).some((key) => key !== 'stage' && key !== 'source')) {
+        try { this.deps.onDiagnostic?.(sessionId, diagnostic); } catch { /* logging must not interrupt capture */ }
+      }
+    }
     if (payload?.event === 'level' && typeof payload.peak_db === 'number') {
       const source: RecordingLevelSource = payload.source === 'mic' || payload.source === 'system'
         || payload.source === 'mixed' ? payload.source : 'mixed';
