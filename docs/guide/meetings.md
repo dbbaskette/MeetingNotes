@@ -43,3 +43,12 @@ Weeks use your Mac's local Monday–Sunday calendar, including DST boundaries. T
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.
 - Large timestamped transcripts render a bounded variable-height window on the existing scrollbar. **Find in transcript** / <kbd>⌘F</kbd>, full-copy and export still cover the whole text. Playback follows the active row unless you scroll manually; explicit seeks and search matches can reach unmounted passages. Per-line and Grouped views retain whole-text corrections and speaker colors.
 - **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings have prioritized next actions. **View all** or **+N more** opens the entire backlog with bounded pages.
+
+## The meeting page
+
+Notes, transcript and action items fill the page. The header shows the meeting's date and length and holds two controls:
+
+- **Processing ▾** lists the models that produced the notes and the three re-run options: from transcription, from speaker separation, or notes and action items only. Each asks for confirmation before replacing results. A recording that has never been processed shows **Process recording** here instead.
+- The **panel button** beside it hides or shows the speakers and export rail, so a finished meeting can be read at full width. The choice is remembered.
+
+In the speakers rail, voices that need review are always listed in full. When more than four voices are already named, they fold into one **N named voices** row; **Show all** expands it.

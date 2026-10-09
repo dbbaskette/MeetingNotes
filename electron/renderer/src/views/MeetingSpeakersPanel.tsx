@@ -13,6 +13,9 @@ function MiniSpinner(): JSX.Element {
 
 interface RosterEntry { id: string; displayName: string; }
 
+/** Named voices beyond this many fold into a single "N named voices" row. */
+const NAMED_VOICES_SHOWN = 4;
+
 export function SpeakersPanel({
   meeting, onReload, compact = false,
 }: {
@@ -53,6 +56,12 @@ export function SpeakersPanel({
     [meeting.speakers],
   );
   const reviewRows = compact ? groupedSpeakers.needsReview.slice(0, 3) : groupedSpeakers.needsReview;
+  // A long list of voices that need nothing from the user pushes Export out of
+  // view. Past a few, fold them into one row; voices needing review always
+  // stay expanded above it (#252).
+  const [showNamed, setShowNamed] = useState(false);
+  const collapseNamed = !compact && !showNamed && groupedSpeakers.rest.length > NAMED_VOICES_SHOWN;
+  const namedPreview = groupedSpeakers.rest.map((sp) => sp.displayName ?? sp.localLabel).join(', ');
   function toggleSelected(label: string): void {
     setSelected((current) => {
       const next = new Set(current);
@@ -148,7 +157,19 @@ export function SpeakersPanel({
         {!compact && groupedSpeakers.rest.length > 0 && groupedSpeakers.needsReview.length > 0 && (
           <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted pt-1">Named</div>
         )}
-        {!compact && groupedSpeakers.rest.map((sp) => (
+        {collapseNamed && (
+          <button
+            type="button"
+            aria-expanded={false}
+            onClick={() => setShowNamed(true)}
+            className="w-full text-left rounded-lg border border-surface-border px-3 py-2 text-xs text-ink-soft hover:border-brand-indigo/50 transition"
+          >
+            <span className="font-semibold text-ink">{groupedSpeakers.rest.length} named voices</span>
+            <span className="block truncate text-ink-muted">{namedPreview}</span>
+            <span className="text-brand-indigo font-medium">Show all</span>
+          </button>
+        )}
+        {!compact && !collapseNamed && groupedSpeakers.rest.map((sp) => (
           <SpeakerRow
             key={sp.localLabel}
             meetingId={meeting.id}
