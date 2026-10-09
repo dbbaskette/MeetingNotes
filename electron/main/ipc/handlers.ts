@@ -95,6 +95,9 @@ export interface IpcServices {
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
+  /** Menu-bar item and global record shortcut; absent in tests and CI smoke. */
+  menuBar?: { setVisible(visible: boolean): void };
+  recordShortcut?: { apply(accelerator: string): void };
   /** Encrypts secret settings and redacts them from renderer snapshots. */
   secrets: SecretSettings;
   googleAuth: GoogleAuth;

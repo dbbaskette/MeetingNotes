@@ -41,6 +41,8 @@ interface Settings {
   };
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
+  showMenuBarIcon: boolean;
+  recordShortcut: string;
   userName: string;
   userSpeakerId: string | null;
   summaryProvider: 'external' | 'lm-studio' | 'ollama';
@@ -576,6 +578,30 @@ export function SettingsView({
         onPersist={update}
       />
 
+      </SettingsSection>
+      <SettingsSection section="Recording" keywords="menu bar tray status icon global shortcut hotkey keyboard start stop">
+      <section className="border-t border-surface-border pt-5 space-y-3">
+        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Menu bar and shortcut</div>
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" checked={s.showMenuBarIcon ?? true} onChange={e => void update('showMenuBarIcon', e.target.checked)} />
+          <span>Show MeetingNotes in the menu bar
+            <span className="block text-xs text-ink-muted mt-1">Shows recording time and lets you start or stop a recording without opening the window. MeetingNotes keeps running there when the window is closed.</span>
+          </span>
+        </label>
+        <Field label="Start/stop shortcut (works in any app)">
+          <input
+            value={s.recordShortcut ?? ''}
+            onChange={(e) => edit('recordShortcut', e.target.value)} onBlur={() => void update('recordShortcut', s.recordShortcut ?? '')}
+            placeholder="None — for example Control+Shift+R"
+            className="input font-mono text-xs"
+            spellCheck={false}
+            autoCapitalize="off"
+          />
+          <div className="text-xs text-ink-muted mt-1">
+            Starts recording all system audio with your microphone, or stops the current recording. Leave empty for no shortcut. A combination that cannot be registered, usually because another app uses it, is refused.
+          </div>
+        </Field>
+      </section>
       </SettingsSection>
       <SettingsSection section="Recording" keywords="permissions microphone system audio privacy security">
       <section className="border-t border-surface-border pt-5">

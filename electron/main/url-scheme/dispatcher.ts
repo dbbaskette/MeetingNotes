@@ -50,7 +50,9 @@ export interface DispatchResult {
 export class SchemeDispatcher {
   constructor(private readonly deps: SchemeDispatcherDeps) {}
 
-  async dispatch(url: string): Promise<DispatchResult> {
+  /** `focusWindow: false` is for callers that act from outside the window
+   *  (menu bar, global shortcut), where raising it would steal focus. */
+  async dispatch(url: string, opts: { focusWindow?: boolean } = {}): Promise<DispatchResult> {
     const parsed = parseSchemeUrl(url);
     this.deps.logger.info('url-scheme:dispatch', { parsed: redactCommand(parsed) });
     if (parsed.kind === 'error') {
@@ -58,7 +60,7 @@ export class SchemeDispatcher {
       this.deps.notify({ title: 'MeetingNotes', body: message });
       return { ok: false, message };
     }
-    this.deps.focusMainWindow();
+    if (opts.focusWindow !== false) this.deps.focusMainWindow();
     try {
       switch (parsed.kind) {
         case 'record': return await this.handleRecord(parsed.source, parsed.title);

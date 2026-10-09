@@ -20,8 +20,12 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     value = validateSetting(key, value);
     if (isSecretSettingKey(key)) return s.secrets.write(key, value as string);
+    // Register first: a shortcut another app already holds must be refused
+    // with a readable error, not saved and silently dead.
+    if (key === 'recordShortcut') s.recordShortcut?.apply(value as string);
     if (key === 'sttModel' && s.pipeline.getStatus().currentId) throw new Error('Wait for active processing to finish before changing the transcription model');
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
+    if (key === 'showMenuBarIcon') s.menuBar?.setVisible(value as boolean);
     if (key === 'theme') {
       nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
     }

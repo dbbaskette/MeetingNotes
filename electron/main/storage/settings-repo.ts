@@ -68,6 +68,11 @@ export interface Settings {
    *  the banner. */
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
+  /** Show the macOS menu-bar item with recording status and controls. */
+  showMenuBarIcon: boolean;
+  /** Global accelerator that starts or stops recording from any app.
+   *  Empty = none. Validated and registered in main before it is saved. */
+  recordShortcut: string;
   /** Display name used for the local user's voice in stem-aware transcripts.
    *  Empty → the literal "You" is used. (#13 Phase 3.) */
   userName: string;
@@ -162,6 +167,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
   autoProcessRecordings: false,
+  showMenuBarIcon: true,
+  recordShortcut: '',
   userName: '',
   onboardedAt: null,
   userSpeakerId: null,
