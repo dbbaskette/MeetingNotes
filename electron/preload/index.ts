@@ -164,6 +164,7 @@ const IPC_CHANNELS = {
   appGetVersion: 'app:get-version',
   logsTail: 'logs:tail',
   logsReveal: 'logs:reveal',
+  logsRendererError: 'logs:renderer-error',
   googleAuthStart: 'google:auth-start',
   googleAuthStatus: 'google:auth-status',
   googleSignOut: 'google:sign-out',
@@ -711,6 +712,15 @@ const api = {
       }>,
     /** Reveal the log file in Finder. */
     reveal: () => ipcRenderer.invoke(IPC_CHANNELS.logsReveal) as Promise<void>,
+    /** Record a caught renderer error in the app log. Main validates,
+     *  truncates and rate-limits; send no meeting content. */
+    reportError: (report: {
+      source: 'boundary' | 'window' | 'promise';
+      scope: string;
+      message: string;
+      stack?: string;
+      componentStack?: string;
+    }) => ipcRenderer.invoke(IPC_CHANNELS.logsRendererError, report) as Promise<void>,
   },
   webhook: {
     /** POSTs a synthetic meeting.completed payload to the configured

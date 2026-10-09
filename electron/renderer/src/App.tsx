@@ -8,6 +8,7 @@ import { LiveRecordingRow } from './components/LiveRecordingRow';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { PipelineStatusBar } from './components/PipelineStatusBar';
 import { Icon } from './components/icons';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { api } from './ipc/client';
 import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
@@ -63,9 +64,11 @@ export interface LiveRecording {
  *  AppInner so it can call useToast for drag-drop import feedback. */
 export function App(): JSX.Element {
   return (
-    <ToastHost>
-      <AppInner />
-    </ToastHost>
+    <ErrorBoundary scope="app" label="MeetingNotes" variant="root">
+      <ToastHost>
+        <AppInner />
+      </ToastHost>
+    </ErrorBoundary>
   );
 }
 
@@ -437,6 +440,7 @@ function AppInner(): JSX.Element {
   const readyForViews = onboardStatus === 'done' && permsOk;
   const libraryView = (
     <div className="h-full" hidden={view.kind !== 'library'}>
+    <ErrorBoundary scope="library" label="The Library">
     <LibraryView
       active={view.kind === 'library'}
       onOpen={(id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
@@ -444,12 +448,14 @@ function AppInner(): JSX.Element {
       onOpenSearch={() => setSearchOpen(true)} liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
       onRecordingStopped={stopped}
-    /></div>
+    /></ErrorBoundary></div>
   );
   const weeklyView = visitedWeekly.current && (
     <div className="h-full" hidden={view.kind !== 'weekly'}>
+    <ErrorBoundary scope="weekly" label="The Weekly view" onLeave={() => void navigate({ kind: 'library' })}>
     <WeeklyView active={view.kind === 'weekly'} onNav={(target) => { if (target !== 'weekly') void navigate({ kind: target }); }}
       onOpenMeeting={(id) => void navigate({ kind: 'detail', id })} />
+    </ErrorBoundary>
     </div>
   );
   const activeView = onboardStatus === null ? (
@@ -471,7 +477,14 @@ function AppInner(): JSX.Element {
       onRunSetupAgain={() => { void navigate({ kind: 'library' }); setForceOpenSetup(true); }}
     />
   );
-  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{readyForViews && libraryView}{readyForViews && weeklyView}{activeView}</Suspense>;
+  // Each view fails on its own (#251): the recording banner, status bar and
+  // the other views sit outside these boundaries and stay usable. The active
+  // view's boundary is keyed so opening another meeting clears a failure.
+  const activeScope = onboardStatus === 'needed' ? 'onboarding' : !permsOk ? 'permissions' : view.kind;
+  const activeLabel = view.kind === 'detail' ? 'This meeting' : view.kind === 'settings' ? 'Settings' : 'This screen';
+  const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{readyForViews && libraryView}{readyForViews && weeklyView}
+    {activeView && <ErrorBoundary scope={activeScope} label={activeLabel} resetKey={view.kind === 'detail' ? `detail:${view.id}` : activeScope}
+      onLeave={activeScope === 'detail' || activeScope === 'settings' ? () => void navigate({ kind: 'library' }) : undefined}>{activeView}</ErrorBoundary>}</Suspense>;
 
   // Persistent recording banner on views that don't show the LibraryView's
   // inline live row. Keeps the user aware that capture is still going even

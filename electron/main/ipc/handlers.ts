@@ -56,6 +56,7 @@ import { SearchOwners } from '../search/owners.js';
 import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
 import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
+import { createReportLimiter, normalizeRendererError } from '../logging/renderer-error.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
 import { buildSpeakerReviewMetadata, type SpeakerReviewMetadata } from '../speakers/review-metadata.js';
@@ -231,6 +232,12 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.logsReveal, () => {
     shell.showItemInFolder(s.logger.filePath);
+  });
+
+  const allowRendererReport = createReportLimiter();
+  ipc.handle(IPC_CHANNELS.logsRendererError, (_e, report: unknown) => {
+    const entry = normalizeRendererError(report);
+    if (entry && allowRendererReport()) s.logger.error('renderer:error', { ...entry });
   });
 
   ipc.handle(IPC_CHANNELS.googleAuthStart, async () => {

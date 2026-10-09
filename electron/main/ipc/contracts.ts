@@ -386,6 +386,9 @@ export const IPC_CHANNELS = {
   logsTail: 'logs:tail',
   /** Reveal the app log file in Finder. */
   logsReveal: 'logs:reveal',
+  /** Renderer → main: a caught render/window error for the app log (#251).
+   *  Validated, truncated and rate-limited in main. */
+  logsRendererError: 'logs:renderer-error',
   /** Begin the Google OAuth sign-in flow (opens the system browser). Resolves
    *  with the connected account email. */
   googleAuthStart: 'google:auth-start',

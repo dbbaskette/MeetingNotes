@@ -1,5 +1,6 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../ipc/client';
@@ -1317,6 +1318,7 @@ function CenterPane({
       </div>
       <div className="p-5">
         {tab === 'summary' && (
+          <ErrorBoundary scope="detail:notes" label="Notes" variant="panel" resetKey={meeting.id}>
           <SummaryPanel
             key={meeting.id}
             meeting={meeting}
@@ -1329,9 +1331,10 @@ function CenterPane({
             savedValue={summarySaved}
             onBaseline={onSummaryBaseline}
           />
+          </ErrorBoundary>
         )}
         {tab === 'transcript' && (
-          <>
+          <ErrorBoundary scope="detail:transcript" label="The transcript" variant="panel" resetKey={meeting.id}>
             <ArtifactFeedback label="transcript" state={transcriptState} onRetry={onRetryTranscript} />
             {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={meeting.transcriptMd + (meeting.summaryMd ?? '')}
               groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing' || summaryDraft !== summarySaved || summaryMode === 'edit'} onReload={onReload}/>}
@@ -1342,9 +1345,9 @@ function CenterPane({
               currentTime={currentTime}
               onSeek={onSeek}
             />}
-          </>
+          </ErrorBoundary>
         )}
-        {tab === 'actions' && <ActionItemsPanel meeting={meeting} onReload={onReload} onShowSource={onShowSource} />}
+        {tab === 'actions' && <ErrorBoundary scope="detail:actions" label="Action items" variant="panel" resetKey={meeting.id}><ActionItemsPanel meeting={meeting} onReload={onReload} onShowSource={onShowSource} /></ErrorBoundary>}
       </div>
     </div>
   );
@@ -1649,7 +1652,7 @@ function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview
 }): JSX.Element {
   return <div id="meeting-speakers" tabIndex={-1} className="border-l border-surface-border p-4 space-y-3">
     <ArtifactFeedback label="speaker review" state={speakerReviewState} onRetry={onRetrySpeakerReview} />
-    <SpeakersPanel meeting={meeting} onReload={onReload} />
-    <MeetingExportPanel meeting={meeting} onReload={onReload} />
+    <ErrorBoundary scope="detail:speakers" label="Speakers" variant="panel" resetKey={meeting.id}><SpeakersPanel meeting={meeting} onReload={onReload} /></ErrorBoundary>
+    <ErrorBoundary scope="detail:export" label="Export" variant="panel" resetKey={meeting.id}><MeetingExportPanel meeting={meeting} onReload={onReload} /></ErrorBoundary>
   </div>;
 }
