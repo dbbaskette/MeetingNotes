@@ -1,4 +1,4 @@
-import chokidar from 'chokidar';
+import chokidar, { type FSWatcher } from 'chokidar';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,7 +34,7 @@ function expandHome(p: string): string {
 }
 
 export class LibraryWatcher {
-  private watchers: chokidar.FSWatcher[] = [];
+  private watchers: FSWatcher[] = [];
   private readonly listeners: Array<(p: string) => void> = [];
   private readonly stability: number;
   private readonly poll: number;
