@@ -7,16 +7,10 @@
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      (function () {
-        try {
-          var t = localStorage.getItem('mn-theme');
-          var dark = t === 'dark' || (t !== 'light' &&
-            window.matchMedia('(prefers-color-scheme: dark)').matches);
-          document.documentElement.classList.toggle('dark', dark);
-        } catch (e) {}
-      })();
-    </script>
+    <!-- Applies the saved theme before first paint. A file, not an inline
+         script, so the production Content-Security-Policy can forbid inline
+         scripts entirely (see vite.config.ts). -->
+    <script src="./theme-boot.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

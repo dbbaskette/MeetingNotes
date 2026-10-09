@@ -56,6 +56,7 @@ import { SearchOwners } from '../search/owners.js';
 import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
 import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
+import type { SecretSettings } from '../storage/secret-settings.js';
 import { createReportLimiter, normalizeRendererError } from '../logging/renderer-error.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
@@ -94,6 +95,8 @@ export interface IpcServices {
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
+  /** Encrypts secret settings and redacts them from renderer snapshots. */
+  secrets: SecretSettings;
   googleAuth: GoogleAuth;
   artifactCache: ArtifactCache;
   /** Process-lifetime set of meetings we've already alerted about entering the

@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import { installRendererRecovery } from './lib/renderer-recovery.js';
+import { installNavigationGuard } from './lib/navigation-guard.js';
+import { SecretSettings } from './storage/secret-settings.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -112,6 +114,14 @@ app.on('open-url', (event, url) => {
  *  crashes through it. */
 let windowLog: ((msg: string, data: Record<string, unknown>) => void) | null = null;
 
+// Links in displayed content must never navigate an app window or open a new
+// one; web links go to the default browser instead (#249). Registered before
+// any window exists so the splash, main and PDF windows are all covered.
+installNavigationGuard(app, {
+  openExternal: (url) => shell.openExternal(url),
+  log: (msg, data) => windowLog?.(msg, data),
+});
+
 let windowBoundsStore: {
   load: () => WindowBounds | null;
   save: (b: WindowBounds) => void;
@@ -141,6 +151,7 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
   // Persist bounds on resize/move (debounced — these fire continuously
@@ -194,6 +205,10 @@ app.whenReady().then(async () => {
 
   const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
+  // Secrets are encrypted with the keychain and never sent to the renderer.
+  // Values saved as plaintext by earlier versions are converted here (#249).
+  const secrets = new SecretSettings(settings, safeStorage);
+  const migratedSecrets = secrets.migrate();
   if (smokeRoot) seedPackageSmoke(smokeRoot, settings);
   const s = settings.getAll();
 
@@ -219,6 +234,7 @@ app.whenReady().then(async () => {
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(smokeRoot ?? path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes'), 'app.log'));
   windowLog = (msg, data) => logger.warn(msg, data);
+  if (migratedSecrets.length) logger.info('settings:secrets-encrypted', { keys: migratedSecrets });
   const artifactCache = new ArtifactCache();
   const terminology = new TerminologyService(new TerminologyRepo(db), {
     libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
@@ -646,7 +662,7 @@ app.whenReady().then(async () => {
   const googleAuth = new GoogleAuth({
     getCredentials: () => {
       const clientId = settings.get('googleClientId').trim();
-      const clientSecret = settings.get('googleClientSecret').trim();
+      const clientSecret = secrets.read('googleClientSecret').trim();
       return clientId && clientSecret ? { clientId, clientSecret } : null;
     },
     getRefreshToken: () => {
@@ -679,7 +695,7 @@ app.whenReady().then(async () => {
     webhook: {
       getConfig: () => ({
         url: settings.get('webhookUrl'),
-        secret: settings.get('webhookSecret'),
+        secret: secrets.read('webhookSecret'),
         template: settings.get('webhookTemplate'),
         ownerFilter: settings.get('webhookOwnerFilter'),
       }),
@@ -729,7 +745,7 @@ app.whenReady().then(async () => {
       userDisplayName: speakers.list().find((sp) => sp.id === settings.get('userSpeakerId'))?.displayName ?? null,
     }, {
       url: settings.get('webhookUrl'),
-      secret: settings.get('webhookSecret'),
+      secret: secrets.read('webhookSecret'),
       template: settings.get('webhookTemplate'),
       ownerFilter: settings.get('webhookOwnerFilter'),
     });
@@ -761,6 +777,7 @@ app.whenReady().then(async () => {
     pause:()=>{const paused=pipeline.getStatus().paused;pipeline.pause();return()=>{if(!paused)pipeline.resume();};},
   });
   registerIpcHandlers(guardedIpc, {
+    secrets,
     backup,
     notesHistory,
     terminology,

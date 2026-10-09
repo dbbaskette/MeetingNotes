@@ -10,12 +10,16 @@ import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { storageLocations } from '../lib/storage-paths.js';
 import { downloadWhisperModel, isWhisperModelFile } from '../whisper/download-model.js';
 import { validateSetting } from '../storage/settings-validation.js';
+import { isSecretSettingKey } from '../../shared/secrets.js';
+import { isSafeExternalUrl } from '../lib/navigation-guard.js';
 
 export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
-  ipc.handle(IPC_CHANNELS.settingsGet, () => s.settings.getAll());
+  // Secrets never cross to the renderer: it sees a mask or an empty string.
+  ipc.handle(IPC_CHANNELS.settingsGet, () => s.secrets.redact(s.settings.getAll()));
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     value = validateSetting(key, value);
+    if (isSecretSettingKey(key)) return s.secrets.write(key, value as string);
     if (key === 'sttModel' && s.pipeline.getStatus().currentId) throw new Error('Wait for active processing to finish before changing the transcription model');
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
     if (key === 'theme') {
@@ -111,7 +115,7 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 
   ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {
-    if (typeof url !== 'string' || !(url.startsWith('https://') || url.startsWith('x-apple.systempreferences:'))) {
+    if (typeof url !== 'string' || !isSafeExternalUrl(url, { allowSystemSettings: true })) {
       throw new Error('invalid url');
     }
     await shell.openExternal(url);

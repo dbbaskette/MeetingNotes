@@ -33,4 +33,13 @@ async function bootstrap(): Promise<void> {
   );
 }
 
-void bootstrap();
+// If the app cannot even start (a module failed to load), say so instead of
+// leaving an empty window. Built with DOM calls: the CSP forbids inline HTML
+// event handlers, and React may be the thing that failed.
+bootstrap().catch((error: unknown) => {
+  const message = document.createElement('p');
+  message.textContent = 'MeetingNotes could not start. Quit and reopen the app; if this keeps happening, the details are in ~/Library/Logs/MeetingNotes/app.log.';
+  message.style.cssText = 'margin:48px auto;max-width:420px;font:14px -apple-system,sans-serif;text-align:center';
+  root.replaceChildren(message);
+  try { void window.api?.logs?.reportError?.(buildErrorReport('window', 'bootstrap', error))?.catch?.(() => {}); } catch { /* best-effort */ }
+});
