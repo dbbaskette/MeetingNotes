@@ -10,6 +10,20 @@ Each recording writes up to three AAC files to the Library's `recordings/` direc
 
 If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Finder**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched.
 
+## From the menu bar or a shortcut
+
+MeetingNotes shows an item in the macOS menu bar. While recording it displays the elapsed time. Click it to:
+
+- **Record All System Audio** — starts immediately, with your microphone, without opening the window.
+- **Choose What to Record…** — brings the window forward and opens the source picker.
+- **Stop Recording**, **Pause/Resume Processing**, **Open MeetingNotes**, **Quit**.
+
+MeetingNotes keeps running in the menu bar when its window is closed, so a recording or processing run continues. Turn the item off in **Settings → Recording → Menu bar and shortcut**.
+
+In the same place you can set a **start/stop shortcut** that works from any app, for example `Control+Shift+R`. It starts recording all system audio, or stops the current recording. There is no shortcut by default, and a combination that macOS or another app already uses is refused with a message.
+
+Menu-bar and shortcut actions use the same recorder as the Record button and the `meetingnotes://` URL scheme, so starting while a recording is active is refused the same way.
+
 ## Managing recordings
 
 The Library opens in **Organized** view: **Ungrouped** appears first, followed by alphabetically sorted named groups, all as expandable sections in the meeting list. Meetings appear only inside their assigned section. Expand a section to browse its meetings, or choose **View** to focus on that group alone; **All groups** returns to the organized list. Use **All meetings** for a flat, sortable list. Status filters and inline search work in either layout; organized search groups matches by their assigned group, while **⌘K** quick search remains global. Use **+ New group** to create a section, and **Move to group…** from a row, meeting detail, or bulk selection to organize older recordings. A meeting belongs to at most one group. Deleting a group only clears assignments; it never deletes meetings or audio.

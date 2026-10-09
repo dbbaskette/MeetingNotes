@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import { installRendererRecovery } from './lib/renderer-recovery.js';
 import { installNavigationGuard } from './lib/navigation-guard.js';
 import { validateIpc } from './ipc/channel-schemas.js';
+import { MenuBarController } from './menu-bar/controller.js';
+import { RecordShortcut } from './menu-bar/shortcut.js';
 import { SecretSettings } from './storage/secret-settings.js';
 import path from 'node:path';
 import os from 'node:os';
@@ -634,6 +636,58 @@ app.whenReady().then(async () => {
     void schemeDispatcher.dispatch(url);
   }
 
+  // Menu-bar item and global shortcut (#253). Both act through the URL-scheme
+  // dispatcher, so they share its single recorder reservation and its
+  // "already recording" guidance, and neither raises the window.
+  const dispatcher = schemeDispatcher;
+  const openMainWindow = (): void => {
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow(nativeTheme.shouldUseDarkColors ? '#171615' : '#fafaf9');
+    else focusMainWindow();
+  };
+  const menuBar = new MenuBarController({
+    getState: () => {
+      const open = recordingSessionsRepo.findOpen()[0];
+      const status = pipeline.getStatus();
+      return {
+        recording: open ? { label: open.targetLabel, startedAt: Date.parse(open.startedAt) || Date.now() } : null,
+        processingTitle: status.currentId ? meetings.findById(status.currentId)?.title ?? null : null,
+        queued: status.queueLength,
+        paused: status.paused,
+      };
+    },
+    onAction: (action) => {
+      switch (action) {
+        case 'record-system': void dispatcher.dispatch('meetingnotes://record?source=all', { focusWindow: false }); break;
+        case 'stop': void dispatcher.dispatch('meetingnotes://stop', { focusWindow: false }); break;
+        case 'record-choose': {
+          const hadWindow = BrowserWindow.getAllWindows().length > 0;
+          openMainWindow();
+          // The source picker lives in the renderer. A window created just now
+          // is not listening yet; it opens on the Library with Record in view.
+          if (hadWindow) BrowserWindow.getAllWindows()[0]?.webContents.send('mn:menu-action', 'toggle-record');
+          break;
+        }
+        case 'open-window': openMainWindow(); break;
+        case 'toggle-queue': if (pipeline.getStatus().paused) pipeline.resume(); else pipeline.pause(); break;
+        case 'quit': app.quit(); break;
+      }
+    },
+  });
+  recordingManager.on('state-change', () => menuBar.refresh());
+  pipeline.onStatusChange(() => menuBar.refresh());
+  const recordShortcut = new RecordShortcut(globalShortcut, () => {
+    const url = recordingSessionsRepo.findOpen().length > 0 ? 'meetingnotes://stop' : 'meetingnotes://record?source=all';
+    void dispatcher.dispatch(url, { focusWindow: false });
+  });
+  // Never in the CI package smoke: no menu-bar item or system-wide shortcut
+  // may be left behind on the host that runs it.
+  if (!smokeRoot) {
+    menuBar.setVisible(settings.get('showMenuBarIcon'));
+    try { recordShortcut.apply(settings.get('recordShortcut')); }
+    catch (err) { logger.warn('record-shortcut:unavailable', { reason: (err as Error).message }); }
+    app.on('will-quit', () => recordShortcut.clear());
+  }
+
   // Native nudge when a meeting parks at the speaker-ID gate. The pipeline
   // otherwise sits blocked on the user with no proactive signal if they've
   // navigated away. Clicking the notification raises the window and lands on
@@ -782,6 +836,7 @@ app.whenReady().then(async () => {
   });
   registerIpcHandlers(guardedIpc, {
     secrets,
+    ...(smokeRoot ? {} : { menuBar, recordShortcut }),
     backup,
     notesHistory,
     terminology,
