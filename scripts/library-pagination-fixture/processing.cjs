@@ -95,6 +95,12 @@ app.whenReady().then(async () => {
   assert.equal(await run('document.body.innerText.includes("Meeting added to the processing queue")'), false);
   await showFirstRows();
   if (process.env.MN_FIXTURE_RESULTS) fs.writeFileSync(path.join(process.env.MN_FIXTURE_RESULTS, 'processing-after.png'), (await win.webContents.capturePage()).toPNG());
+  await win.loadURL(base + '?startup&processing&live');
+  const stopButton = `[...document.querySelectorAll('button')].find(button=>button.textContent.trim().endsWith('Stop'))`;
+  await until(`!!${stopButton} && document.querySelectorAll('section [aria-expanded=true]').length === 3`);
+  await run(`${scroller}.scrollTop=1700`); await settle();
+  assert.ok(await run(`(() => { const stop=${stopButton}, rect=stop.getBoundingClientRect(); return rect.top>=0 && rect.bottom<innerHeight && stop.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)); })()`), 'Capture Stop remains reachable while meetings scroll');
+  assert.equal(await run(`document.documentElement.scrollHeight > innerHeight + 1`), false);
   console.log('PROCESSING PASS: no blocking/redundant popup, processing rows open with selection, single scroll at three sizes/zoom in both views, stable refresh, bounded rows, slow/failed queue and auto-clearing feedback');
   win.destroy(); app.quit();
 }).catch(error => {console.error(error); app.exit(1);});

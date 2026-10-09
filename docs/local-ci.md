@@ -90,4 +90,5 @@ It checks one scroll surface in Organized and All meetings at three window sizes
 and zoom levels, stable scroll during stage refresh, clickable/keyboard-accessible
 processing rows with other meetings selected, direct bulk queueing without a modal,
 duplicate-click protection, retryable failures, and auto-clearing non-modal feedback.
-No actual processing service or recording is started.
+It also checks that capture Stop stays visible while browsing using a fake active
+recording state. No actual processing service or recording is started.

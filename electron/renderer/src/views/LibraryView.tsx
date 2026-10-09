@@ -542,10 +542,6 @@ export function LibraryView({
         />
       </header>
 
-      {/* One scroll surface for the inbox and Library. A busy inbox must not
-          squeeze the list to zero height or create competing wheel regions. */}
-      <div ref={listRef} role="region" aria-label="Meeting library"
-        className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 ${selected.size > 0 ? 'pb-28' : 'pb-8'}`}>
       {!liveRecording && (
         <div className="shrink-0">
           <MeetingDetectedBanner
@@ -576,6 +572,10 @@ export function LibraryView({
         </div>
       )}
 
+      {/* Keep capture controls reachable while browsing. Only the inbox and
+          Library share scrolling; a busy inbox cannot squeeze rows to zero. */}
+      <div ref={listRef} role="region" aria-label="Meeting library"
+        className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 ${selected.size > 0 ? 'pb-28' : 'pb-8'}`}>
       <div className="shrink-0">
         <QueueBanner
           status={pipelineStatus}

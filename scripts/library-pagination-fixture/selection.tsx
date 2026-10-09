@@ -87,7 +87,7 @@ window.api = {
     pause: async () => { queue = { ...queue, paused: true }; pipelineListeners.forEach(listener => listener(queue)); },
     resume: async () => { queue = { ...queue, paused: false }; pipelineListeners.forEach(listener => listener(queue)); },
   },
-  recording: { onStateChange: off }, meetingDetector: { onDetected: off },
+  recording: { onStateChange: off, onLevel: off }, meetingDetector: { onDetected: off },
   recovery: { list: async () => startup ? Array.from({length: 113}, (_, index) => ({
     id: `recovery-${index}`, targetLabel: 'Synthetic call', startedAt: '2026-01-01T00:00:00Z',
     outputPath: `/tmp/synthetic-${index}.m4a`, status: 'orphaned', reason: 'unreadable',
@@ -119,6 +119,7 @@ const { ToastHost } = await import('../../electron/renderer/src/components/Toast
   statusChanged() { data.find((row) => row.id === 'selection-11')!.status = 'done'; },
 };
 createRoot(document.getElementById('root')!).render(<ToastHost><div style={{ height: '100vh' }}><LibraryView
-  onOpen={id => { calls.opened.push(id); }} onNav={() => {}} onOpenSearch={() => {}} liveRecording={null}
+  onOpen={id => { calls.opened.push(id); }} onNav={() => {}} onOpenSearch={() => {}}
+  liveRecording={new URLSearchParams(location.search).has('live') ? {sessionId: 'synthetic-live',label: 'Synthetic live capture',startedAt: new Date().toISOString()} : null}
   onStartRecording={() => { throw new Error('Recording is forbidden in this synthetic fixture'); }} onRecordingStopped={() => {}}
 /></div></ToastHost>);
