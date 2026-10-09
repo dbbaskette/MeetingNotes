@@ -1000,6 +1000,7 @@ function GoogleAccountCard({
             <input
               type="password"
               value={settings.googleClientSecret}
+              onFocus={(e) => e.target.select()}
               onChange={(e) => onUpdate({googleClientSecret: e.target.value})} onBlur={() => void onPersist('googleClientSecret', settings.googleClientSecret)}
               placeholder="GOCSPX-…"
               className="input font-mono text-xs"
@@ -1109,6 +1110,7 @@ function WebhookExporterCard({
             <input
               type="password"
               value={settings.webhookSecret}
+              onFocus={(e) => e.target.select()}
               onChange={(e) => onUpdate({webhookSecret: e.target.value})} onBlur={() => onPersist('webhookSecret', settings.webhookSecret)}
               placeholder="Sent as Authorization: Bearer …"
               className="input"

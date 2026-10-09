@@ -149,6 +149,7 @@ export function createSplash(): Splash {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       // No preload — splash needs nothing from main.
     },
   });
