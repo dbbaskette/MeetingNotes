@@ -14,6 +14,7 @@ window.api = {
   onboarding: {listWhisperModels: async () => fixture.installed, onWhisperProgress: () => () => {}, installWhisperModel: async (model: string) => {fixture.downloads.push(model); fixture.installed.push(model);} },
   llm: {probe: async (url: string) => {fixture.probes.push(url); return {ok: false,error: 'fetch failed',code: fixture.probeCode};},detectProviders: async () => ({lmStudio: {binary: true,running: false},ollama: {binary: true,running: false}})},
   terminology: {list: async () => [],offers: async () => true},groups: {list: async () => ({groups: [],ungroupedCount: 0})},
+  summaryTemplates: {list: async () => ({templates: [{id: 'general',name: 'General',description: 'Discussion points, decisions, follow-ups and open questions.'}],groupDefaults: {}})},
   obsidian: {status: async () => ({config: null,running: false,lastSuccess: null,error: null,pending: 0,synced: 0,issues: []})},
   google: {authStatus: async () => ({signedIn: false,email: null,hasCredentials: false})},logs: {tail: async () => ({path: '/fixture/log',entries: []})},
   notesHistory: {list: async () => [{id: 'version',createdAt: '2026-10-06T10:00:00Z',reason: 'Before notes changed'}],compare: async () => ({revision: 'fingerprint',current: {id: '',summary: 'Current notes',items: []},previous: {id: 'version',summary: 'Old notes',items: [{id: 'task',text: 'Completed original task',status: 'done',ownerName: 'Dan',dueDate: null}]}}),restore: async () => {fixture.restored='Old notes';}},

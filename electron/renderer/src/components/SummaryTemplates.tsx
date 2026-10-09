@@ -16,7 +16,9 @@ export function MeetingTemplatePicker({ meetingId, disabled }: { meetingId: stri
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([api.summaryTemplates.list(), api.summaryTemplates.forMeeting(meetingId)])
+    // Started inside a promise so a missing bridge method rejects (and shows
+    // the inline error) instead of throwing out of the effect.
+    void Promise.resolve().then(() => Promise.all([api.summaryTemplates.list(), api.summaryTemplates.forMeeting(meetingId)]))
       .then(([list, current]) => { if (!cancelled) { setTemplates(list.templates); setChoice(current); } })
       .catch((e) => { if (!cancelled) setError(cleanError(e)); });
     return () => { cancelled = true; };
@@ -63,7 +65,7 @@ export function GroupTemplateDefaults(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([api.summaryTemplates.list(), api.groups.list()])
+    void Promise.resolve().then(() => Promise.all([api.summaryTemplates.list(), api.groups.list()]))
       .then(([list, snapshot]) => {
         if (cancelled) return;
         setTemplates(list.templates); setDefaults(list.groupDefaults);
