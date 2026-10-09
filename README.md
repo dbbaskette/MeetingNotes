@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.14.7-brightgreen)](docs/releases/v1.14.7.md)
+[![Version](https://img.shields.io/badge/version-1.14.8-brightgreen)](docs/releases/v1.14.8.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -21,7 +21,9 @@
 - **Capture without a virtual audio device.** One click records any app's audio (Zoom, Teams, FaceTime, a browser tab) mixed with your microphone, using the macOS 14.2 process tap.
 - **A transcript with real names.** whisper.cpp transcribes, pyannote separates the voices, and voices you name once are recognised in later meetings.
 - **Notes you can act on.** A local LLM writes an overview, discussion points, decisions and open questions, then extracts action items with owners and due dates. Each item links back to the line it came from.
+- **Notes shaped for your meeting.** Choose General, 1:1, Standup, Customer call, Interview or Decision review templates per group or meeting. Existing notes change only when you explicitly re-run processing.
 - **A Library that stays organised.** Groups, search across titles, notes and transcripts, and a **Needs attention** panel for failed runs, voices to name and interrupted recordings.
+- **Uninterrupted processing and recording controls.** Browse one Library scroll area, open an in-progress meeting while other meetings are selected, and queue recordings without a blocking popup. Menu-bar controls and an optional global start/stop shortcut let you manage capture without switching windows.
 - **A weekly roll-up.** Themes that ran across the week's meetings, decisions, and your open action items.
 - **Exports when you want them.** Apple Reminders, Google Tasks, Google Docs, PDF, Markdown, an Obsidian vault, or a webhook.
 
@@ -35,7 +37,7 @@
 
 **You need:** macOS 14.2 or later on Apple Silicon, about 16 GB of RAM, [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com) with a chat model, and a free Hugging Face account (pyannote's models are gated; see [Models](docs/guide/models.md)).
 
-MeetingNotes is built from source. There is no downloadable installer.
+GitHub releases publish source and release notes without binary installer assets. Build from source, or create a local DMG/ZIP with the [packaging instructions](docs/guide/development.md).
 
 ```bash
 git clone https://github.com/dbbaskette/MeetingNotes.git
