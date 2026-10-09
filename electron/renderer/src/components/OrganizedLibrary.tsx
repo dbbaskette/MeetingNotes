@@ -11,6 +11,7 @@ const EXPANDED_STORAGE_KEY = 'libraryExpandedGroups';
 const EMPTY_ROWS: MeetingSummary[] = [];
 
 interface Props {
+  scrollRef?: RefObject<HTMLDivElement>;
   sections: OrganizedSection[];
   filter: MeetingFilter;
   sort: LibrarySortKey;
@@ -34,6 +35,7 @@ export function OrganizedLibrary({
   sections, filter, sort, searching, searchPending, searchQuery, searchResults,
   refreshRevision, revealGroupId, renderRow, onLoadedChange, onFocusGroup,
   onRenameGroup, onDeleteGroup, onFilterGroup,
+  scrollRef: parentScrollRef,
 }: Props): JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try { return readExpandedSections(window.localStorage.getItem(EXPANDED_STORAGE_KEY)); }
@@ -41,7 +43,8 @@ export function OrganizedLibrary({
   });
   const [searchCollapsed, setSearchCollapsed] = useState<Set<string>>(new Set());
   const [loadedBySection, setLoadedBySection] = useState<Record<string, MeetingSummary[]>>({});
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const ownScrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = parentScrollRef ?? ownScrollRef;
   const searchBuckets = useMemo(() => groupSearchMeetings(sections, searchResults), [sections, searchResults]);
 
   useEffect(() => { setSearchCollapsed(new Set()); }, [searchQuery]);
@@ -81,13 +84,13 @@ export function OrganizedLibrary({
     expanded.has(section.key) ? loadedBySection[section.key] ?? EMPTY_ROWS : EMPTY_ROWS),
   [searching, sections, expanded, loadedBySection]);
   useEffect(() => { onLoadedChange(loadedRows); }, [loadedRows, onLoadedChange]);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }); }, [filter, sort, searchQuery]);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }); }, [filter, sort, searchQuery, scrollRef]);
 
   const visibleSections = searching
     ? sections.filter((section) => (searchBuckets.get(section.key)?.length ?? 0) > 0)
     : sections;
 
-  return <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8">
+  return <div ref={ownScrollRef} className={parentScrollRef ? 'pb-8' : 'flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8'}>
     <div>
     {searching && searchPending && searchResults.length === 0 &&
       <div role="status" className="py-8 text-center text-sm text-ink-muted">Searching…</div>}

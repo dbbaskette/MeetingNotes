@@ -65,12 +65,10 @@ app.whenReady().then(async () => {
   await run('window.fixture.selection.getState().toggle("later-arrival")');
   await until(`!!${button('Process (12)')}`);
   // Change the backend status and click in the same renderer turn: the bar
-  // still says 12, but opening the confirmation must freshly hydrate 11.
+  // still says 12, but Process must freshly hydrate and queue only 11.
   await run(`window.fixture.statusChanged(); ${button('Process (12)')}.click()`);
-  await until('document.body.innerText.includes("Process 11 pending recordings?")');
-  assert.equal(await run('document.activeElement.textContent'), 'Cancel');
-  await click('Process');
   await until('window.fixture.calls.process.length === 1 && !window.fixture.selection.getState().busy');
+  assert.equal(await run('!!document.querySelector("[aria-modal=true]")'), false);
   assert.deepEqual(await run('window.fixture.calls.process[0].sort()'), ids(0, 11));
   const retained = ['selection-0', ...ids(11, 120)].sort();
   assert.deepEqual(await selected(), retained, 'Failed and non-pending IDs remain selected');

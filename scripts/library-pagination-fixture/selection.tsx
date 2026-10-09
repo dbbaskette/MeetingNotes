@@ -5,6 +5,7 @@ import '../../electron/renderer/src/index.css';
 
 // The only bridge in this renderer is this in-memory fake. There is no preload.
 const startup = new URLSearchParams(location.search).has('startup');
+const processing = new URLSearchParams(location.search).has('processing');
 const groupA = '00000000-0000-4000-8000-000000000001';
 const groupB = '00000000-0000-4000-8000-000000000002';
 const geometry = { reads: 0 };
@@ -30,7 +31,12 @@ const data: MeetingSummary[] = Array.from({ length: startup ? 600 : 120 }, (_, i
   groupName: !startup || index < 200 ? null : index < 400 ? 'Planning' : 'Reviews',
 }));
 const deleted = new Set<string>();
-const calls = { pages: [] as unknown[], ids: [] as string[], process: [] as string[][], delete: [] as string[], undo: [] as string[] };
+const calls = { pages: [] as unknown[], ids: [] as string[], process: [] as string[][], delete: [] as string[], undo: [] as string[], opened: [] as string[] };
+let queue = { paused: false, currentId: null as string | null, queueLength: 0, queueIds: [] as string[] };
+const pipelineListeners = new Set<(status: typeof queue) => void>();
+let finishQueue: (() => void) | null = null;
+let holdQueue = false;
+let rejectQueue = false;
 const live = () => data.filter((row) => !deleted.has(row.id));
 const matching = (filter: MeetingFilter) => live().filter((row) => filter === 'all' || (filter === 'processing' ? ['processing', 'awaiting_user'].includes(row.status) : row.status === filter));
 const counts = () => ({ all: live().length, pending: matching('pending').length, processing: matching('processing').length, done: matching('done').length, failed: matching('failed').length });
@@ -52,10 +58,21 @@ window.api = {
     onAdded: (listener: () => void) => { subscribers.add(listener); return () => subscribers.delete(listener); },
     startManyDetailed: async (ids: string[]) => {
       calls.process.push([...ids]);
+      if (holdQueue) await new Promise<void>(resolve => { finishQueue = resolve; });
+      if (rejectQueue) throw new Error('Synthetic queue unavailable');
       const failedIds = ids.filter((id) => id === 'selection-0');
       const startedIds = ids.filter((id) => id !== 'selection-0');
       for (const row of data) if (startedIds.includes(row.id)) { row.status = 'processing'; row.pipelineStage = 'transcribing'; }
+      if (processing) {
+        queue = { ...queue, currentId: startedIds[0] ?? null, queueLength: Math.max(0, startedIds.length - 1), queueIds: startedIds.slice(1) };
+        pipelineListeners.forEach(listener => listener(queue));
+      }
       return { startedIds, failedIds };
+    },
+    start: async (id: string) => {
+      data.find(row => row.id === id)!.status = 'processing';
+      queue = { ...queue, currentId: id };
+      pipelineListeners.forEach(listener => listener(queue));
     },
     delete: async (id: string) => {
       calls.delete.push(id);
@@ -66,7 +83,10 @@ window.api = {
     undoDelete: async (id: string) => { calls.undo.push(id); return deleted.delete(id); },
   },
   search: { query: async () => [], cancel: async () => {}, run: async () => ({ status: 'complete', hits: [110, 111].map((index) => ({ meetingId: `selection-${index}`, title: `Synthetic meeting ${index}`, source: 'title', line: 0, text: `Synthetic meeting ${index}` })) }) },
-  pipeline: { status: async () => ({ paused: false, currentId: null, queueLength: 0, queueIds: [] }), onStatusChange: off },
+  pipeline: { status: async () => queue, onStatusChange: (listener: (status: typeof queue) => void) => { pipelineListeners.add(listener); return () => pipelineListeners.delete(listener); },
+    pause: async () => { queue = { ...queue, paused: true }; pipelineListeners.forEach(listener => listener(queue)); },
+    resume: async () => { queue = { ...queue, paused: false }; pipelineListeners.forEach(listener => listener(queue)); },
+  },
   recording: { onStateChange: off }, meetingDetector: { onDetected: off },
   recovery: { list: async () => startup ? Array.from({length: 113}, (_, index) => ({
     id: `recovery-${index}`, targetLabel: 'Synthetic call', startedAt: '2026-01-01T00:00:00Z',
@@ -85,6 +105,13 @@ const { LibraryView } = await import('../../electron/renderer/src/views/LibraryV
 const { ToastHost } = await import('../../electron/renderer/src/components/Toasts');
 (window as any).fixture = {
   selection: librarySelection, store: useMeetingsStore, calls, geometry,
+  holdQueue() { holdQueue = true; },
+  finishQueue() { holdQueue = false; finishQueue?.(); },
+  rejectQueue() { rejectQueue = true; },
+  pushStage() {
+    data.filter(row => row.status === 'processing').forEach(row => { row.pipelineStage = 'diarizing'; });
+    pipelineListeners.forEach(listener => listener({ ...queue }));
+  },
   arrive() {
     data.unshift({ ...data[119]!, id: 'later-arrival', slug: 'later-arrival', title: 'Later synthetic arrival' });
     subscribers.forEach((listener) => listener());
@@ -92,6 +119,6 @@ const { ToastHost } = await import('../../electron/renderer/src/components/Toast
   statusChanged() { data.find((row) => row.id === 'selection-11')!.status = 'done'; },
 };
 createRoot(document.getElementById('root')!).render(<ToastHost><div style={{ height: '100vh' }}><LibraryView
-  onOpen={() => {}} onNav={() => {}} onOpenSearch={() => {}} liveRecording={null}
+  onOpen={id => { calls.opened.push(id); }} onNav={() => {}} onOpenSearch={() => {}} liveRecording={null}
   onStartRecording={() => { throw new Error('Recording is forbidden in this synthetic fixture'); }} onRecordingStopped={() => {}}
 /></div></ToastHost>);

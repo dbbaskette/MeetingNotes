@@ -9,8 +9,8 @@
 // Every row exposes a selection checkbox (for bulk Process / Delete):
 // pending rows show it in place of the avatar stack and toggle on body
 // click; all other rows reveal it on hover (or while a selection is
-// active) next to the speakers/status/action-items side, and clicking
-// the row opens detail unless a bulk selection is in progress.
+// active). In-progress / speaker-review rows always open detail; other
+// rows toggle while bulk selection is in progress.
 //
 // The component is memoized: the meetings store recycles unchanged row
 // objects across polls (lib/meetings-recycle), so with stable callback
@@ -82,6 +82,10 @@ export const LibraryRow = memo(function LibraryRow({
 }: Props): JSX.Element {
   const status = meeting.status;
   const isPending = status === 'pending';
+  // Watching progress / naming voices remains available while another row
+  // is selected. The checkbox still supports explicit bulk selection.
+  const opensProgress = status === 'processing' || status === 'awaiting_user';
+  const togglesOnClick = !!onToggle && !opensProgress && (isPending || !!selectionActive);
   const edge =
     status === 'failed' ? 'before:bg-danger-solid' :
     status === 'processing' ? 'before:bg-brand-indigo' :
@@ -95,11 +99,9 @@ export const LibraryRow = memo(function LibraryRow({
 
   function handleRowClick(): void {
     // Pending rows toggle on body click (makes "select 5 and process"
-    // fast — there's no detail view worth opening yet). Other rows open
-    // detail on click, EXCEPT while a bulk selection is in progress, when
-    // clicking anywhere toggles so multi-select doesn't require pixel-
-    // hunting the checkbox.
-    if (onToggle && (isPending || selectionActive)) onToggle(meeting.id);
+    // fast — there's no detail view worth opening yet). Bulk selection
+    // still toggles completed/failed rows, but never blocks progress/review.
+    if (onToggle && togglesOnClick) onToggle(meeting.id);
     else onOpen(meeting.id, {
       title: meeting.title,
       pipelineStage: meeting.pipelineStage,
@@ -111,7 +113,7 @@ export const LibraryRow = memo(function LibraryRow({
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${onToggle && (isPending || selectionActive) ? checked ? 'Deselect' : 'Select' : 'Open'} ${meeting.title}`}
+      aria-label={`${togglesOnClick ? checked ? 'Deselect' : 'Select' : 'Open'} ${meeting.title}`}
       onKeyDown={e => {
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowClick(); }

@@ -457,16 +457,29 @@ export function LibraryView({
     if (state.selected.size === 0 || !state.beginOperation()) return;
     const snapshot = state.selected;
     try {
-      // Refresh off-page statuses immediately before freezing the confirmation.
+      // Refresh off-page statuses immediately before freezing the queue IDs.
       const { pendingIds } = await hydrateSelection(snapshot, api.meetings.getMany);
       if (!mounted.current) return;
       setPendingSnapshot({ selection: snapshot, ids: pendingIds });
       setSelectionError(null);
-      if (pendingIds.length > 0) setConfirmation(selectionConfirmation('process', pendingIds));
-      else toast.show({ message: 'No selected recordings are pending.', durationMs: 4000 });
+      if (pendingIds.length === 0) {
+        toast.show({ message: 'No selected recordings are pending.', durationMs: 4000 });
+        return;
+      }
+      const result = await runBulkProcess(pendingIds, api.meetings.startManyDetailed);
+      // Keep failures and non-pending selections for retry; progress rows
+      // remain navigable even when those selections are still present.
+      librarySelection.getState().removeSucceeded(result.succeededIds);
+      if (result.failedIds.length > 0) toast.show({
+        message: `${result.failedIds.length} recording${result.failedIds.length === 1 ? '' : 's'} not queued; still selected for retry.`,
+        variant: 'error', durationMs: 4000,
+      });
     } catch {
-      toast.show({ message: 'Unable to check selected meetings. Nothing was started; retry Process.', variant: 'error' });
-    } finally { librarySelection.getState().endOperation(); }
+      toast.show({ message: 'Unable to queue selected recordings. Check their status and retry Process.', variant: 'error', durationMs: 4000 });
+    } finally {
+      librarySelection.getState().endOperation();
+      void invalidate();
+    }
   }
 
   function requestDeleteSelected(): void {
@@ -476,23 +489,19 @@ export function LibraryView({
 
   async function applyConfirmation(): Promise<void> {
     if (!confirmation || !librarySelection.getState().beginOperation()) return;
-    const { action, ids } = confirmation;
+    const { ids } = confirmation;
     setConfirmation(null);
     try {
-      const result = action === 'process'
-        ? await runBulkProcess(ids, api.meetings.startManyDetailed)
-        : await runBulkDelete(ids, api.meetings.delete);
+      const result = await runBulkDelete(ids, api.meetings.delete);
       librarySelection.getState().removeSucceeded(result.succeededIds);
       const n = result.succeededIds.length;
       const failed = result.failedIds.length;
-      const message = action === 'process'
-        ? `Processing ${n} recording${n === 1 ? '' : 's'}…`
-        : `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`;
+      const message = `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`;
       toast.show({
-        message: message + (failed > 0 ? ` ${failed} not ${action === 'process' ? 'started' : 'deleted'}; still selected for retry.` : ''),
+        message: message + (failed > 0 ? ` ${failed} not deleted; still selected for retry.` : ''),
         variant: failed > 0 ? 'error' : 'default',
-        durationMs: action === 'delete' ? 10_000 : 4000,
-        action: action === 'delete' && n > 0 ? {
+        durationMs: 10_000,
+        action: n > 0 ? {
           label: 'Undo',
           onClick: async () => {
             // Only successful deletions are undoable — never touch failed IDs.
@@ -506,7 +515,7 @@ export function LibraryView({
     } finally {
       librarySelection.getState().endOperation();
       void invalidate();
-      if (action === 'delete') void refreshTrash();
+      void refreshTrash();
     }
   }
 
@@ -533,6 +542,10 @@ export function LibraryView({
         />
       </header>
 
+      {/* One scroll surface for the inbox and Library. A busy inbox must not
+          squeeze the list to zero height or create competing wheel regions. */}
+      <div ref={listRef} role="region" aria-label="Meeting library"
+        className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 ${selected.size > 0 ? 'pb-28' : 'pb-8'}`}>
       {!liveRecording && (
         <div className="shrink-0">
           <MeetingDetectedBanner
@@ -588,11 +601,9 @@ export function LibraryView({
 
 
       {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}
-      {/* Section becomes the height-bounded flex column. Header + filter
-          chips stay pinned via `shrink-0`; only the meeting rows below
-          scroll, so the user never loses the chips/search while paging
-          through hundreds of meetings. */}
-      <section className="flex-1 min-h-0 flex flex-col">
+      {/* Keep the toolbar in the same flow as the inbox and rows so even a
+          short / zoomed window can reach every control without nested scrolling. */}
+      <section className="flex flex-col">
         <div className="shrink-0 flex flex-wrap items-center gap-3 mb-3">
           <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
             Library
@@ -819,9 +830,10 @@ export function LibraryView({
               </div>
             );
           };
-          // The key resets browse scroll on a new filter/sort, while refreshes
-          // and appended pages preserve the existing viewport and focused row.
+          // Refreshes and appended pages preserve the shared viewport and
+          // focused row; only explicit filter/sort changes reset scroll.
           if (organizedFull) return <OrganizedLibrary
+            scrollRef={listRef}
             sections={sections} filter={libFilter} sort={sortKey}
             searching={isSearching} searchPending={searchPending} searchQuery={query}
             searchResults={organizedSearchResults} refreshRevision={searchRevision}
@@ -833,6 +845,7 @@ export function LibraryView({
           />;
           if (!isSearching) return (
             <VirtualMeetingList
+              scrollRef={listRef}
               key={`${scopeToken}:${libFilter}:${sortKey}`}
               items={browseList}
               renderRow={(m) => renderRow(m, false)}
@@ -857,12 +870,7 @@ export function LibraryView({
           );
           return (
             <div
-              ref={listRef}
-              className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 space-y-2 ${
-                // Extra clearance while the selection pill is docked over the
-                // bottom of the list, so the last rows can scroll above it.
-                selected.size > 0 ? 'pb-28' : 'pb-8'
-              }`}
+              className="space-y-2"
             >
               {titleMatches.length > 0 && (
                 <SearchSectionHeader
@@ -902,6 +910,7 @@ export function LibraryView({
           }}
         />
       </section>
+      </div>
 
       {/* ── Bulk action bar (docked) ────────────────────────────────────── */}
       <SelectionBar
@@ -969,13 +978,13 @@ export function LibraryView({
         open={confirmation !== null}
         title={confirmation?.title ?? ''}
         body={
-          confirmation?.action === 'delete' ? <>
+          <>
             Each meeting&rsquo;s audio file, transcript, summary, and any exports
             move to <strong>Recently deleted</strong>, restorable for 30 days.
-          </> : <>Only these {confirmation?.ids.length ?? 0} selected pending recordings will be queued. Other selected meetings will stay selected.</>
+          </>
         }
-        confirmLabel={confirmation?.action === 'delete' ? 'Delete' : 'Process'}
-        destructive={confirmation?.action === 'delete'}
+        confirmLabel="Delete"
+        destructive
         busy={bulkBusy}
         onConfirm={() => void applyConfirmation()}
         onCancel={() => setConfirmation(null)}

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { api } from '../ipc/client';
 import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
-import { useToast } from './Toasts';
 import { RecoveryRow } from './RecoveryRow';
 
 export interface RecoveryInboxItem {
@@ -35,7 +34,6 @@ export function NeedsAttentionPanel({
   onOpen: (id: string) => void;
   onChanged: () => void | Promise<void>;
 }): JSX.Element | null {
-  const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -58,7 +56,6 @@ export function NeedsAttentionPanel({
     try {
     if (kind === 'pending') {
       await api.meetings.start(id);
-      toast.show({ message: 'Meeting added to the processing queue.' });
       await onChanged();
       return;
     }
@@ -88,7 +85,7 @@ export function NeedsAttentionPanel({
         </div>
       )}
       {actionError && <p role="alert" className="px-4 py-2 text-xs text-danger">Could not complete this action: {actionError}. Try again.</p>}
-      <div id="attention-items" className={`${expanded ? 'max-h-[65vh]' : 'max-h-64'} overflow-y-auto divide-y divide-surface-border`}>
+      <div id="attention-items" className="divide-y divide-surface-border">
         {groups.map((group) => (
           <div key={group.kind} className="px-4 py-2.5">
             <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted mb-1.5">{group.label} · {group.totalCount}</div>
