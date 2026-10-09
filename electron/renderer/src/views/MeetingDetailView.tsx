@@ -71,6 +71,18 @@ type MeetingShell = Omit<MeetingDetail, 'transcriptMd' | 'rawTranscriptText'>;
 // User-facing pipeline step model lives in lib/pipeline-steps so the
 // LibraryRow chip and the StageTimeline below agree on counts and labels.
 
+const RAIL_PREFERENCE_KEY = 'mn-detail-rail';
+
+/** "Apr 20, 2026 · 53m" for the header; empty when the date is unknown. */
+function meetingWhen(m: { startedAt: string | null; durationS: number | null }): string {
+  if (!m.startedAt) return '';
+  const date = new Date(m.startedAt);
+  if (Number.isNaN(date.getTime())) return '';
+  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const minutes = m.durationS ? Math.max(1, Math.round(m.durationS / 60)) : 0;
+  return minutes ? `${day} · ${minutes}m` : day;
+}
+
 export function MeetingDetailView({
   id, onBack, seekSeconds, hint,
 }: {
@@ -114,6 +126,17 @@ export function MeetingDetailView({
     speakers: mergeSpeakerReview(shell.speakers, speakerReview.data?.speakers),
   } : null, [shell, id, transcript.data, speakerReview.data]);
   const [tab, setTab] = useState<Tab>('summary');
+  // The speakers/export rail can be hidden so notes use the full width; the
+  // choice is a per-device reading preference, so it lives in localStorage.
+  const [railOpen, setRailOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(RAIL_PREFERENCE_KEY) !== 'closed'; } catch { return true; }
+  });
+  const toggleRail = useCallback(() => {
+    setRailOpen((open) => {
+      try { localStorage.setItem(RAIL_PREFERENCE_KEY, open ? 'closed' : 'open'); } catch { /* preference only */ }
+      return !open;
+    });
+  }, []);
   useEffect(() => {
     if (shell?.id === id && (tab === 'transcript' || seekSeconds !== undefined)) {
       void artifacts.request(id, 'transcript');
@@ -422,11 +445,26 @@ export function MeetingDetailView({
             <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M2 5h6l2 2h8v9H2z" /></svg>
             <span className="truncate">{m.groupName ?? 'Add to group'}</span>
           </button>
+          {meetingWhen(m) && <span className="ml-2 text-[11px] text-ink-muted">{meetingWhen(m)}</span>}
         </div>
         {/* Actions menu: rename/delete from the detail view. When the user
             deletes from here, route back to Library since the detail we're
             viewing no longer exists. */}
-        <div className="relative w-[68px] flex justify-end shrink-0">
+        <div className="relative flex items-center justify-end gap-2 shrink-0">
+          <ProcessingMenu meeting={m} onReload={reload} />
+          <button
+            type="button"
+            aria-pressed={railOpen}
+            title={railOpen ? 'Hide speakers and export' : 'Show speakers and export'}
+            aria-label={railOpen ? 'Hide speakers and export' : 'Show speakers and export'}
+            onClick={toggleRail}
+            className="hidden lg:inline-flex text-ink-muted hover:text-ink border border-surface-border rounded-lg p-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo"
+          >
+            <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" /><path d="M12.5 3.5v13" />
+              {railOpen && <path d="M14.5 7h1M14.5 10h1" strokeLinecap="round" />}
+            </svg>
+          </button>
           <MeetingRowMenu
             meeting={{ id: m.id, title: m.title, groupId: m.groupId, groupName: m.groupName }}
             onChanged={() => void reload()}
@@ -475,18 +513,17 @@ export function MeetingDetailView({
           actually shrink — without it long lines of text force horizontal
           overflow and the whole detail view gets cut off on the right.
           On narrow, the CenterPane renders first (content first), then
-          LeftRail and RightRail below, so users aren't scrolling past
-          sidebar meta to reach the transcript. On lg+ the grid
-          columns-order lands them back in their natural visual order.
+          the speakers/export rail below. On lg+ the rail sits to the right
+          and can be hidden from the header so notes use the full width.
 
           Scroll model:
-            • lg+ (3 columns): each rail scrolls on its own — center
+            • lg+ (2 columns): notes and rail scroll on their own — center
               pane can show a 50-page summary while the speakers/export
               rail stays visible.
             • Below lg (stacked): the grid itself scrolls as one column
               because per-section overflow would create awkward nested
               scrollbars on narrow widths. */}
-      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] flex-1 min-h-0 overflow-y-auto lg:overflow-hidden">
+      <div className={`grid grid-cols-1 ${railOpen ? 'lg:grid-cols-[minmax(0,1fr)_260px]' : ''} flex-1 min-h-0 overflow-y-auto lg:overflow-hidden`}>
         <div className="order-1 lg:order-none min-w-0 lg:overflow-y-auto">
           <CenterPane
             meeting={m}
@@ -508,8 +545,7 @@ export function MeetingDetailView({
             onRetryTranscript={() => void artifacts.request(id, 'transcript')}
           />
         </div>
-        <div className="order-2 lg:order-first min-w-0 lg:overflow-y-auto"><LeftRail meeting={m} onReload={reload} /></div>
-        <div className="order-3 min-w-0 lg:overflow-y-auto"><RightRail meeting={m} onReload={reload}
+        <div className={`order-3 min-w-0 lg:overflow-y-auto ${railOpen ? '' : 'lg:hidden'}`}><RightRail meeting={m} onReload={reload}
           speakerReviewState={speakerReview} onRetrySpeakerReview={() => void artifacts.request(id, 'speakerReview')} /></div>
       </div>
 
@@ -732,23 +768,7 @@ function DetailSkeleton({
       </div>
 
       {/* Three-column body — skeletons sized to match the real layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)_240px] min-h-[560px]">
-        {/* Left rail */}
-        <div className="order-2 lg:order-first border-r border-surface-border p-4 space-y-4 animate-pulse">
-          <div className="space-y-1.5">
-            <div className="h-2 w-12 bg-skeleton/70 rounded" />
-            <div className="h-4 w-32 bg-skeleton/80 rounded" />
-          </div>
-          <div className="space-y-1.5">
-            <div className="h-2 w-10 bg-skeleton/70 rounded" />
-            <div className="h-3 w-24 bg-skeleton/80 rounded" />
-          </div>
-          <div className="space-y-1.5">
-            <div className="h-2 w-14 bg-skeleton/70 rounded" />
-            <div className="h-3 w-28 bg-skeleton/80 rounded" />
-            <div className="h-3 w-20 bg-skeleton/80 rounded" />
-          </div>
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] min-h-[560px]">
         {/* Center pane */}
         <div className="order-1 lg:order-none p-6">
           <div className="flex gap-4 mb-6">
@@ -930,7 +950,7 @@ export function FailureBanner({
     setRetryError(null);
     try {
       // Retry from wherever the pipeline left us on failure, via the same
-      // primitive the left rail's "Re-run pipeline from…" buttons use.
+      // primitive the header's Processing menu uses.
       // meeting.pipelineStage is the failed stage for sequential stages, or
       // the rolled-back re-entry point ('discovered') for the parallel
       // transcribe/diarize block. Unlike api.meetings.start(), rerun() clears
@@ -1154,15 +1174,29 @@ function PauseMark(): JSX.Element {
   );
 }
 
-function LeftRail({
+/** Processing actions for the meeting page header (#252). They used to fill
+ *  a permanent 220px column beside the notes; they are needed rarely, so they
+ *  now sit behind one button. The exception is a recording that has never
+ *  been processed, where Process is the primary action and shown directly. */
+function ProcessingMenu({
   meeting, onReload,
 }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
 }): JSX.Element {
+  const [open, setOpen] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunStage, setRerunStage] = useState<string | null>(null);
+  const container = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: MouseEvent): void => { if (!container.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onPointer); document.removeEventListener('keydown', onKey); };
+  }, [open]);
   async function startProcessing(): Promise<void> {
     setBusy(true); setOperationError(null);
     try { await api.meetings.start(meeting.id); await onReload(); }
@@ -1170,7 +1204,7 @@ function LeftRail({
     finally { setBusy(false); }
   }
   async function rerunFrom(stage: string): Promise<void> {
-    setRerunStage(null); setBusy(true); setOperationError(null);
+    setRerunStage(null); setOpen(false); setBusy(true); setOperationError(null);
     try { await api.meetings.rerun(meeting.id, stage); await onReload(); }
     catch (error) { setOperationError((error as Error).message); }
     finally { setBusy(false); }
@@ -1182,67 +1216,67 @@ function LeftRail({
   const neverProcessed =
     meeting.pipelineStage === 'discovered' && meeting.status === 'pending';
   const isProcessing = meeting.status === 'processing';
+  const hasModels = !!(meeting.models.stt || meeting.models.llm);
 
-  // Field labels in the left rail (`Title`, `Date`, `Models`) use a
-  // quieter sans-serif treatment than the tracked-monospace section
-  // headers (`SPEAKERS`, `EXPORT`, `RE-RUN PIPELINE FROM…`). Earlier
-  // both used the same treatment, which collapsed the hierarchy and
-  // made every label fight for attention. Now: tracked-mono for
-  // section headers, plain small caps for fields.
   return (
-    <div className="border-r border-surface-border p-4 space-y-3">
-      {operationError && <p role="alert" className="text-xs text-danger">Could not queue processing: {operationError}</p>}
+    <div ref={container} className="relative shrink-0">
       <ConfirmDialog open={rerunStage !== null} title="Re-run processing?" body="Generated results from the selected stage onward will be replaced. Notes and action items are saved in history. When a transcript is replaced, its previous version (including edits) is kept as a snapshot in the meeting folder. Original audio and remembered terminology are kept." confirmLabel="Re-run" onCancel={() => setRerunStage(null)} onConfirm={() => { if (rerunStage) void rerunFrom(rerunStage); }}/>
-      <div>
-        <div className="text-[11px] text-ink-muted font-medium">Title</div>
-        <div className="font-semibold">{meeting.title}</div>
-      </div>
-      <div>
-        <div className="text-[11px] text-ink-muted font-medium">Date</div>
-        <div className="text-sm">{meeting.startedAt?.slice(0, 10) ?? '—'}</div>
-      </div>
-      <div>
-        <div className="text-[11px] text-ink-muted font-medium">Models</div>
-        {meeting.models.stt && <div className="text-xs">STT: {meeting.models.stt}</div>}
-        {meeting.models.llm && <div className="text-xs">LLM: {meeting.models.llm}</div>}
-      </div>
-      <div className="pt-3 border-t border-surface-border">
-        {neverProcessed ? (
-          <button
-            onClick={startProcessing}
-            disabled={busy}
-            className="w-full bg-brand-indigo text-white text-sm font-semibold rounded-lg py-2 hover:bg-brand-indigo/90 transition inline-flex items-center justify-center gap-1.5"
-          >
-            <Icon name="play" className="w-3.5 h-3.5" />
-            Process recording
-          </button>
-        ) : isProcessing ? (
-          <div className="text-xs text-ink-muted italic px-1">
-            Processing in progress — re-run options will be available once it
-            finishes or fails.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-1">Re-run pipeline from…</div>
-            {([
-              ['transcribing', 'transcribe + everything after'],
-              ['diarizing', 'diarize + everything after'],
-              ['summarizing', 'just summary + actions'],
-            ] as const).map(([stage, label]) => (
-              <button
-                key={stage}
-                onClick={() => setRerunStage(stage)}
-                disabled={busy}
-                className="group w-full text-left bg-surface border-l-2 border-l-brand-indigo/40 border border-surface-border rounded-lg py-2 px-3 text-[13px] text-ink-soft transition-all duration-150 hover:border-l-brand-indigo hover:bg-brand-indigo/5 hover:text-brand-indigo hover:shadow-sm"
-                title={label}
-              >
-                <span className="inline-block transition-transform duration-200 group-hover:rotate-[-45deg] mr-1.5">↻</span>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {neverProcessed ? (
+        <button
+          onClick={() => void startProcessing()}
+          disabled={busy}
+          className="bg-brand-indigo text-white text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5 disabled:opacity-60"
+        >
+          <Icon name="play" className="w-3.5 h-3.5" />
+          Process recording
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="text-xs font-medium text-ink-muted hover:text-ink border border-surface-border rounded-lg px-2.5 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo"
+        >
+          Processing ▾
+        </button>
+      )}
+      {operationError && <p role="alert" className="absolute right-0 top-full mt-1 w-64 text-xs text-danger bg-surface border border-surface-border rounded-lg p-2 z-30">Could not queue processing: {operationError}</p>}
+      {open && (
+        <div role="menu" aria-label="Processing" className="absolute right-0 top-full mt-1 z-30 w-72 bg-surface border border-surface-border rounded-lg shadow-pop p-3 space-y-3 text-left">
+          {hasModels && (
+            <div>
+              <div className="text-[11px] text-ink-muted font-medium">Models used</div>
+              {meeting.models.stt && <div className="text-xs">Transcription: {meeting.models.stt}</div>}
+              {meeting.models.llm && <div className="text-xs">Notes: {meeting.models.llm}</div>}
+            </div>
+          )}
+          {isProcessing ? (
+            <div className="text-xs text-ink-muted italic">
+              Processing in progress — re-run options will be available once it finishes or fails.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-ink-muted font-medium">Re-run from…</div>
+              {([
+                ['transcribing', 'Transcription, then everything after'],
+                ['diarizing', 'Speaker separation, then everything after'],
+                ['summarizing', 'Notes and action items only'],
+              ] as const).map(([stage, label]) => (
+                <button
+                  key={stage}
+                  role="menuitem"
+                  onClick={() => { setOpen(false); setRerunStage(stage); }}
+                  disabled={busy}
+                  className="w-full text-left border border-surface-border rounded-lg py-1.5 px-2.5 text-[13px] text-ink-soft hover:border-brand-indigo/50 hover:text-ink transition disabled:opacity-50"
+                >
+                  <span className="mr-1.5">↻</span>{label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
