@@ -66,6 +66,22 @@ describe('SecretSettings', () => {
     expect(secrets.migrate()).toEqual([]);
   });
 
+  it('does not touch the keychain at startup when there is nothing to migrate', () => {
+    const data: Settings = { ...DEFAULT_SETTINGS };
+    const touched: string[] = [];
+    const cipher: SecretCipher = {
+      isEncryptionAvailable: () => { touched.push('available'); return true; },
+      encryptString: (plain) => { touched.push('encrypt'); return Buffer.from(plain); },
+      decryptString: (buf) => { touched.push('decrypt'); return buf.toString(); },
+    };
+    const secrets = new SecretSettings({ get: (key) => data[key], set: (key, value) => { data[key] = value; } }, cipher);
+    expect(secrets.migrate()).toEqual([]);
+    data.webhookSecret = 'enc:v1:' + Buffer.from('x').toString('base64');
+    expect(secrets.migrate()).toEqual([]);
+    expect(secrets.redact(data).webhookSecret).toBe(SAVED_SECRET_MASK);
+    expect(touched).toEqual([]);
+  });
+
   it('leaves legacy plaintext alone when it cannot encrypt', () => {
     const { data, secrets } = setup(false);
     data.webhookSecret = 'legacy-token';

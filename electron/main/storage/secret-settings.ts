@@ -53,11 +53,16 @@ export class SecretSettings {
    *  keys that were converted. Leaves them untouched when encryption is
    *  unavailable so nothing is lost. */
   migrate(): SecretSettingKey[] {
-    if (!this.cipher.isEncryptionAvailable()) return [];
-    const migrated: SecretSettingKey[] = [];
-    for (const key of SECRET_SETTING_KEYS) {
+    // Look for work before touching the cipher: asking the keychain can show
+    // a macOS permission prompt, which must not block every launch.
+    const pending = SECRET_SETTING_KEYS.filter((key) => {
       const stored = this.settings.get(key);
-      if (!stored || isSealed(stored)) continue;
+      return !!stored && !isSealed(stored);
+    });
+    if (pending.length === 0 || !this.cipher.isEncryptionAvailable()) return [];
+    const migrated: SecretSettingKey[] = [];
+    for (const key of pending) {
+      const stored = this.settings.get(key);
       this.settings.set(key, SEALED_PREFIX + this.cipher.encryptString(stored).toString('base64'));
       migrated.push(key);
     }

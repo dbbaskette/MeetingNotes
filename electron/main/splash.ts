@@ -17,6 +17,7 @@ const SPLASH_HTML = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:" />
   <title>MeetingNotes</title>
   <style>
     :root { color-scheme: light dark; }
