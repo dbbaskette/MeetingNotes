@@ -382,6 +382,12 @@ export const MIGRATIONS: Migration[] = [
       UPDATE meetings SET action_revision = action_revision + 1 WHERE id = OLD.meeting_id;
     END;
   ` },
+  // Summary templates (#254): a default per group and an override per
+  // meeting. NULL means "inherit" (group default, then General).
+  { version: 23, up: `
+    ALTER TABLE groups ADD COLUMN summary_template TEXT;
+    ALTER TABLE meetings ADD COLUMN summary_template TEXT;
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -165,6 +165,10 @@ const IPC_CHANNELS = {
   logsTail: 'logs:tail',
   logsReveal: 'logs:reveal',
   logsRendererError: 'logs:renderer-error',
+  summaryTemplatesList: 'summary-templates:list',
+  summaryTemplatesForMeeting: 'summary-templates:for-meeting',
+  summaryTemplatesSetMeeting: 'summary-templates:set-meeting',
+  summaryTemplatesSetGroup: 'summary-templates:set-group',
   googleAuthStart: 'google:auth-start',
   googleAuthStatus: 'google:auth-status',
   googleSignOut: 'google:sign-out',
@@ -696,6 +700,22 @@ const api = {
       email: string | null; hasCredentials: boolean; signedIn: boolean;
     }>,
     signOut: () => ipcRenderer.invoke(IPC_CHANNELS.googleSignOut) as Promise<void>,
+  },
+  summaryTemplates: {
+    /** Built-in templates and each group's default template id. */
+    list: () => ipcRenderer.invoke(IPC_CHANNELS.summaryTemplatesList) as Promise<{
+      templates: { id: string; name: string; description: string }[];
+      groupDefaults: Record<string, string>;
+    }>,
+    forMeeting: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.summaryTemplatesForMeeting, meetingId) as Promise<{
+      own: string | null; group: string | null; effective: string;
+    } | null>,
+    /** `null` clears the override so the meeting inherits again. Takes effect
+     *  the next time notes are generated; existing notes are not changed. */
+    setForMeeting: (meetingId: string, templateId: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.summaryTemplatesSetMeeting, meetingId, templateId) as Promise<void>,
+    setForGroup: (groupId: string, templateId: string | null) =>
+      ipcRenderer.invoke(IPC_CHANNELS.summaryTemplatesSetGroup, groupId, templateId) as Promise<void>,
   },
   logs: {
     /** Tail the app log as parsed JSON-lines entries (oldest-first) for the

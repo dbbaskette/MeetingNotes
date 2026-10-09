@@ -389,6 +389,12 @@ export const IPC_CHANNELS = {
   /** Renderer → main: a caught render/window error for the app log (#251).
    *  Validated, truncated and rate-limited in main. */
   logsRendererError: 'logs:renderer-error',
+  /** Summary templates (#254): built-in list plus each group's default. */
+  summaryTemplatesList: 'summary-templates:list',
+  /** A meeting's own template, its group's default and the effective one. */
+  summaryTemplatesForMeeting: 'summary-templates:for-meeting',
+  summaryTemplatesSetMeeting: 'summary-templates:set-meeting',
+  summaryTemplatesSetGroup: 'summary-templates:set-group',
   /** Begin the Google OAuth sign-in flow (opens the system browser). Resolves
    *  with the connected account email. */
   googleAuthStart: 'google:auth-start',

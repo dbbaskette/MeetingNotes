@@ -44,6 +44,26 @@ Weeks use your Mac's local Monday–Sunday calendar, including DST boundaries. T
 - Large timestamped transcripts render a bounded variable-height window on the existing scrollbar. **Find in transcript** / <kbd>⌘F</kbd>, full-copy and export still cover the whole text. Playback follows the active row unless you scroll manually; explicit seeks and search matches can reach unmounted passages. Per-line and Grouped views retain whole-text corrections and speaker colors.
 - **Needs attention** — recovery warnings, failed processing, speaker gates, and pending recordings have prioritized next actions. **View all** or **+N more** opens the entire backlog with bounded pages.
 
+## Notes templates
+
+A template sets which sections the notes have for a kind of meeting. Six are built in:
+
+| Template | Sections it adds |
+| --- | --- |
+| **General** (default) | Key Discussion Points, Follow-ups, Open Questions |
+| **1:1** | Updates, Feedback and Growth, Blockers and Support Needed, Topics for Next Time |
+| **Standup** | Progress, Planned Next, Blockers, each per person |
+| **Customer call** | Customer Context, Needs and Pain Points, Objections and Risks, Next Steps, Open Questions |
+| **Interview** | Candidate Background, Strengths, Concerns, Notable Answers, Open Questions |
+| **Decision review** | Options Considered, Trade-offs, Risks and Mitigations, Open Questions |
+
+Every template keeps **Overview**, **Decisions**, **Action Items** and **Off-topic Conversation**, because action-item extraction, the Weekly view and exports rely on them.
+
+- **For a group:** Settings → Processing → **Notes template by group**. Meetings in that group use it from then on.
+- **For one meeting:** the meeting page's **Processing ▾** menu → **Notes template**. *Automatic* follows the group.
+
+Choosing a template never rewrites notes that already exist. To apply it to a finished meeting, pick the template and then use **Processing ▾ → Re-run from… → Notes and action items only**; the previous notes are kept in notes history. Templates are built in and cannot be edited yet.
+
 ## The meeting page
 
 Notes, transcript and action items fill the page. The header shows the meeting's date and length and holds two controls:

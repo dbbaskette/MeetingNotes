@@ -1,6 +1,7 @@
 // electron/renderer/src/views/SettingsView.tsx
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { GroupTemplateDefaults } from '../components/SummaryTemplates';
 import { api } from '../ipc/client';
 import {LibraryBackupPanel} from '../components/LibraryBackupPanel';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
@@ -196,6 +197,9 @@ export function SettingsView({
             <span className="block text-xs text-ink-muted mt-1">Off by default. Applies only to new built-in recordings with usable finalized audio, not imports or recovery. Queue pause and voice review still apply.</span>
           </span>
         </label>
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="notes summary template group 1:1 standup customer interview decision meeting type">
+        <section className="border-t border-surface-border pt-5"><GroupTemplateDefaults /></section>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="dictionary terminology corrections words">
         <TerminologySettings />
