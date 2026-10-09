@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
 import { installRendererRecovery } from './lib/renderer-recovery.js';
 import { installNavigationGuard } from './lib/navigation-guard.js';
+import { validateIpc } from './ipc/channel-schemas.js';
 import { SecretSettings } from './storage/secret-settings.js';
 import path from 'node:path';
 import os from 'node:os';
@@ -244,7 +245,9 @@ app.whenReady().then(async () => {
   terminology.recover();
   try { notesHistory.recover(); } catch (e) { logger.error('notes-history:recovery', {error: String(e)}); }
   const obsidian = new ObsidianSync(db, { libraryRoot, meetings, speakers, items: actionItems, settings, stale: id => terminology.stale(id) });
-  const guardedIpc=guardLibraryIpc(ipcMain);
+  // Every handler validates its arguments (channel-schemas.ts), then writes are
+  // held back while a Library backup is copying.
+  const guardedIpc=validateIpc(guardLibraryIpc(ipcMain));
   registerObsidianHandlers(guardedIpc, obsidian);
   obsidian.start();
 
