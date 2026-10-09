@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, protocol, safeStorage, screen, shell } from 'electron';
+import { installRendererRecovery } from './lib/renderer-recovery.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -107,6 +108,10 @@ app.on('open-url', (event, url) => {
 // on every window creation. load() returns null when nothing usable is
 // saved (first run, garbage row, or the saved position is on a display
 // that's no longer attached), in which case the hardcoded defaults apply.
+/** Set in whenReady() once the logger exists; createWindow reports renderer
+ *  crashes through it. */
+let windowLog: ((msg: string, data: Record<string, unknown>) => void) | null = null;
+
 let windowBoundsStore: {
   load: () => WindowBounds | null;
   save: (b: WindowBounds) => void;
@@ -160,6 +165,15 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
       saveBounds();
     });
   }
+  installRendererRecovery(win, {
+    log: (msg, data) => windowLog?.(msg, data),
+    askReload: async (message, detail) => {
+      const { response } = await dialog.showMessageBox(win, {
+        type: 'warning', message, detail, buttons: ['Reload', 'Wait'], defaultId: 0, cancelId: 1,
+      });
+      return response === 0;
+    },
+  });
   if (isDev) await win.loadURL(process.env.VITE_DEV_URL ?? 'http://localhost:5174');
   else await win.loadFile(path.join(__dirname, '../../renderer/index.html'));
   return win;
@@ -204,6 +218,7 @@ app.whenReady().then(async () => {
   const actionItems = new ActionItemsRepo(db);
   const stageDurations = new StageDurationsRepo(db);
   const logger = new Logger(path.join(smokeRoot ?? path.join(os.homedir(), 'Library', 'Logs', 'MeetingNotes'), 'app.log'));
+  windowLog = (msg, data) => logger.warn(msg, data);
   const artifactCache = new ArtifactCache();
   const terminology = new TerminologyService(new TerminologyRepo(db), {
     libraryRoot, meetings, speakers, artifactCache, userName: () => settings.get('userName'),
