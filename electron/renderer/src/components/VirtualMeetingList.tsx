@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { retainedRowIndexes, stepMeetingIndex, virtualWindow } from '../lib/virtual-window';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { retainedRowIndexes, sectionWindow, settleSectionViewport, stepMeetingIndex, virtualWindow } from '../lib/virtual-window';
 import type { MeetingSummary } from '../lib/paged-meetings';
 import { RowDialogRetention } from './RowDialogRetention';
 
@@ -9,6 +9,7 @@ const ROW_HEIGHT = 72;
 const OVERSCAN = 5;
 
 interface Props {
+  scrollRef?: RefObject<HTMLDivElement>;
   items: MeetingSummary[];
   renderRow: (meeting: MeetingSummary) => ReactNode;
   hasMore: boolean;
@@ -21,9 +22,13 @@ interface Props {
 }
 
 /** Browse only: search snippets have variable height and stay non-virtual.
- * Owns the sole scroll container; the footer remains in its normal flow. */
-export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, refreshing, error, loadMore, footer, className = '' }: Props): JSX.Element {
-  const scrollRef = useRef<HTMLDivElement>(null);
+ * Reuses the Library scroll surface, or owns one when rendered standalone.
+ * Shared viewport geometry is relative to these rows, not the inbox above. */
+export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, refreshing, error, loadMore, footer, className = '', scrollRef: parentScrollRef }: Props): JSX.Element {
+  const ownScrollRef = useRef<HTMLDivElement>(null);
+  const scrollRef = parentScrollRef ?? ownScrollRef;
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const measureFrame = useRef<number | null>(null);
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [dialogIds, setDialogIds] = useState<Set<string>>(new Set());
@@ -38,34 +43,42 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
     });
   }, []);
 
+  const measure = useCallback((): void => {
+    const scroll = scrollRef.current, rows = rowsRef.current;
+    if (!scroll || !rows) return;
+    const scrollTop = parentScrollRef
+      ? scroll.getBoundingClientRect().top + scroll.clientTop - rows.getBoundingClientRect().top
+      : scroll.scrollTop;
+    setViewport(previous => settleSectionViewport(previous, { scrollTop, height: scroll.clientHeight }));
+  }, [scrollRef, parentScrollRef]);
+  const schedule = useCallback((): void => {
+    if (measureFrame.current === null) measureFrame.current = requestAnimationFrame(() => {
+      measureFrame.current = null; measure();
+    });
+  }, [measure]);
+  useLayoutEffect(() => { if (parentScrollRef) schedule(); });
   useEffect(() => {
     const scroll = scrollRef.current;
     if (!scroll) return;
-    let frame: number | null = null;
-    const measure = (): void => {
-      frame = null;
-      const scrollTop = scroll.scrollTop;
-      const height = scroll.clientHeight;
-      setViewport((previous) => previous.scrollTop === scrollTop && previous.height === height
-        ? previous : { scrollTop, height });
-    };
-    const schedule = (): void => {
-      if (frame === null) frame = requestAnimationFrame(measure);
-    };
     const observer = new ResizeObserver(schedule);
     observer.observe(scroll);
+    if (parentScrollRef) {
+      if (scroll.firstElementChild) observer.observe(scroll.firstElementChild);
+      if (rowsRef.current) observer.observe(rowsRef.current);
+    }
     scroll.addEventListener('scroll', schedule, { passive: true });
     measure();
     return () => {
       observer.disconnect();
       scroll.removeEventListener('scroll', schedule);
-      if (frame !== null) cancelAnimationFrame(frame);
+      if (measureFrame.current !== null) cancelAnimationFrame(measureFrame.current);
+      measureFrame.current = null;
       // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
       focusRevision.current++;
     };
-  }, []);
+  }, [scrollRef, parentScrollRef, schedule, measure]);
 
-  const window = virtualWindow({ count: items.length, rowHeight: ROW_HEIGHT, scrollTop: viewport.scrollTop, viewportHeight: viewport.height, overscan: OVERSCAN });
+  const window = (parentScrollRef ? sectionWindow : virtualWindow)({ count: items.length, rowHeight: ROW_HEIGHT, scrollTop: viewport.scrollTop, viewportHeight: viewport.height, overscan: OVERSCAN });
   useEffect(() => {
     // Trigger from the viewport's overscan, never from a distant pinned row.
     // The paged store shares in-flight requests with the explicit button.
@@ -92,9 +105,11 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
       if (next === null) return;
       const id = items[next]!.id;
       setFocusedId(id);
-      const top = next * ROW_HEIGHT;
       const scroll = scrollRef.current;
       if (!scroll) return;
+      const offset = parentScrollRef && rowsRef.current
+        ? rowsRef.current.getBoundingClientRect().top - scroll.getBoundingClientRect().top - scroll.clientTop + scroll.scrollTop : 0;
+      const top = offset + next * ROW_HEIGHT;
       if (top < scroll.scrollTop) scroll.scrollTop = top;
       else if (top + ROW_HEIGHT > scroll.scrollTop + scroll.clientHeight) {
         scroll.scrollTop = top + ROW_HEIGHT - scroll.clientHeight;
@@ -102,7 +117,7 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
     };
     globalThis.addEventListener('keydown', onKey);
     return () => globalThis.removeEventListener('keydown', onKey);
-  }, [items, focusedId]);
+  }, [items, focusedId, scrollRef, parentScrollRef]);
 
   const indexes = retainedRowIndexes({
     items, start: window.start, end: window.end,
@@ -110,9 +125,9 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
   });
 
   return (
-    <div ref={scrollRef} className={`flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 ${className}`}>
+    <div ref={ownScrollRef} className={parentScrollRef ? className : `flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 ${className}`}>
       <RowDialogRetention.Provider value={retainDialog}>
-        <div className="relative" style={{ height: window.totalHeight }}>
+        <div ref={rowsRef} className="relative" style={{ height: window.totalHeight }}>
           {indexes.map((index) => {
             const meeting = items[index]!;
             return (

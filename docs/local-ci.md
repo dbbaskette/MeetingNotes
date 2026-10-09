@@ -84,3 +84,11 @@ Library on an already-granted host, or the production Permissions needed screen
 on an ungranted clean VM. Both verify real preload paging and no active capture.
 Permission-gate rendering is reported separately from populated-Library rendering;
 the test never grants/fakes TCC or initiates recording to reach Library.
+
+The processing UX fixture renders the real Library with synthetic queue events.
+It checks one scroll surface in Organized and All meetings at three window sizes
+and zoom levels, stable scroll during stage refresh, clickable/keyboard-accessible
+processing rows with other meetings selected, direct bulk queueing without a modal,
+duplicate-click protection, retryable failures, and auto-clearing non-modal feedback.
+It also checks that capture Stop stays visible while browsing using a fake active
+recording state. No actual processing service or recording is started.

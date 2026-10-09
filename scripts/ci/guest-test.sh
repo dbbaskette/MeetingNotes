@@ -58,7 +58,7 @@ fi
 if [[ "$test_mode" == full ]]; then
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 else
-  export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology
+  export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology,processing
 fi
 run_check renderer-fixtures env MN_BENCH_REPO="$source_root" MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
 # An optional task-owned package payload allows the same clean-Mac runner to

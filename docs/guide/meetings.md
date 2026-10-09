@@ -36,6 +36,8 @@ Weeks use your Mac's local Monday–Sunday calendar, including DST boundaries. T
 
 ## Progress, search & playback
 
+- **Process without a blocking popup** — select recordings and choose **Process** to queue only the selected meetings that are still pending. Progress stays inline; unsuccessful starts remain selected for retry. Processing and speaker-review rows open their detail view even when other meetings are selected; use their checkboxes for explicit selection.
+- The Library and **Needs attention** inbox share one scroll area, including at smaller window sizes and higher zoom. Stage refreshes preserve the scroll position, and active capture controls remain above the scrolling area. Routine queue messages disappear automatically. Delete and re-run confirmations still protect operations that replace or remove results.
 - **Learned ETAs** — the app records how long each stage takes on *your* machine, bucketed by transcript size, and shows "elapsed · ~estimate" with a "running long" cue. A rough estimate appears after a single run.
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
 - <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
