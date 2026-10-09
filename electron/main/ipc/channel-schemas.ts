@@ -164,6 +164,12 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.obsidianExportComparison]: z.tuple([Id]),
   [C.obsidianReplace]: z.tuple([Id, handlerValidated]),
 
+  // Summary templates
+  [C.summaryTemplatesList]: none,
+  [C.summaryTemplatesForMeeting]: z.tuple([Id]),
+  [C.summaryTemplatesSetMeeting]: z.tuple([Id, z.string().min(1).max(100).nullable()]),
+  [C.summaryTemplatesSetGroup]: z.tuple([Id, z.string().min(1).max(100).nullable()]),
+
   // Weekly
   [C.weeklyGet]: z.tuple([...WeekArgs]),
   [C.weeklyGetStructured]: z.tuple([...WeekArgs]),

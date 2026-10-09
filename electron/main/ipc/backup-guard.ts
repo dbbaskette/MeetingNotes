@@ -45,6 +45,8 @@ const reads = new Set([
   'obsidian:preview',
   'obsidian:compare',
   'terminology:list',
+  'summary-templates:list',
+  'summary-templates:for-meeting',
   'terminology:preview',
 ]);
 export function guardLibraryIpc(ipc: IpcMain): IpcMain {

@@ -1,6 +1,7 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { MeetingTemplatePicker } from '../components/SummaryTemplates';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../ipc/client';
@@ -1251,6 +1252,7 @@ function ProcessingMenu({
               {meeting.models.llm && <div className="text-xs">Notes: {meeting.models.llm}</div>}
             </div>
           )}
+          <MeetingTemplatePicker meetingId={meeting.id} disabled={isProcessing} />
           {isProcessing ? (
             <div className="text-xs text-ink-muted italic">
               Processing in progress — re-run options will be available once it finishes or fails.

@@ -5,6 +5,7 @@ import { validateIpc } from './ipc/channel-schemas.js';
 import { MenuBarController } from './menu-bar/controller.js';
 import { RecordShortcut } from './menu-bar/shortcut.js';
 import { SecretSettings } from './storage/secret-settings.js';
+import { SummaryTemplateStore } from './storage/summary-template-store.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -230,6 +231,7 @@ app.whenReady().then(async () => {
   const libraryRoot = s.libraryPath;
   const db = openDb(path.join(libraryRoot, 'db.sqlite'));
   const meetings = new MeetingsRepo(db);
+  const summaryTemplates = new SummaryTemplateStore(db);
   if (smokeRoot) seedPackageSmoke(smokeRoot, settings, meetings);
   const groups = new GroupsRepo(db);
   const speakers = new SpeakersRepo(db);
@@ -394,6 +396,7 @@ app.whenReady().then(async () => {
   const roster = new RosterService(speakers, libraryRoot);
 
   const ctx = {
+    summaryTemplateFor: (meetingId: string) => summaryTemplates.effectiveFor(meetingId),
     notesHistory,
     terminology,
     libraryRoot,
@@ -836,6 +839,7 @@ app.whenReady().then(async () => {
   });
   registerIpcHandlers(guardedIpc, {
     secrets,
+    summaryTemplates,
     ...(smokeRoot ? {} : { menuBar, recordShortcut }),
     backup,
     notesHistory,

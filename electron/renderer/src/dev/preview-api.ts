@@ -135,6 +135,17 @@ export const overrides: PreviewOverrides = {
   search: { query: async () => [], run: async () => ({ hits: [], status: 'complete' }) },
   groups: { list: async () => ({ groups: [], allCount: rows.length, ungroupedCount: rows.length }) },
   trash: { list: async () => [] },
+  summaryTemplates: {
+    list: async () => ({
+      templates: [
+        { id: 'general', name: 'General', description: 'Discussion points, decisions, follow-ups and open questions.' },
+        { id: 'one-on-one', name: '1:1', description: 'Updates, feedback, blockers and topics for next time.' },
+        { id: 'standup', name: 'Standup', description: 'Progress, plans and blockers, per person.' },
+      ],
+      groupDefaults: {},
+    }),
+    forMeeting: async () => ({ own: null, group: null, effective: 'general' }),
+  },
   terminology: { list: async () => [], offers: async () => true },
   obsidian: { status: async () => ({ config: null, running: false, lastSuccess: null, error: null, pending: 0, synced: 0, issues: [] }) },
   backup: { preview: async () => null },

@@ -57,6 +57,8 @@ import { isMyItem, userIsIdentified } from '../exporters/owner-filter.js';
 import { registerExportHandlers } from './export-handlers.js';
 import type { Logger } from '../logging/logger.js';
 import type { SecretSettings } from '../storage/secret-settings.js';
+import type { SummaryTemplateStore } from '../storage/summary-template-store.js';
+import { SUMMARY_TEMPLATES } from '../../shared/summary-templates.js';
 import { createReportLimiter, normalizeRendererError } from '../logging/renderer-error.js';
 import type { GoogleAuth } from '../google/auth.js';
 import { tailLogFile } from '../logging/log-tail.js';
@@ -95,6 +97,8 @@ export interface IpcServices {
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
   logger: Logger;
+  /** Per-group and per-meeting summary template choices. */
+  summaryTemplates?: SummaryTemplateStore;
   /** Menu-bar item and global record shortcut; absent in tests and CI smoke. */
   menuBar?: { setVisible(visible: boolean): void };
   recordShortcut?: { apply(accelerator: string): void };
@@ -238,6 +242,23 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.logsReveal, () => {
     shell.showItemInFolder(s.logger.filePath);
+  });
+
+  // Summary templates (#254). Choosing one never rewrites existing notes; it
+  // applies the next time the summarize stage runs for that meeting.
+  ipc.handle(IPC_CHANNELS.summaryTemplatesList, () => ({
+    templates: SUMMARY_TEMPLATES.map(({ id, name, description }) => ({ id, name, description })),
+    groupDefaults: s.summaryTemplates?.groupDefaults() ?? {},
+  }));
+  ipc.handle(IPC_CHANNELS.summaryTemplatesForMeeting, (_e, meetingId: string) =>
+    s.summaryTemplates?.forMeeting(meetingId) ?? null);
+  ipc.handle(IPC_CHANNELS.summaryTemplatesSetMeeting, (_e, meetingId: string, templateId: string | null) => {
+    if (!s.summaryTemplates) throw new Error('Summary templates are unavailable');
+    s.summaryTemplates.setForMeeting(meetingId, templateId);
+  });
+  ipc.handle(IPC_CHANNELS.summaryTemplatesSetGroup, (_e, groupId: string, templateId: string | null) => {
+    if (!s.summaryTemplates) throw new Error('Summary templates are unavailable');
+    s.summaryTemplates.setForGroup(groupId, templateId);
   });
 
   const allowRendererReport = createReportLimiter();

@@ -1,4 +1,5 @@
 // electron/main/pipeline/prompts.ts
+import { GENERAL_TEMPLATE_ID, summaryTemplate, templateSections, type SummaryTemplate } from '../../shared/summary-templates.js';
 
 /** How verbose the summary should be. Set per-user in Settings and threaded
  *  through to {@link buildSummaryPrompt}. The point is to make verbosity a
@@ -49,7 +50,14 @@ const LENGTH_GUIDANCE: Record<SummaryDetail, string> = {
 export function buildSummaryPrompt(
   detail: SummaryDetail = 'detailed',
   knownTopic?: string | null,
+  template: SummaryTemplate = summaryTemplate(GENERAL_TEMPLATE_ID),
 ): string {
+  // The General template has no brief, so its prompt is byte-for-byte the
+  // prompt this function produced before templates existed (see the test).
+  const typeBrief = template.brief ? `\n\nMeeting type — ${template.name}: ${template.brief}` : '';
+  // Named in the off-topic rule below; must be a section this template has.
+  const firstBodySection = template.before[0] ?? 'Decisions';
+  const sections = templateSections(template).map((name) => `## ${name}`).join('\n');
   const topicLine = knownTopic
     ? `This meeting is about: **${knownTopic}**. Use that as the anchor for what's on-topic.`
     : `Infer the meeting's main purpose from the transcript itself.`;
@@ -57,16 +65,10 @@ export function buildSummaryPrompt(
 
 ${topicLine}
 
-Given the speaker-labeled transcript of a business meeting, produce a self-contained summary in GitHub-flavored Markdown that a reader who didn't attend can use as a complete substitute for the meeting.
+Given the speaker-labeled transcript of a business meeting, produce a self-contained summary in GitHub-flavored Markdown that a reader who didn't attend can use as a complete substitute for the meeting.${typeBrief}
 
 Use these sections as relevant — SKIP any section that has nothing substantive:
-## Overview
-## Key Discussion Points
-## Decisions
-## Action Items
-## Follow-ups
-## Open Questions
-## Off-topic Conversation
+${sections}
 
 ${LENGTH_GUIDANCE[detail]}
 
@@ -82,7 +84,7 @@ Content rules:
 - Be concrete. Name people, systems, numbers where the transcript supports them.
 - Action Items: sweep the ENTIRE transcript for commitments — they are often stated mid-discussion or in the closing minutes, not only in a wrap-up recap. One bullet per item, naming the task, the owner (or "(owner TBD)" if unstated), and the due date (or "(no date)"). This section is exempt from the brevity guidance above: include every genuine commitment, however small — missing a real action item is worse than an extra bullet here.
 - Off-topic Conversation: capture only the social/personal small talk that OPENS or CLOSES the meeting and is unrelated to the meeting's purpose (greetings, weekend plans, weather, sign-offs, stock-market chatter, and similar). List it as 1–3 short bullets naming the topics — do not summarize it in depth. Do NOT pull tangents from the middle of the meeting here; those belong in the main sections. Omit this section entirely if there was no such chatter; when present, it MUST be the final section.
-- This section MOVES off-topic chatter out of the outline — it does not duplicate it. Anything you put in Off-topic Conversation must NOT also appear in Overview, Key Discussion Points, or any other section. The main sections cover only on-topic business; do not add a "small talk" or "(off-topic)" entry to Key Discussion Points, and do not narrate the opening chatter in the Overview.
+- This section MOVES off-topic chatter out of the outline — it does not duplicate it. Anything you put in Off-topic Conversation must NOT also appear in Overview, ${firstBodySection}, or any other section. The main sections cover only on-topic business; do not add a "small talk" or "(off-topic)" entry to ${firstBodySection}, and do not narrate the opening chatter in the Overview.
 - Do NOT invent attendees, decisions, commitments, or details the transcript does not support. Faithfulness to the transcript beats producing a polished-sounding summary.`;
 }
 

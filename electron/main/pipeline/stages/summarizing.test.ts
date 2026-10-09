@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runSummarizing, extractTitleFromSummary, stripSummaryPreamble } from './summarizing.js';
+import { summaryTemplate } from '../../../shared/summary-templates.js';
 type SummaryContext = Parameters<typeof runSummarizing>[1];
 /** These isolated tests deliberately supply only the dependencies used by this stage. */
 function summaryContext<T extends object>(mock: T): T & SummaryContext {
@@ -65,6 +66,32 @@ describe('runSummarizing', () => {
     expect(updateTitle).toHaveBeenCalledOnce();
     const newTitle = updateTitle.mock.calls[0][1] as string;
     expect(newTitle).toContain('Quarterly engineering review');
+  });
+
+  it('asks for the sections of the meeting\'s summary template', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-template-'));
+    const f = path.join(dir, 'meetings', 'slug');
+    fs.mkdirSync(f, { recursive: true });
+    fs.writeFileSync(path.join(f, 'transcript.md'), '[Alice 00:00] Yesterday I finished the importer.');
+    try {
+      const chat = vi.fn(async (_request: { messages: { role: string; content: string }[] }) => '## Overview\nStatus round.');
+      const summaryTemplateFor = vi.fn(() => summaryTemplate('standup'));
+      const ctx = summaryContext({
+        libraryRoot: dir,
+        llmSupervisor: { ensureReady: async () => {} },
+        lmStudio: { chat },
+        meetings: { findById: () => ({ slug: 'slug', title: 'Daily standup' }), updateTitle: vi.fn() },
+        settings: { get: () => '' },
+        logger: { info: () => {} },
+        summaryTemplateFor,
+      });
+      await runSummarizing({ meetingId: 'm' }, ctx);
+      expect(summaryTemplateFor).toHaveBeenCalledWith('m');
+      const system = chat.mock.calls[0]![0].messages[0]!.content;
+      expect(system).toContain('Meeting type — Standup:');
+      expect(system).toContain('## Blockers');
+      expect(system).not.toContain('## Key Discussion Points');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('passes the meeting title to the prompt as the known topic', async () => {
