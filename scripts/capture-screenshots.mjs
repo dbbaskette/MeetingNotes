@@ -1,198 +1,183 @@
-#!/usr/bin/env node
 // scripts/capture-screenshots.mjs
 //
-// Headless-Chromium capture of the renderer UI for the README screenshots
-// referenced under docs/screenshots/. Not part of the release build — run
-// by hand when the UI changes and the README shots need refreshing:
+// Captures the README screenshots under docs/screenshots/ from the current
+// renderer, using synthetic data only. Run by hand when the UI changes:
 //
-//   npm run dev:renderer &   # Vite on :5174
-//   node scripts/capture-screenshots.mjs
+//   npm run dev:renderer      # Vite on :5174, in another terminal
+//   npm run screenshots
 //
-// Uses the browser that ships with macOS (Google Chrome) via puppeteer-core
-// so we don't have to download a separate Chromium. Relies on the dev-shim
-// in index.html to provide window.api — no Electron preload in this path.
+// It runs inside Electron (no extra browser dependency) and relies on the
+// browser-preview API in
+// electron/renderer/src/dev/preview-api.ts for `window.api`. No Electron
+// preload, main-process service, real meeting or real setting is involved.
 
-import puppeteer from 'puppeteer-core';
+import { app, BrowserWindow, nativeTheme } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO = path.resolve(__dirname, '..');
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(REPO, 'docs/screenshots');
-fs.mkdirSync(OUT, { recursive: true });
+const SIZE = { width: 1400, height: 900 };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const URL_BASE = 'http://localhost:5174';
+// A throwaway profile so nothing is read from or written to the real app's.
+app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'meetingnotes-screenshots-')));
 
-const VIEWPORT = { width: 1400, height: 900, deviceScaleFactor: 2 };
+const transcript = [
+  '[Alice 00:00] Thanks for joining. Three things today: storage, the Q3 budget, and hiring.',
+  '[Bob 00:12] On storage, the migration dry run finished last night with no data loss.',
+  '[Alice 00:25] Good. Can we commit to cutting over before the end of the month?',
+  '[Bob 00:31] Yes, if the rollback plan is reviewed this week. I will send it by Friday.',
+  '[Priya 00:44] Budget is tracking four percent under. I would move that into the tooling line.',
+  '[Alice 00:58] Agreed. Decision: reallocate the surplus to tooling.',
+  '[Priya 01:10] For hiring, two candidates are at the final stage. Feedback is due Wednesday.',
+].join('\n');
 
-// Rich detail-view payload so the detail screenshots have meaningful content.
-const RICH_DETAIL = {
-  id: 'b',
-  slug: 'b',
-  title: 'Design critique — detail view',
-  startedAt: '2026-04-20T11:00:00',
-  durationS: 2100,
-  pipelineStage: 'awaiting_speaker_id',
-  status: 'awaiting_user',
-  stageStartedAt: '2026-04-20T12:00:00',
-  skipSpeakerId: false,
-  unidentifiedCount: 2,
-  actionItemsCount: 0,
-  speakers: [
-    { localLabel: 'SPEAKER_00', rosterId: null, displayName: null, confidence: null },
-    { localLabel: 'SPEAKER_01', rosterId: null, displayName: null, confidence: null },
-  ],
-  transcriptMd: [
-    '[You 00:00] Hey everyone, thanks for joining.',
-    '[SPEAKER_00 00:04] Glad to be here.',
-    '[You 00:08] Let\'s start with the critique results.',
-    '[SPEAKER_01 00:14] The row chromatic noise observation stood out to me.',
-    '[You 00:20] Agreed — we demoted the action-items pill already.',
-  ].join('\n'),
-  rawTranscriptText: null,
-  summaryMd: [
-    '## Overview',
-    'Two-hour walkthrough of the library and detail views. Focused on row density,',
-    'action-item visibility, and the awaiting-user gate.',
-    '',
-    '## Decisions',
-    '- **Demote the action-items pill** to outline style so state reads first.',
-    '- **Move the awaiting-user banner** above the pipeline timeline.',
-    '- **Drop the InboxRow component** in favor of a unified list.',
-    '',
-    '## Follow-ups',
-    '- Ship updated screenshots for the README.',
-  ].join('\n'),
-  audioPath: '/tmp/sample.m4a',
-  actionItems: [],
-  models: { stt: 'whisper-large-v3', llm: 'qwen3.5-9b' },
+const summary = [
+  '## Overview',
+  'Quarterly planning covering the storage migration, the Q3 budget and open hiring. The migration dry run succeeded and the team committed to a cut-over date.',
+  '',
+  '## Key Discussion Points',
+  '- **Storage migration:** the dry run completed with no data loss; the remaining risk is the rollback plan.',
+  '- **Q3 budget:** spending is four percent under plan.',
+  '- **Hiring:** two candidates are in the final stage.',
+  '',
+  '## Decisions',
+  '- Cut over to the new storage tier before the end of the month.',
+  '- Reallocate the Q3 surplus to the tooling line.',
+  '',
+  '## Action Items',
+  '- **Bob** — send the rollback plan for review by Friday.',
+  '- **Priya** — collect final-round interview feedback by Wednesday.',
+  '',
+  '## Open Questions',
+  '- Who signs off on the cut-over window?',
+].join('\n');
+
+const base = {
+  groupId: null, groupName: null, errorMessage: null, processingHistory: [], stageStartedAt: null,
+  stageEtaMs: null, stageEtaRough: false, skipSpeakerId: false, rawTranscriptText: null,
+  audioPath: '/tmp/meetingnotes-screenshot.m4a', userIdentified: true, models: { stt: 'large-v3-turbo', llm: 'qwen/qwen3.5-9b' },
 };
 
-const DONE_DETAIL = {
-  ...RICH_DETAIL,
-  id: 'a',
-  slug: 'a',
-  title: 'Quarterly planning review',
-  startedAt: '2026-04-20T08:00:00',
-  durationS: 3200,
-  pipelineStage: 'done',
-  status: 'done',
-  skipSpeakerId: false,
-  unidentifiedCount: 0,
-  actionItemsCount: 9,
+const DONE = {
+  ...base, id: 'a', slug: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', durationS: 3200,
+  pipelineStage: 'done', status: 'done', transcriptMd: transcript, summaryMd: summary,
   speakers: [
-    { localLabel: 'SPEAKER_00', rosterId: 'r1', displayName: 'Alice', confidence: 0.95 },
-    { localLabel: 'SPEAKER_01', rosterId: 'r2', displayName: 'Bob', confidence: 0.95 },
+    { localLabel: 'SPEAKER_00', rosterId: 'r1', displayName: 'Alice', confidence: 1 },
+    { localLabel: 'SPEAKER_01', rosterId: 'r2', displayName: 'Bob', confidence: 0.94 },
+    { localLabel: 'SPEAKER_02', rosterId: 'r3', displayName: 'Priya', confidence: 0.91 },
   ],
   actionItems: [
-    { id: 'x1', text: 'Ship the storage plan by Friday', ownerName: 'Alice', dueDate: '2026-04-25', status: 'open', exportedTo: [] },
-    { id: 'x2', text: 'Draft the budget review', ownerName: null, dueDate: null, status: 'open', exportedTo: [] },
+    { id: 'x1', text: 'Send the rollback plan for review', ownerName: 'Bob', dueDate: '2026-04-24', status: 'open', exportedTo: [], sourceQuote: 'I will send it by Friday.', isMine: false },
+    { id: 'x2', text: 'Collect final-round interview feedback', ownerName: 'Priya', dueDate: '2026-04-22', status: 'open', exportedTo: [], sourceQuote: 'Feedback is due Wednesday.', isMine: false },
   ],
 };
 
-const browser = await puppeteer.launch({
-  executablePath: CHROME,
-  headless: 'new',
-  defaultViewport: VIEWPORT,
+const GATE = {
+  ...base, id: 'b', slug: 'b', title: 'Design critique — detail view', startedAt: '2026-04-20T11:00:00', durationS: 2100,
+  pipelineStage: 'awaiting_speaker_id', status: 'awaiting_user', transcriptMd: transcript.replace(/Bob/g, 'SPEAKER_01').replace(/Priya/g, 'SPEAKER_02'),
+  summaryMd: null, userIdentified: true,
+  speakers: [
+    { localLabel: 'SPEAKER_00', rosterId: 'r1', displayName: 'Alice', confidence: 1 },
+    { localLabel: 'SPEAKER_01', rosterId: null, displayName: null, confidence: null },
+    { localLabel: 'SPEAKER_02', rosterId: 'r3', displayName: 'Priya', confidence: 0.62 },
+  ],
+  actionItems: [],
+};
+
+const review = (meeting) => ({
+  speakers: meeting.speakers.map((sp, i) => ({
+    ...sp,
+    state: !sp.rosterId ? 'unknown' : (sp.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable',
+    needsReview: !sp.rosterId || (sp.confidence ?? 0) < 0.8,
+    segmentCount: 12 - i * 3, durationS: 600 - i * 150, lineCount: 40 - i * 9,
+  })),
 });
 
-async function newPage() {
-  const page = await browser.newPage();
-  await page.setViewport(VIEWPORT);
-  // Headless Chrome inherits the OS color-scheme preference, which on
-  // a dark-mode Mac flips the whole renderer to its dark palette.
-  // README screenshots are documented in the light palette, so force
-  // it here. (Override locally to capture dark-mode counterparts.)
-  await page.emulateMediaFeatures([
-    { name: 'prefers-color-scheme', value: 'light' },
-  ]);
-  return page;
+/** Runs in the page: replace preview-API methods with meeting-page data. */
+function installFixtures(serialized) {
+  const { details, reviews } = JSON.parse(serialized);
+  const strip = (m) => { const { transcriptMd, rawTranscriptText, ...shell } = m; return shell; };
+  const api = window.api;
+  api.meetings.get = async (id) => (details[id] ? strip(details[id]) : null);
+  api.meetings.getTranscript = async (id) => (details[id] ? { transcriptMd: details[id].transcriptMd, rawTranscriptText: null } : null);
+  api.meetings.getSpeakerReview = async (id) => reviews[id] ?? null;
+  api.meetings.getStatus = async (id) => (details[id] ? { ...strip(details[id]) } : null);
+  api.speakers.list = async () => [
+    { id: 'r1', displayName: 'Alice' }, { id: 'r2', displayName: 'Bob' }, { id: 'r3', displayName: 'Priya' },
+  ];
+  api.speakers.suggestions = async () => [];
+  api.recording.listSources = async () => [];
+  return true;
 }
 
-async function installApiOverrides(page, { detailById }) {
-  await page.evaluateOnNewDocument((detailByIdSerialized) => {
-    const detailById = JSON.parse(detailByIdSerialized);
-    const waitForApi = () => new Promise((resolve) => {
-      const check = () => {
-        if (window.api) return resolve();
-        setTimeout(check, 10);
-      };
-      check();
-    });
-    waitForApi().then(() => {
-      window.api.meetings.get = async (id) => detailById[id] ?? null;
-      window.api.speakers.sample = async () => null;
-    });
-  }, JSON.stringify(detailById));
+/** Runs in the page: click the innermost element whose text matches, so the
+ *  click bubbles to whatever row or button owns it. */
+function clickText(pattern, selector) {
+  const re = new RegExp(pattern);
+  const matches = [...document.querySelectorAll(selector)].filter((node) => re.test((node.textContent ?? '').trim()));
+  const el = matches.find((node) => !matches.some((other) => other !== node && node.contains(other)));
+  if (!el) return false;
+  el.click();
+  return true;
 }
 
-async function shoot(filename, setup) {
-  const page = await newPage();
-  await installApiOverrides(page, setup.overrides ?? { detailById: {} });
-  await page.goto(URL_BASE, { waitUntil: 'networkidle2' });
-  // Give the library's 3s polling refresh a beat to populate rows.
-  await new Promise((r) => setTimeout(r, 800));
-  if (setup.after) await setup.after(page);
-  await new Promise((r) => setTimeout(r, 400));
-  const outPath = path.join(OUT, filename);
-  await page.screenshot({ path: outPath, type: 'png' });
-  console.log('wrote', path.relative(REPO, outPath));
-  await page.close();
+async function shoot(url, filename, steps = []) {
+  const win = new BrowserWindow({
+    ...SIZE, show: false, useContentSize: true,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
+  const errors = [];
+  win.webContents.on('console-message', (event) => { if (event.level === 'error') errors.push(event.message.slice(0, 200)); });
+  // Vite may restart once while it pre-bundles dependencies on a cold cache.
+  for (let attempt = 1; ; attempt++) {
+    try { await win.loadURL(url); break; }
+    catch (error) { if (attempt === 5) throw error; await sleep(1000); }
+  }
+  // The preview API is installed during bootstrap; wait for the app to mount.
+  for (let i = 0; i < 100; i++) {
+    if (await win.webContents.executeJavaScript('!!window.api && document.getElementById("root").children.length > 0')) break;
+    await sleep(50);
+  }
+  const fixtures = JSON.stringify({ details: { a: DONE, b: GATE }, reviews: { a: review(DONE), b: review(GATE) } });
+  await win.webContents.executeJavaScript(`(${installFixtures.toString()})(${JSON.stringify(fixtures)})`);
+  await sleep(900);
+  for (const [pattern, selector] of steps) {
+    const clicked = await win.webContents.executeJavaScript(`(${clickText.toString()})(${JSON.stringify(pattern)}, ${JSON.stringify(selector)})`);
+    if (!clicked) throw new Error(`${filename}: nothing matched ${pattern} in ${selector}`);
+    await sleep(900);
+  }
+  const failed = await win.webContents.executeJavaScript('[...document.querySelectorAll("[role=alert]")].map((n) => n.textContent.slice(0, 80))');
+  if (failed.length) throw new Error(`${filename}: a view failed to render: ${failed.join(' | ')}\n${errors.slice(-3).join('\n')}`);
+  const image = await win.webContents.capturePage();
+  fs.writeFileSync(path.join(OUT, filename), image.toPNG());
+  console.log('wrote', path.join('docs/screenshots', filename), `${image.getSize().width}x${image.getSize().height}`);
+  win.destroy();
 }
 
-try {
-  // 1. Library — unified list as rendered by the dev shim.
-  await shoot('library.png', {
-    overrides: { detailById: {} },
-  });
+// Each shot uses its own window; closing one must not quit the app.
+app.on('window-all-closed', () => {});
 
-  // 2. Recording in progress — click Record → "All system audio" to set
-  //    LiveRecordingRow state.
-  await shoot('recording.png', {
-    overrides: { detailById: {} },
-    after: async (page) => {
-      await page.evaluate(() => {
-        const recordBtn = [...document.querySelectorAll('button')]
-          .find((b) => /Record/.test(b.textContent ?? ''));
-        recordBtn?.click();
-      });
-      await new Promise((r) => setTimeout(r, 300));
-      await page.evaluate(() => {
-        const sysAudio = [...document.querySelectorAll('button')]
-          .find((b) => /All system audio/.test(b.textContent ?? ''));
-        sysAudio?.click();
-      });
-      await new Promise((r) => setTimeout(r, 400));
-    },
-  });
-
-  // 3. Speaker-ID gate — click the awaiting_user row to open detail view.
-  await shoot('speaker-id.png', {
-    overrides: { detailById: { b: RICH_DETAIL } },
-    after: async (page) => {
-      await page.evaluate(() => {
-        const rows = [...document.querySelectorAll('[class*="rounded-xl"][class*="cursor-pointer"]')];
-        const target = rows.find((r) => (r.textContent ?? '').includes('Design critique'));
-        target?.click();
-      });
-      await new Promise((r) => setTimeout(r, 500));
-    },
-  });
-
-  // 4. Summary editor — click the done row; detail view defaults to Summary tab.
-  await shoot('summary.png', {
-    overrides: { detailById: { a: DONE_DETAIL } },
-    after: async (page) => {
-      await page.evaluate(() => {
-        const rows = [...document.querySelectorAll('[class*="rounded-xl"][class*="cursor-pointer"]')];
-        const target = rows.find((r) => (r.textContent ?? '').includes('Quarterly planning'));
-        target?.click();
-      });
-      await new Promise((r) => setTimeout(r, 500));
-    },
-  });
-} finally {
-  await browser.close();
-}
+app.whenReady().then(async () => {
+  nativeTheme.themeSource = 'light';
+  fs.mkdirSync(OUT, { recursive: true });
+  const url = process.env.MN_SCREENSHOT_URL ?? 'http://localhost:5174/';
+  try { await fetch(url, { signal: AbortSignal.timeout(3000) }); }
+  catch { console.error(`No dev server at ${url}. Start it with: npm run dev:renderer`); app.exit(1); return; }
+  let code = 0;
+  try {
+    await shoot(url, 'library.png');
+    await shoot(url, 'recording.png', [['Record', 'button'], ['All system audio', 'button']]);
+    await shoot(url, 'speaker-id.png', [['^Name speakers$', 'button']]);
+    await shoot(url, 'summary.png', [['^Quarterly planning review$', 'main *, #root *']]);
+    await shoot(url, 'weekly.png', [['^Weekly$', 'button']]);
+  } catch (error) {
+    console.error(String(error));
+    code = 1;
+  } finally {
+    app.exit(code);
+  }
+});

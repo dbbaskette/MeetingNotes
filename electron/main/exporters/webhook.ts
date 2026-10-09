@@ -40,6 +40,8 @@ export interface WebhookExporterDeps {
   /** Persist the most recent delivery result so the Settings card can
    *  show it without us having to maintain in-memory state. */
   setLastResult: (r: WebhookDeliveryResult) => void;
+  /** App version for the User-Agent header; omitted in tests. */
+  appVersion?: string;
   /** Test-injectable fetch. Production wiring passes globalThis.fetch. */
   fetchImpl?: typeof fetch;
   /** Test-injectable sleep. Production wiring passes a real setTimeout. */
@@ -95,7 +97,7 @@ export class WebhookExporter implements Exporter {
     const headers: Record<string, string> = {
       'content-type': rendered.contentType,
       'idempotency-key': deliveryId,
-      'user-agent': 'MeetingNotes/0.2 (+https://github.com/dbbaskette/MeetingNotes)',
+      'user-agent': `MeetingNotes/${this.deps.appVersion ?? 'dev'} (+https://github.com/dbbaskette/MeetingNotes)`,
     };
     if (cfg.secret) headers['authorization'] = `Bearer ${cfg.secret}`;
     const fetcher = this.deps.fetchImpl ?? globalThis.fetch;

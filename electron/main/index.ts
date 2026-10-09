@@ -703,6 +703,7 @@ app.whenReady().then(async () => {
         ownerFilter: settings.get('webhookOwnerFilter'),
       }),
       setLastResult: (r: WebhookDeliveryResult) => settings.set('webhookLastResult', r),
+      appVersion: app.getVersion(),
       fetchImpl: globalThis.fetch,
       log: (msg, data) => logger.info(msg, data),
     },
