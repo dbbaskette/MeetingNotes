@@ -7,7 +7,10 @@ import { LibraryWatcher } from './watcher.js';
 const dirs: string[] = [];
 afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop()!, { recursive: true, force: true }); });
 
-async function waitFor(check: () => boolean, timeoutMs = 2000): Promise<void> {
+// Generous ceiling: the wait ends as soon as the condition holds, and a
+// polling watcher can be starved for seconds when the whole suite runs in
+// parallel. A short timeout here made this file fail under load only.
+async function waitFor(check: () => boolean, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
     if (Date.now() >= deadline) throw new Error('condition not met before timeout');

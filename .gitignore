@@ -29,6 +29,9 @@ sidecar/build/
 sidecar/*.spec
 sidecar/*.egg-info/
 
+# Launch-video output from the brag skill
+brag-output*/
+
 # Worktrees / local tooling
 .claude/
 .worktrees/

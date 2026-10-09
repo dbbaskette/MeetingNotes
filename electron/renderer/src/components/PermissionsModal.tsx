@@ -26,6 +26,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
     if (micState === 'granted' && audioPerms.audioCapture !== 'denied') onAllGranted();
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
   useEffect(() => { void recheck(); const t = setInterval(recheck, 2000); return () => clearInterval(t); }, []);
 
   async function handleGrantMic(): Promise<void> {

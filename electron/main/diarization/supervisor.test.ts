@@ -127,7 +127,6 @@ describe('createDiarizationSupervisor', () => {
 
   it('reads expected build_id from sidecarDir/BUILD_ID for stale-vs-fresh adoption', async () => {
     fs.writeFileSync(path.join(tmpDir, 'BUILD_ID'), 'fresh-xyz\n');
-    const killOnPort = vi.fn(async () => {});
     let probeCalls = 0;
     const probe = async (): Promise<{ ok: boolean; buildId?: string }> => {
       probeCalls += 1;

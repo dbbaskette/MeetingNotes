@@ -87,6 +87,7 @@ export function SearchPalette({
         if (!cancelled) setLoading(false);
       }
     }, 150);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
     return () => { cancelled = true; window.clearTimeout(t); if(dispatched)void api.search.cancel(clientId.current,id); };
   }, [q, open, retryToken, facets]);
 

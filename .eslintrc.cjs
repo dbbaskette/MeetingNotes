@@ -15,4 +15,12 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     '@typescript-eslint/consistent-type-imports': 'error',
   },
+  overrides: [
+    {
+      // Tests and UI fixtures build partial fakes of large interfaces, where
+      // `any` is the honest type. Product code keeps the rule.
+      files: ['**/*.test.ts', '**/*.test.tsx', 'scripts/**'],
+      rules: { '@typescript-eslint/no-explicit-any': 'off' },
+    },
+  ],
 };

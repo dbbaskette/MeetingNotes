@@ -60,6 +60,7 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
       observer.disconnect();
       scroll.removeEventListener('scroll', schedule);
       if (frame !== null) cancelAnimationFrame(frame);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
       focusRevision.current++;
     };
   }, []);
