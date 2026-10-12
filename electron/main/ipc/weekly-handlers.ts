@@ -8,7 +8,7 @@ import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 
 export function registerWeeklyHandlers(ipc: IpcMain, s: IpcServices): void {
   // Weekly summary (#weekly). Year/week pair identifies an ISO week.
-  // The aggregator handles cache-or-regenerate based on input hash.
+  // The aggregator preserves saved reports until explicit regeneration.
   const validWeek = (y: unknown, w: unknown): { year: number; week: number } | null => {
     if (typeof y !== 'number' || typeof w !== 'number') return null;
     if (!Number.isInteger(y) || !Number.isInteger(w)) return null;
@@ -33,8 +33,8 @@ export function registerWeeklyHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.weeklyAggregator.getStructuredWeek(w.year, w.week);
   });
 
-  // Slow path: returns the cached narrative if fresh, else triggers
-  // an LLM call. Pass force=true to bypass the cache (Regenerate).
+  // Returns the saved report, or generates it once if absent.
+  // Pass force=true to explicitly replace it (Regenerate).
   ipc.handle(IPC_CHANNELS.weeklyGetNarrative, async (_e, year: unknown, week: unknown, force: unknown) => {
     const w = validWeek(year, week);
     if (!w) throw new Error('invalid year/week');

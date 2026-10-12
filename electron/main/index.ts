@@ -819,7 +819,7 @@ app.whenReady().then(async () => {
   });
   // Weekly summary aggregator (#weekly). Builds the per-week digest
   // from the existing meetings + action_items tables, with an LLM-
-  // narrative cache backed by the weekly_summaries table.
+  // report snapshot backed by the weekly_summaries table.
   const weeklySummaries = new WeeklySummariesRepo(db);
   const weeklyAggregator = new WeeklyAggregator({
     meetings,

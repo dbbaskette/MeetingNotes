@@ -1,13 +1,10 @@
 // electron/main/storage/weekly-summaries-repo.ts
 //
-// Cache for the LLM-generated weekly narrative + decisions list.
-// We store these because regeneration is expensive (LM Studio call,
-// 5-30s depending on model). Everything else the weekly view shows
-// (meetings list, action items rollup) is queried live each time
-// because it's already indexed and cheap.
+// Durable weekly reports. Narrative and structured sections are replaced
+// together only after a successful explicit regeneration.
 
 import type Database from 'better-sqlite3';
-import type { WeeklyTheme } from '../weekly/aggregator.js';
+import type { WeeklyTheme, WeeklySnapshot } from '../ipc/contracts.js';
 
 export interface WeeklySummaryRow {
   isoYear: number;
@@ -17,6 +14,7 @@ export interface WeeklySummaryRow {
   decisions: string[];
   inputHash: string;
   generatedAt: string;
+  snapshot: WeeklySnapshot | null;
 }
 
 function row(r: Record<string, unknown>): WeeklySummaryRow {
@@ -28,6 +26,7 @@ function row(r: Record<string, unknown>): WeeklySummaryRow {
     decisions: JSON.parse((r.decisions_json as string) || '[]') as string[],
     inputHash: r.input_hash as string,
     generatedAt: r.generated_at as string,
+    snapshot: r.snapshot_json ? JSON.parse(r.snapshot_json as string) as WeeklySnapshot : null,
   };
 }
 
@@ -50,12 +49,13 @@ export interface WeeklySummaryUpsert {
   themes: readonly WeeklyTheme[];
   decisions: readonly string[];
   inputHash: string;
+  snapshot?: WeeklySnapshot;
 }
 
 export class WeeklySummariesRepo {
   constructor(private readonly db: Database.Database) {}
 
-  /** Returns the cached row for the week, or null if no row exists. */
+  /** Returns the saved report even when its source meetings have changed. */
   get(isoYear: number, isoWeek: number): WeeklySummaryRow | null {
     const r = this.db
       .prepare('SELECT * FROM weekly_summaries WHERE iso_year = ? AND iso_week = ?')
@@ -68,14 +68,15 @@ export class WeeklySummariesRepo {
     const generatedAt = new Date().toISOString();
     this.db.prepare(`
       INSERT INTO weekly_summaries
-        (iso_year, iso_week, narrative, themes_json, decisions_json, input_hash, generated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (iso_year, iso_week, narrative, themes_json, decisions_json, input_hash, generated_at, snapshot_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (iso_year, iso_week) DO UPDATE SET
         narrative = excluded.narrative,
         themes_json = excluded.themes_json,
         decisions_json = excluded.decisions_json,
         input_hash = excluded.input_hash,
-        generated_at = excluded.generated_at
+        generated_at = excluded.generated_at,
+        snapshot_json = excluded.snapshot_json
     `).run(
       input.isoYear,
       input.isoWeek,
@@ -84,10 +85,18 @@ export class WeeklySummariesRepo {
       JSON.stringify(input.decisions),
       input.inputHash,
       generatedAt,
+      input.snapshot ? JSON.stringify(input.snapshot) : null,
     );
   }
 
-  /** Drop the cached row for the week. Forces regeneration on next get. */
+  /** Upgrade legacy rows once without changing their narrative or generation date. */
+  captureLegacySnapshot(isoYear: number, isoWeek: number, snapshot: WeeklySnapshot): void {
+    this.db.prepare(`UPDATE weekly_summaries SET snapshot_json = ?
+      WHERE iso_year = ? AND iso_week = ? AND snapshot_json IS NULL`)
+      .run(JSON.stringify(snapshot), isoYear, isoWeek);
+  }
+
+  /** Explicitly remove a saved report. Not used for source-change invalidation. */
   clear(isoYear: number, isoWeek: number): void {
     this.db.prepare(
       'DELETE FROM weekly_summaries WHERE iso_year = ? AND iso_week = ?',

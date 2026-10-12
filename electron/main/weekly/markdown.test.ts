@@ -22,6 +22,13 @@ function baseData(over: Partial<WeeklyData> = {}): WeeklyData {
 }
 
 describe('renderWeeklyMarkdown', () => {
+  it('identifies saved reports and the capture date of upgraded sections', () => {
+    const md = renderWeeklyMarkdown(baseData({ generatedAt: '2026-04-27T12:00:00Z',
+      legacySnapshot: true, capturedAt: '2026-10-12T12:00:00Z' }));
+    expect(md).toContain('Saved report · generated 2026-04-27T12:00:00Z');
+    expect(md).toContain('not current task status');
+    expect(md).toContain('captured after upgrading (2026-10-12T12:00:00Z)');
+  });
   it('renders a header with the date range', () => {
     const md = renderWeeklyMarkdown(baseData());
     expect(md).toMatch(/^# Weekly summary — Apr 20 – Apr 26, 2026/m);

@@ -1,10 +1,8 @@
 // electron/main/weekly/aggregator.ts
 //
 // Pulls together everything the weekly view needs for one ISO week:
-// the list of meetings, action items grouped by owner, and the cached
-// LLM narrative (or a freshly-generated one when the input hash
-// invalidates the cache). No state of its own — all storage goes
-// through the repos.
+// Live rollups for unfinished weeks, durable snapshots for generated reports.
+// Source changes never invalidate a saved report; only Regenerate replaces it.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -13,11 +11,11 @@ import type { MeetingsRepo, MeetingRow } from '../storage/meetings-repo.js';
 import type { ActionItemsRepo, ActionItemRow } from '../storage/action-items-repo.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
-import type { WeeklySummariesRepo } from '../storage/weekly-summaries-repo.js';
+import type { WeeklySummariesRepo, WeeklySummaryRow } from '../storage/weekly-summaries-repo.js';
 import { isoWeekRange } from '../lib/iso-week.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { extractOverviewRecap } from './recap.js';
-import type { WeeklyTheme, WeeklyMeeting, WeeklyOwnerGroup, WeeklyStructured, WeeklyNarrative, WeeklyData } from '../ipc/contracts.js';
+import type { WeeklyTheme, WeeklyMeeting, WeeklyOwnerGroup, WeeklyStructured, WeeklySnapshot, WeeklyNarrative, WeeklyData } from '../ipc/contracts.js';
 export type { WeeklyTheme, WeeklyMeeting, WeeklyActionItem, WeeklyOwnerGroup, WeeklyStructured, WeeklyNarrative, WeeklyData } from '../ipc/contracts.js';
 
 // ──────── Public types ────────
@@ -68,14 +66,17 @@ export class WeeklyAggregator {
 
   constructor(private readonly deps: AggregatorDeps) {}
 
-  /** Fast path: meetings + action items + decisions buckets, no
-   *  LLM call. Returns within ~10s of an action-item-heavy week and
-   *  much faster for a typical week. The renderer paints this
-   *  immediately, then a separate getOrGenerateNarrative() call
-   *  fills in the Overview card.
-   *
-   *  Idempotent + side-effect-free; safe to call repeatedly. */
+  /** Fast path: saved report sections, or a live rollup before generation.
+   *  Legacy rows acquire their missing structured snapshot once, without an LLM. */
   async getStructuredWeek(isoYear: number, isoWeek: number): Promise<WeeklyStructured> {
+    const saved = this.getSavedReport(isoYear, isoWeek);
+    if (saved?.snapshot) {
+      return { ...saved.snapshot, hasFreshCache: true, savedAt: saved.generatedAt };
+    }
+    return { ...this.buildLiveWeek(isoYear, isoWeek), hasFreshCache: false };
+  }
+
+  private buildLiveWeek(isoYear: number, isoWeek: number): WeeklySnapshot {
     const { start, end } = isoWeekRange(isoYear, isoWeek);
     const startIso = start.toISOString();
     const endIso = end.toISOString();
@@ -86,10 +87,6 @@ export class WeeklyAggregator {
     const openActionGroups = this.collectOpenActions(meetings);
     const openActionCount = openActionGroups.reduce((s, g) => s + g.items.length, 0);
 
-    const inputHash = this.computeInputHash(meetings);
-    const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
-    const hasFreshCache = !!(cached && cached.inputHash === inputHash);
-
     return {
       isoYear, isoWeek,
       rangeStart: startIso,
@@ -99,14 +96,29 @@ export class WeeklyAggregator {
       openActionGroups,
       openActionCount,
       inProgress,
-      hasFreshCache,
     };
   }
 
-  /** Slow path: returns the cached narrative if fresh, otherwise
-   *  triggers an LLM call. The two-call split (getStructuredWeek
+  private getSavedReport(isoYear: number, isoWeek: number): WeeklySummaryRow | null {
+    const saved = this.deps.weeklySummaries.get(isoYear, isoWeek);
+    if (saved && !saved.snapshot) {
+      const snapshot = { ...this.buildLiveWeek(isoYear, isoWeek), inProgress: false,
+        legacySnapshot: true, capturedAt: new Date().toISOString() };
+      this.deps.weeklySummaries.captureLegacySnapshot(isoYear, isoWeek, snapshot);
+      return this.deps.weeklySummaries.get(isoYear, isoWeek);
+    }
+    return saved;
+  }
+
+  private savedNarrative(saved: WeeklySummaryRow): WeeklyNarrative {
+    return { narrative: saved.narrative, themes: saved.themes, decisions: saved.decisions,
+      generatedAt: saved.generatedAt, fromCache: true, snapshot: saved.snapshot ?? undefined };
+  }
+
+  /** Returns any saved narrative, otherwise generates the first report.
+   *  The two-call split (getStructuredWeek
    *  first, then this) means the renderer can paint the layout
-   *  before this resolves. Pass `force: true` to bypass the cache
+   *  before this resolves. Pass `force: true` to replace the saved report
    *  (used by the "Regenerate" button).
    *
    *  Concurrent calls for the same week share an in-flight promise —
@@ -118,6 +130,12 @@ export class WeeklyAggregator {
     isoWeek: number,
     opts: { force?: boolean } = {},
   ): Promise<WeeklyNarrative> {
+    // Readers can keep using the saved report while an explicit replacement
+    // is in flight. Failed regeneration must never hide the previous report.
+    if (!opts.force) {
+      const saved = this.getSavedReport(isoYear, isoWeek);
+      if (saved) return this.savedNarrative(saved);
+    }
     const key = `${isoYear}:${isoWeek}`;
     const existing = this.narrativeInFlight.get(key);
     if (existing) return existing;
@@ -141,6 +159,9 @@ export class WeeklyAggregator {
     // would be obsolete by the time the user reads it.
     const inProgress = end.getTime() > Date.now();
     if (inProgress) {
+      if (opts.force && this.deps.weeklySummaries.get(isoYear, isoWeek)) {
+        throw new Error('Wait until this week ends to regenerate. Your saved report has been kept.');
+      }
       return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
     const meetings = this.deps.meetings.listInRange(
@@ -148,23 +169,24 @@ export class WeeklyAggregator {
       end.toISOString(),
     );
     const inputHash = this.computeInputHash(meetings);
-    const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
-    if (!opts.force && cached && cached.inputHash === inputHash) {
-      return {
-        narrative: cached.narrative,
-        themes: cached.themes,
-        decisions: cached.decisions,
-        generatedAt: cached.generatedAt,
-        fromCache: true,
-      };
-    }
     if (meetings.length === 0) {
+      if (opts.force && this.deps.weeklySummaries.get(isoYear, isoWeek)) {
+        throw new Error('No source meetings remain for this week. Your saved report has been kept.');
+      }
       return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
     const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
     const openActionGroups = this.collectOpenActions(meetings);
+    const snapshot: WeeklySnapshot = {
+      isoYear, isoWeek, rangeStart: start.toISOString(), rangeEnd: end.toISOString(),
+      totalDurationS: meetings.reduce((sum, m) => sum + (m.durationS ?? 0), 0),
+      meetings: weeklyMeetings, openActionGroups,
+      openActionCount: openActionGroups.reduce((sum, group) => sum + group.items.length, 0),
+      inProgress: false,
+      capturedAt: new Date().toISOString(),
+    };
     const out = await this.regenerate(
-      isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash,
+      isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash, snapshot,
     );
     return {
       narrative: out.narrative,
@@ -172,21 +194,16 @@ export class WeeklyAggregator {
       decisions: out.decisions,
       generatedAt: out.generatedAt,
       fromCache: false,
+      snapshot,
     };
   }
 
-  /** Returns the full week's data, generating + caching the narrative
-   *  when the input hash has changed since the last cached row.
-   *  Equivalent to getStructuredWeek + getOrGenerateNarrative
-   *  squashed into one call — kept for backward compat with the
-   *  weeklyGet IPC. New callers should prefer the split pair so
-   *  the renderer can show the structured view while the narrative
-   *  is still being drafted. */
+  /** Returns one consistent report, including for Markdown export. */
   async getWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
-    const [structured, narrative] = await Promise.all([
-      this.getStructuredWeek(isoYear, isoWeek),
-      this.getOrGenerateNarrative(isoYear, isoWeek),
-    ]);
+    const narrative = await this.getOrGenerateNarrative(isoYear, isoWeek);
+    const structured = narrative.snapshot
+      ? { ...narrative.snapshot, hasFreshCache: true, savedAt: narrative.generatedAt }
+      : await this.getStructuredWeek(isoYear, isoWeek);
     const { hasFreshCache: _drop, ...structuredOut } = structured;
     void _drop;
     return {
@@ -201,11 +218,13 @@ export class WeeklyAggregator {
   /** Forces narrative regeneration even when the input hash is
    *  unchanged. Used by the renderer's "Regenerate" button. */
   async regenerateWeek(isoYear: number, isoWeek: number): Promise<WeeklyData> {
-    const [structured, narrative] = await Promise.all([
-      this.getStructuredWeek(isoYear, isoWeek), this.getOrGenerateNarrative(isoYear, isoWeek, { force: true }),
-    ]);
+    const narrative = await this.getOrGenerateNarrative(isoYear, isoWeek, { force: true });
+    const structured = narrative.snapshot
+      ? { ...narrative.snapshot, hasFreshCache: true, savedAt: narrative.generatedAt }
+      : await this.getStructuredWeek(isoYear, isoWeek);
     const { hasFreshCache: _drop, ...out } = structured; void _drop;
-    return { ...out, ...narrative };
+    return { ...out, narrative: narrative.narrative, themes: narrative.themes,
+      decisions: narrative.decisions, generatedAt: narrative.generatedAt };
   }
 
   // ──────── Internals ────────
@@ -317,6 +336,8 @@ export class WeeklyAggregator {
 
   private computeInputHash(meetings: readonly MeetingRow[]): string {
     const sorted = [...meetings].sort((a, b) => a.id.localeCompare(b.id));
+    const ownerIds = new Set(meetings.flatMap(m => this.deps.actionItems.listByMeeting(m.id)
+      .map(item => item.ownerSpeakerId).filter((id): id is string => id !== null)));
     // Hash the actual source content, not incidental timestamp mutations.
     // This catches summary/terminology/history edits and all task/roster paths.
     const payload = JSON.stringify({
@@ -326,7 +347,7 @@ export class WeeklyAggregator {
         return { id: m.id, title: m.title, startedAt: m.startedAt, durationS: m.durationS,
           updatedAt: m.updatedAt, summary, actions: this.deps.actionItems.listByMeeting(m.id).sort((a, b) => a.id.localeCompare(b.id)) };
       }),
-      roster: this.deps.speakers.list().map(s => [s.id, s.displayName]).sort((a, b) => a[0]!.localeCompare(b[0]!)),
+      roster: this.deps.speakers.list().filter(s => ownerIds.has(s.id)).map(s => [s.id, s.displayName]).sort((a, b) => a[0]!.localeCompare(b[0]!)),
       userSpeakerId: this.deps.settings.get('userSpeakerId'),
     });
     return crypto.createHash('sha256').update(payload).digest('hex');
@@ -339,6 +360,7 @@ export class WeeklyAggregator {
     weeklyMeetings: readonly WeeklyMeeting[],
     openActionGroups: readonly WeeklyOwnerGroup[],
     inputHash: string,
+    snapshot: WeeklySnapshot,
   ): Promise<{ narrative: string; themes: WeeklyTheme[]; decisions: string[]; generatedAt: string }> {
     if (this.deps.ensureLLMReady) await this.deps.ensureLLMReady();
 
@@ -391,6 +413,7 @@ export class WeeklyAggregator {
       themes: out.themes,
       decisions: out.decisions,
       inputHash,
+      snapshot,
     });
 
     const cached = this.deps.weeklySummaries.get(isoYear, isoWeek);
