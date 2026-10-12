@@ -9,12 +9,15 @@ export function WeeklyTaskRow({
   onOpen,
   onPatch,
   onSaved,
+  savedAt,
 }: {
   item: WeeklyActionItem;
   rangeEnd: string;
   onOpen: (id: string) => void;
   onPatch: (id: string, patch: Patch) => void;
   onSaved: () => Promise<void>;
+  /** Saved report actions are historical, not live task controls. */
+  savedAt?: string;
 }): JSX.Element {
   const [owner, setOwner] = useState(item.ownerName ?? ''),
     [due, setDue] = useState(item.dueDate ?? ''),
@@ -28,7 +31,7 @@ export function WeeklyTaskRow({
     }
   }, [item.ownerName, item.dueDate, busy]);
   async function save(patch: Patch): Promise<void> {
-    if (busy) return;
+    if (busy || savedAt) return;
     setBusy(true);
     setError(null);
     setRetry(null);
@@ -62,18 +65,18 @@ export function WeeklyTaskRow({
     setDue(value);
     void save({ dueDate: value });
   }
-  const dueLabel = fmtDueLabel(item.dueDate, rangeEnd);
+  const dueLabel = fmtDueLabel(item.dueDate, rangeEnd, savedAt ? new Date(savedAt) : undefined);
   return (
     <div className="px-4 py-3 space-y-2">
       <div className="flex items-start gap-2">
-        <input
+        {!savedAt && <input
           type="checkbox"
           aria-label={`Complete ${item.text}`}
           checked={item.status === 'done'}
           disabled={busy}
           onChange={() => void save({ status: item.status === 'done' ? 'open' : 'done' })}
           className="mt-1 accent-brand-indigo"
-        />
+        />}
         <div className="min-w-0 flex-1">
           <p
             className={`text-sm ${item.status === 'done' ? 'line-through text-ink-muted' : 'text-ink'}`}
@@ -89,7 +92,7 @@ export function WeeklyTaskRow({
         </div>
         <span className={`text-xs rounded-full px-2 py-1 ${dueLabel.tier==='overdue'?'bg-danger-bg text-danger-text':dueLabel.tier==='this-week'?'bg-status-warnBg text-status-warnText':'text-ink-muted'}`}>{busy ? 'Saving…' : dueLabel.label}</span>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-xs">
+      {!savedAt && <div className="flex flex-wrap items-center gap-2 text-xs">
         <label>
           Owner{' '}
           <input
@@ -124,7 +127,7 @@ export function WeeklyTaskRow({
         <button disabled={busy} onClick={snooze}>
           Snooze 1 week
         </button>
-      </div>
+      </div>}
       {item.sourceQuote && (
         <details className="text-xs text-ink-muted">
           <summary className="cursor-pointer">Source note</summary>

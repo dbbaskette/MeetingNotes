@@ -43,14 +43,24 @@ export interface WeeklyStructured {
   openActionGroups: WeeklyOwnerGroup[];
   openActionCount: number;
   inProgress: boolean;
+  /** Compatibility name: true when a saved report exists, independent of source changes. */
   hasFreshCache: boolean;
+  /** Present for an immutable saved report; absent for a live rollup. */
+  savedAt?: string;
+  /** Older versions saved only the narrative, not the structured sections. */
+  legacySnapshot?: boolean;
+  /** Snapshot date can differ from generation date for upgraded legacy rows. */
+  capturedAt?: string;
 }
+export type WeeklySnapshot = Omit<WeeklyStructured, 'hasFreshCache' | 'savedAt'>;
 export interface WeeklyNarrative {
   narrative: string;
   themes: WeeklyTheme[];
   decisions: string[];
   generatedAt: string;
   fromCache: boolean;
+  /** The structured sections saved atomically with this narrative. */
+  snapshot?: WeeklySnapshot;
 }
 export interface WeeklyData extends Omit<WeeklyStructured, 'hasFreshCache'> {
   narrative: string;

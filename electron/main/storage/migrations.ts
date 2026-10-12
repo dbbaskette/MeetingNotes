@@ -388,6 +388,11 @@ export const MIGRATIONS: Migration[] = [
     ALTER TABLE groups ADD COLUMN summary_template TEXT;
     ALTER TABLE meetings ADD COLUMN summary_template TEXT;
   ` },
+  // Weekly reports are durable snapshots, not invalidatable narrative caches.
+  // Existing narratives remain intact; structured sections are captured on read.
+  { version: 24, up: `
+    ALTER TABLE weekly_summaries ADD COLUMN snapshot_json TEXT;
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

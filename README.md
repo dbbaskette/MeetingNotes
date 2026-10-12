@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-14.2%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.14.9-brightgreen)](docs/releases/v1.14.9.md)
+[![Version](https://img.shields.io/badge/version-1.14.10-brightgreen)](docs/releases/v1.14.10.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -25,7 +25,7 @@
 - **Notes shaped for your meeting.** Choose General, 1:1, Standup, Customer call, Interview or Decision review templates per group or meeting. Existing notes change only when you explicitly re-run processing.
 - **A Library that stays organised.** Groups, search across titles, notes and transcripts, and a **Needs attention** panel for failed runs, voices to name and interrupted recordings.
 - **Uninterrupted processing and recording controls.** Browse one Library scroll area, open an in-progress meeting while other meetings are selected, and queue recordings without a blocking popup. Menu-bar controls and an optional global start/stop shortcut let you manage capture without switching windows.
-- **A weekly roll-up.** Themes that ran across the week's meetings, decisions, and your open action items.
+- **Saved weekly reports.** Themes across the week's meetings, recaps, decisions, and actions, preserved as static snapshots until you explicitly regenerate them.
 - **Exports when you want them.** Apple Reminders, Google Tasks, Google Docs, PDF, Markdown, an Obsidian vault, or a webhook.
 
 | Library | Naming voices |

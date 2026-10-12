@@ -20,7 +20,10 @@ app
     win.webContents.on('console-message', (_event, level, message) => {
       if (level >= 2 && !message.includes('Electron Security Warning')) errors.push(message);
     });
-    const run = (code) => win.webContents.executeJavaScript(code, true),
+    const run = async (code) => {
+      try { return await win.webContents.executeJavaScript(code, true); }
+      catch (error) { console.error('Failed fixture expression:', code, errors); throw error; }
+    },
       settle = () =>
         run(
           'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>setTimeout(r,60))))',
@@ -190,6 +193,42 @@ app
     assert(
       await run('document.querySelector("details").textContent.includes("Original task source")'),
     );
+    await run('fixture.setMode("weekly")'); await settle();
+    await until('document.body.textContent.includes("In progress")');
+    assert(await run('!!document.querySelector("input[type=checkbox]")'), 'Current-week tasks stay editable');
+    await run(`document.querySelector('button[title="Previous week"]').click()`);
+    await until('document.body.textContent.includes("Permanent saved overview")');
+    assert(await run('document.body.textContent.includes("Saved report")'));
+    assert(await run('document.body.textContent.includes("Historical action")'));
+    assert(await run('!document.querySelector("input[type=checkbox]")'), 'Saved actions are read-only');
+    assert.equal(await run('fixture.weeklyGenerations'), 0);
+    await run('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("Regenerate (~30s)")).click()');
+    await until('fixture.weeklyGenerations===1');
+    assert(await run('document.body.textContent.includes("Permanent saved overview")'), 'Keep old overview during regeneration');
+    assert(await run('document.body.textContent.includes("Original theme")'), 'Keep old themes during regeneration');
+    await run('fixture.finishWeekly(true)');
+    await until('document.body.textContent.includes("Synthetic model offline")');
+    assert(await run('document.body.textContent.includes("Permanent saved overview")'), 'Keep old overview on failure');
+    assert(await run('document.body.textContent.includes("Historical action")'), 'Keep old actions on failure');
+    await run('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("Regenerate (~30s)")).click()');
+    await until('fixture.weeklyGenerations===2');
+    await run('fixture.finishWeekly(false)');
+    await until('document.body.textContent.includes("Replacement saved overview")');
+    assert(await run('document.body.textContent.includes("Replacement source meeting")'), 'Replace structured sections with the overview');
+    assert(await run('!document.body.textContent.includes("Historical action")'));
+    await run(`document.querySelector('button[title="Next week"]').click()`); await settle();
+    await run(`document.querySelector('button[title="Previous week"]').click()`);
+    await until('document.body.textContent.includes("Replacement saved overview")');
+    assert.equal(await run('fixture.weeklyGenerations'), 2, 'Navigation never regenerates saved reports');
+    await run('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="Export").click()'); await settle();
+    assert.deepEqual(await run('fixture.weeklyExports'), ['Replacement source meeting']);
+    await run(`document.querySelector('button[title="Next week"]').click()`); await settle();
+    await run('fixture.emptyLegacyReport()');
+    await run(`document.querySelector('button[title="Previous week"]').click()`);
+    await until('document.body.textContent.includes("Legacy overview without source meetings")');
+    assert(await run('document.body.textContent.includes("Older versions saved only the generated text")'));
+    assert(await run('!Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="Export").disabled'), 'Legacy report with no remaining meetings is exportable');
+    assert.equal(await run('fixture.weeklyGenerations'), 2);
     await run('fixture.setMode("backup")');await settle();
     await run('Array.from(document.querySelectorAll("button")).find(button=>button.textContent.includes("Choose backup destination")).click()');await settle();
     assert(await run('document.querySelector("[role=dialog]").textContent.includes("webhook secrets")'));

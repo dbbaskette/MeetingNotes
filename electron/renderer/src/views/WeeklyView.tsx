@@ -72,6 +72,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
   const toast = useToast();
   const taskRefresh=useRef(0);
   function patchTask(id:string,patch:{status?:string;ownerName?:string|null;dueDate?:string|null}):void {
+    if (structured?.savedAt) return;
     fetchSeq.current++;setNarrative(null);setNarrState('idle');
     setStructured(previous=>{
       if(!previous)return previous;
@@ -90,13 +91,13 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
 
   /** Two-phase load. Structured (meetings + actions) paints
    *  immediately; narrative (LLM) streams in separately. Setting
-   *  `force=true` forces a regenerate on the narrative side only. */
+   *  `force=true` replaces the whole report after successful generation. */
   const load = useCallback(async (
     target: { year: number; week: number },
     force = false,
   ): Promise<void> => {
     const seq = ++fetchSeq.current;
-    setStructState('loading');
+    if (!force) setStructState('loading');
     setErrorMsg(null);
     if (!force) {
       // On a normal week-change, drop the old narrative immediately
@@ -125,7 +126,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
       // 2) Narrative fetch — fires immediately after structured
       //    resolves so we know whether the cache is fresh (and
       //    thus whether to even show the "drafting" skeleton).
-      if (result.meetings.length === 0 || result.inProgress) {
+      if (!result.savedAt && (result.meetings.length === 0 || result.inProgress)) {
         // Empty week or current (still-in-progress) week — no
         // narrative to fetch. Current-week narratives are intentionally
         // skipped because meetings keep getting added all week and
@@ -140,6 +141,9 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
       )) as WeeklyNarrativeResult;
       if (seq !== fetchSeq.current) return;
       setNarrative(narrResult);
+      if (narrResult.snapshot) {
+        setStructured({ ...narrResult.snapshot, hasFreshCache: true, savedAt: narrResult.generatedAt });
+      }
       setNarrState('ready');
     } catch (e) {
       if (seq !== fetchSeq.current) return;
@@ -271,7 +275,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
         </div>
         <button
           onClick={onExport}
-          disabled={structState !== 'ready' || !structured || structured.meetings.length === 0}
+          disabled={structState !== 'ready' || !structured || (!structured.savedAt && structured.meetings.length === 0)}
           className="px-3 py-1.5 rounded-md bg-ink text-white text-sm font-medium hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
         >
           Export
@@ -330,9 +334,10 @@ function WeeklyBody({
   // Alias for the original prop name throughout the body so the
   // existing JSX further down keeps working without per-line edits.
   const data = structured;
-  const empty = data.meetings.length === 0;
+  const empty = data.meetings.length === 0 && !data.savedAt;
   const [taskFilter,setTaskFilter]=useState<'all'|'mine'|'overdue'|'week'>('all');
-  const today=new Date();const todayString=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const snapshotDate=data.capturedAt??data.savedAt;
+  const today=snapshotDate?new Date(snapshotDate):new Date();const todayString=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
   const filteredGroups=data.openActionGroups.map(group=>({...group,items:group.items.filter(item=>taskFilter==='all'||taskFilter==='mine'&&item.isYou||taskFilter==='overdue'&&!!item.dueDate&&item.dueDate<todayString||taskFilter==='week'&&!!item.dueDate&&new Date(`${item.dueDate}T12:00:00`).getTime()>=Date.parse(data.rangeStart)&&new Date(`${item.dueDate}T12:00:00`).getTime()<=Date.parse(data.rangeEnd))})).filter(group=>group.items.length>0);
 
   return (
@@ -347,6 +352,7 @@ function WeeklyBody({
               In progress
             </span>
           )}
+          {data.savedAt && <span className="text-[11px] px-2 py-0.5 rounded-full bg-surface-sunken text-status-ok font-medium">Saved report</span>}
         </div>
         <h1 className="text-3xl font-semibold tracking-tight mb-1">Weekly summary</h1>
         <div className="text-sm text-ink-muted">
@@ -354,6 +360,10 @@ function WeeklyBody({
           {fmtTotalDuration(data.totalDurationS)} total · {data.openActionCount} open action
           item{data.openActionCount === 1 ? '' : 's'}
         </div>
+        {data.savedAt && <p className="text-xs text-ink-muted mt-3">
+          This report stays unchanged. Regenerate to replace it with the latest meeting notes and actions.
+          {data.legacySnapshot && ' Older versions saved only the generated text; meeting and action sections were captured when this report was first opened after upgrading.'}
+        </p>}
       </div>
 
       {empty && (
@@ -386,7 +396,7 @@ function WeeklyBody({
 
           {/* Themes / threads — the recall payload. Lives in the narrative
               (LLM) payload, so it appears once the narrative resolves. */}
-          {narrState === 'ready' && narrative && narrative.themes.length > 0 && (
+          {narrative && narrative.themes.length > 0 && (
             <section className="mb-10">
               <div className="flex items-baseline gap-3 mb-3">
                 <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
@@ -483,12 +493,13 @@ function WeeklyBody({
             <section className="mb-10">
               <div className="flex items-baseline gap-3 mb-3">
                 <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
-                  Open action items
+                  {data.savedAt ? 'Open actions in saved report' : 'Open action items'}
                 </h3>
                 <span className="text-[11px] text-ink-muted">
                   {data.openActionCount} across {data.openActionGroups.length} owner{data.openActionGroups.length === 1 ? '' : 's'}
                 </span>
               </div>
+              {data.savedAt && <p className="text-xs text-ink-muted mb-3">Historical snapshot. Open the source meeting to manage its current tasks.</p>}
               {/* One card per owner with whitespace between, so multi-owner
                   weeks read as distinct buckets instead of one flat scroll.
                   isYou cards are tinted the whole way down (not just the
@@ -529,7 +540,7 @@ function WeeklyBody({
                         </div>
                       </div>
                       <div className="divide-y divide-surface-border/70">
-                        {group.items.map(it=><WeeklyTaskRow key={it.id} item={it} rangeEnd={data.rangeEnd} onOpen={onOpenMeeting} onPatch={onTaskPatch} onSaved={onTasksSaved}/>)}
+                        {group.items.map(it=><WeeklyTaskRow key={it.id} item={it} rangeEnd={data.rangeEnd} savedAt={data.savedAt ? snapshotDate : undefined} onOpen={onOpenMeeting} onPatch={onTaskPatch} onSaved={onTasksSaved}/>)}
                       </div>
                     </div>
                   );
@@ -578,9 +589,7 @@ interface NarrativeCardProps {
    *  narrative generation in that case because meetings keep getting
    *  added all week — show a friendly placeholder instead. */
   inProgress: boolean;
-  /** True when this week's narrative is already cached against the current
-   *  inputs. Lets the Regenerate button hint the cost up front — a fresh
-   *  model call still runs regardless. */
+  /** Compatibility name: true when the week has a saved report. */
   hasFreshCache: boolean;
   onRegenerate: () => Promise<void>;
 }
@@ -610,7 +619,7 @@ function NarrativeCard({
         {!inProgress && narrState === 'loading' && (
           <span className="text-[11px] text-ink-muted ml-2 inline-flex items-center gap-1.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-indigo animate-pulse" />
-            drafting from {meetingCount} meeting{meetingCount === 1 ? '' : 's'}
+            {narrative ? 'updating saved report' : `drafting from ${meetingCount} meeting${meetingCount === 1 ? '' : 's'}`}
             {elapsedSec >= 1 && <span className="font-mono">· {elapsedSec}s</span>}
           </span>
         )}
@@ -622,12 +631,12 @@ function NarrativeCard({
       {inProgress && (
         <div className="text-sm text-ink-muted leading-relaxed">
           The week is still in progress, so the Overview is generated only
-          after the week ends. The meetings, action items, and decisions
+          after the week ends. The meetings and action items
           below update live as new recordings finish processing.
         </div>
       )}
 
-      {!inProgress && narrState === 'loading' && (
+      {!inProgress && narrState === 'loading' && !narrative && (
         <div aria-busy="true" aria-live="polite" className="space-y-2.5 animate-pulse">
           {/* Skeleton — 3 paragraphs of varying-length pulsing bars
               that approximate the LLM's typical 200-350 word output. */}
@@ -651,9 +660,10 @@ function NarrativeCard({
 
       {!inProgress && narrState === 'error' && (
         <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-lg p-3 text-sm">
-          <div className="font-medium mb-1">Couldn&apos;t draft the narrative.</div>
+          <div className="font-medium mb-1">Couldn&apos;t generate the report.</div>
           <div className="text-xs">{narrError ?? 'unknown error'}</div>
           <div className="text-xs mt-2 text-ink-muted">
+            {narrative && 'Your saved report has not been changed. '}
             Common causes: LM Studio isn&apos;t running, no model is loaded, or the
             chosen model can&apos;t fit the prompt. The structured rollup below still
             works — only the Overview card needs the LLM.
@@ -661,14 +671,14 @@ function NarrativeCard({
         </div>
       )}
 
-      {!inProgress && narrState === 'ready' && narrative != null && (
+      {!inProgress && narrative != null && (
         narrative.narrative ? (
           <div className="prose prose-sm max-w-none text-ink-soft leading-relaxed whitespace-pre-line">
             {narrative.narrative}
           </div>
         ) : (
           <div className="text-sm text-ink-muted italic">
-            No narrative cached yet. Click Regenerate to produce one.
+            No overview text. Click Regenerate to produce one.
           </div>
         )
       )}
@@ -690,8 +700,8 @@ function NarrativeCard({
             disabled={narrState === 'loading'}
             title={
               hasFreshCache
-                ? 'This week is already cached — regenerating will still take ~30s+ to call the model fresh.'
-                : 'No cached narrative yet — first generation typically takes 30s+.'
+                ? 'Replace this saved report using the latest notes and actions. Requires a new model call (~30s+).'
+                : 'Generate and save this report. Typically takes 30s+.'
             }
             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md hover:bg-surface-sunken text-ink-soft hover:text-ink transition disabled:opacity-50"
           >

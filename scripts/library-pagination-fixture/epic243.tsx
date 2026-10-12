@@ -2,7 +2,8 @@ import React, { Profiler, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
 import { ToastHost } from '../../electron/renderer/src/components/Toasts';
-import type { WeeklyActionItem } from '../../electron/main/ipc/contracts';
+import type { WeeklyActionItem, WeeklySnapshot, WeeklyNarrative } from '../../electron/main/ipc/contracts';
+import { getIsoWeek, addWeeks, isoWeekRange } from '../../electron/shared/local-week';
 import type { MeetingDetail } from '../../electron/renderer/src/views/MeetingDetailView';
 const baseline = new URLSearchParams(location.search).has('baseline');
 const baselineModulePath = '../../electron/renderer/src/views/.epic243-baseline-transcript.tsx';
@@ -26,6 +27,10 @@ const fixture = {
   failNextTask: true,
   saved: 0,
   finishBackup:null as null|(()=>void),
+  finishWeekly: null as null | ((fail: boolean) => void),
+  weeklyGenerations: 0,
+  weeklyExports: [] as string[],
+  emptyLegacyReport: null as null | (() => void),
 };
 (window as unknown as { fixture: typeof fixture }).fixture = fixture;
 window.api = {
@@ -46,11 +51,61 @@ window.api = {
   },
 } as unknown as typeof window.api;
 window.api.backup={preview:async()=>({destination:'/synthetic/private-backup',bytes:1024,files:4,missing:[]}),status:async()=>({state:'working',completed:2,total:4,destination:'/synthetic/private-backup'}),run:async()=>{await new Promise<void>(resolve=>{fixture.finishBackup=resolve;});return{state:'complete',completed:4,total:4,destination:'/synthetic/private-backup'};}};
+const reportWeek = addWeeks(getIsoWeek(), -1);
+const reportRange = isoWeekRange(reportWeek.year, reportWeek.week);
+const savedSnapshot: WeeklySnapshot = {
+  isoYear: reportWeek.year, isoWeek: reportWeek.week,
+  rangeStart: reportRange.start.toISOString(), rangeEnd: reportRange.end.toISOString(),
+  totalDurationS: 60, inProgress: false,
+  meetings: [{ id: 'saved-meeting', title: 'Saved source meeting', startedAt: reportRange.start.toISOString(), durationS: 60, speakerCount: 2, highlight: 'Original recap' }],
+  openActionCount: 1,
+  openActionGroups: [{ ownerLabel: 'Original owner', isYou: false, items: [{
+    id: 'saved-task', meetingId: 'saved-meeting', meetingTitle: 'Saved source meeting',
+    text: 'Historical action', status: 'open', ownerLabel: 'Original owner', isYou: false,
+    dueDate: null, meetingStartedAt: reportRange.start.toISOString(),
+  }] }],
+};
+let weeklyReport: WeeklyNarrative = {
+  narrative: 'Permanent saved overview', themes: [{ title: 'Original theme', detail: 'Saved detail', meetings: ['Saved source meeting'] }],
+  decisions: ['Original decision'], generatedAt: reportRange.end.toISOString(), fromCache: true, snapshot: savedSnapshot,
+};
+fixture.emptyLegacyReport = () => {
+  weeklyReport = { ...weeklyReport, narrative: 'Legacy overview without source meetings',
+    snapshot: { ...savedSnapshot, meetings: [], totalDurationS: 0, openActionGroups: [],
+      openActionCount: 0, legacySnapshot: true, capturedAt: new Date().toISOString() } };
+};
+window.api.weekly = {
+  getStructured: async (year, week) => {
+    if (year === reportWeek.year && week === reportWeek.week) {
+      return { ...structuredClone(weeklyReport.snapshot!), savedAt: weeklyReport.generatedAt, hasFreshCache: true };
+    }
+    const range = isoWeekRange(year, week);
+    return { ...structuredClone(savedSnapshot), isoYear: year, isoWeek: week,
+      rangeStart: range.start.toISOString(), rangeEnd: range.end.toISOString(), inProgress: true, hasFreshCache: false };
+  },
+  getNarrative: async (_year, _week, force) => {
+    if (force) {
+      fixture.weeklyGenerations++;
+      await new Promise<void>((resolve, reject) => { fixture.finishWeekly = fail => fail ? reject(Error('Synthetic model offline')) : resolve(); });
+      weeklyReport = { narrative: 'Replacement saved overview', themes: [], decisions: ['Replacement decision'],
+        generatedAt: new Date().toISOString(), fromCache: false,
+        snapshot: { ...savedSnapshot, meetings: [{ ...savedSnapshot.meetings[0]!, title: 'Replacement source meeting' }], openActionGroups: [], openActionCount: 0 } };
+    }
+    return structuredClone(weeklyReport);
+  },
+  get: async () => { throw Error('Unused'); },
+  regenerate: async () => { throw Error('Unused'); },
+  exportMarkdown: async () => {
+    fixture.weeklyExports.push(weeklyReport.snapshot!.meetings[0]!.title);
+    return { markdown: weeklyReport.narrative, path: '/synthetic/weekly.md' };
+  },
+};
 const {TranscriptPanel}=await import('../../electron/renderer/src/views/MeetingTranscriptPanel');
 const {ModalShell}=await import('../../electron/renderer/src/components/ModalShell');
 const {ConfirmDialog}=await import('../../electron/renderer/src/components/ConfirmDialog');
 const {LibraryRow}=await import('../../electron/renderer/src/components/LibraryRow');
 const {WeeklyTaskRow}=await import('../../electron/renderer/src/components/WeeklyTaskRow');
+const {WeeklyView}=await import('../../electron/renderer/src/views/WeeklyView');
 const {LibraryBackupPanel}=await import('../../electron/renderer/src/components/LibraryBackupPanel');
 const Baseline=baseline?((await import(/* @vite-ignore */ baselineModulePath)) as {TranscriptPanel:typeof TranscriptPanel}).TranscriptPanel:TranscriptPanel;
 function Fixture(): JSX.Element {
@@ -103,7 +158,8 @@ function Fixture(): JSX.Element {
             <Baseline meeting={meeting} showRaw={false} currentTime={time} onSeek={setTime} />
           </Profiler>
         </div>
-      ) : mode==='backup'?<LibraryBackupPanel/>:mode === 'tasks' ? (
+      ) : mode === 'weekly' ? <WeeklyView onNav={() => {}} onOpenMeeting={() => fixture.opened++}/>
+      : mode==='backup'?<LibraryBackupPanel/>:mode === 'tasks' ? (
         <WeeklyTaskRow
           item={task}
           rangeEnd="2026-10-11"

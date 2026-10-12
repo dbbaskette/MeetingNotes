@@ -97,7 +97,7 @@ describe('WeeklyAggregator', () => {
     expect(generate).toHaveBeenCalledTimes(1); // cache hit
   });
 
-  it('regenerates when input hash changes (new meeting added)', async () => {
+  it('keeps the saved report after new meetings arrive until explicitly regenerated', async () => {
     const { meetings, actionItems, speakers, settings, weekly } = setupDb();
     insertMeeting(meetings, undefined as never, {
       id: 'm1', title: 'Q2 planning', startedAt: '2026-04-20T10:00:00.000Z',
@@ -118,12 +118,17 @@ describe('WeeklyAggregator', () => {
     const first = await agg.getWeek(2026, 17);
     expect(first.narrative).toBe('first');
 
-    // Add a second meeting in the same week. Hash changes → regenerate.
+    // A later meeting must not invalidate or change a generated report.
     insertMeeting(meetings, undefined as never, {
       id: 'm2', title: 'Vendor sync', startedAt: '2026-04-22T14:00:00.000Z',
     });
     const second = await agg.getWeek(2026, 17);
-    expect(second.narrative).toBe('second');
+    expect(second).toEqual(first);
+    expect(second.meetings).toHaveLength(1);
+    expect(generate).toHaveBeenCalledTimes(1);
+    const replaced = await agg.regenerateWeek(2026, 17);
+    expect(replaced.narrative).toBe('second');
+    expect(replaced.meetings).toHaveLength(2);
     expect(generate).toHaveBeenCalledTimes(2);
   });
 

@@ -48,6 +48,14 @@ export function renderWeeklyMarkdown(data: WeeklyData): string {
   );
   lines.push('');
 
+  if (data.generatedAt) {
+    lines.push(`*Saved report · generated ${data.generatedAt}. Actions reflect the saved snapshot, not current task status.*`);
+    if (data.legacySnapshot) {
+      lines.push(`*Older versions saved only the generated text; meeting and action sections were captured after upgrading${data.capturedAt ? ` (${data.capturedAt})` : ''}.*`);
+    }
+    lines.push('');
+  }
+
   // Narrative
   if (data.narrative) {
     lines.push('## Overview');
