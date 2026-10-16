@@ -210,6 +210,16 @@ export function normalizeAutoDetectMeetings(value: unknown): Settings['autoDetec
 export class SettingsRepo {
   constructor(private readonly db: Database.Database) {}
 
+  /** One-time startup choice. Never reinterpret an existing user's settings,
+   * roster/library, or explicitly saved provider as a fresh installation. */
+  initializeSpeechProvider(nativeSupported: boolean): void {
+    if (this.db.prepare("SELECT value FROM settings WHERE key = 'speechProvider'").get()) return;
+    const prior = this.db.prepare('SELECT COUNT(*) AS n FROM settings').get() as { n: number };
+    const meetings = this.db.prepare('SELECT COUNT(*) AS n FROM meetings').get() as { n: number };
+    const speakers = this.db.prepare('SELECT COUNT(*) AS n FROM speakers').get() as { n: number };
+    this.set('speechProvider', nativeSupported && prior.n === 0 && meetings.n === 0 && speakers.n === 0 ? 'native' : 'legacy');
+  }
+
   get<K extends Key>(key: K): Settings[K] {
     const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
     if (!r) return DEFAULT_SETTINGS[key];

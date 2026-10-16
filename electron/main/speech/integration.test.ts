@@ -40,6 +40,17 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
 const file = (name: string) => path.join(folder, name);
 const words = ['Keith', 'will', 'review', 'Salsa', 'compliance.'].map((text, i) => ({ start: i, end: i + 0.9, text }));
+it('defaults only genuinely fresh supported installations to native speech', () => {
+  // The fixture's preexisting meeting marks this as an upgrade, even with no
+  // settings rows. Removing it simulates a genuinely new installation.
+  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('legacy');
+  db.exec('DELETE FROM settings; DELETE FROM meetings');
+  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('native');
+  settings.initializeSpeechProvider(false); expect(settings.get('speechProvider')).toBe('native');
+  db.exec('DELETE FROM settings'); settings.set('sttUrl', 'http://localhost:9090');
+  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('legacy');
+  expect(settings.get('sttUrl')).toBe('http://localhost:9090');
+});
 it('uses native processing, human review, shared terminology, notes, tasks and export end to end', async () => {
   settings.set('speechProvider', 'native');
   const legacyId = roster.confirmSpeaker({ displayName: 'Keith', embedding: [0, 1] });

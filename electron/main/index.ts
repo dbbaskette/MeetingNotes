@@ -210,12 +210,7 @@ app.whenReady().then(async () => {
 
   const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
-  const savedSpeech = settingsDb.prepare("SELECT value FROM settings WHERE key = 'speechProvider'").get();
-  if (!savedSpeech) {
-    const prior = settingsDb.prepare('SELECT COUNT(*) AS n FROM settings').get() as { n: number };
-    const priorMeetings = settingsDb.prepare('SELECT COUNT(*) AS n FROM meetings').get() as { n: number };
-    settings.set('speechProvider', !smokeRoot && prior.n === 0 && priorMeetings.n === 0 && supportsNativeSpeech() ? 'native' : 'legacy');
-  }
+  settings.initializeSpeechProvider(!smokeRoot && supportsNativeSpeech());
   // Secrets are encrypted with the keychain and never sent to the renderer.
   // Values saved as plaintext by earlier versions are converted here (#249).
   const secrets = new SecretSettings(settings, safeStorage);
