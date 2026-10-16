@@ -87,7 +87,7 @@ export function SpeakersPanel({
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Speakers</div>
+        <div className="text-sm text-ink-muted font-semibold">Speakers</div>
         {meeting.speakers.length > 0 && (
           <div className="text-[10px] text-ink-muted tabular-nums">
             {meeting.speakers.filter((sp) => sp.rosterId).length}/{meeting.speakers.length} named
@@ -119,7 +119,7 @@ export function SpeakersPanel({
             <button
               disabled={!bulkRosterId || bulkBusy}
               onClick={() => void bulkAssign()}
-              className="text-xs font-semibold px-2.5 py-1 rounded-md bg-brand-indigo text-white disabled:opacity-40"
+              className="text-xs font-semibold px-2.5 py-1 rounded-md bg-brand-solid text-white disabled:opacity-40"
             >
               {bulkBusy ? 'Assigning…' : 'Assign'}
             </button>
@@ -395,7 +395,7 @@ function SpeakerEditor({
         <div className="flex items-center gap-2">
           <button
             onClick={() => audioRef.current?.play()}
-            className="shrink-0 w-7 h-7 rounded-full bg-brand-indigo text-white flex items-center justify-center hover:bg-brand-indigo/90 transition"
+            className="shrink-0 w-7 h-7 rounded-full bg-brand-solid text-white flex items-center justify-center hover:bg-brand-solid/90 transition"
             aria-label="Play sample"
           >
             <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor">
@@ -471,8 +471,8 @@ function SpeakerEditor({
           <button
             disabled={busy || newName.trim().length === 0}
             onClick={createNew}
-            className="text-xs font-semibold px-2.5 py-1 rounded-md bg-brand-indigo text-white
-                       disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-indigo/90 transition"
+            className="text-xs font-semibold px-2.5 py-1 rounded-md bg-brand-solid text-white
+                       disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-solid/90 transition"
           >
             Save
           </button>

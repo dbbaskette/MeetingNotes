@@ -30,6 +30,7 @@ export default {
         brand: {
           indigo: cssVar('brand-indigo'),
           violet: cssVar('brand-violet'),
+          solid: cssVar('brand-solid'),
           gradient: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
         },
         status: {

@@ -104,3 +104,11 @@ expanded groups, loaded pages and scroll position stay intact. It also covers
 a stale group page pending during rename, a rejected rename and Library-row
 rename. All meetings and bridge calls are synthetic; local-file audio loading
 is suppressed in this navigation-only fixture, so it makes no audio claim.
+
+The Golden Gate appearance fixture covers Library, detail (all tabs), Weekly,
+Settings and onboarding in light/dark and desktop/narrow layouts, group
+disclosure, navigation, shared dialogs and source-picker stacking. CDP emulates
+reduced transparency, contrast, motion and CSS keyboard-focus state in a hidden
+window. Existing keyboard/dialog fixtures test actual key handling. All API
+data is synthetic; capture/setup are explicitly forbidden. Forty-two token
+contrast checks cover reading, chrome, selection and filled-accent labels.

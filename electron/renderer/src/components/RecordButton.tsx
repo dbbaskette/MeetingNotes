@@ -72,7 +72,7 @@ export function RecordButton({
         onClick={() => { setFeedback(null); setPickerOpen(true); }}
         disabled={busy || recordingActive}
         title={recordingActive ? RECORDING_ACTIVE_MESSAGE : `Start recording (${shortcutMod()}+R)`}
-        className="rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-card bg-gradient-to-br from-brand-indigo to-brand-violet disabled:opacity-50 inline-flex items-center gap-2"
+        className="record-command rounded-xl px-5 py-2 text-sm font-semibold text-white shadow-card bg-gradient-to-br from-brand-indigo to-brand-violet disabled:opacity-50 inline-flex items-center gap-2"
       >
         {!busy && <Icon name="record" className="w-3 h-3" />}
         <span>{busy ? 'Starting…' : recordingActive ? 'Recording active' : 'Record'}</span>

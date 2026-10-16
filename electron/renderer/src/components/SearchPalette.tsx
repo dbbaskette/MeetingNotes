@@ -124,7 +124,7 @@ export function SearchPalette({
       <div
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKey}
-        className="w-full max-w-2xl bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden"
+        className="material-dialog w-full max-w-2xl bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden"
       >
         <div className="px-4 py-3 border-b border-surface-border flex items-center gap-3">
           <svg viewBox="0 0 24 24" className="w-4 h-4 text-ink-muted shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

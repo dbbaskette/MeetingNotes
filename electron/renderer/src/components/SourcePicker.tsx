@@ -68,7 +68,7 @@ export function SourcePicker({
   }
 
   return (
-    <div className="absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
+    <div className="material-popover absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
       <div className="flex items-center justify-between text-xs text-ink-muted px-2 py-1">
         <span>Recording from</span>
         <button type="button" disabled={loading} onClick={() => void refresh()}

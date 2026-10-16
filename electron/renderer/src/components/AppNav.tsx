@@ -26,7 +26,7 @@ export function AppNav({
   onNav: (target: NavTarget) => void;
 }): JSX.Element {
   return (
-    <nav className="flex items-center gap-1 text-sm" aria-label="Primary">
+    <nav className="primary-nav flex items-center gap-1 text-sm" aria-label="Primary">
       {TABS.map(({ target, label }) => {
         const isActive = target === active;
         return (

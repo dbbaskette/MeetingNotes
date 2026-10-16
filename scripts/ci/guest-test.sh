@@ -58,7 +58,7 @@ fi
 if [[ "$test_mode" == full ]]; then
 run_check browse-benchmark env MN_BENCH_REPO="$source_root" node --import tsx scripts/bench-browse.mjs
 else
-  export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology,processing,rename
+  export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology,processing,rename,appearance
 fi
 run_check renderer-fixtures env MN_BENCH_REPO="$source_root" MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
 run_check speech-beta-ui env ELECTRON_RUN_AS_NODE=1 MN_BETA_UI_RESULTS="$results_root/speech-beta-ui" ./node_modules/.bin/electron scripts/speech-benchmark/ui-smoke.mjs

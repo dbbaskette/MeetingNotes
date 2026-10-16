@@ -38,7 +38,7 @@ export function NativeSpeechPanel({ language, onReady }: {
       <p className="text-xs text-ink-muted">Initial setup downloads Apple-managed language assets and about 11 MB of verified speaker models. Meetings are never uploaded. Summaries still use your configured LLM.</p>
       <p className="text-xs text-ink-muted">Confirm voices in a new native meeting to build native profiles. Suggestions are similarities to review, not automatic identifications or confidence percentages.</p>
       <div className="flex items-center gap-3">
-        <button disabled={changing || status?.busy || !status?.supported} onClick={() => void prepare()} className="px-3 py-2 rounded-lg bg-brand-indigo text-white disabled:opacity-40">Prepare native speech</button>
+        <button disabled={changing || status?.busy || !status?.supported} onClick={() => void prepare()} className="px-3 py-2 rounded-lg bg-brand-solid text-white disabled:opacity-40">Prepare native speech</button>
         {(changing || status?.busy) && <button className="underline" onClick={() => void api.nativeSpeech.cancel().catch(e => setError(String(e)))}>Cancel setup</button>}
       </div>
       {status?.busy && <div role="status"><p>{status.phase}</p><progress className="w-full" max={1} value={status.progress} /></div>}

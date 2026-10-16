@@ -19,7 +19,7 @@ function StatusPip({ status }: { status: StepStatus }): JSX.Element {
   const cls =
     status === 'ok' ? 'bg-status-ok'
       : status === 'warn' ? 'bg-status-warn'
-        : status === 'checking' ? 'bg-brand-indigo animate-pulse'
+        : status === 'checking' ? 'bg-brand-solid animate-pulse'
           : 'bg-surface-border';
   return <span className={`inline-block w-2 h-2 rounded-full ${cls}`} aria-label={status} />;
 }
@@ -43,8 +43,8 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
   const done = idx === STEPS.length - 1;
 
   return (
-    <div className="max-w-xl mx-auto my-10 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
-      <div className="px-6 py-4 border-b border-surface-border flex items-center gap-3">
+    <div className="onboarding-view max-w-xl mx-auto my-10 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
+      <div className="app-chrome detail-chrome px-6 py-4 border-b border-surface-border flex items-center gap-3">
         <div
           className="w-6 h-6 rounded-md"
           style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
@@ -77,7 +77,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
           {STEPS.map((k, i) => (
             <div key={k} className="flex-1 flex items-center gap-1">
               <div
-                className={`h-1 flex-1 rounded-full ${i <= idx ? 'bg-brand-indigo' : 'bg-surface-border'}`}
+                className={`h-1 flex-1 rounded-full ${i <= idx ? 'bg-brand-solid' : 'bg-surface-border'}`}
               />
               <StatusPip status={stepStatus[k]} />
             </div>
@@ -157,7 +157,7 @@ function PermissionsStep({ onStatus }: { onStatus: (s: StepStatus) => void }): J
               <div className="flex gap-2">
                 <button
                   onClick={async () => { await api.permissions.requestMic(); await refresh(); }}
-                  className="text-xs font-semibold bg-brand-indigo text-white px-3 py-1 rounded-md"
+                  className="text-xs font-semibold bg-brand-solid text-white px-3 py-1 rounded-md"
                 >
                   Request
                 </button>

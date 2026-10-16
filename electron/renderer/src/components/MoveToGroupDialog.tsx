@@ -163,7 +163,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
           <button type="button" disabled={busy} onClick={() => { setCreating(false); setError(null); }}
             className="px-3 py-1.5 text-sm text-ink-muted disabled:opacity-50">Back to groups</button>
           <button type="submit" disabled={busy || moveIds.length === 0 || !loaded || !!groupsError || !name.trim()}
-            className="rounded-lg bg-brand-indigo px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
+            className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
             {busy ? 'Creating and moving…' : `Create and move ${countLabel}`}
           </button>
         </div>
@@ -187,7 +187,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
             className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 disabled:opacity-50
               ${destination?.id === option.id ? 'border-brand-indigo bg-brand-indigo/10 text-brand-indigo' : 'border-transparent hover:border-surface-border hover:bg-surface-sunken'}`}>
             <span aria-hidden="true" className={`h-4 w-4 shrink-0 rounded-full border flex items-center justify-center ${destination?.id === option.id ? 'border-brand-indigo' : 'border-ink-muted/50'}`}>
-              {destination?.id === option.id && <span className="h-2 w-2 rounded-full bg-brand-indigo" />}
+              {destination?.id === option.id && <span className="h-2 w-2 rounded-full bg-brand-solid" />}
             </span>
             <span className="min-w-0 flex-1 truncate font-medium" title={option.name}>{option.name}</span>
           </button>)}
@@ -207,7 +207,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
           <button type="button" disabled={busy || moveIds.length === 0 || !loaded || !!groupsError || !destination || alreadyThere || destinationMissing}
             onClick={() => void confirmMove()}
             aria-label={destination ? `Move ${countLabel} to ${destination.name}` : 'Choose a destination before moving'}
-            className="min-w-0 max-w-[65%] rounded-lg bg-brand-indigo px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
+            className="min-w-0 max-w-[65%] rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
             <span className="block truncate">{busy ? 'Moving…' : destination ? `Move to ${destination.name}` : 'Choose a group'}</span>
           </button>
         </div>

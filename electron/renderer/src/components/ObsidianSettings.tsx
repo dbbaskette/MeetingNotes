@@ -139,7 +139,7 @@ export function ObsidianSettings(): JSX.Element {
             e.preventDefault();
             close();
           }}
-          className="m-auto w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
+          className="material-dialog m-auto w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
         >
           <header className="flex shrink-0 justify-between items-center border-b border-surface-border p-5">
             <h2 id="obsidian-title" className="font-semibold">

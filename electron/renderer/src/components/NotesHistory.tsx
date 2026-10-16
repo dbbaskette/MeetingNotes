@@ -18,7 +18,7 @@ export function NotesHistory({ meetingId, disabled, onRestored }: {meetingId: st
   function close(): void { if (busy) return; modal.current?.close(); setOpen(false); setComparison(null); trigger.current?.focus(); }
   return <>
     <button ref={trigger} className={`${button} self-start`} disabled={disabled} onClick={() => { setOpen(true); void perform(async () => setVersions(await api.notesHistory.list(meetingId))); }}>Notes &amp; action-item history…</button>
-    {open && <dialog ref={modal} onCancel={e => {e.preventDefault(); close();}} className="w-[min(calc(100%-2rem),64rem)] max-h-[85vh] rounded-xl bg-surface text-ink p-6 backdrop:bg-black/40">
+    {open && <dialog ref={modal} onCancel={e => {e.preventDefault(); close();}} className="material-dialog w-[min(calc(100%-2rem),64rem)] max-h-[85vh] rounded-xl bg-surface text-ink p-6 backdrop:bg-black/40">
       <div className="flex justify-between items-center gap-4 mb-4"><h2 className="text-lg font-semibold">Previous notes &amp; action items</h2><button className={button} disabled={busy} onClick={close}>Close</button></div>
       <p className="text-xs text-ink-muted mb-4">The latest 20 versions are kept automatically before edits, regeneration, re-extraction, and restore. Restoring also preserves the current version.</p>
       {error && <p role="alert" className="text-sm text-danger mb-3">{error}</p>}

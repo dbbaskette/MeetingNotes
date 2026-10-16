@@ -88,7 +88,7 @@ export const LibraryRow = memo(function LibraryRow({
   const togglesOnClick = !!onToggle && !opensProgress && (isPending || !!selectionActive);
   const edge =
     status === 'failed' ? 'before:bg-danger-solid' :
-    status === 'processing' ? 'before:bg-brand-indigo' :
+    status === 'processing' ? 'before:bg-brand-solid' :
     status === 'awaiting_user' ? 'before:bg-status-warn' :
     'before:bg-transparent';
 
@@ -112,6 +112,7 @@ export const LibraryRow = memo(function LibraryRow({
   return (
     <div
       role="button"
+      data-selected={!!checked}
       tabIndex={0}
       aria-label={`${togglesOnClick ? checked ? 'Deselect' : 'Select' : 'Open'} ${meeting.title}`}
       onKeyDown={e => {
@@ -120,7 +121,7 @@ export const LibraryRow = memo(function LibraryRow({
       }}
       onClick={handleRowClick}
       className={`
-        group relative ${bg} border border-surface-border rounded-xl
+        meeting-row group relative ${bg} border border-surface-border rounded-xl
         min-h-[64px] px-4 py-3 flex items-center gap-4 cursor-pointer transition
         hover:border-brand-indigo/60 hover:shadow-pop
         before:content-[''] before:absolute before:left-0 before:top-2 before:bottom-2
@@ -137,7 +138,7 @@ export const LibraryRow = memo(function LibraryRow({
           className={`
             w-[18px] h-[18px] rounded-[5px] border-2 shrink-0 flex items-center justify-center transition
             ${checked
-              ? 'bg-brand-indigo border-brand-indigo text-white'
+              ? 'bg-brand-solid border-brand-indigo text-white'
               : 'border-ink/20 bg-surface group-hover:border-ink/40'}
             ${isPending || checked || selectionActive
               ? 'opacity-100'

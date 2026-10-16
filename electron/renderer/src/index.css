@@ -8,59 +8,67 @@
    and just resolves to a different RGB triple. Values are space-separated
    RGB so Tailwind's `<alpha-value>` opacity modifiers keep working.
 
-   `ink-muted` was bumped from #78716c (~3.5:1 on surface, sub-AA) to
-   #57534e (~5.0:1) so muted body text clears WCAG AA. */
+   Reading surfaces stay opaque; only explicitly named chrome uses diffusion.
+   Muted text and the filled accent have AA contrast in both appearances. */
 :root {
-  --ink: 28 25 23;
-  --ink-soft: 68 64 60;
-  --ink-muted: 87 83 78;
+  --ink: 35 49 67;
+  --ink-soft: 62 79 100;
+  --ink-muted: 83 98 118;
 
   --surface: 255 255 255;
-  --surface-sunken: 250 250 249;
-  --surface-border: 231 229 228;
+  --surface-sunken: 237 241 245;
+  --surface-border: 198 209 223;
+  --content: 248 250 252;
+  --chrome: 229 236 245;
+  --selection: 224 231 242;
+  --material-highlight: 255 255 255;
+  --material-shadow: 36 52 76;
 
   --danger: 220 38 38;
   --danger-bg: 254 226 226;
   --danger-text: 185 28 28;
   --danger-border: 254 202 202;
   --danger-solid: 220 38 38;
-  --skeleton: 231 229 228;
+  --skeleton: 215 224 235;
 
-  --brand-indigo: 99 102 241;
-  --brand-violet: 139 92 246;
+  --brand-indigo: 91 83 204;
+  --brand-violet: 110 66 190;
+  --brand-solid: 91 83 204;
 
-  --status-ok: 22 163 74;
+  --status-ok: 21 128 61;
   --status-ok-bg: 220 252 231;
   --status-warn: 245 158 11;
   --status-warn-bg: 254 243 199;
   --status-warn-text: 146 64 14;
-  --status-processing: 99 102 241;
+  --status-processing: 91 83 204;
   --status-processing-bg: 224 231 255;
 }
 
-/* ── Color palette (dark) ─────────────────────────────────────────────────
-   Mid-grey background instead of pitch black so the photographic banner
-   image and the gradient brand mark still ship cleanly. Status colors
-   are tuned brighter so amber/rose/green stay legible against the dark
-   surface. */
+/* Independent dark materials, not translucent light-mode content. */
 .dark {
-  --ink: 245 245 244;
-  --ink-soft: 214 211 209;
-  --ink-muted: 168 162 158;
+  --ink: 239 243 250;
+  --ink-soft: 207 218 234;
+  --ink-muted: 168 185 207;
 
-  --surface: 33 31 30;
-  --surface-sunken: 23 22 21;
-  --surface-border: 56 53 51;
+  --surface: 30 40 55;
+  --surface-sunken: 19 27 39;
+  --surface-border: 71 89 113;
+  --content: 24 33 46;
+  --chrome: 38 51 69;
+  --selection: 49 65 89;
+  --material-highlight: 161 185 220;
+  --material-shadow: 0 0 0;
 
   --danger: 248 113 113;
   --danger-bg: 58 20 23;
   --danger-text: 253 164 176;
   --danger-border: 90 35 40;
   --danger-solid: 225 29 72;
-  --skeleton: 45 43 41;
+  --skeleton: 48 63 83;
 
-  --brand-indigo: 129 140 248;
+  --brand-indigo: 177 184 255;
   --brand-violet: 167 139 250;
+  --brand-solid: 91 83 204;
 
   --status-ok: 74 222 128;
   --status-ok-bg: 6 78 59;
@@ -90,6 +98,96 @@ body {
 
 .input {
   @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
+  box-shadow: inset 0 1px 2px rgb(var(--material-shadow) / 0.04);
+}
+
+/* Golden Gate-inspired CSS material. No native window-glass claim or
+   window-compositor dependency. Keep filters off scrolling content/rows. */
+.app-view { background: rgb(var(--content)); }
+.app-chrome, .material-popover, .detail-tabs, .settings-navigation {
+  background: rgb(var(--chrome));
+  box-shadow: inset 0 1px 0 rgb(var(--material-highlight) / 0.6);
+}
+.app-chrome {
+  position: relative;
+  z-index: 20;
+  border-bottom: 1px solid rgb(var(--surface-border));
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.app-view > .app-chrome {
+  margin-top: -2rem; padding-top: 2rem;
+  margin-inline: -1rem; padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .app-view > .app-chrome { margin-inline: -1.5rem; padding-inline: 1.5rem; }
+}
+@media (min-width: 1024px) {
+  .app-view > .app-chrome { margin-inline: -2rem; padding-inline: 2rem; }
+}
+.onboarding-view { border-radius: 8px; box-shadow: 0 6px 24px rgb(var(--material-shadow) / 0.08); }
+.primary-nav { padding: 3px; border-radius: 10px; background: rgb(var(--surface) / 0.45); }
+.primary-nav button[aria-current='page'], .segmented-control button[aria-pressed='true'],
+.settings-navigation button[aria-pressed='true'] {
+  color: rgb(var(--ink));
+  background: rgb(var(--surface));
+  box-shadow: 0 1px 3px rgb(var(--material-shadow) / 0.14), inset 0 1px 0 rgb(var(--material-highlight) / 0.5);
+}
+.segmented-control { background: rgb(var(--chrome)); }
+.record-command {
+  background: linear-gradient(145deg, rgb(var(--brand-solid)), #7042be);
+  border: 1px solid rgb(255 255 255 / 0.3);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 2px 5px rgb(var(--brand-solid) / 0.2);
+}
+.library-content { padding-top: 0.25rem; }
+.library-heading, .report-heading, .settings-view .settings-section-title {
+  font-family: inherit; font-size: 0.875rem; font-weight: 600;
+  letter-spacing: normal; text-transform: none;
+}
+.library-search { background: rgb(var(--surface)); box-shadow: inset 0 1px 2px rgb(var(--material-shadow) / 0.06); }
+.library-group > .group-heading { border-radius: 8px; }
+.library-group[data-expanded='true'] > .group-heading { background: rgb(var(--selection)); }
+.library-group > .group-heading:hover { background: rgb(var(--selection) / 0.65); }
+.library-group .group-meetings { border-color: rgb(var(--surface-border)); }
+.meeting-row { border-radius: 8px; box-shadow: none; }
+.meeting-row:hover { box-shadow: none; background: rgb(var(--selection) / 0.55); }
+.meeting-row[data-selected='true'] { background: rgb(var(--selection)); }
+.report-section { border-radius: 8px; box-shadow: none; }
+.detail-view {
+  margin-top: 2rem; margin-bottom: 0; height: calc(100% - 2rem);
+  border-radius: 0; box-shadow: none;
+}
+.detail-chrome { margin-bottom: 0; padding-bottom: 0.75rem; }
+.detail-tabs button { font-family: inherit; letter-spacing: normal; text-transform: capitalize; font-size: 0.8125rem; }
+.detail-inspector { background: rgb(var(--surface-sunken)); border-left: 1px solid rgb(var(--surface-border)); }
+.audio-chrome { background: rgb(var(--chrome)); }
+.settings-view { background: rgb(var(--content)); border-inline: 1px solid rgb(var(--surface-border)); }
+.settings-view .app-chrome { margin-bottom: 0; }
+.settings-content { background: rgb(var(--content)); }
+.material-dialog { border: 1px solid rgb(var(--surface-border)); box-shadow: 0 16px 52px rgb(var(--material-shadow) / 0.22); }
+.material-popover { border-color: rgb(var(--surface-border)); }
+
+@supports (backdrop-filter: blur(12px)) {
+  .app-chrome, .material-popover {
+    background: rgb(var(--chrome) / 0.92);
+    backdrop-filter: blur(12px) saturate(1.12);
+  }
+}
+/* The base opaque fill also works where these media preferences aren't
+   exposed by Chromium. No per-row blur or decorative animation is used. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .app-chrome, .material-popover, .audio-chrome, .detail-tabs, .settings-navigation {
+    background: rgb(var(--chrome)); backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .meeting-row, .material-dialog, .material-popover, .primary-nav, .segmented-control {
+    border: 1px solid rgb(var(--ink-muted));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
 
 /* Frameless window (titleBarStyle: 'hiddenInset') has no OS chrome for the
@@ -111,15 +209,9 @@ button, a, input, select, textarea {
 
 /* ── Focus-visible default ────────────────────────────────────────────────
    Every interactive element gets a visible keyboard focus ring without
-   per-component churn. Components that need a custom ring color or
-   offset can override locally. */
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[role='button']:focus-visible,
-[tabindex]:focus-visible {
+   per-component churn. The root specificity beats legacy focus:outline-none
+   utilities, which otherwise suppress the keyboard ring on search inputs. */
+:root :is(button, a, input, select, textarea, [role='button'], [tabindex]):focus-visible {
   outline: 2px solid rgb(var(--brand-indigo));
   outline-offset: 2px;
   border-radius: 4px;

@@ -158,9 +158,9 @@ export function SettingsView({
   }
 
   return (
-    <div className="h-full flex flex-col max-w-2xl mx-auto w-full">
+    <div className="settings-view h-full flex flex-col max-w-2xl mx-auto w-full">
       <ConfirmDialog open={leaveOpen} title="Leave Settings with unsaved changes?" body="Some changes have not been saved. Stay to finish saving or correct any errors." confirmLabel="Leave Settings" onCancel={() => {leaveResolver.current?.(false); leaveResolver.current = null; setLeaveOpen(false);}} onConfirm={() => {leaveResolver.current?.(true); leaveResolver.current = null; setLeaveOpen(false);}}/>
-      <header className="shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
+      <header className="app-chrome shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
         <AppNav active="settings" onNav={onNav} />
         {/* Visually redundant with the active nav tab, kept for the
             accessibility tree / screen-reader page title. */}
@@ -423,7 +423,7 @@ export function SettingsView({
       </Field>
 
       <section className="border-t border-surface-border pt-5">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Speakers</div>
+        <div className="settings-section-title text-ink-muted font-semibold mb-2">Speakers</div>
         <div className="text-xs text-ink-muted mb-3">
           Everyone you&rsquo;ve identified across meetings. Rename fixes a
           misspelling everywhere; merge collapses duplicates (&ldquo;Dan&rdquo; /
@@ -451,7 +451,7 @@ export function SettingsView({
       </SettingsSection>
       <SettingsSection section="Recording" keywords="quality AAC bitrate audio capture meeting auto detect browser native Zoom permissions microphone">
       <section className="border-t border-surface-border pt-5">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Recording quality</div>
+        <div className="settings-section-title text-ink-muted font-semibold mb-2">Recording quality</div>
         <label className="block">
           <div className="text-sm text-ink mb-1">AAC bitrate</div>
           <select
@@ -470,7 +470,7 @@ export function SettingsView({
       </section>
 
       <section className="border-t border-surface-border pt-5">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Meeting auto-detect</div>
+        <div className="settings-section-title text-ink-muted font-semibold mb-2">Meeting auto-detect</div>
         <label className="flex items-start gap-3 cursor-pointer">
           <input
             type="checkbox"
@@ -555,7 +555,7 @@ export function SettingsView({
       </SettingsSection>
       <SettingsSection section="Recording" keywords="menu bar tray status icon global shortcut hotkey keyboard start stop">
       <section className="border-t border-surface-border pt-5 space-y-3">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold">Menu bar and shortcut</div>
+        <div className="settings-section-title text-ink-muted font-semibold">Menu bar and shortcut</div>
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" checked={s.showMenuBarIcon ?? true} onChange={e => void update('showMenuBarIcon', e.target.checked)} />
           <span>Show MeetingNotes in the menu bar
@@ -580,7 +580,7 @@ export function SettingsView({
       <SettingsSection section="Recording" keywords="permissions microphone system audio privacy security">
       <section className="border-t border-surface-border pt-5">
         <div className="flex items-center gap-2 mb-2">
-          <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">Permissions</div>
+          <div className="settings-section-title text-ink-muted font-semibold flex-1">Permissions</div>
           <button
             onClick={recheckPerms}
             className="text-xs font-semibold text-brand-indigo hover:underline"
@@ -655,7 +655,7 @@ function DiagnosticsSection(): JSX.Element {
   return (
     <section className="border-t border-surface-border pt-5 space-y-3">
       <div className="flex items-center gap-2">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex-1">
+        <div className="settings-section-title text-ink-muted font-semibold flex-1">
           Diagnostics
         </div>
         <button
@@ -956,7 +956,7 @@ function GoogleAccountCard({
 
   return (
     <section className="border-t border-surface-border pt-5">
-      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Google account</div>
+      <div className="settings-section-title text-ink-muted font-semibold mb-2">Google account</div>
       <p className="text-xs text-ink-muted mb-3">
         Connect a Google account to export action items to <strong>Google Tasks</strong> and meetings to a <strong>Google Doc</strong>.
       </p>
@@ -1000,7 +1000,7 @@ function GoogleAccountCard({
             <button
               onClick={() => void signIn()}
               disabled={!hasCreds || busy}
-              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              className="text-sm font-semibold bg-brand-solid text-white px-4 py-1.5 rounded-lg hover:bg-brand-solid/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
               title={hasCreds ? undefined : 'Enter your Client ID and Secret first'}
             >
               {busy ? 'Connecting…' : 'Sign in with Google'}
@@ -1067,7 +1067,7 @@ function WebhookExporterCard({
 
   return (
     <section className="border-t border-surface-border pt-5">
-      <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-2">Webhook exporter</div>
+      <div className="settings-section-title text-ink-muted font-semibold mb-2">Webhook exporter</div>
       <label className="flex items-start gap-3 cursor-pointer mb-3">
         <input
           type="checkbox"

@@ -524,9 +524,9 @@ export function LibraryView({
     // pt-8 (32px) at every width: the frameless window's drag strip covers the
     // top 28px, so smaller paddings put the header buttons under it and clicks
     // near their top edge dragged the window instead.
-    <div className="relative h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
+    <div className="app-view relative h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
-      <header className="shrink-0 flex items-center gap-4 mb-8">
+      <header className="app-chrome shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
@@ -604,9 +604,9 @@ export function LibraryView({
       {/* ── LIBRARY (unified list) ──────────────────────────────────────── */}
       {/* Keep the toolbar in the same flow as the inbox and rows so even a
           short / zoomed window can reach every control without nested scrolling. */}
-      <section className="flex flex-col">
+      <section className="library-content flex flex-col">
         <div className="shrink-0 flex flex-wrap items-center gap-3 mb-3">
-          <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+          <h2 className="library-heading text-ink-muted">
             Library
           </h2>
           <button type="button" onClick={() => setNewBaseline(acknowledgeArrivals())} className="text-xs text-ink-muted hover:text-brand-indigo">Mark new as seen</button>
@@ -614,11 +614,11 @@ export function LibraryView({
             <button type="button" onClick={() => changeGroup(undefined)}
               className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">‹ All groups</button>
             <span className="min-w-0 truncate text-sm font-semibold" title={scopeName}>{scopeName}</span>
-          </> : <div role="group" aria-label="Library view" className="inline-flex rounded-lg border border-surface-border bg-surface p-0.5">
+          </> : <div role="group" aria-label="Library view" className="segmented-control inline-flex rounded-lg border border-surface-border bg-surface p-0.5">
             <button type="button" aria-pressed={viewMode === 'organized'} onClick={() => changeViewMode('organized')}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'organized' ? 'bg-brand-indigo text-white' : 'text-ink-muted hover:text-ink'}`}>Organized</button>
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'organized' ? 'bg-brand-solid text-white' : 'text-ink-muted hover:text-ink'}`}>Organized</button>
             <button type="button" aria-pressed={viewMode === 'flat'} onClick={() => changeViewMode('flat')}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'flat' ? 'bg-brand-indigo text-white' : 'text-ink-muted hover:text-ink'}`}>All meetings</button>
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'flat' ? 'bg-brand-solid text-white' : 'text-ink-muted hover:text-ink'}`}>All meetings</button>
           </div>}
           <span className="text-[11px] text-ink-muted">
             {libCounts.all} {libCounts.all === 1 ? 'meeting' : 'meetings'}
@@ -629,7 +629,7 @@ export function LibraryView({
             <button type="button" aria-label={`Options for ${activeGroup.name}`} aria-haspopup="menu" aria-expanded={groupOptionsOpen}
               onClick={() => setGroupOptionsOpen((open) => !open)}
               className="w-8 h-8 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">⋯</button>
-            {groupOptionsOpen && <div role="menu" className="absolute right-0 top-full mt-1 z-50 w-40 bg-surface rounded-lg border border-surface-border shadow-pop p-1">
+            {groupOptionsOpen && <div role="menu" className="material-popover absolute right-0 top-full mt-1 z-50 w-40 bg-surface rounded-lg border border-surface-border shadow-pop p-1">
               <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('rename'); setGroupError(null); }}
                 className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken">Rename group…</button>
               <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('delete'); setGroupError(null); }}
@@ -669,7 +669,7 @@ export function LibraryView({
             onClick={() => setLibFilter('processing')}
             label="Processing"
             n={libCounts.processing}
-            dotClass={libCounts.processing > 0 ? 'bg-brand-indigo animate-pulse' : 'bg-brand-indigo'}
+            dotClass={libCounts.processing > 0 ? 'bg-brand-solid animate-pulse' : 'bg-brand-solid'}
           />
           <FilterChip
             active={libFilter === 'done'}
@@ -710,7 +710,7 @@ export function LibraryView({
               value={query}
               maxLength={500}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
+              className="library-search w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
                          focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
             />
             {isSearching && searchPending ? (
@@ -1020,7 +1020,7 @@ function GroupNameDialog({ mode, name, error, busy, onClose, onSave }: {
       {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-ink-muted">Cancel</button>
-        <button disabled={busy || !value.trim()} className="rounded-lg bg-brand-indigo px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
+        <button disabled={busy || !value.trim()} className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
           {busy ? 'Saving…' : mode === 'create' ? 'Create group' : 'Save name'}
         </button>
       </div>
@@ -1272,7 +1272,7 @@ function QueueBanner({
     : 'bg-brand-indigo/5 border-brand-indigo/30 text-ink';
   const dotTone = status.paused
     ? 'bg-status-warn'
-    : 'bg-brand-indigo animate-pulse';
+    : 'bg-brand-solid animate-pulse';
 
   return (
     <div className={`mb-4 rounded-xl border px-4 py-3 flex items-center gap-3 ${tone}`}>
@@ -1384,7 +1384,7 @@ function SelectionBar({
               onClick={onProcess}
               disabled={busy}
               title="Starts processing the pending recordings in the selection"
-              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5"
+              className="text-sm font-semibold bg-brand-solid text-white px-4 py-1.5 rounded-lg hover:bg-brand-solid/90 transition inline-flex items-center gap-1.5"
             >
               <Icon name="play" className="w-3.5 h-3.5" />
               {pendingCount === null ? 'Check & process' : `Process (${pendingCount})`}

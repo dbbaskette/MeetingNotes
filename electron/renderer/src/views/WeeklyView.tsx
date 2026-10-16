@@ -219,10 +219,10 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
   return (
     // pt-8 at every width keeps the header clear of the 28px window drag strip
     // (see LibraryView) so its buttons stay clickable edge to edge.
-    <div className="h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
+    <div className="app-view h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
       {/* Header — pinned via shrink-0; only the content region below scrolls,
           matching the Library page's top bar. */}
-      <header className="shrink-0 flex items-center gap-4 mb-8">
+      <header className="app-chrome shrink-0 flex items-center gap-4 mb-8">
         <div className="flex items-center gap-2.5">
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
@@ -276,7 +276,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
         <button
           onClick={onExport}
           disabled={structState !== 'ready' || !structured || (!structured.savedAt && structured.meetings.length === 0)}
-          className="px-3 py-1.5 rounded-md bg-ink text-white text-sm font-medium hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+          className="px-3 py-1.5 rounded-md bg-ink text-surface text-sm font-medium hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
         >
           Export
           <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -344,7 +344,7 @@ function WeeklyBody({
     <>
       <div className="mb-6">
         <div className="flex items-baseline gap-3 mb-2">
-          <h2 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+          <h2 className="report-heading text-ink-muted">
             {fmtRange(data.rangeStart, data.rangeEnd, data.isoYear)}
           </h2>
           {data.inProgress && (
@@ -367,7 +367,7 @@ function WeeklyBody({
       </div>
 
       {empty && (
-        <div className="bg-surface rounded-xl shadow-card border border-surface-border p-10 text-center">
+        <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-10 text-center">
           <div className="text-ink-soft mb-1">No meetings captured this week.</div>
           <div className="text-xs text-ink-muted">
             Record a meeting and it&apos;ll show up here once processing finishes.
@@ -399,7 +399,7 @@ function WeeklyBody({
           {narrative && narrative.themes.length > 0 && (
             <section className="mb-10">
               <div className="flex items-baseline gap-3 mb-3">
-                <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+                <h3 className="report-heading text-ink-muted">
                   Themes
                 </h3>
                 <span className="text-[11px] text-ink-muted">
@@ -410,7 +410,7 @@ function WeeklyBody({
                 {narrative.themes.map((t, ti) => (
                   <div
                     key={ti}
-                    className="bg-surface rounded-xl shadow-card border border-surface-border p-5"
+                    className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-5"
                   >
                     <div className="font-semibold text-ink mb-1.5">{t.title}</div>
                     <div className="text-sm text-ink-soft leading-relaxed">{t.detail}</div>
@@ -448,12 +448,12 @@ function WeeklyBody({
           {/* Meetings */}
           <section className="mb-10">
             <div className="flex items-baseline gap-3 mb-3">
-              <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+              <h3 className="report-heading text-ink-muted">
                 Meetings
               </h3>
               <span className="text-[11px] text-ink-muted">{data.meetings.length} this week</span>
             </div>
-            <div className="bg-surface rounded-xl shadow-card border border-surface-border divide-y divide-surface-border overflow-hidden">
+            <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border divide-y divide-surface-border overflow-hidden">
               {data.meetings.map((m) => (
                 <button
                   key={m.id}
@@ -492,7 +492,7 @@ function WeeklyBody({
           {data.openActionGroups.length > 0 && (
             <section className="mb-10">
               <div className="flex items-baseline gap-3 mb-3">
-                <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+                <h3 className="report-heading text-ink-muted">
                   {data.savedAt ? 'Open actions in saved report' : 'Open action items'}
                 </h3>
                 <span className="text-[11px] text-ink-muted">
@@ -554,18 +554,18 @@ function WeeklyBody({
           {narrative != null && narrative.decisions.length > 0 && (
             <section className="mb-10">
               <div className="flex items-baseline gap-3 mb-3">
-                <h3 className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+                <h3 className="report-heading text-ink-muted">
                   Key decisions
                 </h3>
                 <span className="text-[11px] text-ink-muted">
                   {narrative.decisions.length} this week
                 </span>
               </div>
-              <div className="bg-surface rounded-xl shadow-card border border-surface-border p-6">
+              <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-6">
                 <ul className="space-y-3 text-sm text-ink-soft">
                   {narrative.decisions.map((d, i) => (
                     <li key={i} className="flex items-start gap-3">
-                      <div className="w-1 h-1 rounded-full bg-brand-indigo mt-2 shrink-0" />
+                      <div className="w-1 h-1 rounded-full bg-brand-solid mt-2 shrink-0" />
                       <div>{d}</div>
                     </li>
                   ))}
@@ -609,16 +609,16 @@ function NarrativeCard({
 }: NarrativeCardProps): JSX.Element {
   const elapsedSec = Math.floor(narrElapsedMs / 1000);
   return (
-    <div className="bg-surface rounded-xl shadow-card border border-surface-border p-6">
+    <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-6">
       <div className="flex items-center gap-2 mb-4">
         <div className="w-1.5 h-1.5 rounded-full"
           style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }} />
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted">
+        <div className="report-heading text-ink-muted">
           Overview
         </div>
         {!inProgress && narrState === 'loading' && (
           <span className="text-[11px] text-ink-muted ml-2 inline-flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-indigo animate-pulse" />
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-solid animate-pulse" />
             {narrative ? 'updating saved report' : `drafting from ${meetingCount} meeting${meetingCount === 1 ? '' : 's'}`}
             {elapsedSec >= 1 && <span className="font-mono">· {elapsedSec}s</span>}
           </span>

@@ -20,17 +20,17 @@ export function SettingsNavigation({ children }: { children: ReactNode }): JSX.E
   const matches = Children.toArray(children).filter(child => isValidElement<{section: string; keywords: string}>(child)
     && `${child.props.section} ${child.props.keywords}`.toLowerCase().includes(normalized)).length;
   return <>
-    <div className="shrink-0 px-8 py-3 space-y-3 border-b border-surface-border">
+    <div className="settings-navigation shrink-0 px-8 py-3 space-y-3 border-b border-surface-border">
       <input className="input w-full" type="search" aria-label="Search settings" placeholder="Find a setting…" value={query} onChange={e => setQuery(e.target.value)}/>
       <nav aria-label="Settings sections" className="flex flex-wrap gap-1">
         {sections.map(name => <button key={name} type="button" aria-pressed={!query && section === name}
-          className={`rounded-md px-2 py-1 text-xs font-semibold ${!query && section === name ? 'bg-brand-indigo text-white' : 'text-ink-muted hover:bg-surface-sunken'}`}
+          className={`rounded-md px-2 py-1 text-xs font-semibold ${!query && section === name ? 'bg-brand-solid text-white' : 'text-ink-muted hover:bg-surface-sunken'}`}
           onClick={() => { setSection(name); setQuery(''); }}>{name}</button>)}
       </nav>
       {normalized && <p role="status" className="text-xs text-ink-muted">{matches ? 'Showing matching sections, including advanced settings.' : 'No matching settings. Try audio, summary, vault, or storage.'}</p>}
     </div>
     <visibility.Provider value={{section, query: normalized}}>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
+      <div className="settings-content flex-1 min-h-0 overflow-y-auto px-8 py-6 space-y-5">
         {!query && <h2 className="text-lg font-semibold">{section}</h2>}{children}
       </div>
     </visibility.Provider>

@@ -8,13 +8,19 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.16.0-brightgreen)](docs/releases/v1.16.0.md)
+[![Version](https://img.shields.io/badge/version-1.17.0-brightgreen)](docs/releases/v1.17.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
 </div>
 
 ![A finished meeting: notes in the centre, speakers and export on the right, audio player below](docs/screenshots/summary.png)
+
+## A clearer, calmer interface
+
+1.17 applies the Golden Gate-inspired design across Library, meeting details, Weekly, Settings and setup: cool layered surfaces, restrained diffused navigation/menus, flatter expandable groups and readable opaque notes. Light and dark themes share clear selection and keyboard focus, with reduced-effects fallbacks. This is a CSS interpretation, not native OS Liquid Glass. Existing workflows and library data are unchanged; no speech assets need to be prepared again if they are already ready.
+
+The reusable, stack-neutral [Golden Gate design skill](macos-goldengate-skill/SKILL.md) is included for web, Electron and native projects. See the [1.17 release notes](docs/releases/v1.17.0.md) and [updated Settings](docs/screenshots/settings.png).
 
 ## What you get
 
@@ -31,7 +37,7 @@
 
 | Library | Naming voices |
 | :---: | :---: |
-| ![Library with the Needs attention panel above grouped meetings](docs/screenshots/library.png) | ![A meeting paused for speaker review](docs/screenshots/speaker-id.png) |
+| ![Library with expanded meeting groups and clear selection surfaces](docs/screenshots/library.png) | ![A meeting paused for speaker review](docs/screenshots/speaker-id.png) |
 | **Recording** | **Weekly** |
 | ![A recording in progress with level meter and Stop](docs/screenshots/recording.png) | ![The Weekly view](docs/screenshots/weekly.png) |
 
