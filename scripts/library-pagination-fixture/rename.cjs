@@ -6,7 +6,9 @@ process.on('exit', () => fs.rmSync(profile, { recursive: true, force: true }));
 const base = process.env.MN_LIBRARY_FIXTURE_URL;
 assert(base?.startsWith('http://127.0.0.1:'));
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1440, height: 1000,
+  // Fit the clean VM's display too: macOS can constrain an oversized hidden
+  // window when its detail input takes focus, changing the scroll geometry.
+  const win = new BrowserWindow({ show: false, width: 900, height: 700,
     webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   const errors = [];
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) errors.push(message); });
@@ -59,10 +61,12 @@ app.whenReady().then(async () => {
   await run(`(() => { const scroll = ${scroller}; scroll.scrollTop += ${planning}.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 300; })()`);
   await settleLayout();
   const before = await run(`${scroller}.scrollTop`);
+  const viewport = await run('({ width: innerWidth, height: innerHeight })');
   await open('Synthetic meeting 205');
   await inlineRename('Updated grouped meeting'); await click('← Back');
   await until(`!!${row('Updated grouped meeting')}`);
   await settleLayout();
+  assert.deepEqual(await run('({ width: innerWidth, height: innerHeight })'), viewport, 'Navigation does not resize the fixture viewport');
   assert.equal(await run(`${scroller}.scrollTop`), before, 'Return preserves scroll');
   assert.equal(await run('document.querySelectorAll("section [aria-expanded=true]").length'), 1, 'Return preserves expansion');
   assert.ok(await run(`${planning}.textContent.includes('Load more (100 of 200)')`), 'Return preserves loaded pages');
