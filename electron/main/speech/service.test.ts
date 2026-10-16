@@ -41,3 +41,11 @@ supported('rejects malformed timestamps and incompatible embedding models', asyn
   request.mockResolvedValue({ result: { segments: [], centroids: {}, num_speakers: 0, provider: 'speakerkit', modelRevision: SPEAKER_REVISION, embeddingSpace: 'another-space' }, elapsedMs: 0 });
   await expect(service.diarize('/fixture/audio.m4a')).rejects.toThrow('incompatible');
 });
+supported('does not show an old locale as ready after a failed language check', async () => {
+  const request = vi.spyOn(SpeechClient.prototype, 'request').mockResolvedValue({ result: { available: true, installed: true }, elapsedMs: 1 });
+  const service = new NativeSpeechService('/usr/bin/true', '/fixture/models');
+  expect((await service.status('en')).appleReady).toBe(true);
+  request.mockRejectedValue(new Error('Unsupported locale'));
+  const changed = await service.status('unsupported');
+  expect(changed.appleReady).toBe(false); expect(changed.error).toContain('Unsupported locale');
+});

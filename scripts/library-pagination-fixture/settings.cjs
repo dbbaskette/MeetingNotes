@@ -69,6 +69,7 @@ app.whenReady().then(async () => {
   assert.equal(await run('window.fixture.saves.at(-1).value'),'native');
   assert(await run('document.body.innerText.includes("No Whisper download")'));
   assert.equal(await run('Array.from(document.querySelectorAll("summary")).some(s=>s.textContent==="Whisper model management")'),false);
+  assert.equal(await run('document.body.innerText.includes("STT URL (whisper.cpp server)")'),false);
   await click('Prepare native speech'); await until('!!document.querySelector("progress")');
   await click('Cancel setup'); await until('document.body.innerText.includes("Setup cancelled")');
   assert.equal(await run('window.fixture.downloads.length'),0,'Native setup never downloads Whisper');

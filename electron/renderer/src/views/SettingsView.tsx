@@ -379,7 +379,7 @@ export function SettingsView({
         </div>
       </Field>
       </SettingsSection>
-      <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
+      {s.speechProvider !== 'native' && <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
       <Field label="STT URL (whisper.cpp server)">
         <div className="flex gap-2">
           <input
@@ -405,7 +405,7 @@ export function SettingsView({
           Managed model name or absolute custom model file path. Download models in Processing → Whisper model management. External STT uses its own model configuration. Restart MeetingNotes after changing this value; active processing must finish first.
         </div>
       </Field>
-      </SettingsSection>
+      </SettingsSection>}
       <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
       <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
@@ -423,6 +423,7 @@ export function SettingsView({
           onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
+        {s.speechProvider === 'native' && <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing.</p>}
       </Field>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">

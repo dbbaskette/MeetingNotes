@@ -33,7 +33,7 @@ export class NativeSpeechService {
         this.state.appleReady = health.available && health.installed;
         this.state.error = health.available ? this.setupError : 'Apple transcription is unavailable for this language on this Mac.';
         this.state.speakerReady = modelsReady(this.modelFolder);
-      } catch (e) { this.state.error = String(e); }
+      } catch (e) { this.state.appleReady = false; this.state.error = String(e); }
     }
     return this.snapshot();
   }
@@ -42,7 +42,7 @@ export class NativeSpeechService {
     if (this.provisioning) throw new Error('Speech setup is already running.');
     const controller = new AbortController(); this.provisioning = controller;
     this.setupError = null;
-    this.state = { ...this.state, busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0 };
+    this.state = { ...this.state, appleReady: false, busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0 };
     try {
       await this.client.request('provision-apple', { locale: appleLocale(language) },
         { signal: controller.signal, progress: fraction => { this.state.progress = fraction; } });
