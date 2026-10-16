@@ -51,7 +51,37 @@ typing in the new contrast-test helper. A test-only follow-up uses RGB tuples
 and explicit missing-token checks. Both renderer/fixture type checks, all 42
 contrast tests, lint and docs then passed locally. No product source changed.
 The failed clone was deleted; logs remain under the standard MeetingNotes
-results directory. A full rerun is in progress; final results follow here.
+results directory.
+
+The next run `meetingnotes-test-20261016212535-65991-6621d455` hit the previously
+documented unchanged `LibraryWatcher` five-second timeout (1,361 tests passed).
+The isolated watcher suite passed 10/10 in 2.08 seconds on the host; its product
+and test files have no diff from main. This supports intermittency, not a proven
+root cause. No watcher behavior, assertions, timeouts or CI gate were changed.
+That clone was also deleted.
+
+**Final full run: PASS**, `meetingnotes-test-20261016212835-67705-bf9ca7ee`.
+Tested commit `19f2b124b4570a1dee62e42e6d4a8fa70cd8e6b5`, tree
+`b07abe7f02ef2b55a7d3e9de9de2a85735353798`. Actual guest: macOS 27.0 (26A428),
+arm64, Node 22.23.2, npm 10.9.8, Electron 44.7.0.
+
+- Clean dependency installation/Electron-native rebuild; **1,362 tests passed,
+  six skipped**, 158 test files passed/two skipped.
+- Complete capture-helper synthetic writer/microphone-timing harness.
+- Renderer, fixture and main type checks, production build, docs and repository
+  zero-warning lint.
+- Browse benchmark; all **12 UI fixture modes**, including appearance,
+  populated Library/scroll/zoom, processing, naming, selection/group moves,
+  terminology, Settings/history and rename navigation; beta comparison UI.
+- Runner wrote PASS, exited zero, deleted its owned clone and posted
+  `tart-ci=success`. No task-owned VM remains. Base and unrelated VMs were not
+  changed. No installer payload was staged or installer VM acceptance run.
+
+Logs/screenshots remain at
+`~/Library/Logs/MacOS Test Suite/meetingnotes/<run-name>/` for all three runs.
+Final documentation/screenshot-only updates reuse this unchanged tested product
+and test tree; docs/link checks run separately before merge. The installer
+product remains byte-identical to the tested app source.
 
 ## Acceptance boundaries
 
@@ -59,3 +89,6 @@ results directory. A full rerun is in progress; final results follow here.
 - CSS material is not native OS glass; opaque/reduced-effects behavior is tested.
 - Existing virtualization and scroll owners are preserved.
 - No installer VM acceptance, actual capture or inference is requested/claimed.
+- Dependency versions are unchanged; npm reports the existing 38 audit findings
+  (one low, 12 moderate, 22 high, three critical). No automatic dependency upgrade
+  or audit remediation is claimed in this visual release.
