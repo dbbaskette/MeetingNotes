@@ -39,7 +39,8 @@ import {
 } from '../pipeline/clear-artifacts.js';
 import {
   extractSpeakerSample,
-  averageEmbeddingForLabel,
+  embeddingForLabel,
+  type DiarizationArtifact,
   type DiarizationSegment,
 } from '../speakers/sample-extractor.js';
 import { moveToTrash, restoreFromTrash, purgeTrashDir, TRASH_RETENTION_MS } from '../storage/trash.js';
@@ -69,8 +70,10 @@ import type { TerminologyService } from '../terminology/service.js';
 import { registerTerminologyHandlers } from './terminology-handlers.js';
 import type { NotesHistory } from '../storage/notes-history.js';
 import type {LibraryBackup} from '../storage/library-backup.js';
+import type { NativeSpeechService } from '../speech/service.js';
 
 export interface IpcServices {
+  nativeSpeech?: NativeSpeechService;
   backup?: LibraryBackup;
   notesHistory?: NotesHistory;
   terminology?: TerminologyService;
@@ -712,7 +715,12 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {
     const parsed = ConfirmSpeakerSchema.parse(input);
-    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding: parsed.embedding });
+    const meeting = s.meetings.findById(parsed.meetingId);
+    if (!meeting) throw new Error('meeting not found');
+    const file = path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'diarization.json');
+    const diar = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as DiarizationArtifact : null;
+    const embedding = diar?.embeddingSpace ? embeddingForLabel(diar, parsed.localLabel) : parsed.embedding;
+    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding }, diar?.embeddingSpace);
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     return id;
   });
@@ -803,11 +811,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       const diarPath = path.join(folder, 'diarization.json');
       if (fs.existsSync(diarPath)) {
         try {
-          const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as {
-            segments: DiarizationSegment[];
-          };
-          const embedding = averageEmbeddingForLabel(diar.segments, parsed.localLabel);
-          if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+          const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
+          const embedding = embeddingForLabel(diar, parsed.localLabel);
+          if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diar.embeddingSpace);
         } catch { /* roster update is best-effort; don't fail the link */ }
       }
       s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, parsed.rosterId, 1.0);
@@ -821,10 +827,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const diarPath = path.join(folder, 'diarization.json');
     if (!fs.existsSync(diarPath)) throw new Error('diarization not available yet');
-    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as { segments: DiarizationSegment[] };
-    const embedding = averageEmbeddingForLabel(diar.segments, parsed.localLabel);
-    if (!embedding) throw new Error(`no embeddings for ${parsed.localLabel}`);
-    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding });
+    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
+    const embedding = embeddingForLabel(diar, parsed.localLabel);
+    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding }, diar.embeddingSpace);
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     remergeMeetings([parsed.meetingId]);
     return id;
@@ -845,12 +850,11 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const links = listMeetingSpeakers(s.speakers, parsed.meetingId);
     const [metadata, diarFile] = await Promise.all([
       speakerReviewForFolder(folder, links, s.artifactCache),
-      s.artifactCache.readJson<{ segments?: DiarizationSegment[] }>(path.join(folder, 'diarization.json')),
+      s.artifactCache.readJson<DiarizationArtifact>(path.join(folder, 'diarization.json')),
     ]);
-    const diarization = diarFile?.segments ?? [];
     for (const localLabel of labels) {
-      const embedding = averageEmbeddingForLabel(diarization, localLabel);
-      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding);
+      const embedding = diarFile ? embeddingForLabel(diarFile, localLabel) : null;
+      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diarFile?.embeddingSpace);
       s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
     }
     remergeMeetings([parsed.meetingId]);
@@ -867,10 +871,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const diarPath = path.join(folder, 'diarization.json');
     if (!fs.existsSync(diarPath)) return [];
-    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as { segments: DiarizationSegment[] };
-    const embedding = averageEmbeddingForLabel(diar.segments, localLabel);
+    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
+    const embedding = embeddingForLabel(diar, localLabel);
     if (!embedding) return [];
-    return s.roster.suggestionsFor({ label: localLabel, embedding });
+    return s.roster.suggestionsFor({ label: localLabel, embedding }, 3, diar.embeddingSpace);
   });
 
   ipc.handle(IPC_CHANNELS.speakersUnlink, (_e, meetingId: unknown, localLabel: unknown) => {

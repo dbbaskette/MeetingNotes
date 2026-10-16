@@ -8,6 +8,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { WhisperStep } from './OnboardingView';
+import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
 import { SetupHealth } from '../components/SetupHealth';
 import { Icon } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
@@ -18,6 +19,7 @@ import { formatLogTimestamp } from '../lib/log-timestamp.js';
 import { effectiveLlmUrl as providerUrl, isIdleProbe, resolveWhisperEndpoint } from '../../../shared/inference-endpoints.js';
 
 interface Settings {
+  speechProvider: 'native' | 'legacy';
   lmStudioUrl: string;
   sttUrl: string;
   sttModel: string;
@@ -185,11 +187,14 @@ export function SettingsView({
       </div>
       <SetupHealth />
       <SettingsNavigation>
-      <SettingsSection section="Processing" keywords="Whisper models download transcription STT setup">
+      <SettingsSection section="Processing" keywords="Apple SpeakerKit native speech language transcription STT setup">
+        <NativeSpeechPanel provider={s.speechProvider ?? 'legacy'} language={s.sttLanguage} onProvider={speechProvider => setS(previous => previous ? {...previous, speechProvider} : previous)} />
+      </SettingsSection>
+      {s.speechProvider !== 'native' && <SettingsSection section="Processing" keywords="Whisper models download transcription STT setup">
         <details><summary className="cursor-pointer text-sm font-semibold">Whisper model management</summary>
           <div className="mt-3"><WhisperStep activeModel={s.sttModel} onStatus={() => {}} onUse={model => update('sttModel', model)} /></div>
         </details>
-      </SettingsSection>
+      </SettingsSection>}
       <SettingsSection section="Processing" keywords="automatic auto process recordings queue">
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" checked={s.autoProcessRecordings ?? false} onChange={e => void update('autoProcessRecordings', e.target.checked)} />
@@ -374,7 +379,7 @@ export function SettingsView({
         </div>
       </Field>
       </SettingsSection>
-      <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
+      {s.speechProvider !== 'native' && <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
       <Field label="STT URL (whisper.cpp server)">
         <div className="flex gap-2">
           <input
@@ -400,7 +405,7 @@ export function SettingsView({
           Managed model name or absolute custom model file path. Download models in Processing → Whisper model management. External STT uses its own model configuration. Restart MeetingNotes after changing this value; active processing must finish first.
         </div>
       </Field>
-      </SettingsSection>
+      </SettingsSection>}
       <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
       <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
@@ -418,6 +423,7 @@ export function SettingsView({
           onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
+        {s.speechProvider === 'native' && <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing.</p>}
       </Field>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">
@@ -797,6 +803,11 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
  *  buttons resolve the real (possibly relocated) paths in the main process. */
 function StoragePanel(): JSX.Element {
   const rows: { key: string; label: string; path: string; note: string }[] = [
+    {
+      key: 'nativeModels', label: 'Native speaker models',
+      path: '~/Library/Application Support/MeetingNotes/speech-models',
+      note: 'Verified SpeakerKit models. Apple language assets are managed separately by macOS.',
+    },
     {
       key: 'models',
       label: 'Models',

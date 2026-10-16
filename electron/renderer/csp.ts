@@ -17,7 +17,7 @@ export const CSP_DIRECTIVES: Record<string, string[]> = {
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:'],
   'font-src': ["'self'", 'data:'],
-  'media-src': ["'self'", 'file:', 'data:', 'blob:', 'recovery-audio:'],
+  'media-src': ["'self'", 'file:', 'data:', 'blob:', 'recovery-audio:', 'beta-audio:'],
   'connect-src': ["'self'", 'https://huggingface.co'],
   'object-src': ["'none'"],
   'base-uri': ["'none'"],

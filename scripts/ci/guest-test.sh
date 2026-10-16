@@ -61,6 +61,7 @@ else
   export MN_FIXTURE_MODES=rows,selection,grouped,startup,settings,sources,capture,epic243,terminology,processing,rename
 fi
 run_check renderer-fixtures env MN_BENCH_REPO="$source_root" MN_FIXTURE_FOCUS=1 MN_FIXTURE_RESULTS="$results_root" node scripts/library-pagination-fixture.mjs
+run_check speech-beta-ui env ELECTRON_RUN_AS_NODE=1 MN_BETA_UI_RESULTS="$results_root/speech-beta-ui" ./node_modules/.bin/electron scripts/speech-benchmark/ui-smoke.mjs
 # An optional task-owned package payload allows the same clean-Mac runner to
 # verify the actual packaged main/preload/renderer and bundled inference. It
 # is never fetched from a release or installed into /Applications.

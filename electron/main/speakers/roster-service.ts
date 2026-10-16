@@ -1,11 +1,12 @@
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
 import { embeddingFilePath, writeEmbedding, readEmbedding } from './embeddings.js';
 import { matchSpeakers, rankCandidates, updateRunningAverage, type DetectedSpeaker, type Match } from './matcher.js';
+import { VoiceProfiles, normalized } from './voice-profiles.js';
 
 export class RosterService {
   constructor(private readonly repo: SpeakersRepo, private readonly libraryRoot: string) {}
 
-  confirmSpeaker(input: { displayName: string; embedding: number[]; notes?: string }): string {
+  confirmSpeaker(input: { displayName: string; embedding: number[] | null; notes?: string }, space?: string): string {
     // If the user types a name that already exists on the roster (modulo
     // whitespace + case), reuse that entry and merge this observation into
     // its embedding rather than creating a duplicate row. Prevents the
@@ -13,17 +14,22 @@ export class RosterService {
     // up across many meetings.
     const existing = this.repo.findByDisplayName(input.displayName);
     if (existing) {
-      this.confirmSpeakerFor(existing.id, input.embedding);
+      if (input.embedding) this.confirmSpeakerFor(existing.id, input.embedding, space);
       return existing.id;
     }
     const id = this.repo.create({ displayName: input.displayName, notes: input.notes });
-    writeEmbedding(embeddingFilePath(this.libraryRoot, id), input.embedding);
+    if (input.embedding) this.confirmSpeakerFor(id, input.embedding, space);
     return id;
   }
 
-  confirmSpeakerFor(id: string, observed: number[]): void {
-    const old = this.loadEmbedding(id);
-    const updated = updateRunningAverage(old, observed);
+  confirmSpeakerFor(id: string, observed: number[], space?: string): void {
+    // Renderer-supplied IDs must resolve to an actual roster entry before
+    // creating either a hashed native profile or a legacy embedding file.
+    if (!this.repo.findById(id)) throw new Error('Roster speaker not found');
+    if (!normalized(observed)) return;
+    if (space) { new VoiceProfiles(this.libraryRoot).confirm(space, id, observed); return; }
+    const old = this.safeLoad(id);
+    const updated = old ? updateRunningAverage(old, observed) : observed;
     writeEmbedding(embeddingFilePath(this.libraryRoot, id), updated);
   }
 
@@ -31,7 +37,9 @@ export class RosterService {
     return readEmbedding(embeddingFilePath(this.libraryRoot, id));
   }
 
-  identifyUnknowns(detected: readonly DetectedSpeaker[]): Match[] {
+  identifyUnknowns(detected: readonly DetectedSpeaker[], space?: string): Match[] {
+    // Native scores are not yet calibrated; candidates require confirmation.
+    if (space) return detected.map(s => ({ label: s.label, rosterId: null, confidence: null }));
     const rosterEntries = this.repo.list()
       .map((s) => ({ id: s.id, embedding: this.safeLoad(s.id) }))
       .filter((r): r is { id: string; embedding: number[] } => r.embedding !== null);
@@ -42,8 +50,10 @@ export class RosterService {
    *  used by the Speakers panel so the user can confirm a guess instead of
    *  typing a name from scratch. Unlike identifyUnknowns, this has no
    *  MATCH_THRESHOLD gate: it's for a human to eyeball, not to auto-link. */
-  suggestionsFor(detected: DetectedSpeaker, topN = 3): { id: string; displayName: string; confidence: number }[] {
+  suggestionsFor(detected: DetectedSpeaker, topN = 3, space?: string): { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[] {
     const roster = this.repo.list();
+    if (space) return new VoiceProfiles(this.libraryRoot).suggestions(space, detected.embedding, roster)
+      .slice(0, topN).map(s => ({ id: s.id, displayName: s.displayName, confidence: s.similarity, scoreKind: 'similarity' }));
     const nameById = new Map(roster.map((r) => [r.id, r.displayName]));
     const candidates = roster
       .map((r) => ({ id: r.id, embedding: this.safeLoad(r.id) }))
@@ -56,6 +66,6 @@ export class RosterService {
   }
 
   private safeLoad(id: string): number[] | null {
-    try { return this.loadEmbedding(id); } catch { return null; }
+    try { const vector = this.loadEmbedding(id); return normalized(vector) ? vector : null; } catch { return null; }
   }
 }

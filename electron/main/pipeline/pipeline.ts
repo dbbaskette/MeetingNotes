@@ -8,6 +8,7 @@ import { transcriptChars } from './transcript-chars.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { buildSpeakerReviewMetadata } from '../speakers/review-metadata.js';
 import type { DiarizationSegment } from '../speakers/sample-extractor.js';
+import { selectSpeech } from '../speech/selection.js';
 
 const LINEAR_STAGES = STAGES.slice(
   STAGES.indexOf('merging'),
@@ -212,16 +213,20 @@ export class Pipeline {
     }
 
     let stage = m.pipelineStage as Stage;
+    const ctx = { ...this.deps.ctx };
 
     // Parallel block: transcribing + diarizing. Treat any of these as a single
     // entry point so a rerun-from-transcribing still produces diarization.
     if (stage === 'discovered' || stage === 'transcribing' || stage === 'diarizing') {
+      if (ctx.nativeSpeech) ctx.speechSelection = selectSpeech(meetingFolderPath(ctx.libraryRoot, m.slug), ctx.settings);
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
       this.notifyMeeting(meetingId);
-      await Promise.all([
-        this.timeStage('transcribing', input, m.slug),
-        this.timeStage('diarizing', input, m.slug),
+      const parallel = await Promise.allSettled([
+        this.timeStage('transcribing', input, m.slug, ctx),
+        this.timeStage('diarizing', input, m.slug, ctx),
       ]);
+      const failed = parallel.find(result => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
       stage = 'merging';
     }
 
@@ -302,9 +307,9 @@ export class Pipeline {
    *  bucketed by the meeting's transcript size. Timing must never break a real
    *  run: a failing stage records nothing (its time isn't representative), and
    *  a failing telemetry write is logged and swallowed. */
-  private async timeStage(stage: WorkStage, input: StageInput, slug: string): Promise<void> {
+  private async timeStage(stage: WorkStage, input: StageInput, slug: string, ctx = this.deps.ctx): Promise<void> {
     const start = performance.now();
-    await this.deps.stages[stage](input, this.deps.ctx);
+    await this.deps.stages[stage](input, ctx);
     const durationMs = performance.now() - start;
     try {
       const bucket = bucketForChars(transcriptChars(this.deps.ctx.libraryRoot, slug));

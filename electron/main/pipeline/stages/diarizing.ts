@@ -4,11 +4,23 @@ import path from 'node:path';
 import type { StageHandler } from '../context.js';
 import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { ensureWav } from '../../lib/ensure-wav.js';
+import { atomicJson } from '../../speakers/voice-profiles.js';
 
 export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
+  if (ctx.speechSelection?.provider === 'native') {
+    if (!ctx.nativeSpeech) throw new Error('Native speech helper is not configured.');
+    const result = await ctx.nativeSpeech.diarize(meeting.audioPath);
+    atomicJson(path.join(folder, 'diarization.json'), result);
+    atomicJson(path.join(folder, 'diarization.meta.json'), { num_speakers: result.num_speakers });
+    // Labels belong to this run, never to the same numeric label in an old run.
+    ctx.speakers.unlinkMeeting(meetingId);
+    ctx.artifactCache.invalidate(path.join(folder, 'diarization.json'));
+    ctx.logger.info('diarize:done', { meetingId, provider: 'speakerkit', speakers: result.num_speakers });
+    return;
+  }
   // Diarize the mixed file. Previously this was the system stem when stems
   // existed (cleaner input for pyannote, faster on long meetings), but
   // that only worked when transcription ALSO ran on stems — otherwise the

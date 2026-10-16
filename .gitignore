@@ -38,3 +38,9 @@ brag-output*/
 
 # Phase 0 research scratch — not committed
 research/
+speech-engine/.build/
+speech-engine/build/
+speech-engine/.swiftpm/
+speech-benchmark-results/
+scripts/speech-benchmark/parakeet/.build/
+scripts/speech-benchmark/parakeet/.swiftpm/

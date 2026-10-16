@@ -17,13 +17,14 @@ import { api } from '../ipc/client';
 import { type StepStatus, statusFromProbe } from '../lib/setup-wizard';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { Icon } from '../components/icons';
+import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
+import type { SpeechProvider } from '../../../shared/native-speech';
 
 interface Props {
   onFinished: () => void;
 }
 
-type StepKey = 'permissions' | 'whisper' | 'hf' | 'llm' | 'stt';
-const STEPS: StepKey[] = ['permissions', 'whisper', 'hf', 'llm', 'stt'];
+type StepKey = 'permissions' | 'native' | 'whisper' | 'hf' | 'llm' | 'stt';
 
 /** Small colored pip a step reports up so the stepper bar reflects
  *  pending / checking / ok / warn without each step owning its own chrome. */
@@ -38,9 +39,13 @@ function StatusPip({ status }: { status: StepStatus }): JSX.Element {
 
 export function OnboardingView({ onFinished }: Props): JSX.Element {
   const [idx, setIdx] = useState(0);
+  const [provider, setProvider] = useState<SpeechProvider>('legacy');
+  const [language, setLanguage] = useState('en');
+  useEffect(() => { void api.settings.getAll().then(s => { setProvider(s.speechProvider ?? 'legacy'); setLanguage(s.sttLanguage); }); }, []);
+  const STEPS: StepKey[] = provider === 'native' ? ['permissions', 'native', 'llm'] : ['permissions', 'whisper', 'hf', 'llm', 'stt'];
   const step = STEPS[idx]!;
   const [stepStatus, setStepStatus] = useState<Record<StepKey, StepStatus>>({
-    permissions: 'pending', whisper: 'pending', hf: 'pending', llm: 'pending', stt: 'pending',
+    permissions: 'pending', native: 'pending', whisper: 'pending', hf: 'pending', llm: 'pending', stt: 'pending',
   });
   const setStatus = (k: StepKey, s: StepStatus): void =>
     setStepStatus((prev) => ({ ...prev, [k]: s }));
@@ -66,6 +71,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
       </div>
 
       <div className="p-6 min-h-[260px]">
+        {(step === 'native' || step === 'whisper') && <div className="mb-5"><NativeSpeechPanel provider={provider} language={language} onProvider={value => { setProvider(value); setIdx(1); }} onReady={ready => setStatus('native', ready ? 'ok' : 'warn')} /></div>}
         {step === 'permissions' && <PermissionsStep onStatus={(s) => setStatus('permissions', s)} />}
         {step === 'whisper' && <WhisperStep onStatus={(s) => setStatus('whisper', s)} />}
         {step === 'hf' && <HfStep onStatus={(s) => setStatus('hf', s)} />}

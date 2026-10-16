@@ -20,6 +20,7 @@ export function clearArtifactsFromStage(folder: string, fromStage: string, artif
   const files = STAGE_ARTIFACTS[fromStage];
   if (!files) return;
   artifactCache.invalidateFolder(folder);
+  if (fromStage === 'transcribing' || fromStage === 'diarizing') fs.rmSync(path.join(folder, 'processing-speech.json'), { force: true });
   for (const name of files) {
     const p = path.join(folder, name);
     try {

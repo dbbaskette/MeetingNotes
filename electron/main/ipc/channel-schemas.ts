@@ -179,6 +179,9 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
 
   // Settings, onboarding, terminology
   [C.settingsGet]: none,
+  [C.nativeSpeechStatus]: none,
+  [C.nativeSpeechPrepare]: none,
+  [C.nativeSpeechCancel]: none,
   [C.settingsSet]: z.tuple([z.string().min(1).max(100), handlerValidated]),
   [C.settingsChooseFolder]: none,
   [C.settingsRevealStorage]: z.tuple([z.string().min(1).max(100)]),

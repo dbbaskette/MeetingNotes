@@ -1,0 +1,38 @@
+appId: com.dbbaskette.meetingnotes.beta
+productName: MeetingNotes Beta
+artifactName: MeetingNotes-Beta-${version}-${arch}.${ext}
+extraMetadata:
+  main: dist/electron/main/beta/index.js
+  version: 1.15.0-beta.1
+directories:
+  output: release/beta
+files:
+  - dist/**
+  - package.json
+asarUnpack:
+  - node_modules/better-sqlite3/build/Release/**
+extraResources:
+  - from: speech-engine/.build/release/meeting-notes-speech
+    to: bin/meeting-notes-speech
+  - from: docs/speech-beta-notices.md
+    to: speech-beta-notices.md
+  - from: speech-engine/.build/checkouts/argmax-oss-swift/LICENSE
+    to: licenses/Argmax-LICENSE
+  - from: speech-engine/.build/checkouts/argmax-oss-swift/NOTICES
+    to: licenses/Argmax-NOTICES
+mac:
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  minimumSystemVersion: '26.0.0'
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  extendInfo:
+    CFBundleDisplayName: MeetingNotes Beta
+    NSSpeechRecognitionUsageDescription: MeetingNotes Beta transcribes selected copied meeting recordings locally.
+compression: maximum

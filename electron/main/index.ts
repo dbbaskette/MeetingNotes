@@ -9,6 +9,7 @@ import { SummaryTemplateStore } from './storage/summary-template-store.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
+import { NativeSpeechService, nativeModelFolder, supportsNativeSpeech } from './speech/service.js';
 import { fileURLToPath } from 'node:url';
 import { recoveryMediaHandler } from './recording/recovery-media.js';
 
@@ -209,6 +210,7 @@ app.whenReady().then(async () => {
 
   const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
+  settings.initializeSpeechProvider(!smokeRoot && supportsNativeSpeech());
   // Secrets are encrypted with the keychain and never sent to the renderer.
   // Values saved as plaintext by earlier versions are converted here (#249).
   const secrets = new SecretSettings(settings, safeStorage);
@@ -396,8 +398,12 @@ app.whenReady().then(async () => {
   }
 
   const roster = new RosterService(speakers, libraryRoot);
+  const nativeSpeech = new NativeSpeechService(app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'meeting-notes-speech')
+    : path.join(app.getAppPath(), 'speech-engine', '.build', 'release', 'meeting-notes-speech'), nativeModelFolder());
 
   const ctx = {
+    nativeSpeech,
     summaryTemplateFor: (meetingId: string) => summaryTemplates.effectiveFor(meetingId),
     notesHistory,
     terminology,
@@ -840,6 +846,7 @@ app.whenReady().then(async () => {
     pause:()=>{const paused=pipeline.getStatus().paused;pipeline.pause();return()=>{if(!paused)pipeline.resume();};},
   });
   registerIpcHandlers(guardedIpc, {
+    nativeSpeech,
     secrets,
     summaryTemplates,
     ...(smokeRoot ? {} : { menuBar, recordShortcut }),
@@ -895,6 +902,7 @@ app.whenReady().then(async () => {
     shuttingDown = true;
     e.preventDefault();
     pipeline.drain();
+    nativeSpeech.close();
     obsidian.stop();
     void (async () => {
       // Stop any active recordings cleanly so finalize is written, instead of

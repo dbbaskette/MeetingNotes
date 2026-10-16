@@ -1,6 +1,8 @@
 import { VOICE_SPEAKER_LABEL } from './stem-paths.js';
 
 export interface WhisperSegment {
+  /** Native word timing is retained raw, grouped into readable turns on render. */
+  wordTiming?: boolean;
   start: number;
   end: number;
   text: string;
@@ -50,6 +52,19 @@ export function mergeTranscriptWithDiarization(
       }
     }
     out[whisperIndex] = { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
+  }
+  return whisper.every(s => s.wordTiming) ? readableTurns(out) : out;
+}
+
+export function readableTurns(segments: readonly MergedSegment[]): MergedSegment[] {
+  const out: MergedSegment[] = [];
+  for (const segment of segments) {
+    const last = out[out.length - 1];
+    if (last && last.speaker === segment.speaker && segment.start >= last.start
+      && segment.start - last.end <= 0.75 && segment.end - last.start <= 12) {
+      const separator = /^[,.;:!?]/.test(segment.text.trimStart()) ? '' : ' ';
+      last.text = last.text.trimEnd() + separator + segment.text.trimStart(); last.end = Math.max(last.end, segment.end);
+    } else out.push({ ...segment });
   }
   return out;
 }

@@ -16,6 +16,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ffmpegPath } from '../lib/find-ffmpeg.js';
+import { normalized } from './voice-profiles.js';
 
 const pExecFile = promisify(execFile);
 
@@ -27,6 +28,16 @@ export interface DiarizationSegment {
 }
 
 const MAX_CLIP_S = 8;
+export interface DiarizationArtifact {
+  segments: DiarizationSegment[];
+  centroids?: Record<string, number[]>;
+  embeddingSpace?: string;
+}
+export function embeddingForLabel(diar: DiarizationArtifact, label: string): number[] | null {
+  if (diar.embeddingSpace) return normalized(diar.centroids?.[label] ?? []);
+  const average = averageEmbeddingForLabel(diar.segments, label);
+  return average ? normalized(average) : null;
+}
 const MIN_CLIP_S = 1.5;
 
 /** Pick the best [start,end] window (seconds) for a speaker's sample clip.
@@ -119,9 +130,10 @@ export function averageEmbeddingForLabel(
   segments: readonly DiarizationSegment[],
   label: string,
 ): number[] | null {
-  const own = segments.filter((s) => s.speaker === label && Array.isArray(s.embedding));
+  const own = segments.filter((s) => s.speaker === label && Array.isArray(s.embedding) && normalized(s.embedding));
   if (own.length === 0) return null;
   const dim = own[0]!.embedding!.length;
+  if (own.some(s => s.embedding!.length !== dim)) return null;
   const sum = new Array<number>(dim).fill(0);
   for (const s of own) {
     for (let i = 0; i < dim; i++) sum[i] = (sum[i] ?? 0) + (s.embedding![i] ?? 0);

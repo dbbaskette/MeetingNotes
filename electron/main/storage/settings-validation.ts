@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from './settings-repo.js';
 import { existingFolder } from '../lib/pasted-path.js';
 
 const enums: Record<string, readonly [string, ...string[]]> = {
-  theme: ['system', 'light', 'dark'], summaryProvider: ['external', 'lm-studio', 'ollama'],
+  theme: ['system', 'light', 'dark'], summaryProvider: ['external', 'lm-studio', 'ollama'], speechProvider: ['native', 'legacy'],
   summaryDetail: ['concise', 'standard', 'detailed'], webhookTemplate: ['compact', 'full', 'telegram-markdown', 'slack-blocks'],
   webhookOwnerFilter: ['mine', 'all', 'none'],
 };

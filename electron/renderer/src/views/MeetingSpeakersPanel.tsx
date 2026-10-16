@@ -308,7 +308,7 @@ function SpeakerEditor({
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<{ id: string; displayName: string; confidence: number }[]>([]);
+  const [suggestions, setSuggestions] = useState<{ id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[]>([]);
   const [pendingAssignment, setPendingAssignment] = useState<{ rid: string; impact: string } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -426,7 +426,7 @@ function SpeakerEditor({
                 className="text-[11px] font-medium px-2 py-1 rounded-full bg-brand-indigo/10 text-brand-indigo
                            hover:bg-brand-indigo/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
-                {sug.displayName} ({Math.round(sug.confidence * 100)}%)
+                {sug.displayName} ({sug.scoreKind === 'similarity' ? `similarity ${sug.confidence.toFixed(2)} · confirm` : `${Math.round(sug.confidence * 100)}%`})
               </button>
             ))}
           </div>

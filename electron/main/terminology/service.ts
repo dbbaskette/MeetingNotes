@@ -21,6 +21,7 @@ import {
   mergedToMarkdown,
   type WhisperSegment,
   type DiarSegment,
+  type MergedSegment,
 } from '../lib/merge-transcript.js';
 import { VOICE_SPEAKER_LABEL } from '../lib/stem-paths.js';
 
@@ -100,13 +101,23 @@ export class TerminologyService {
       throw e;
     }
   }
-  private raw(id: string): { segments: WhisperSegment[]; revision: string } {
+  private raw(id: string): { segments: WhisperSegment[]; revision: string; nativeTurns?: MergedSegment[] } {
     const text = this.text(
       path.join(path.dirname(this.file(id, 'transcript')), 'transcript.raw.json'),
     );
     if (!text) throw new Error('Wait for transcription to finish before correcting terms');
+    const parsed = JSON.parse(text) as { provider?: string; segments: WhisperSegment[] };
+    if (parsed.provider === 'apple') {
+      const diarText = this.text(path.join(path.dirname(this.file(id, 'transcript')), 'diarization.json'));
+      if (!diarText) throw new Error('Wait for speaker processing to finish before correcting terms');
+      const diar = JSON.parse(diarText) as { segments: DiarSegment[] };
+      const nativeTurns = mergeTranscriptWithDiarization(parsed.segments, diar.segments);
+      // Correction units are readable speaker turns, not individual timed words.
+      // This retains phrase replacements and undo without estimating timestamps.
+      return { segments: nativeTurns, nativeTurns, revision: hash(text + '\n' + diarText) };
+    }
     return {
-      segments: (JSON.parse(text) as { segments: WhisperSegment[] }).segments,
+      segments: parsed.segments,
       revision: hash(text),
     };
   }
@@ -124,7 +135,7 @@ export class TerminologyService {
     for (const speaker of this.deps.speakers.listForMeeting(id))
       if (speaker.displayName) labels[speaker.localLabel] = speaker.displayName;
     return mergedToMarkdown(
-      mergeTranscriptWithDiarization(
+      raw.nativeTurns ? raw.nativeTurns.map((s, i) => ({ ...s, text: doc.units[i] ?? s.text })) : mergeTranscriptWithDiarization(
         raw.segments.map((s, i) => ({ ...s, text: doc.units[i] ?? s.text })),
         diar,
       ),

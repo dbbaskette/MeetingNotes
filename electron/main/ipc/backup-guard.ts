@@ -27,6 +27,8 @@ const reads = new Set([
   'speakers:sample',
   'speakers:suggestions',
   'settings:get',
+  'native-speech:status',
+  'native-speech:cancel',
   'models:list',
   'onboarding:whisper-list',
   'onboarding:hf-token-status',

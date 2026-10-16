@@ -5,9 +5,10 @@ npm run dev            # vite + electron with HMR
 npm test               # full suite under Electron's Node
 npm run lint           # whole repository, zero warnings
 npm run build          # tsc main + preload (CJS) + vite
+npm run build:speech   # Apple/SpeakerKit Swift helper; Xcode 26+ SDK
 npm run smoke:source   # build, then launch against a synthetic library
 npm run screenshots    # refresh docs/screenshots (needs `npm run dev:renderer` running)
-npm run dist           # full installer: audio-tap + sidecar + app + .dmg + .zip
+npm run dist           # capture + native speech + legacy sidecar + app + DMG/ZIP
 ```
 
 > [!NOTE]
@@ -17,6 +18,7 @@ npm run dist           # full installer: audio-tap + sidecar + app + .dmg + .zip
 
 ```
 audio-tap/            Swift CLI helper — CoreAudio Process Tap recording (swiftc + codesign)
+speech-engine/        Swift Apple transcription + pinned SpeakerKit OSS helper
 electron/main/        main process: pipeline, storage, IPC, watcher, services
   recording/          RecordingManager, AppEnumerator, orphan-recovery, recovery inbox
   library/            watcher, catalog service, ffprobe
@@ -39,7 +41,13 @@ docs/                 url-scheme.md · exporters.md · google-setup.md · releas
 
 ## Packaging & the packaged-app PATH
 
-`./scripts/rebuild.sh` (or `npm run dist`) compiles and signs the Swift helper, bundles the Python sidecar with PyInstaller (so end users don't need Python), builds the Electron app, rebuilds `better-sqlite3` against Electron's ABI, and produces `release/MeetingNotes-1.14.11-arm64.dmg` + `.zip` on Apple Silicon. GitHub source releases may intentionally omit these binary assets; build locally when you need an installer. `scripts/rebuild.sh` removes previous DMG/ZIP files; to keep them, run the component build steps and package with a version-specific output directory, for example `npx electron-builder --mac --config.directories.output=release/v1.14.11`.
+`npm run dist` compiles the capture and native speech helpers, bundles the legacy Python sidecar with PyInstaller, builds Electron and produces `release/MeetingNotes-1.15.0-arm64.dmg` + `.zip`. The regular installer retains legacy fallback for macOS 14.2+; native speech requires Apple Silicon/macOS 26+. Native end users need no Python/Whisper/HF token. Full installer **builders** still need the sidecar build environment, Node dependencies and Xcode 26+ with the macOS 26+ SDK. SDK/model notices accompany the helper. GitHub releases intentionally publish source/notes without binary assets.
+
+For native-only **source development**, use `brew install ffmpeg`, `./scripts/setup.sh --native`, then `npm start` (or `npm run dev`). This skips legacy sidecar, Whisper/HF setup and packaging, builds both Swift helpers and the app, and explicitly selects native speech. Quit the app before running setup against existing settings. Prepare language and speaker assets in the app; setup does not process meetings. Full packaging still includes the legacy fallback.
+
+`scripts/rebuild.sh` also builds both helpers but removes previous top-level DMG/ZIP files. To retain installers, run component build steps and package with a version-specific output, e.g. `npx electron-builder --mac --publish never --config.directories.output=release/v1.15.0`. Existing development signing is not notarization or Developer ID distribution. Do not install/restart a running app as part of a build.
+
+Native physical-device checks: `npm run speech:smoke`, then `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/integrated-smoke.mjs`. Prepare Apple assets explicitly first. The integrated check generates AAC speech in a disposable library, uses actual native inference through the full stable pipeline, confirms/trains a voice, saves notes/tasks with fixture LLM responses, and exports Markdown. It never opens private meetings. Synthetic results do not establish real-meeting accuracy or microphone capture quality.
 
 The app icon uses a bright tile and bold indigo waveform/chat mark for visibility on dark backgrounds. `npm run build:icons` regenerates its macOS icon family and matching in-app logo from `build/icon-1024.png`.
 

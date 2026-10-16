@@ -54,7 +54,7 @@ export function libraryWatchPaths(opts: {
   return out;
 }
 
-export type StorageLocationKey = 'library' | 'models' | 'logs' | 'hfCache';
+export type StorageLocationKey = 'library' | 'models' | 'logs' | 'hfCache' | 'nativeModels';
 
 export interface StorageLocation {
   key: StorageLocationKey;
@@ -88,6 +88,11 @@ export function storageLocations(opts: {
       label: 'Logs',
       path: path.join(home, 'Library', 'Logs', 'MeetingNotes'),
       note: 'App logs.',
+    },
+    {
+      key: 'nativeModels', label: 'Native speaker models',
+      path: path.join(home, 'Library', 'Application Support', 'MeetingNotes', 'speech-models'),
+      note: 'Verified SpeakerKit models. Apple language assets are managed separately by macOS.',
     },
     {
       key: 'hfCache',
