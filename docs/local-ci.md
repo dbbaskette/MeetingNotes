@@ -100,3 +100,11 @@ processing rows with other meetings selected, direct bulk queueing without a mod
 duplicate-click protection, retryable failures, and auto-clearing non-modal feedback.
 It also checks that capture Stop stays visible while browsing using a fake active
 recording state. No actual processing service or recording is started.
+
+The rename navigation fixture retains the real Library while opening the real
+meeting detail view, matching App navigation. It checks inline and menu renames
+followed by Back in Organized, All meetings, focused-group and search views;
+expanded groups, loaded pages and scroll position stay intact. It also covers
+a stale group page pending during rename, a rejected rename and Library-row
+rename. All meetings and bridge calls are synthetic; local-file audio loading
+is suppressed in this navigation-only fixture, so it makes no audio claim.

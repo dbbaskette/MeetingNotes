@@ -6,6 +6,16 @@ import '../../electron/renderer/src/index.css';
 // The only bridge in this renderer is this in-memory fake. There is no preload.
 const startup = new URLSearchParams(location.search).has('startup');
 const processing = new URLSearchParams(location.search).has('processing');
+const rename = new URLSearchParams(location.search).has('rename');
+if (rename) {
+  // Navigation-only fixture: never let the detail player's file:// source
+  // attempt disk access from this HTTP-hosted renderer. Audio is not tested.
+  const setAttribute = HTMLMediaElement.prototype.setAttribute;
+  HTMLMediaElement.prototype.setAttribute = function (name, value) {
+    if (name === 'src' && value.startsWith('file://')) return;
+    setAttribute.call(this, name, value);
+  };
+}
 const groupA = '00000000-0000-4000-8000-000000000001';
 const groupB = '00000000-0000-4000-8000-000000000002';
 const geometry = { reads: 0 };
@@ -24,7 +34,7 @@ if (startup && new URLSearchParams(location.search).has('jitter')) {
 const data: MeetingSummary[] = Array.from({ length: startup ? 600 : 120 }, (_, index) => ({
   id: `selection-${index}`, slug: `selection-${index}`, title: `Synthetic meeting ${index}`,
   startedAt: '2026-09-08T12:00:00Z', durationS: 1800,
-  status: index < 12 ? 'pending' : 'done', pipelineStage: index < 12 ? 'discovered' : 'done',
+  status: !rename && index < 12 ? 'pending' : 'done', pipelineStage: !rename && index < 12 ? 'discovered' : 'done',
   errorMessage: null, stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0,
   actionItemsCount: 0, stageEtaMs: null, stageEtaRough: false, speakers: [],
   groupId: !startup || index < 200 ? null : index < 400 ? groupA : groupB,
@@ -42,6 +52,9 @@ const matching = (filter: MeetingFilter) => live().filter((row) => filter === 'a
 const counts = () => ({ all: live().length, pending: matching('pending').length, processing: matching('processing').length, done: matching('done').length, failed: matching('failed').length });
 const subscribers = new Set<() => void>();
 const off = () => () => {};
+let rejectRename = false;
+let holdGroupPage = false;
+let releaseGroupPage: (() => void) | null = null;
 window.api = {
   groups: { list: async () => ({groups: startup ? [
     {id: groupA, name: 'Planning', count: 200}, {id: groupB, name: 'Reviews', count: 200},
@@ -51,8 +64,20 @@ window.api = {
       calls.pages.push(query);
       const rows = matching(query.filter).filter(row => query.groupId === undefined || row.groupId === query.groupId);
       const start = Number(query.cursor ?? 0), end = Math.min(rows.length, start + (query.pageSize ?? 50));
-      return { items: structuredClone(rows.slice(start, end)), total: rows.length, counts: counts(), nextCursor: end < rows.length ? String(end) : null };
+      const snapshot = { items: structuredClone(rows.slice(start, end)), total: rows.length, counts: counts(), nextCursor: end < rows.length ? String(end) : null };
+      if (holdGroupPage && query.groupId === groupA) {
+        holdGroupPage = false;
+        await new Promise<void>(resolve => { releaseGroupPage = resolve; });
+      }
+      return snapshot;
     },
+    rename: async (id: string, title: string) => {
+      if (rejectRename) throw new Error('Synthetic rename rejected');
+      data.find(row => row.id === id)!.title = title;
+    },
+    get: async (id: string) => ({ ...structuredClone(data.find(row => row.id === id)),
+      summaryMd: null, audioPath: '', userIdentified: false, speakers: [], actionItems: [], models: {} }),
+    getSpeakerReview: async () => ({ speakers: [] }),
     listIds: async (filter: MeetingFilter) => { calls.ids.push(filter); return matching(filter).map((row) => row.id); },
     getMany: async (ids: string[]) => structuredClone(ids.flatMap((id) => live().filter((row) => row.id === id))),
     onAdded: (listener: () => void) => { subscribers.add(listener); return () => subscribers.delete(listener); },
@@ -82,17 +107,19 @@ window.api = {
     },
     undoDelete: async (id: string) => { calls.undo.push(id); return deleted.delete(id); },
   },
-  search: { query: async () => [], cancel: async () => {}, run: async () => ({ status: 'complete', hits: [110, 111].map((index) => ({ meetingId: `selection-${index}`, title: `Synthetic meeting ${index}`, source: 'title', line: 0, text: `Synthetic meeting ${index}` })) }) },
+  search: { query: async () => [], cancel: async () => {}, run: async () => ({ status: 'complete', hits: [110, 111].map((index) => ({ meetingId: `selection-${index}`, title: data[index]!.title, source: 'title', line: 0, text: data[index]!.title })) }) },
   pipeline: { status: async () => queue, onStatusChange: (listener: (status: typeof queue) => void) => { pipelineListeners.add(listener); return () => pipelineListeners.delete(listener); },
+    onMeetingStageChange: off,
     pause: async () => { queue = { ...queue, paused: true }; pipelineListeners.forEach(listener => listener(queue)); },
     resume: async () => { queue = { ...queue, paused: false }; pipelineListeners.forEach(listener => listener(queue)); },
   },
   recording: { onStateChange: off, onLevel: off }, meetingDetector: { onDetected: off },
-  recovery: { list: async () => startup ? Array.from({length: 113}, (_, index) => ({
+  recovery: { list: async () => startup && !rename ? Array.from({length: 113}, (_, index) => ({
     id: `recovery-${index}`, targetLabel: 'Synthetic call', startedAt: '2026-01-01T00:00:00Z',
     outputPath: `/tmp/synthetic-${index}.m4a`, status: 'orphaned', reason: 'unreadable',
     durationS: null, sizeBytes: 1024, canRecover: false, canTrim: false,
   })) : [] }, trash: { list: async () => [] },
+  speakers: { list: async () => [] }, google: { authStatus: async () => ({ signedIn: false, email: null }) },
 } as any;
 
 const { librarySelection } = await import('../../electron/renderer/src/lib/selection');
@@ -105,6 +132,10 @@ const { LibraryView } = await import('../../electron/renderer/src/views/LibraryV
 const { ToastHost } = await import('../../electron/renderer/src/components/Toasts');
 (window as any).fixture = {
   selection: librarySelection, store: useMeetingsStore, calls, geometry,
+  rejectRename(value: boolean) { rejectRename = value; },
+  holdGroupRefresh() { holdGroupPage = true; pipelineListeners.forEach(listener => listener({ ...queue })); },
+  groupPageHeld() { return releaseGroupPage !== null; },
+  releaseGroupPage() { releaseGroupPage?.(); releaseGroupPage = null; },
   holdQueue() { holdQueue = true; },
   finishQueue() { holdQueue = false; finishQueue?.(); },
   rejectQueue() { rejectQueue = true; },
@@ -118,8 +149,18 @@ const { ToastHost } = await import('../../electron/renderer/src/components/Toast
   },
   statusChanged() { data.find((row) => row.id === 'selection-11')!.status = 'done'; },
 };
-createRoot(document.getElementById('root')!).render(<ToastHost><div style={{ height: '100vh' }}><LibraryView
-  onOpen={id => { calls.opened.push(id); }} onNav={() => {}} onOpenSearch={() => {}}
-  liveRecording={new URLSearchParams(location.search).has('live') ? {sessionId: 'synthetic-live',label: 'Synthetic live capture',startedAt: new Date().toISOString()} : null}
-  onStartRecording={() => { throw new Error('Recording is forbidden in this synthetic fixture'); }} onRecordingStopped={() => {}}
-/></div></ToastHost>);
+const DetailView = rename ? (await import('../../electron/renderer/src/views/MeetingDetailView')).MeetingDetailView : null;
+// Match App's retained Library: navigation hides it instead of remounting it.
+function Fixture(): JSX.Element {
+  const [id, setId] = React.useState<string | null>(null);
+  return <>
+    <div hidden={id !== null} style={{ height: '100vh' }}><LibraryView
+      active={id === null}
+      onOpen={meetingId => { calls.opened.push(meetingId); if (rename) setId(meetingId); }} onNav={() => {}} onOpenSearch={() => {}}
+      liveRecording={new URLSearchParams(location.search).has('live') ? {sessionId: 'synthetic-live',label: 'Synthetic live capture',startedAt: new Date().toISOString()} : null}
+      onStartRecording={() => { throw new Error('Recording is forbidden in this synthetic fixture'); }} onRecordingStopped={() => {}}
+    /></div>
+    {id && DetailView && <div style={{ height: '100vh' }}><DetailView id={id} onBack={() => setId(null)} /></div>}
+  </>;
+}
+createRoot(document.getElementById('root')!).render(<ToastHost><Fixture /></ToastHost>);

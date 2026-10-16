@@ -295,9 +295,10 @@ export function LibraryView({
   useEffect(() => {
     void setPageQuery({ filter: libFilter, sort: sortKey, groupId });
   }, [libFilter, sortKey, groupId, setPageQuery]);
-  // A remount can reuse the same query after changes in the detail view.
-  // The initial request is shared when setPageQuery just started it above.
-  useEffect(() => { if(active)void refreshPages(); }, [active, refreshPages]);
+  // App retains the Library while details are open. Refresh every projection
+  // on return, including expanded group pages, search and Needs attention.
+  // Invalidation also fences any request that began before the detail edit.
+  useEffect(() => { if (active) void invalidate(); }, [active, invalidate]);
   useMeetingsPoll(active && hasMotion);
   useEffect(() => {
     const onVisible = (): void => {
