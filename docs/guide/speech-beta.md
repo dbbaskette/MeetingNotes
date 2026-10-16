@@ -2,6 +2,8 @@
 
 This branch builds **MeetingNotes Beta**, a separate evaluation app, version 1.15.0-beta.1. Stable MeetingNotes remains 1.14.11. Apple transcription and SpeakerKit run locally; the stable app's processing defaults do not change.
 
+The first beta uses English (en-US). It is a speech-comparison workspace, not a replacement for the regular app's recording, summaries, and integrations.
+
 ## Try old meetings safely
 
 1. Build with `npm run dist:beta`, or run the beta from source with `npm run beta` on Apple Silicon/macOS 26+ with a suitable Xcode SDK.
@@ -20,6 +22,7 @@ Beta data lives under `~/Library/Application Support/MeetingNotes Beta/`; instal
 
 - `npm run build:speech` builds the pinned SpeakerKit helper; `swift test --package-path speech-engine --configuration release` checks timestamp/vector validation.
 - `npm run speech:smoke` provisions the public pinned SpeakerKit files in a task-owned cache and processes generated synthetic speech. Prepare Apple's assets explicitly first. Results remain ignored under `speech-benchmark-results/`. This test is not a representative accuracy gate.
+- After the short smoke, `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/long-smoke.mjs` generates a 75-minute repeated synthetic recording and checks transcription/speaker coverage throughout its timeline. This is not real-meeting accuracy evidence.
 - `npm run build && ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/ui-smoke.mjs` opens only a disposable synthetic profile, checks comparison/notes/audio, captures a screenshot, and cleans up its temporary library.
 - `swift build --package-path scripts/speech-benchmark/parakeet --configuration release` builds an optional **benchmark-only** Parakeet adapter. FluidAudio 0.17.7 is pinned; its model loader downloads English v2 weights to an explicitly supplied task-owned directory. It is not shipped in the beta or used as fallback. Record the model cache/metadata when evaluating it; the upstream loader's model revision is not pinned by this adapter, so comparisons must not claim fully pinned Parakeet assets.
 
