@@ -69,12 +69,13 @@ app.whenReady().then(async () => {
   assert.equal(await run('window.fixture.saves.at(-1).value'),'native');
   assert(await run('document.body.innerText.includes("No Whisper download")'));
   assert.equal(await run('Array.from(document.querySelectorAll("summary")).some(s=>s.textContent==="Whisper model management")'),false);
-  assert.equal(await run('document.body.innerText.includes("STT URL (whisper.cpp server)")'),false);
+  assert.equal(await run('Array.from(document.querySelectorAll("label")).some(label=>label.textContent.includes("STT URL (whisper.cpp server)"))'),false);
   await click('Prepare native speech'); await until('!!document.querySelector("progress")');
   await click('Cancel setup'); await until('document.body.innerText.includes("Setup cancelled")');
   assert.equal(await run('window.fixture.downloads.length'),0,'Native setup never downloads Whisper');
   win.setSize(780,700); await settle();
   assert(await run('document.documentElement.scrollWidth <= window.innerWidth'),'Native setup fits narrow Settings');
+  await run('(() => {const summary=Array.from(document.querySelectorAll("summary")).find(s=>s.textContent.startsWith("Setup & health"));if(summary?.parentElement.open)summary.click();document.querySelector("[aria-label=\\"Speech engine\\"]").scrollIntoView({block:"start"});})()'); await settle();
   if(process.env.MN_FIXTURE_RESULTS) fs.writeFileSync(path.join(process.env.MN_FIXTURE_RESULTS,'settings.png'),(await win.webContents.capturePage()).toPNG());
-  console.log('SETTINGS/HISTORY PASS section navigation/search/no matches/text blur save/failure/retry/explicit path/restart guidance/version compare/restore'); win.destroy();app.quit();
+  console.log('SETTINGS/HISTORY PASS navigation/search/save/retry/history/native engine rejection/progress/cancel/no legacy downloads/narrow layout'); win.destroy();app.quit();
 }).catch(e => {console.error(e);app.exit(1);});
