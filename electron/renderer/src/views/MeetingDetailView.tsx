@@ -422,8 +422,8 @@ export function MeetingDetailView({
     // then internally splits into [pinned header] / [scrollable grid] /
     // [pinned audio]. Title bar, stage timeline, and parked-banner stay
     // on screen while the user reads a long summary or transcript.
-    <div className="max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
-      <div className="shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+    <div className="detail-view max-w-6xl mx-auto my-6 h-[calc(100%-3rem)] bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden flex flex-col">
+      <div className="app-chrome detail-chrome shrink-0 flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         {/* onBack (App's history goBack) consults the unsaved-edits guard
             itself — do NOT guard again here, or a dirty summary would
             prompt the discard dialog twice. */}
@@ -546,7 +546,7 @@ export function MeetingDetailView({
             onRetryTranscript={() => void artifacts.request(id, 'transcript')}
           />
         </div>
-        <div className={`order-3 min-w-0 lg:overflow-y-auto ${railOpen ? '' : 'lg:hidden'}`}><RightRail meeting={m} onReload={reload}
+        <div className={`detail-inspector order-3 min-w-0 lg:overflow-y-auto ${railOpen ? '' : 'lg:hidden'}`}><RightRail meeting={m} onReload={reload}
           speakerReviewState={speakerReview} onRetrySpeakerReview={() => void artifacts.request(id, 'speakerReview')} /></div>
       </div>
 
@@ -554,7 +554,7 @@ export function MeetingDetailView({
           CenterPane so it stays visible while the user reads the summary
           OR transcript — no more "switch tabs to play". Click-to-seek on
           transcript lines pipes through `seekTo` to this element. */}
-      <div className="shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3 flex items-center gap-2">
+      <div className="audio-chrome shrink-0 bg-surface-sunken border-t border-surface-border px-5 py-3 flex items-center gap-2">
         {/* Transport controls (#A3). Keyboard: Space play/pause, ←/→ ∓/±15s. */}
         <button
           type="button"
@@ -725,7 +725,7 @@ function DetailSkeleton({
   const isFullyDone = hint?.pipelineStage === 'done';
   const showLiveStage = hint?.status === 'processing';
   return (
-    <div className="max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
+    <div className="detail-view max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       {/* Title bar — uses real title when available */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
@@ -750,7 +750,7 @@ function DetailSkeleton({
               <div className={`
                 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums
                 ${isAllDone || isDone ? 'bg-status-okBg/70 text-status-ok' : ''}
-                ${isCurrent ? 'bg-brand-indigo text-white shadow-sm' : ''}
+                ${isCurrent ? 'bg-brand-solid text-white shadow-sm' : ''}
                 ${!isCurrent && !isDone && !isAllDone ? 'bg-transparent text-ink-muted' : ''}
               `}>
                 <span className={`w-1.5 h-1.5 rounded-full ${
@@ -1097,7 +1097,7 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
               className={`
                 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tabular-nums
                 ${isDone ? 'bg-status-okBg/70 text-status-ok' : ''}
-                ${isCurrent && isProcessing ? 'bg-brand-indigo text-white shadow-sm' : ''}
+                ${isCurrent && isProcessing ? 'bg-brand-solid text-white shadow-sm' : ''}
                 ${isFailedHere ? 'bg-danger-bg text-danger-text' : ''}
                 ${isAwaitingHere ? 'bg-status-warnBg text-status-warnText shadow-sm' : ''}
                 ${isPending ? 'bg-transparent text-ink-muted' : ''}
@@ -1226,7 +1226,7 @@ function ProcessingMenu({
         <button
           onClick={() => void startProcessing()}
           disabled={busy}
-          className="bg-brand-indigo text-white text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-brand-indigo/90 transition inline-flex items-center gap-1.5 disabled:opacity-60"
+          className="bg-brand-solid text-white text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-brand-solid/90 transition inline-flex items-center gap-1.5 disabled:opacity-60"
         >
           <Icon name="play" className="w-3.5 h-3.5" />
           Process recording
@@ -1244,7 +1244,7 @@ function ProcessingMenu({
       )}
       {operationError && <p role="alert" className="absolute right-0 top-full mt-1 w-64 text-xs text-danger bg-surface border border-surface-border rounded-lg p-2 z-30">Could not queue processing: {operationError}</p>}
       {open && (
-        <div role="menu" aria-label="Processing" className="absolute right-0 top-full mt-1 z-30 w-72 bg-surface border border-surface-border rounded-lg shadow-pop p-3 space-y-3 text-left">
+        <div role="menu" aria-label="Processing" className="material-popover absolute right-0 top-full mt-1 z-30 w-72 bg-surface border border-surface-border rounded-lg shadow-pop p-3 space-y-3 text-left">
           {hasModels && (
             <div>
               <div className="text-[11px] text-ink-muted font-medium">Models used</div>
@@ -1331,19 +1331,18 @@ function CenterPane({
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   return (
     <div>
-      {/* Tab labels share the ALL-CAPS tracked treatment used by the
-          Library/Inbox section headings, so section-level typography is
-          consistent across views. Audio is now a sticky footer, not a
+      {/* Sentence-case tabs share the app's system typography.
+          Audio is a sticky footer, not a
           tab — keeps playback alive while reading either tab.
           Sticky-pinned to the top of the center-pane scroll container
           so SUMMARY/TRANSCRIPT/ACTIONS stay reachable while paging
           through a long summary or transcript. */}
-      <div className="sticky top-0 z-10 bg-surface flex border-b border-surface-border px-4">
+      <div className="detail-tabs sticky top-0 z-10 bg-surface flex border-b border-surface-border px-4">
         {(['summary', 'transcript', 'actions'] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTab(t)}
-            className={`px-3 py-3 font-mono text-[11px] tracking-[0.2em] uppercase transition
+            className={`px-3 py-3 text-[13px] capitalize transition
               ${tab === t
                 ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold -mb-px'
                 : 'text-ink-muted hover:text-ink'}`}
@@ -1582,8 +1581,8 @@ function SummaryToolbar({
       <button
         onClick={() => void onSave()}
         disabled={!dirty || saving}
-        className="text-xs font-semibold bg-brand-indigo text-white px-3 py-1 rounded-md
-                   hover:bg-brand-indigo/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+        className="text-xs font-semibold bg-brand-solid text-white px-3 py-1 rounded-md
+                   hover:bg-brand-solid/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>

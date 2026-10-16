@@ -118,7 +118,7 @@ export function GroupPicker({
             {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" onClick={() => setCreating(false)} className="text-xs text-ink-muted px-2 py-1">Cancel</button>
-              <button disabled={busy || !newName.trim()} className="rounded-lg bg-brand-indigo px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">Create</button>
+              <button disabled={busy || !newName.trim()} className="rounded-lg bg-brand-solid px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">Create</button>
             </div>
           </form>}
         </div>

@@ -179,8 +179,8 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
     : filter === 'all' ? `${section.count} ${section.count === 1 ? 'meeting' : 'meetings'}`
       : `${section.count} total${expanded && !loadingInitial ? ` · ${total} ${filter}` : ''}`;
 
-  return <section className="border-b border-surface-border last:border-b-0">
-    <div className="flex min-h-[56px] items-center gap-1.5 py-1">
+  return <section data-expanded={expanded} className="library-group border-b border-surface-border last:border-b-0">
+    <div className="group-heading flex min-h-[56px] items-center gap-1.5 py-1">
       <button type="button" aria-expanded={expanded} aria-controls={panelId}
         onClick={onToggle} className="min-w-0 flex-1 flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">
         <span aria-hidden="true" className="w-4 shrink-0 text-ink-muted">{expanded ? '⌄' : '›'}</span>
@@ -200,14 +200,14 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
           onClick={() => setMenuOpen((open) => !open)} className="shrink-0 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">⋯</button>
         {menuOpen && menuAnchor && createPortal(<div ref={menuRef} role="menu"
           style={{ position: 'fixed', top: menuAnchor.top, bottom: menuAnchor.bottom, right: menuAnchor.right, zIndex: 1000 }}
-          className="w-40 rounded-lg border border-surface-border bg-surface p-1 shadow-pop">
+          className="material-popover w-40 rounded-lg border border-surface-border bg-surface p-1 shadow-pop">
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onRename(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken">Rename group…</button>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onDelete(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm text-danger hover:bg-danger-bg">Delete group…</button>
         </div>, document.body)}
       </>}
     </div>
     {expanded && <div id={panelId} role="region" aria-labelledby={`group-label-${section.key}`}
-      className="mb-3 ml-5 border-l-2 border-brand-indigo/20 pl-4 space-y-2">
+      className="group-meetings mb-3 ml-5 border-l-2 border-brand-indigo/20 pl-4 space-y-2">
       {!searching && (!queryMatches || loadingInitial) && rows.length === 0 && <p role="status" className="py-3 text-sm text-ink-muted">Loading meetings…</p>}
       {!searching && queryMatches && error && rows.length === 0 && <p role="alert" className="py-3 text-sm text-danger-text">{error}{' '}
         <button type="button" onClick={() => void pageStore.getState().retry()} className="font-semibold underline">Retry</button></p>}

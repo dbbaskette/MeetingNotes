@@ -50,7 +50,7 @@ export function ConfirmDialog({
           onClick={onConfirm}
           disabled={busy}
           className={`px-3 py-1.5 text-sm font-semibold text-white rounded-lg disabled:opacity-50 ${
-            destructive ? 'bg-danger-solid hover:bg-danger-solid' : 'bg-brand-indigo hover:bg-brand-indigo'
+            destructive ? 'bg-danger-solid hover:bg-danger-solid' : 'bg-brand-solid hover:bg-brand-solid'
           }`}
         >
           {busy ? 'Working…' : confirmLabel}

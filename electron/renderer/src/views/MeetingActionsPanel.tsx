@@ -313,7 +313,7 @@ function ActionItemEditor({
         <button
           onClick={() => void save()}
           disabled={busy}
-          className="text-xs font-semibold text-white bg-brand-indigo hover:bg-brand-indigo/90
+          className="text-xs font-semibold text-white bg-brand-solid hover:bg-brand-solid/90
                      px-3 py-1.5 rounded-lg disabled:opacity-50"
         >
           {busy ? 'Saving…' : initial ? 'Save' : 'Add'}

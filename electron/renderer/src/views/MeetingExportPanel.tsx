@@ -83,7 +83,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
   return (
     <div className="space-y-3">
       <div className="pt-3 border-t border-surface-border space-y-2">
-        <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold flex items-center justify-between">
+        <div className="text-sm text-ink-muted font-semibold flex items-center justify-between">
           <span>Export</span>
           {hasItems && (
             <span className="text-ink-muted/80 font-normal tabular-nums">
@@ -309,7 +309,7 @@ function ExportPickerModal({
       onClick={() => { if (!busy) onClose(); }}
     >
       <div
-        className="bg-surface rounded-2xl shadow-2xl border border-surface-border w-full max-w-xl max-h-[80vh] flex flex-col"
+        className="material-dialog bg-surface rounded-2xl shadow-2xl border border-surface-border w-full max-w-xl max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-surface-border flex items-baseline gap-3">
@@ -421,7 +421,7 @@ function ExportPickerModal({
             <button
               disabled={busy || (selected.size === 0 && !isDocumentExport)}
               onClick={run}
-              className="text-sm font-semibold bg-brand-indigo text-white px-4 py-1.5 rounded-lg hover:bg-brand-indigo/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              className="text-sm font-semibold bg-brand-solid text-white px-4 py-1.5 rounded-lg hover:bg-brand-solid/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
               {exporter.id === 'google-doc'
                 ? (busy ? 'Creating…' : 'Create Doc')

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Golden Gate UI Design"
+  short_description: "Golden Gate styling for web and native interfaces"
+  default_prompt: "Use $macos-golden-gate-design to make this interface look like macOS Golden Gate, preserving its existing stack, behavior, and product identity."
+policy:
+  allow_implicit_invocation: true

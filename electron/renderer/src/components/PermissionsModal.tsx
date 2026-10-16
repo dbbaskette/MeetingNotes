@@ -49,7 +49,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
 
   return (
     <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Permissions needed" tabIndex={-1} className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6">
-      <div className="bg-surface rounded-2xl shadow-pop max-w-md w-full p-6">
+      <div className="material-dialog bg-surface rounded-2xl shadow-pop max-w-md w-full p-6">
         <h2 className="text-lg font-semibold mb-2">Permissions needed</h2>
         <p className="text-sm text-ink-muted mb-4">
           MeetingNotes records meetings by tapping the microphone and the audio your computer plays. macOS needs your explicit permission for both.
@@ -66,7 +66,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
           {mic !== 'granted' && (
             <button
               onClick={() => void handleGrantMic()}
-              className="text-xs font-semibold bg-brand-indigo text-white px-3 py-1.5 rounded-md"
+              className="text-xs font-semibold bg-brand-solid text-white px-3 py-1.5 rounded-md"
             >
               Grant
             </button>
@@ -96,7 +96,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
               onClick={() =>
                 window.open('x-apple.systempreferences:com.apple.preference.security?Privacy')
               }
-              className="text-xs font-semibold bg-brand-indigo text-white px-3 py-1.5 rounded-md whitespace-nowrap"
+              className="text-xs font-semibold bg-brand-solid text-white px-3 py-1.5 rounded-md whitespace-nowrap"
             >
               {audioCapture === 'denied' ? 'Open Settings' : 'Grant via Record'}
             </button>

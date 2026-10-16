@@ -62,7 +62,7 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
   const clickable = model?.meetingId != null;
   return (
     <div
-      className={`shrink-0 z-[900] border-t border-surface-border bg-surface-sunken/95 backdrop-blur px-4 py-1.5 text-xs text-ink-muted flex items-center gap-2 ${
+      className={`audio-chrome shrink-0 z-[900] border-t border-surface-border bg-surface-sunken/95 px-4 py-1.5 text-xs text-ink-muted flex items-center gap-2 ${
         clickable ? 'cursor-pointer hover:text-ink' : ''
       }`}
       onClick={clickable ? () => onOpenMeeting(model!.meetingId!) : undefined}
@@ -70,7 +70,7 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
       title={clickable ? 'Open this meeting' : undefined}
     >
       {model?.kind === 'processing' && model.meetingId ? (
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-indigo animate-pulse" />
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-solid animate-pulse" />
       ) : (
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-status-ok/70" />
       )}

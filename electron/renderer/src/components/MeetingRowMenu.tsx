@@ -120,7 +120,7 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           }}
           className="
             min-w-[140px]
-            bg-surface border border-surface-border rounded-lg shadow-pop
+            material-popover bg-surface border border-surface-border rounded-lg shadow-pop
             py-1 text-sm
           "
         >

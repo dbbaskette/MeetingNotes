@@ -29,7 +29,7 @@ export function ModalShell({ children, onClose, title = 'Meeting action', busy =
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-surface rounded-xl shadow-pop border border-surface-border p-5 w-full max-w-md"
+        className="material-dialog bg-surface rounded-xl shadow-pop border border-surface-border p-5 w-full max-w-md"
       >
         <DialogDepth.Provider value={depth+1}>{children}</DialogDepth.Provider>
       </div>

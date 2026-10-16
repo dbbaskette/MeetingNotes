@@ -643,7 +643,7 @@ export function TerminologySettings(): JSX.Element {
             if (discarding) setDiscarding(false);
             else closeManager();
           }}
-          className="m-auto w-[calc(100%-2rem)] max-w-2xl h-[min(40rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
+          className="material-dialog m-auto w-[calc(100%-2rem)] max-w-2xl h-[min(40rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
         >
           <header className="shrink-0 flex items-center justify-between gap-3 border-b border-surface-border p-5">
             <h2 id="dictionary-title" className="font-semibold">
