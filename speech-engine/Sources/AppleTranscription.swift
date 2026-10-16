@@ -43,7 +43,7 @@ enum AppleTranscription {
         let url = try requiredAudio(request)
         let module = try await transcriber(request.locale ?? "en-US")
         guard await AssetInventory.status(forModules: [module]) == .installed else {
-            throw SpeechFailure("Download Apple speech assets in Beta setup before transcribing. No download was started automatically.")
+            throw SpeechFailure("Prepare Apple speech assets in Settings → Processing before transcribing. No download was started automatically.")
         }
         let audio = try AVAudioFile(forReading: url)
         let duration = Double(audio.length) / audio.processingFormat.sampleRate

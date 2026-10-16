@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { ObsidianConfig } from '../../shared/obsidian.js';
 
 export interface Settings {
+  speechProvider: 'native' | 'legacy';
   obsidian: ObsidianConfig | null;
   lmStudioUrl: string;
   /** OpenAI-compatible STT endpoint (whisper.cpp's whisper-server, etc.). */
@@ -141,6 +142,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  // Missing values in an existing library must never silently switch engines.
+  speechProvider: 'legacy',
   obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
   sttUrl: 'http://127.0.0.1:8080',

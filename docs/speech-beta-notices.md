@@ -1,4 +1,4 @@
-# Native speech beta: third-party notices
+# Native speech: third-party notices (regular app and comparison beta)
 
 Speaker processing uses [Argmax SpeakerKit OSS](https://github.com/argmaxinc/argmax-oss-swift), pinned to v1.1.1 (see `speech-engine/Package.resolved`). SpeakerKit and its transitive Argmax modules use the MIT License, copyright Argmax, Inc. Their full [license](https://github.com/argmaxinc/argmax-oss-swift/blob/v1.1.1/LICENSE) and [third-party notices](https://github.com/argmaxinc/argmax-oss-swift/blob/v1.1.1/NOTICES) must accompany a distributed helper.
 

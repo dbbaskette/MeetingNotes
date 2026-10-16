@@ -1,12 +1,14 @@
 # Settings and storage
 
-The [native speech beta](speech-beta.md) uses its own application identity and copied library. Its comparison workspace deliberately has no active stable settings, recording triggers, exporters, or vault sync; the settings below describe stable MeetingNotes.
+The regular app now includes **Apple transcription + SpeakerKit** under Processing. Existing users opt in; fresh supported Macs default to it. The separate [comparison beta](speech-beta.md) still uses its own copied library and never automatically writes results/profiles back.
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](../usability-improvements.md).
 
 **Settings → Storage → Back up Library** previews size and missing files, then creates a private local backup of the actual library and canonical settings databases, meeting audio (including external capture stems), notes, groups, speakers, and terminology. Model caches are excluded. Backup requires idle recording/processing/sync and protects writes while copying; checksummed manifests validate the result. A changed file inventory requires a fresh preview. Restore only into a new destination with the supplied script, never over a live Library. See [backup, privacy, restore, and rollback](../library-backup.md).
 
-**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing Settings includes the shared Whisper download/model picker; custom paths stay in Advanced. See [capture, processing and delivery guide](../reliable-capture-processing.md) for retry history, audio limitations and deferred hardware checks.
+**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing includes the speech-engine selector and explicit native asset preparation/cancel/retry. Whisper management appears when Legacy is selected; legacy custom paths stay in Advanced. Native setup removes HF/Whisper wizard steps, not LLM setup or capture permissions. See [capture, processing and delivery guide](../reliable-capture-processing.md).
+
+**Native storage:** `<library>/voice-profiles/` holds model-tagged confirmed profiles, separate from legacy `<library>/speakers/embeddings/`. Verified public model files use `~/Library/Application Support/MeetingNotes/speech-models/<revision>/`; Apple language assets are managed by macOS. Neither engine switch nor setup bulk-reprocesses old meetings. Library backups include voice profiles; asset caches can be re-downloaded.
 
 **Notes history:** the Notes tab's **Notes & action-item history…** compares and restores the latest 20 saved versions. Regeneration and re-extraction preserve existing notes/tasks before replacing them; restore includes completion status, ownership, due dates, and export markers while leaving the transcript/audio unchanged.
 
@@ -20,6 +22,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 
 | Key | Default | What it does |
 | --- | --- | --- |
+| `speechProvider` | `native` on fresh supported Macs; `legacy` for existing/older installations | Apple + SpeakerKit, or legacy Whisper + pyannote. Changing it requires idle processing/queue/setup; existing artifacts and voice profiles remain. |
 | `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. Managed modes spawn the runtime, auto-load `llmModel`, and idle-shut-down. `external` = you run the server at `lmStudioUrl`. A healthy externally-started server is adopted (never killed) in any mode. |
 | `lmStudioUrl` | `http://localhost:1234` | Chat/LLM endpoint (used only in `external` mode; managed modes hardcode 1234 / 11434). |
 | `llmModel` | `qwen/qwen3.5-9b` | Model id for summarize/extract. Auto-loaded on first use. |
@@ -28,7 +31,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `summaryDetail` | `detailed` | Summary verbosity: `concise` / `standard` / `detailed`. |
 | `sttUrl` | `http://127.0.0.1:8080` | whisper-server endpoint. Plain HTTP loopback URLs at the root path are managed locally on the configured port (HTTP without a port uses 80). Remote, HTTPS, or proxy endpoints are user-managed. Restart the app after changing this URL. |
 | `sttModel` | `whisper-1` | Model file loaded when the app spawns whisper-server (`ggml-<name>.bin`); falls back to an auto-pick order if missing. |
-| `sttLanguage` | `en` | Passed to Whisper. |
+| `sttLanguage` | `en` | Speech language. Native maps `en` to en-US and checks Apple's locale support. Re-prepare assets after changing language. Also passed to legacy Whisper. |
 | `libraryPath` | `~/Documents/MeetingNotes` | Meetings, DB, embeddings. |
 | `audioWatchPath` | `~/Music/MeetingNotes` | Folder watched for new recordings. |
 | `recordingBitrateKbps` | `128` | AAC bitrate (96 / 128 / 192). |

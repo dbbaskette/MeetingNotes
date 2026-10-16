@@ -1,6 +1,6 @@
 # Native speech beta
 
-This branch builds **MeetingNotes Beta**, a separate evaluation app, version 1.15.0-beta.1. Stable MeetingNotes remains 1.14.11. Apple transcription and SpeakerKit run locally; the stable app's processing defaults do not change.
+**As of 1.15.0, the regular app includes the native engines.** Follow the [regular-app upgrade guide](../../README.md#upgrading-to-1150-what-to-do) for recording, notes and exports. This page documents the retained, isolated **MeetingNotes Beta** 1.15.0-beta.1 comparison workspace. Its copied results/profiles are not automatically imported into the regular library.
 
 The first beta uses English (en-US). It is a speech-comparison workspace, not a replacement for the regular app's recording, summaries, and integrations.
 
@@ -38,6 +38,6 @@ Create a local corpus manifest, never committed if it contains private informati
 
 Run `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/compare.mjs /absolute/manifest.json`, optionally adding `--whisper=http://127.0.0.1:PORT` and `--parakeet=/absolute/path/to/parakeet-comparison`. No service is started/adopted and no meeting library is discovered. The endpoint must be loopback. Each engine runs twice and saves raw text, edit counts, reference-word counts, failures and elapsed time. A failure stays visible rather than disappearing from aggregate accuracy.
 
-The beta is experimental. The complete public/approved-real-meeting accuracy comparison, 60–90-minute tests, memory/overlap measurements, held-out cross-meeting identity calibration, and stable-provider migration remain release gates. Do not advertise the synthetic smoke timing as real-meeting performance or remove legacy processing based on it. See issue #274 and the native-speech plan for those boundaries.
+The comparison workspace remains experimental. The owner accepted their beta meeting evaluation for regular-app integration; synthetic 75-minute coverage is recorded separately. Broad accuracy, memory/overlap measurements and held-out cross-meeting identity calibration remain follow-up work, not completed benchmarks. The regular app retains legacy processing and requires native suggestion confirmation; no calibrated automatic identification claim is made. Do not advertise synthetic timing as real-meeting performance. See issue #274 and the native-speech plan for the original evaluation boundaries.
 
 See [third-party notices](../speech-beta-notices.md) for the SDK/model terms. This work does not remove summary-runtime or media-tool requirements from stable MeetingNotes.

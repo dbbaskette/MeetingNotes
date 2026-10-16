@@ -3,6 +3,7 @@
 # supported way to change Whisper models or repair a partial install.
 #
 # Flags:
+#   --native        Apple + SpeakerKit source setup, no Whisper/Python/HF token
 #   --skip-npm      don't run `npm install`
 #   --skip-sidecar  don't (re)create the Python sidecar venv
 #   --skip-whisper  don't prompt for a Whisper model
@@ -20,9 +21,11 @@ SKIP_HF=0
 SKIP_LLM=0
 SKIP_DIST=0
 MODEL_ARG=""
+NATIVE_SPEECH=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --native)      NATIVE_SPEECH=1; SKIP_SIDECAR=1; SKIP_WHISPER=1; SKIP_HF=1; SKIP_DIST=1 ;;
     --skip-npm)     SKIP_NPM=1 ;;
     --skip-sidecar) SKIP_SIDECAR=1 ;;
     --skip-whisper) SKIP_WHISPER=1 ;;
@@ -58,10 +61,16 @@ need() {
 }
 need node          "https://nodejs.org or 'brew install node'"
 need npm           "ships with Node"
-need python3       "https://www.python.org or 'brew install python'"
+if [ "$NATIVE_SPEECH" -eq 0 ]; then need python3 "https://www.python.org or 'brew install python'"; fi
 need ffmpeg        "brew install ffmpeg"
 need ffprobe       "brew install ffmpeg"
-need whisper-server "brew install whisper-cpp"
+if [ "$NATIVE_SPEECH" -eq 0 ]; then need whisper-server "brew install whisper-cpp"; fi
+if [ "$NATIVE_SPEECH" -eq 1 ]; then
+  need swift "Xcode 26+ with the macOS 26+ SDK"
+  if [ "$(uname -m)" != arm64 ] || [ "$(sw_vers -productVersion | cut -d. -f1)" -lt 26 ]; then
+    echo 'Native speech needs Apple silicon and macOS 26 or newer.' >&2; exit 1
+  fi
+fi
 [ "$missing" -eq 1 ] && { echo; echo "Install missing tools and re-run."; exit 1; }
 
 # ---------------------------------------------------------------------------
@@ -209,6 +218,13 @@ SQL
 read_setting() {
   sqlite3 "$DB" "SELECT value FROM settings WHERE key='$1';" 2>/dev/null
 }
+if [ "$NATIVE_SPEECH" -eq 1 ]; then
+  write_setting speechProvider '"native"'
+  npm run build:audio-tap
+  npm run build:speech
+  npm run build
+  ok 'Native source app ready. Launch with npm start and prepare speech in Settings → Processing.'
+fi
 
 if [ "$SKIP_LLM" -eq 0 ]; then
   bold "7. LM Studio chat model + STT URL"
@@ -260,7 +276,8 @@ if [ "$SKIP_LLM" -eq 0 ]; then
       fi
     fi
 
-    # --- STT URL ---
+    # --- Legacy STT URL ---
+    if [ "$NATIVE_SPEECH" -eq 0 ]; then
     cur_stt="$(read_setting sttUrl | tr -d '"')"
     cur_stt="${cur_stt:-$STT_DEFAULT}"
     printf "  STT URL (whisper-server) [%s]: " "$cur_stt"
@@ -268,6 +285,7 @@ if [ "$SKIP_LLM" -eq 0 ]; then
     stt_url="${ans:-$cur_stt}"
     write_setting sttUrl "\"$stt_url\""
     ok "sttUrl = $stt_url"
+    fi
   fi
 else
   bold "7. LM Studio chat model + STT URL (skipped)"
@@ -304,6 +322,12 @@ fi
 
 # ---------------------------------------------------------------------------
 bold "Done."
+if [ "$NATIVE_SPEECH" -eq 1 ]; then
+  echo 'Launch with npm start (or npm run dev). In Settings → Processing, prepare native speech assets.'
+  echo 'Summaries still need your configured chat model. ffmpeg/ffprobe remain required for media tools.'
+  echo 'For the full distributable with the legacy fallback, use the packaging guide and npm run dist.'
+  exit 0
+fi
 cat <<EOF
 
 Run everything (recommended — one command):

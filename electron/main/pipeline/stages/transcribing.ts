@@ -6,12 +6,21 @@ import { meetingFolderPath } from '../../storage/meeting-folder.js';
 import { ensureWav } from '../../lib/ensure-wav.js';
 import { chunkWavIfNeeded } from '../../lib/chunk-wav.js';
 import { filterHallucinations } from '../hallucination-filter.js';
+import { atomicJson } from '../../speakers/voice-profiles.js';
 
 export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
   const meeting = ctx.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   ctx.logger.info('transcribe:start', { meetingId });
+  if (ctx.speechSelection?.provider === 'native') {
+    if (!ctx.nativeSpeech) throw new Error('Native speech helper is not configured.');
+    const result = await ctx.nativeSpeech.transcribe(meeting.audioPath, ctx.speechSelection.language);
+    atomicJson(path.join(folder, 'transcript.raw.json'), { ...result, segments: result.segments.map(s => ({ ...s, wordTiming: true })) });
+    ctx.artifactCache.invalidate(path.join(folder, 'transcript.raw.json'));
+    ctx.logger.info('transcribe:done', { meetingId, provider: 'apple', segments: result.segments.length });
+    return;
+  }
 
   // Deliberately consume the SAME primary mixed timeline as diarization.
   // #173 repairs clocked capture but does not enable independent stem STT:
@@ -42,8 +51,8 @@ export const runTranscribing: StageHandler = async ({ meetingId }, ctx) => {
       const chunk = chunks[i]!;
       const result = await ctx.stt.transcribe({
         audioPath: chunk.path,
-        model: ctx.settings.get('sttModel'),
-        language: ctx.settings.get('sttLanguage'),
+        model: ctx.speechSelection?.model ?? ctx.settings.get('sttModel'),
+        language: ctx.speechSelection?.language ?? ctx.settings.get('sttLanguage'),
       });
       for (const seg of result.segments) {
         allSegments.push({

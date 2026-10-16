@@ -1,6 +1,6 @@
 {
   "name": "meeting-notes",
-  "version": "1.14.11",
+  "version": "1.15.0",
   "description": "Local-first meeting notes for macOS: record, transcribe, name speakers, summarize and extract action items on your own machine",
   "main": "dist/electron/main/index.js",
   "type": "module",
@@ -16,7 +16,7 @@
     "speech:smoke": "npm run build && ELECTRON_RUN_AS_NODE=1 electron scripts/speech-benchmark/smoke.mjs",
     "build:icons": "node scripts/build-icons.mjs",
     "start": "electron .",
-    "dist": "npm run build:audio-tap && npm run build && npm run sidecar:bundle && electron-builder --mac && npm run dist:cleanup-loose-app",
+    "dist": "npm run build:audio-tap && npm run build:speech && npm run build && npm run sidecar:bundle && electron-builder --mac --publish never && npm run dist:cleanup-loose-app",
     "dist:cleanup-loose-app": "rm -rf release/mac-arm64/MeetingNotes.app && echo '  removed loose release/mac-arm64/MeetingNotes.app (use the dmg/zip in release/ instead — leaving the unboxed .app on disk causes LaunchServices to register it as a duplicate of /Applications/MeetingNotes.app)'",
     "sidecar:bundle": "bash sidecar/scripts/build-bundle.sh",
     "test": "ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run",

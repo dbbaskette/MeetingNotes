@@ -40,6 +40,7 @@ const sampleMeetings = [
 // Typed as the full Settings record so adding a setting in main fails
 // typecheck here until the preview has a value for it.
 const previewSettings: Settings = {
+  speechProvider: 'legacy',
   obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
   sttUrl: 'http://127.0.0.1:8080',

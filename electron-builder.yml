@@ -54,6 +54,14 @@ files:
 asarUnpack:
   - "node_modules/@vscode/ripgrep-*/bin/**"
 extraResources:
+  - from: speech-engine/.build/release/meeting-notes-speech
+    to: bin/meeting-notes-speech
+  - from: docs/speech-beta-notices.md
+    to: licenses/native-speech-notices.md
+  - from: speech-engine/.build/checkouts/argmax-oss-swift/LICENSE
+    to: licenses/Argmax-LICENSE
+  - from: speech-engine/.build/checkouts/argmax-oss-swift/NOTICES
+    to: licenses/Argmax-NOTICES
   # Ship only the PyInstaller bundle — the user does not need Python installed.
   # Dev runs out of the source tree where the .venv path is used instead.
   - from: sidecar/dist/meeting-notes-diarize
@@ -104,6 +112,7 @@ mac:
   # bundled Info.plist (Electron prompts on first getMediaAccessStatus call
   # only if asked — we let the helper own the prompts).
   extendInfo:
+    NSSpeechRecognitionUsageDescription: MeetingNotes transcribes your selected meeting recordings locally on this Mac.
     NSMicrophoneUsageDescription: MeetingNotes records meetings by capturing your microphone.
     NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
 # Post-package hook trims dead weight from Chromium's bundled Electron

@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { NativeSpeechStatus } from '../shared/native-speech.js';
 import type { SearchRequest, SearchResponse } from '../shared/search';
 import type {BackupPreview,BackupStatus} from '../shared/backup';
 import type { NotesVersion, NotesComparison } from '../shared/notes-history';
@@ -127,6 +128,9 @@ const IPC_CHANNELS = {
   exportRun: 'export:run',
   dialogSave: 'dialog:save',
   settingsGet: 'settings:get',
+  nativeSpeechStatus: 'native-speech:status',
+  nativeSpeechPrepare: 'native-speech:prepare',
+  nativeSpeechCancel: 'native-speech:cancel',
   settingsSet: 'settings:set',
   settingsChooseFolder: 'settings:choose-folder',
   notesHistoryList: 'notes-history:list',
@@ -434,7 +438,7 @@ const api = {
     // its MATCH_THRESHOLD gate, since this is for a human to confirm.
     suggestions: (meetingId: string, localLabel: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersSuggestions, meetingId, localLabel) as Promise<
-        { id: string; displayName: string; confidence: number }[]
+        { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[]
       >,
     unlink: (meetingId: string, localLabel: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersUnlink, meetingId, localLabel),
@@ -478,6 +482,11 @@ const api = {
      *  missing and shows it in Finder. */
     revealStorage: (key: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.settingsRevealStorage, key) as Promise<void>,
+  },
+  nativeSpeech: {
+    status: (): Promise<NativeSpeechStatus> => ipcRenderer.invoke(IPC_CHANNELS.nativeSpeechStatus),
+    prepare: (): Promise<NativeSpeechStatus> => ipcRenderer.invoke(IPC_CHANNELS.nativeSpeechPrepare),
+    cancel: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.nativeSpeechCancel),
   },
   notesHistory: {
     list: (id: string): Promise<Omit<NotesVersion, 'summary' | 'items'>[]> => ipcRenderer.invoke(IPC_CHANNELS.notesHistoryList, id),

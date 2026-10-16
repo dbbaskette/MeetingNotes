@@ -87,6 +87,7 @@ step "Rebuilding native modules for Electron"
 npm run rebuild:electron
 
 step "Building Electron app (TypeScript + Vite)"
+npm run build:speech
 npm run build
 
 # ── Step 4: Wipe stale artifacts ──────────────────────────────────────
@@ -106,7 +107,7 @@ rm -f release/MeetingNotes-*.dmg \
 
 # ── Step 5: Package with electron-builder ─────────────────────────────
 step "Packaging .dmg and .zip with electron-builder"
-npx electron-builder --mac
+npx electron-builder --mac --publish never
 
 # ── Step 6: Clean up loose .app ───────────────────────────────────────
 step "Cleaning up loose .app (use the .dmg instead)"

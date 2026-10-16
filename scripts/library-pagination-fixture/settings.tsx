@@ -2,8 +2,15 @@ import React from 'react';
 import {createRoot} from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
 const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED', captures: 0, installed: ['small.en'], downloads: [] as string[]};
+const nativeState = {supported: true, appleReady: false, speakerReady: false, busy: false, phase: 'Not checked', progress: 0, error: null as string | null};
+let finishSpeech: (() => void) | undefined;
 (window as any).fixture = fixture;
 window.api = {
+  nativeSpeech: {status: async () => ({...nativeState}), prepare: async () => {
+    Object.assign(nativeState, {busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0.5});
+    await new Promise<void>(resolve => {finishSpeech = resolve;});
+    nativeState.busy = false; return {...nativeState};
+  }, cancel: async () => {nativeState.error = 'Setup cancelled. You can retry at any time.'; finishSpeech?.();}},
   settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
     set: async (key: string,value: unknown) => {fixture.saves.push({key,value}); if(fixture.fail) throw new Error('Fixture save failed'); return value;},chooseFolder: async () => fixture.chosen},
   models: {list: async () => []},permissions: {audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [

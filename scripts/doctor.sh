@@ -20,11 +20,15 @@ http_ok() {
 }
 
 section "Binaries"
-for bin in node npm python3 ffmpeg ffprobe; do
+doctor_bins='node npm ffmpeg ffprobe'
+if [ "$SPEECH_PROVIDER" = legacy ]; then doctor_bins="$doctor_bins python3"; fi
+for bin in $doctor_bins; do
   if command -v "$bin" >/dev/null; then ok "$bin: $(command -v "$bin")"; else bad "$bin: not found"; fi
 done
+if [ "$SPEECH_PROVIDER" = legacy ]; then
 if command -v whisper-server >/dev/null; then ok "whisper-server: $(command -v whisper-server)"
 else bad "whisper-server: not found (brew install whisper-cpp)"; fi
+fi
 
 section "Filesystem"
 [ -d "$LIB" ] && ok "library dir: $LIB" || bad "library dir missing: $LIB"
@@ -33,6 +37,7 @@ section "Filesystem"
 if [ -d "$AUDIO_HIJACK_DIR" ]; then ok "Audio Hijack output dir: $AUDIO_HIJACK_DIR"
 else hmm "Audio Hijack output dir not found at $AUDIO_HIJACK_DIR (set audioWatchPath in app settings)"; fi
 
+if [ "$SPEECH_PROVIDER" = legacy ]; then
 section "Sidecar (pyannote)"
 if [ -x "sidecar/.venv/bin/python" ]; then
   ok "sidecar venv present"
@@ -49,12 +54,18 @@ fi
 if ls -d "$HOME/.cache/huggingface/hub/models--pyannote--"* >/dev/null 2>&1; then
   ok "pyannote models cached (offline diarization will work)"
 fi
+else
+section 'Native speech (Apple + SpeakerKit)'
+hmm 'Use Settings → Processing to check Apple language assets and verified speaker models. No HF token or Whisper server is required.'
+fi
 
 section "Services"
+if [ "$SPEECH_PROVIDER" = legacy ]; then
 if http_ok "$STT_URL/v1/models"; then
   ok "whisper-server reachable at $STT_URL"
 else
   hmm "whisper-server not currently running at $STT_URL (the app spawns it on first transcribe and shuts it down after 10 min idle)"
+fi
 fi
 
 if http_ok "$LLM_URL/v1/models"; then
@@ -66,10 +77,12 @@ else
   hmm "LLM ($PROVIDER) not currently running at $LLM_URL (managed mode — the app spawns it on first summarize)"
 fi
 
+if [ "$SPEECH_PROVIDER" = legacy ]; then
 if http_ok "$DIAR_URL/health" || http_ok "$DIAR_URL/"; then
   ok "diarization sidecar reachable at $DIAR_URL"
 else
   hmm "diarization sidecar not currently running at $DIAR_URL (the app spawns it on first diarize and shuts it down after 10 min idle)"
+fi
 fi
 
 section "Native modules"

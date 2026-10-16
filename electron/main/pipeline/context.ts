@@ -14,8 +14,12 @@ import type { ArtifactCache } from '../library/artifact-cache.js';
 import type { TerminologyService } from '../terminology/service.js';
 import type { NotesHistory } from '../storage/notes-history.js';
 import type { SummaryTemplate } from '../../shared/summary-templates.js';
+import type { NativeSpeechService } from '../speech/service.js';
+import type { SpeechSelection } from '../../shared/native-speech.js';
 
 export interface PipelineContext {
+  nativeSpeech?: NativeSpeechService;
+  speechSelection?: SpeechSelection;
   /** Resolves the summary template for a meeting (its own choice, its
    *  group's default, or General). Absent in tests: General is used. */
   summaryTemplateFor?: (meetingId: string) => SummaryTemplate;

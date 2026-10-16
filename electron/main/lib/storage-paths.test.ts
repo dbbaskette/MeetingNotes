@@ -60,9 +60,9 @@ describe('storageLocations', () => {
   const home = '/Users/x';
   const libraryRoot = '/Users/x/Documents/MeetingNotes';
 
-  it('returns the four keyed rows in order', () => {
+  it('returns the five keyed rows in order', () => {
     const rows = storageLocations({ libraryRoot, home });
-    expect(rows.map((r) => r.key)).toEqual(['library', 'models', 'logs', 'hfCache']);
+    expect(rows.map((r) => r.key)).toEqual(['library', 'models', 'logs', 'nativeModels', 'hfCache']);
   });
 
   it('points each row at the expected path', () => {
@@ -74,6 +74,7 @@ describe('storageLocations', () => {
       path.join(home, 'Library', 'Application Support', 'MeetingNotes', 'whisper-models'),
     );
     expect(byKey.logs).toBe(path.join(home, 'Library', 'Logs', 'MeetingNotes'));
+    expect(byKey.nativeModels).toBe(path.join(home, 'Library', 'Application Support', 'MeetingNotes', 'speech-models'));
     expect(byKey.hfCache).toBe(path.join(home, '.cache', 'huggingface'));
   });
 
