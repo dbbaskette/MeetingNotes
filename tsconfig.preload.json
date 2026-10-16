@@ -11,6 +11,6 @@
     "rootDir": ".",
     "baseUrl": "."
   },
-  "include": ["electron/preload/index.ts"],
+  "include": ["electron/preload/index.ts", "electron/preload/beta.ts"],
   "exclude": ["electron/preload/**/*.test.ts"]
 }

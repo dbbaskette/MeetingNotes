@@ -24,6 +24,7 @@ export default defineConfig({
   },
   server: { port: 5174, strictPort: true },
   build: {
+    rollupOptions: { input: { main: path.resolve(__dirname, 'electron/renderer/index.html'), beta: path.resolve(__dirname, 'electron/renderer/beta.html') } },
     outDir: path.resolve(__dirname, 'dist/renderer'),
     emptyOutDir: true,
   },

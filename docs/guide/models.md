@@ -2,6 +2,8 @@
 
 How MeetingNotes talks to your local LLM, and the one-time Hugging Face setup that diarization needs.
 
+For the separate Apple/SpeakerKit evaluation app, see [Native speech beta](speech-beta.md). Its account-free native speaker path does not change stable MeetingNotes' requirements described below.
+
 MeetingNotes talks to any chat model in **LM Studio** or **Ollama** over an OpenAI-compatible API, and manages the runtime for you: with `summaryProvider` set to `lm-studio`/`ollama` it spawns the server, auto-loads `llmModel`, and idle-shuts-down after 10 min. The default is **`qwen/qwen3.5-9b`** — small enough to fit Apple Silicon VRAM on long transcripts.
 
 **Reasoning models are supported but need care.** Models like Gemma, Qwen3, and DeepSeek-R1 "think" in a `<think>` channel before answering, which MeetingNotes handles at several layers:

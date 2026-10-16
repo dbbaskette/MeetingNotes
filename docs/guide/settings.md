@@ -1,5 +1,7 @@
 # Settings and storage
 
+The [native speech beta](speech-beta.md) uses its own application identity and copied library. Its comparison workspace deliberately has no active stable settings, recording triggers, exporters, or vault sync; the settings below describe stable MeetingNotes.
+
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](../usability-improvements.md).
 
 **Settings → Storage → Back up Library** previews size and missing files, then creates a private local backup of the actual library and canonical settings databases, meeting audio (including external capture stems), notes, groups, speakers, and terminology. Model caches are excluded. Backup requires idle recording/processing/sync and protects writes while copying; checksummed manifests validate the result. A changed file inventory requires a fresh preview. Restore only into a new destination with the supplied script, never over a live Library. See [backup, privacy, restore, and rollback](../library-backup.md).

@@ -58,6 +58,10 @@ On first launch a setup wizard checks permissions, the Whisper model, the Huggin
 
 More detail: [Recording](docs/guide/recording.md) · [Working with meetings](docs/guide/meetings.md)
 
+### Experimental native-speech beta
+
+The `codex/native-speech-speakerkit` branch adds a separately named **MeetingNotes Beta** for Apple transcription and SpeakerKit voice matching on Apple Silicon/macOS 26+. It copies an existing library into an isolated test workspace and keeps original and reprocessed transcripts available for comparison. Stable processing, saved notes, and voice profiles are not replaced. See the [beta setup, comparison workflow, and current limitations](docs/guide/speech-beta.md). This is not a promoted replacement for the stable engines.
+
 ## How it works
 
 MeetingNotes is an Electron app that runs four local helpers, starting each when needed and stopping it after ten idle minutes.
