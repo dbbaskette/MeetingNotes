@@ -115,15 +115,10 @@ export interface IpcServices {
   gateNotified: Set<string>;
 }
 
-const MAX_EMBEDDING_DIMS = 8192;
 const ConfirmSpeakerSchema = z.object({
   meetingId: z.string().min(1),
   localLabel: z.string().min(1),
   displayName: z.string().min(1).max(200),
-  embedding: z
-    .array(z.number().refine(Number.isFinite, 'embedding values must be finite'))
-    .min(1)
-    .max(MAX_EMBEDDING_DIMS),
 });
 
 const RerunSchema = z.object({
@@ -332,6 +327,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const speakers = listMeetingSpeakers(s.speakers, id);
     const settingsSnapshot = s.settings.getAll();
+    // Tiny per-run manifest, not the potentially multi-MB raw transcript.
+    // Historical meetings without provenance must not be relabelled as Apple.
+    const speech = await s.artifactCache.readJson<{ provider?: string }>(path.join(folder, 'processing-speech.json')).catch(() => null);
     const items = s.actionItems.listByMeeting(id);
     // Owner identity for the per-item `isMine` flag — drives the task-app
     // export modal (which lists only the user's own items) and the "set who
@@ -369,7 +367,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         sourceQuote: ai.sourceQuote,
         isMine: isMyItem(ai, me),
       })),
-      models: { stt: settingsSnapshot.sttModel, llm: settingsSnapshot.llmModel },
+      models: { stt: speech?.provider === 'native' ? 'Apple SpeechTranscriber' : undefined, llm: settingsSnapshot.llmModel },
     };
   });
 
@@ -719,7 +717,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting) throw new Error('meeting not found');
     const file = path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'diarization.json');
     const diar = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as DiarizationArtifact : null;
-    const embedding = diar?.embeddingSpace ? embeddingForLabel(diar, parsed.localLabel) : parsed.embedding;
+    const embedding = diar?.embeddingSpace ? embeddingForLabel(diar, parsed.localLabel) : null;
     const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding }, diar?.embeddingSpace);
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     return id;
@@ -1110,32 +1108,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   // running-status hints.
   ipc.handle(IPC_CHANNELS.llmDetectProviders, async (): Promise<ProviderAvailability> => {
     return detectProviders();
-  });
-
-  // Settings "Test connection" buttons. Both probes time out at 3 s
-  // so a misconfigured URL fails fast instead of hanging the form.
-  ipc.handle(IPC_CHANNELS.sttProbe, async (
-    _e, url: unknown,
-  ): Promise<{ ok: true } | { ok: false; error: string; code?: string }> => {
-    if (typeof url !== 'string' || !url) return { ok: false, error: 'invalid url' };
-    try {
-      const resp = await fetch(`${url.replace(/\/$/, '')}/health`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!resp.ok) return { ok: false, error: `HTTP ${resp.status} from /health` };
-      const text = await resp.text();
-      try {
-        const parsed = JSON.parse(text) as { status?: unknown };
-        if (parsed?.status !== 'ok') {
-          return { ok: false, error: `/health returned unexpected body — is this whisper-server?` };
-        }
-        return { ok: true };
-      } catch {
-        return { ok: false, error: '/health returned non-JSON — likely a different server on this port' };
-      }
-    } catch (e) {
-      return probeError(e);
-    }
   });
 
   ipc.handle(IPC_CHANNELS.llmProbe, async (

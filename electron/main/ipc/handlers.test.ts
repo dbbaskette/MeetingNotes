@@ -341,6 +341,7 @@ describe('registerIpcHandlers', () => {
       const get = handle.mock.calls.find(([channel]) => channel === 'meetings:get')![1];
       const save = handle.mock.calls.find(([channel]) => channel === 'meetings:save-summary')![1];
       expect((await get(null, 'm1')).summaryMd).toBe('Old summary');
+      const entriesBeforeSave = artifactCache.stats().entries;
 
       const writeFileSync = fsSync.writeFileSync.bind(fsSync);
       let entriesAtWrite = -1;
@@ -355,7 +356,8 @@ describe('registerIpcHandlers', () => {
       }
 
       expect((await get(null, 'm1')).summaryMd).toBe('New summary');
-      expect(entriesAtWrite).toBe(0);
+      // Only summary.md is evicted; tiny provenance entries stay cached.
+      expect(entriesAtWrite).toBe(entriesBeforeSave - 1);
     } finally {
       await fs.rm(libraryRoot, { recursive: true, force: true });
     }
@@ -455,7 +457,7 @@ describe('registerIpcHandlers', () => {
     expect(channels).toContain('models:list');
     // New endpoints from the UX-review pass: Settings "Test connection"
     // probes (one per LLM/STT side) and the drag-and-drop import handler.
-    expect(channels).toContain('stt:probe');
+    expect(channels).not.toContain('stt:probe');
     expect(channels).toContain('llm:probe');
     expect(channels).toContain('meetings:import-dropped');
     expect(channels).toContain('transcript:export');

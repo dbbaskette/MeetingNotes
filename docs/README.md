@@ -3,7 +3,7 @@
 ## Using MeetingNotes
 - [Recording a meeting](guide/recording.md) — starting, stopping, sources, groups, recovering an interrupted capture
 - [Working with meetings](guide/meetings.md) — speaker review, notes and action items, terminology, Weekly, search and playback
-- [Models](guide/models.md) — LM Studio and Ollama, reasoning models, the Hugging Face token
+- [Models](guide/models.md) — Apple/SpeakerKit assets, LM Studio and Ollama, reasoning models
 - [Settings and storage](guide/settings.md) — settings sections, backup, setup and health, notes history, the full settings reference
 - [Settings, notes history and large libraries](usability-improvements.md) — behaviour details for paths, restore and grouped browsing
 

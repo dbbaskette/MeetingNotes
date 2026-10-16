@@ -140,11 +140,6 @@ const IPC_CHANNELS = {
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
-  onboardingWhisperList: 'onboarding:whisper-list',
-  onboardingWhisperInstall: 'onboarding:whisper-install',
-  onboardingWhisperProgress: 'onboarding:whisper-progress',
-  onboardingHfTokenSave: 'onboarding:hf-token-save',
-  onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',
@@ -153,7 +148,6 @@ const IPC_CHANNELS = {
   weeklyGetNarrative: 'weekly:get-narrative',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
-  sttProbe: 'stt:probe',
   llmProbe: 'llm:probe',
   llmHealthCheckModel: 'llm:health-check-model',
   meetingsImportDropped: 'meetings:import-dropped',
@@ -402,7 +396,7 @@ const api = {
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
-    confirm: (input: { meetingId: string; localLabel: string; displayName: string; embedding: number[] }) =>
+    confirm: (input: { meetingId: string; localLabel: string; displayName: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
     /** Merge the source roster speaker into the target. Meeting links and
@@ -519,35 +513,6 @@ const api = {
     ) => ipcRenderer.invoke(IPC_CHANNELS.meetingDetectorDismiss, input),
   },
   onboarding: {
-    /** List currently-installed Whisper models (by inspecting
-     *  whisper-server.sh's models directory). */
-    listWhisperModels: () =>
-      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperList) as Promise<string[]>,
-    /** Download and install a Whisper model by name (e.g. "medium.en").
-     *  Resolves on completion; rejects with a readable message on failure.
-     *  No progress stream yet — shows a spinner for the full ~1-3 min
-     *  download depending on model + connection. */
-    installWhisperModel: (model: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.onboardingWhisperInstall, model) as Promise<void>,
-    /** Subscribe to byte-level progress for an in-flight model download.
-     *  `total` is null when the host omitted content-length. Returns an
-     *  unsubscribe callback. */
-    onWhisperProgress: (cb: (e: { model: string; received: number; total: number | null }) => void) => {
-      const wrapped = (_e: unknown, payload: { model: string; received: number; total: number | null }): void => cb(payload);
-      ipcRenderer.on(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
-      return () => ipcRenderer.off(IPC_CHANNELS.onboardingWhisperProgress, wrapped);
-    },
-    /** Write an HF token to ~/.cache/huggingface/token with 0600 perms.
-     *  Caller is expected to have validated it already. */
-    saveHfToken: (token: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenSave, token) as Promise<void>,
-    /** Whether an HF token is already on disk (~/.cache/huggingface/token).
-     *  Lets the wizard show "already saved" after back-nav instead of a
-     *  blank field — we never read the secret back into the UI. */
-    hfTokenStatus: () =>
-      ipcRenderer.invoke(IPC_CHANNELS.onboardingHfTokenStatus) as Promise<{ saved: boolean }>,
-    /** Open an external URL (HF model-gate pages, LM Studio download,
-     *  System Settings deep-links) via shell.openExternal. */
     openExternal: (url: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.onboardingOpenExternal, url) as Promise<void>,
   },
@@ -673,14 +638,6 @@ const api = {
         verdict: 'ok' | 'loops';
         checkedAt: string;
       }>,
-  },
-  stt: {
-    /** Probe a whisper-server endpoint by parsing /health JSON. */
-    probe: (url: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.sttProbe, url) as Promise<
-        | { ok: true }
-        | { ok: false; error: string; code?: string }
-      >,
   },
   permissions: {
     setupHealth: () => ipcRenderer.invoke(IPC_CHANNELS.setupHealth) as Promise<{ label: string; state: string; detail: string; section: string }[]>,

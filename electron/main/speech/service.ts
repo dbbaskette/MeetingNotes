@@ -71,7 +71,7 @@ export class NativeSpeechService {
     return value;
   }
   private requireSupported(): void {
-    if (!this.state.supported) throw new Error('Native speech is unavailable on this Mac. Choose Legacy speech in Settings → Processing.');
+    if (!this.state.supported) throw new Error('Native speech is unavailable on this Mac. MeetingNotes requires Apple silicon and macOS 26 or newer.');
     if (this.state.busy) throw new Error('Wait for native speech setup to finish, then retry processing.');
   }
 }

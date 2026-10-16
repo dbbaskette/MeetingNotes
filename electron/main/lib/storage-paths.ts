@@ -4,9 +4,8 @@ import path from 'node:path';
  * Pure path derivations for the consolidated storage layout (Option B).
  *
  * User-facing data (recordings, meetings, db.sqlite) lives under a single
- * Library root; re-downloadable / derived data (whisper models, logs) stays
- * in the conventional macOS locations so GBs don't end up in iCloud; the
- * HF/pyannote cache is left where the Hugging Face library demands it.
+ * Library root; re-downloadable / derived data (speaker models, logs) stays
+ * in conventional macOS locations. Apple manages its own language assets.
  *
  * No I/O here — these are just string joins so they can be unit-tested and
  * reused from both the main process and (indirectly) the renderer.
@@ -54,7 +53,7 @@ export function libraryWatchPaths(opts: {
   return out;
 }
 
-export type StorageLocationKey = 'library' | 'models' | 'logs' | 'hfCache' | 'nativeModels';
+export type StorageLocationKey = 'library' | 'logs' | 'nativeModels';
 
 export interface StorageLocation {
   key: StorageLocationKey;
@@ -78,12 +77,6 @@ export function storageLocations(opts: {
       note: 'Recordings, meetings, and the database.',
     },
     {
-      key: 'models',
-      label: 'Models',
-      path: path.join(home, 'Library', 'Application Support', 'MeetingNotes', 'whisper-models'),
-      note: 'Whisper models — re-downloadable, kept out of iCloud.',
-    },
-    {
       key: 'logs',
       label: 'Logs',
       path: path.join(home, 'Library', 'Logs', 'MeetingNotes'),
@@ -93,12 +86,6 @@ export function storageLocations(opts: {
       key: 'nativeModels', label: 'Native speaker models',
       path: path.join(home, 'Library', 'Application Support', 'MeetingNotes', 'speech-models'),
       note: 'Verified SpeakerKit models. Apple language assets are managed separately by macOS.',
-    },
-    {
-      key: 'hfCache',
-      label: 'AI model cache',
-      path: path.join(home, '.cache', 'huggingface'),
-      note: 'Diarization models + token — shared with other Hugging Face tools.',
     },
   ];
 }

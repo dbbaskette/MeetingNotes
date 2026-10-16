@@ -1,14 +1,12 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow, dialog, nativeTheme, shell } from 'electron';
+import { dialog, nativeTheme, shell } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 import { IPC_CHANNELS } from './contracts.js';
 import type { IpcServices } from './handlers.js';
 import type { Settings } from '../storage/settings-repo.js';
 import { DEFAULT_SETTINGS } from '../storage/settings-repo.js';
 import { storageLocations } from '../lib/storage-paths.js';
-import { downloadWhisperModel, isWhisperModelFile } from '../whisper/download-model.js';
 import { validateSetting } from '../storage/settings-validation.js';
 import { isSecretSettingKey } from '../../shared/secrets.js';
 import { isSafeExternalUrl } from '../lib/navigation-guard.js';
@@ -26,16 +24,14 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     value = validateSetting(key, value);
-    if (key === 'speechProvider' || key === 'sttLanguage') {
+    if (key === 'sttLanguage') {
       const status = s.pipeline.getStatus();
-      if (status.currentId || status.queueLength || s.nativeSpeech?.snapshot().busy) throw new Error('Wait for processing and speech setup to finish before changing the speech engine or language.');
-      if (key === 'speechProvider' && value === 'native' && !native().snapshot().supported) throw new Error('Native speech requires Apple silicon and macOS 26 or newer. Legacy speech remains available.');
+      if (status.currentId || status.queueLength || s.nativeSpeech?.snapshot().busy) throw new Error('Wait for processing and speech setup to finish before changing the speech language.');
     }
     if (isSecretSettingKey(key)) return s.secrets.write(key, value as string);
     // Register first: a shortcut another app already holds must be refused
     // with a readable error, not saved and silently dead.
     if (key === 'recordShortcut') s.recordShortcut?.apply(value as string);
-    if (key === 'sttModel' && s.pipeline.getStatus().currentId) throw new Error('Wait for active processing to finish before changing the transcription model');
     s.settings.set(key as keyof Settings, value as Settings[keyof Settings]);
     if (key === 'showMenuBarIcon') s.menuBar?.setVisible(value as boolean);
     if (key === 'theme') {
@@ -77,57 +73,6 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
     try { return await s.lmStudio.listModels(); }
     catch { return []; }
-  });
-
-  // Onboarding-wizard handlers (#43). Kept out of the main settings
-  // block because they're only used during first-run setup.
-  ipc.handle(IPC_CHANNELS.onboardingWhisperList, async () => {
-    const dir = path.join(os.homedir(), 'Library', 'Application Support', 'MeetingNotes', 'whisper-models');
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir)
-      .filter((f) => f.startsWith('ggml-') && f.endsWith('.bin') && isWhisperModelFile(path.join(dir, f)))
-      .map((f) => f.replace(/^ggml-/, '').replace(/\.bin$/, ''));
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingWhisperInstall, async (_e, model: unknown) => {
-    if (typeof model !== 'string') throw new Error('invalid model id');
-    if (s.pipeline.getStatus().currentId) throw new Error('Wait for processing to finish before installing or replacing a transcription model');
-    // Native streaming download (no shell script). The old path shelled out to
-    // scripts/whisper-server.sh, which isn't bundled into the packaged .app —
-    // so onboarding's model download failed there with "No such file or
-    // directory". downloadWhisperModel validates the id and pulls the ggml
-    // file straight into the whisper-models directory. Progress fans out on
-    // the onboarding:whisper-progress push channel (throttled to ~4/sec in
-    // download-model.ts) so the wizard can render a real progress bar.
-    await downloadWhisperModel(model, {
-      onProgress: (received, total) => {
-        BrowserWindow.getAllWindows().forEach((w) =>
-          w.webContents.send(IPC_CHANNELS.onboardingWhisperProgress, { model, received, total }));
-      },
-    });
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenSave, async (_e, token: unknown) => {
-    if (typeof token !== 'string' || token.length < 8) throw new Error('invalid token');
-    const dir = path.join(os.homedir(), '.cache', 'huggingface');
-    fs.mkdirSync(dir, { recursive: true });
-    const tokenPath = path.join(dir, 'token');
-    fs.writeFileSync(tokenPath, token, { mode: 0o600 });
-    // Set perms explicitly in case writeFileSync's mode arg is honored
-    // only at file creation on some filesystems.
-    try { fs.chmodSync(tokenPath, 0o600); } catch { /* best-effort */ }
-  });
-
-  ipc.handle(IPC_CHANNELS.onboardingHfTokenStatus, async () => {
-    // Report whether a non-empty token file exists — so the wizard's HF step,
-    // after the user navigates away and back, shows "already saved" rather than
-    // a blank field that looks like the token vanished. We never read the
-    // secret back into the renderer.
-    const tokenPath = path.join(os.homedir(), '.cache', 'huggingface', 'token');
-    let saved = false;
-    try { saved = fs.existsSync(tokenPath) && fs.readFileSync(tokenPath, 'utf8').trim().length > 0; }
-    catch { saved = false; }
-    return { saved };
   });
 
   ipc.handle(IPC_CHANNELS.onboardingOpenExternal, async (_e, url: unknown) => {

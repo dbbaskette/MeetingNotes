@@ -5,7 +5,7 @@ import path from 'node:path';
 import { runIdentifying } from './identifying.js';
 
 describe('runIdentifying', () => {
-  it('averages embeddings per speaker and links via roster service', async () => {
+  it('passes tagged native centroids to roster review', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-i-'));
     const f = path.join(dir, 'meetings', 'slug');
     fs.mkdirSync(f, { recursive: true });
@@ -17,7 +17,7 @@ describe('runIdentifying', () => {
           { start: 1, end: 2, speaker: 'SPEAKER_00', embedding: [1, 0, 0] },
           { start: 2, end: 3, speaker: 'SPEAKER_01', embedding: [0, 1, 0] },
         ],
-        num_speakers: 2,
+        num_speakers: 2, centroids: { SPEAKER_00: [1, 0, 0], SPEAKER_01: [0, 1, 0] }, embeddingSpace: 'native:1',
       }),
     );
     const linkFn = vi.fn();
@@ -37,6 +37,7 @@ describe('runIdentifying', () => {
       logger: { info: () => {} },
     };
     await runIdentifying({ meetingId: 'm' }, ctx);
+    expect(ctx.roster.identifyUnknowns).toHaveBeenCalledWith([{ label: 'SPEAKER_00', embedding: [1, 0, 0] }, { label: 'SPEAKER_01', embedding: [0, 1, 0] }]);
     expect(linkFn).toHaveBeenCalledWith('m', 'SPEAKER_00', 'spk_a', 0.9);
   });
 });

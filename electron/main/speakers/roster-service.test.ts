@@ -1,61 +1,47 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../storage/db.js';
 import { SpeakersRepo } from '../storage/speakers-repo.js';
 import { RosterService } from './roster-service.js';
-
-let svc: RosterService;
-let tmp: string;
-
+import { VoiceProfiles, normalized } from './voice-profiles.js';
+let svc: RosterService, tmp: string, db: ReturnType<typeof openDb>, profiles: VoiceProfiles;
+const space = 'speakerkit:model-a:raw';
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-roster-'));
-  const db = openDb(path.join(tmp, 'db.sqlite'));
-  svc = new RosterService(new SpeakersRepo(db), tmp);
+  db = openDb(path.join(tmp, 'db.sqlite')); svc = new RosterService(new SpeakersRepo(db), tmp); profiles = new VoiceProfiles(tmp);
 });
-
+afterEach(() => { db.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
 describe('RosterService', () => {
-  it('confirmSpeaker creates a new speaker and persists embedding', () => {
-    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: new Array(512).fill(0.1) });
-    expect(svc.loadEmbedding(id)).toHaveLength(512);
+  it('persists only confirmed model-tagged native embeddings', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [3, 4] }, space);
+    expect(profiles.load(space, id)).toEqual([0.6, 0.8]);
+    expect(profiles.load('another-model', id)).toBeNull();
   });
-
-  it('identifyUnknowns auto-links when above threshold', () => {
-    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] });
-    const m = svc.identifyUnknowns([{ label: 'Speaker 1', embedding: [0.99, 0.01, 0] }]);
-    expect(m[0]!.rosterId).toBe(id);
+  it('requires confirmation even for a strong voice match', () => {
+    svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] }, space);
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0, 0] }])[0]?.rosterId).toBeNull();
   });
-
-  it('confirm on existing speaker updates running average embedding', () => {
-    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] });
-    svc.confirmSpeakerFor(id, [0, 1, 0]);
-    const e = svc.loadEmbedding(id);
-    expect(e[0]).toBeCloseTo(0.7, 6);
-    expect(e[1]).toBeCloseTo(0.3, 6);
+  it('updates the normalized running average after confirmation', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] }, space);
+    svc.confirmSpeakerFor(id, [0, 1, 0], space);
+    expect(profiles.load(space, id)).toEqual(normalized([0.7, 0.3, 0]));
   });
-
-  it('confirmSpeaker reuses an existing entry when the name matches (case/whitespace-insensitive)', () => {
-    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0, 0] });
-    const again = svc.confirmSpeaker({ displayName: '  dan  ', embedding: [0, 1, 0] });
-    expect(again).toBe(id);
-    // No duplicate row was added.
-    const e = svc.loadEmbedding(id);
-    // Embedding was merged via running average, not overwritten.
-    expect(e[0]).toBeCloseTo(0.7, 6);
-    expect(e[1]).toBeCloseTo(0.3, 6);
+  it('reuses names case/whitespace-insensitively', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    expect(svc.confirmSpeaker({ displayName: '  dan  ', embedding: [0, 1] }, space)).toBe(id);
   });
-
-  it('suggestionsFor ranks roster entries by similarity with display names attached', () => {
-    const aliceId = svc.confirmSpeaker({ displayName: 'Alice', embedding: [1, 0, 0] });
-    const bobId = svc.confirmSpeaker({ displayName: 'Bob', embedding: [0, 1, 0] });
-    const out = svc.suggestionsFor({ label: 'Speaker 1', embedding: [0.9, 0.1, 0] });
-    expect(out[0]).toEqual({ id: aliceId, displayName: 'Alice', confidence: expect.any(Number) });
+  it('ranks native suggestions as similarity, not probability', () => {
+    const aliceId = svc.confirmSpeaker({ displayName: 'Alice', embedding: [1, 0] }, space);
+    const bobId = svc.confirmSpeaker({ displayName: 'Bob', embedding: [0, 1] }, space);
+    const out = svc.suggestionsFor({ label: 'A', embedding: [0.9, 0.1] }, 3, space);
+    expect(out[0]).toMatchObject({ id: aliceId, displayName: 'Alice', scoreKind: 'similarity' });
     expect(out[0]!.confidence).toBeGreaterThan(out[1]!.confidence);
     expect(out[1]!.id).toBe(bobId);
+    expect(svc.suggestionsFor({ label: 'A', embedding: [1, 0] })).toEqual([]);
   });
-
-  it('suggestionsFor returns an empty array for an empty roster', () => {
-    expect(svc.suggestionsFor({ label: 'Speaker 1', embedding: [1, 0, 0] })).toEqual([]);
+  it('returns no suggestions for an empty roster', () => {
+    expect(svc.suggestionsFor({ label: 'A', embedding: [1, 0] }, 3, space)).toEqual([]);
   });
 });

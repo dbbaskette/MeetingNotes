@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickSampleWindow, averageEmbeddingForLabel, type DiarizationSegment } from './sample-extractor.js';
+import { pickSampleWindow, embeddingForLabel, type DiarizationSegment } from './sample-extractor.js';
 
 describe('pickSampleWindow', () => {
   it('returns null when speaker has no segments longer than the floor', () => {
@@ -38,17 +38,14 @@ describe('pickSampleWindow', () => {
   });
 });
 
-describe('averageEmbeddingForLabel', () => {
-  it('averages only that speakers vectors', () => {
-    const segs: DiarizationSegment[] = [
-      { start: 0, end: 1, speaker: 'A', embedding: [1, 2, 3] },
-      { start: 1, end: 2, speaker: 'B', embedding: [10, 10, 10] },
-      { start: 2, end: 3, speaker: 'A', embedding: [3, 4, 5] },
-    ];
-    expect(averageEmbeddingForLabel(segs, 'A')).toEqual([2, 3, 4]);
+describe('embeddingForLabel', () => {
+  it('never trains native profiles from untagged legacy embeddings', () => {
+    expect(embeddingForLabel({ segments: [{ start: 0, end: 1, speaker: 'A', embedding: [3, 4] }] }, 'A')).toBeNull();
   });
-
-  it('returns null when the speaker has no embeddings', () => {
-    expect(averageEmbeddingForLabel([], 'A')).toBeNull();
+  it('normalizes tagged native centroids and rejects absent/zero vectors', () => {
+    const artifact = { segments: [], embeddingSpace: 'native:1', centroids: { A: [3, 4], B: [0, 0] } };
+    expect(embeddingForLabel(artifact, 'A')).toEqual([0.6, 0.8]);
+    expect(embeddingForLabel(artifact, 'B')).toBeNull();
+    expect(embeddingForLabel(artifact, 'C')).toBeNull();
   });
 });

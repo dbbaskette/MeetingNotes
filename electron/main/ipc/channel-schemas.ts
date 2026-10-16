@@ -144,7 +144,6 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.llmDetectProviders]: none,
   [C.llmProbe]: z.tuple([z.string().max(4096).optional()]),
   [C.llmHealthCheckModel]: z.tuple([z.string().min(1).max(500)]),
-  [C.sttProbe]: z.tuple([z.string().max(4096).optional()]),
 
   // Exports and integrations
   [C.exportRun]: z.tuple([ExportRunInput]),
@@ -185,10 +184,6 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.settingsSet]: z.tuple([z.string().min(1).max(100), handlerValidated]),
   [C.settingsChooseFolder]: none,
   [C.settingsRevealStorage]: z.tuple([z.string().min(1).max(100)]),
-  [C.onboardingWhisperList]: none,
-  [C.onboardingWhisperInstall]: z.tuple([z.string().min(1).max(200)]),
-  [C.onboardingHfTokenSave]: z.tuple([z.string().min(8).max(1000)]),
-  [C.onboardingHfTokenStatus]: none,
   [C.onboardingOpenExternal]: z.tuple([z.string().min(1).max(4096)]),
   [C.terminologyList]: none,
   [C.terminologySave]: z.tuple([handlerValidated, Id.optional()]),

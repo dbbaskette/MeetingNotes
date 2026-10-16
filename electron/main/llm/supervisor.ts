@@ -1,8 +1,7 @@
 // electron/main/llm/supervisor.ts
 //
-// Lifecycle for the summarization LLM. Mirrors the pyannote /
-// whisper supervisor pattern (lazy spawn, idle shutdown, adopt
-// existing daemon) but multiplexes across provider modes:
+// Lifecycle for the summarization LLM: lazy spawn, idle shutdown and
+// adoption of existing daemons, multiplexed across provider modes:
 //
 //   - 'external' → no-op. The user has LM Studio / Ollama / some
 //     other OpenAI-compat server running; we don't manage its

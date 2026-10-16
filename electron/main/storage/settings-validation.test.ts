@@ -13,8 +13,8 @@ it('accepts only the supported numeric context lengths', () => {
   for (const value of ['8192', -1, 8192.5, Infinity, NaN, 999999]) expect(() => validateSetting('llmContextLength', value)).toThrow();
 });
 it('rejects prototype keys, managed settings, malformed and unsafe endpoints', () => {
-  for (const key of ['toString', '__proto__', 'obsidian', 'googleRefreshTokenEnc']) expect(() => validateSetting(key, null)).toThrow();
-  for (const value of ['local', 'file:///tmp/private', 'https://user:secret@example.org']) expect(() => validateSetting('sttUrl', value)).toThrow();
+  for (const key of ['toString', '__proto__', 'obsidian', 'googleRefreshTokenEnc', 'speechProvider', 'sttUrl', 'sttModel']) expect(() => validateSetting(key, null)).toThrow();
+  for (const value of ['local', 'file:///tmp/private', 'https://user:secret@example.org']) expect(() => validateSetting('lmStudioUrl', value)).toThrow();
   expect(() => validateSetting('webhookUrl', 'http://example.org')).toThrow('HTTPS');
   expect(validateSetting('webhookUrl', 'http://localhost:8080/hook')).toBe('http://localhost:8080/hook');
 });

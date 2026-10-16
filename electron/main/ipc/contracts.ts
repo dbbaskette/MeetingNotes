@@ -331,15 +331,6 @@ export const IPC_CHANNELS = {
   modelsList: 'models:list',
   meetingDetectedEvent: 'meeting-detector:detected',
   meetingDetectorDismiss: 'meeting-detector:dismiss',
-  onboardingWhisperList: 'onboarding:whisper-list',
-  onboardingWhisperInstall: 'onboarding:whisper-install',
-  /** Push channel: byte-level progress for an in-flight whisper model
-   *  download. Payload: { model, received, total } — total is null when
-   *  the host omitted content-length. ~4 events/sec (throttled in
-   *  download-model.ts). */
-  onboardingWhisperProgress: 'onboarding:whisper-progress',
-  onboardingHfTokenSave: 'onboarding:hf-token-save',
-  onboardingHfTokenStatus: 'onboarding:hf-token-status',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
   weeklyGet: 'weekly:get',
@@ -348,11 +339,6 @@ export const IPC_CHANNELS = {
   weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
-  /** Probe a custom STT URL for whisper-server's /health JSON. Used
-   *  by the Settings "Test" button so users can validate their
-   *  endpoint before walking into a 5–15 min pipeline run with a
-   *  misconfigured server. */
-  sttProbe: 'stt:probe',
   /** Probe a custom LLM URL for /v1/models. Returns the loaded
    *  model ids, or an error string. Same Settings "Test" button. */
   llmProbe: 'llm:probe',

@@ -1,24 +1,24 @@
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import '../../electron/renderer/src/index.css';
-const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED', captures: 0, installed: ['small.en'], downloads: [] as string[]};
+const fixture = {saves: [] as {key: string; value: unknown}[], fail: false, restored: '', chosen: '/fixture/chosen', probes: [] as string[], probeCode: 'ECONNREFUSED', captures: 0, preparations: 0, downloads: [] as string[]};
 const nativeState = {supported: true, appleReady: false, speakerReady: false, busy: false, phase: 'Not checked', progress: 0, error: null as string | null};
 let finishSpeech: (() => void) | undefined;
 (window as any).fixture = fixture;
 window.api = {
   nativeSpeech: {status: async () => ({...nativeState}), prepare: async () => {
-    Object.assign(nativeState, {busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0.5});
+    fixture.preparations++; Object.assign(nativeState, {busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0.5});
     await new Promise<void>(resolve => {finishSpeech = resolve;});
     nativeState.busy = false; return {...nativeState};
   }, cancel: async () => {nativeState.error = 'Setup cancelled. You can retry at any time.'; finishSpeech?.();}},
-  settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
+  settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,speechProvider: 'legacy',sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',recordingBitrateKbps: 128,autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
     set: async (key: string,value: unknown) => {fixture.saves.push({key,value}); if(fixture.fail) throw new Error('Fixture save failed'); return value;},chooseFolder: async () => fixture.chosen},
-  models: {list: async () => []},permissions: {audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [
-    {label: 'Transcription', state: 'check', detail: 'Managed local service may be idle', section: 'Processing'},
+  models: {list: async () => []},permissions: {micStatus: async () => 'granted', audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [
+    {label: 'Transcription', state: 'check', detail: 'Apple language assets need preparation', section: 'Processing'},
     {label: 'Exporters', state: 'optional', detail: 'Optional; does not block recording', section: 'Integrations'},
   ]},speakers: {list: async () => []},
   recording: { listSources: async () => [], test: async () => {fixture.captures++; return {durationS: 8, streams: {Mic: {playable: true,peakDb: -12},App: {playable: false,peakDb: null},File: {playable: true,peakDb: -18}}, message: 'Test audio discarded; no Library meeting'};} },
-  onboarding: {listWhisperModels: async () => fixture.installed, onWhisperProgress: () => () => {}, installWhisperModel: async (model: string) => {fixture.downloads.push(model); fixture.installed.push(model);} },
+  onboarding: {openExternal: async () => {}},
   llm: {probe: async (url: string) => {fixture.probes.push(url); return {ok: false,error: 'fetch failed',code: fixture.probeCode};},detectProviders: async () => ({lmStudio: {binary: true,running: false},ollama: {binary: true,running: false}})},
   terminology: {list: async () => [],offers: async () => true},groups: {list: async () => ({groups: [],ungroupedCount: 0})},
   summaryTemplates: {list: async () => ({templates: [{id: 'general',name: 'General',description: 'Discussion points, decisions, follow-ups and open questions.'}],groupDefaults: {}})},
@@ -28,6 +28,9 @@ window.api = {
 } as any;
 const {SettingsView} = await import('../../electron/renderer/src/views/SettingsView');
 const {NotesHistory} = await import('../../electron/renderer/src/components/NotesHistory');
-createRoot(document.getElementById('root')!).render(<div style={{height: '100vh'}}>
+const root = createRoot(document.getElementById('root')!);
+const {OnboardingView} = await import('../../electron/renderer/src/views/OnboardingView');
+(window as any).showOnboarding = () => root.render(<OnboardingView onFinished={() => {}}/>);
+root.render(<div style={{height: '100vh'}}>
   <SettingsView onNav={() => {}}/><div style={{position: 'fixed',bottom: 8,right: 8}}><NotesHistory meetingId="m" disabled={false} onRestored={async summary => {fixture.restored=summary;}}/></div>
 </div>);

@@ -4,13 +4,8 @@ import path from 'node:path';
 import type { ObsidianConfig } from '../../shared/obsidian.js';
 
 export interface Settings {
-  speechProvider: 'native' | 'legacy';
   obsidian: ObsidianConfig | null;
   lmStudioUrl: string;
-  /** OpenAI-compatible STT endpoint (whisper.cpp's whisper-server, etc.). */
-  sttUrl: string;
-  /** Model id for STT. For whisper.cpp this is informational; the loaded model is set at server start. */
-  sttModel: string;
   llmModel: string;
   audioHijackSessionName: string;
   libraryPath: string;
@@ -142,12 +137,8 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  // Missing values in an existing library must never silently switch engines.
-  speechProvider: 'legacy',
   obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
-  sttUrl: 'http://127.0.0.1:8080',
-  sttModel: 'whisper-1',
   // Default to a small-to-mid LLM that actually fits in Apple Silicon VRAM
   // on an 8-hour meeting transcript. Gemma-31b and Qwen-35b-a3b both blow up
   // with Metal OOM on 13k+ token prompts on 24–32GB machines; qwen3.5-9b
@@ -209,16 +200,6 @@ export function normalizeAutoDetectMeetings(value: unknown): Settings['autoDetec
 
 export class SettingsRepo {
   constructor(private readonly db: Database.Database) {}
-
-  /** One-time startup choice. Never reinterpret an existing user's settings,
-   * roster/library, or explicitly saved provider as a fresh installation. */
-  initializeSpeechProvider(nativeSupported: boolean): void {
-    if (this.db.prepare("SELECT value FROM settings WHERE key = 'speechProvider'").get()) return;
-    const prior = this.db.prepare('SELECT COUNT(*) AS n FROM settings').get() as { n: number };
-    const meetings = this.db.prepare('SELECT COUNT(*) AS n FROM meetings').get() as { n: number };
-    const speakers = this.db.prepare('SELECT COUNT(*) AS n FROM speakers').get() as { n: number };
-    this.set('speechProvider', nativeSupported && prior.n === 0 && meetings.n === 0 && speakers.n === 0 ? 'native' : 'legacy');
-  }
 
   get<K extends Key>(key: K): Settings[K] {
     const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;

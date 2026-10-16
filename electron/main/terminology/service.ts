@@ -19,7 +19,7 @@ import { meetingFolderPath } from '../storage/meeting-folder.js';
 import {
   mergeTranscriptWithDiarization,
   mergedToMarkdown,
-  type WhisperSegment,
+  type TranscriptSegment,
   type DiarSegment,
   type MergedSegment,
 } from '../lib/merge-transcript.js';
@@ -101,12 +101,12 @@ export class TerminologyService {
       throw e;
     }
   }
-  private raw(id: string): { segments: WhisperSegment[]; revision: string; nativeTurns?: MergedSegment[] } {
+  private raw(id: string): { segments: TranscriptSegment[]; revision: string; nativeTurns?: MergedSegment[] } {
     const text = this.text(
       path.join(path.dirname(this.file(id, 'transcript')), 'transcript.raw.json'),
     );
     if (!text) throw new Error('Wait for transcription to finish before correcting terms');
-    const parsed = JSON.parse(text) as { provider?: string; segments: WhisperSegment[] };
+    const parsed = JSON.parse(text) as { provider?: string; segments: TranscriptSegment[] };
     if (parsed.provider === 'apple') {
       const diarText = this.text(path.join(path.dirname(this.file(id, 'transcript')), 'diarization.json'));
       if (!diarText) throw new Error('Wait for speaker processing to finish before correcting terms');

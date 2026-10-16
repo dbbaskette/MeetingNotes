@@ -7,7 +7,6 @@ import {LibraryBackupPanel} from '../components/LibraryBackupPanel';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { WhisperStep } from './OnboardingView';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
 import { SetupHealth } from '../components/SetupHealth';
 import { Icon } from '../components/icons';
@@ -16,13 +15,10 @@ import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { formatLogTimestamp } from '../lib/log-timestamp.js';
-import { effectiveLlmUrl as providerUrl, isIdleProbe, resolveWhisperEndpoint } from '../../../shared/inference-endpoints.js';
+import { effectiveLlmUrl as providerUrl, isIdleProbe } from '../../../shared/inference-endpoints.js';
 
 interface Settings {
-  speechProvider: 'native' | 'legacy';
   lmStudioUrl: string;
-  sttUrl: string;
-  sttModel: string;
   llmModel: string;
   audioHijackSessionName: string;
   libraryPath: string;
@@ -188,13 +184,8 @@ export function SettingsView({
       <SetupHealth />
       <SettingsNavigation>
       <SettingsSection section="Processing" keywords="Apple SpeakerKit native speech language transcription STT setup">
-        <NativeSpeechPanel provider={s.speechProvider ?? 'legacy'} language={s.sttLanguage} onProvider={speechProvider => setS(previous => previous ? {...previous, speechProvider} : previous)} />
+        <NativeSpeechPanel language={s.sttLanguage} />
       </SettingsSection>
-      {s.speechProvider !== 'native' && <SettingsSection section="Processing" keywords="Whisper models download transcription STT setup">
-        <details><summary className="cursor-pointer text-sm font-semibold">Whisper model management</summary>
-          <div className="mt-3"><WhisperStep activeModel={s.sttModel} onStatus={() => {}} onUse={model => update('sttModel', model)} /></div>
-        </details>
-      </SettingsSection>}
       <SettingsSection section="Processing" keywords="automatic auto process recordings queue">
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" checked={s.autoProcessRecordings ?? false} onChange={e => void update('autoProcessRecordings', e.target.checked)} />
@@ -379,33 +370,6 @@ export function SettingsView({
         </div>
       </Field>
       </SettingsSection>
-      {s.speechProvider !== 'native' && <SettingsSection section="Advanced" keywords="STT whisper transcription server URL model">
-      <Field label="STT URL (whisper.cpp server)">
-        <div className="flex gap-2">
-          <input
-            value={s.sttUrl}
-            onChange={(e) => edit('sttUrl', e.target.value)} onBlur={() => void update('sttUrl', s.sttUrl)}
-            className="input flex-1"
-          />
-          <TestButton kind="stt" url={s.sttUrl} lazySpawn={resolveWhisperEndpoint(s.sttUrl).kind === 'managed'} />
-        </div>
-        <div className="text-xs text-ink-muted mt-1">
-          Default http://127.0.0.1:8080. Local HTTP endpoints auto-launch whisper-server
-          on first transcription and shut it down after 10 minutes of inactivity.
-          Remote, HTTPS, or proxy endpoints must already be running. Restart MeetingNotes after changing this URL.
-        </div>
-      </Field>
-      <Field label="STT Model name">
-        <input
-          value={s.sttModel}
-          onChange={(e) => edit('sttModel', e.target.value)} onBlur={() => void update('sttModel', s.sttModel)}
-          className="input"
-        />
-        <div className="text-xs text-ink-muted mt-1">
-          Managed model name or absolute custom model file path. Download models in Processing → Whisper model management. External STT uses its own model configuration. Restart MeetingNotes after changing this value; active processing must finish first.
-        </div>
-      </Field>
-      </SettingsSection>}
       <SettingsSection section="Storage" keywords="library path recordings folders storage watch logs models cache">
       <PathSetting label="Library path" value={s.libraryPath} onApply={value => update('libraryPath', value)}/>
       <StoragePanel />
@@ -423,7 +387,7 @@ export function SettingsView({
           onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
-        {s.speechProvider === 'native' && <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing.</p>}
+        <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing.</p>
       </Field>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">
@@ -809,22 +773,10 @@ function StoragePanel(): JSX.Element {
       note: 'Verified SpeakerKit models. Apple language assets are managed separately by macOS.',
     },
     {
-      key: 'models',
-      label: 'Models',
-      path: '~/Library/Application Support/MeetingNotes/whisper-models',
-      note: 'Whisper models — re-downloadable, kept out of iCloud.',
-    },
-    {
       key: 'logs',
       label: 'Logs',
       path: '~/Library/Logs/MeetingNotes',
       note: 'App logs.',
-    },
-    {
-      key: 'hfCache',
-      label: 'AI model cache',
-      path: '~/.cache/huggingface',
-      note: 'Diarization models + token — shared with other Hugging Face tools.',
     },
   ];
   return (
@@ -887,7 +839,7 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
  *  Surfaces config errors at edit time instead of letting them bite the
  *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
  *  so the row doesn't accumulate stale state as the user keeps editing. */
-function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
+function TestButton({ url, lazySpawn = false }: { kind: 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; detail?: string }
@@ -908,14 +860,11 @@ function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url
   async function probe(): Promise<void> {
     setBusy(true); setResult(null);
     try {
-      if (kind === 'llm') {
+      {
         const r = await api.llm.probe(url);
         setResult(r.ok
           ? { ok: true, detail: `${r.models.length} model${r.models.length === 1 ? '' : 's'} loaded` }
           : { ok: false, error: r.error, code: r.code });
-      } else {
-        const r = await api.stt.probe(url);
-        setResult(r.ok ? { ok: true } : { ok: false, error: r.error, code: r.code });
       }
     } catch (error) {
       setResult({ ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -943,7 +892,7 @@ function TestButton({ kind, url, lazySpawn = false }: { kind: 'stt' | 'llm'; url
       )}
       {result && !result.ok && (
         // "Connection refused" on a service the app spawns on demand is the
-        // normal idle state, not a failure — whisper-server and the managed
+        // normal idle state, not a failure — the managed
         // LLM runtimes shut down after 10 min. Only unexpected responses
         // (wrong port answering with 404s, timeouts mid-request) stay red.
         isIdleProbe(lazySpawn, result.code) ? (

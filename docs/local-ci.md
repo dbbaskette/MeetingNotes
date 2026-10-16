@@ -73,19 +73,15 @@ for the 1.14 regression history and remaining hardware acceptance.
 For an explicitly requested packaged-runtime gate, build a disposable unsigned
 package and run `node scripts/ci/prepare-package-fixture.mjs /absolute/path/MeetingNotes.app /absolute/path/synthetic-speech.wav`.
 This creates the ignored `.ci-package-fixture/` payload with the current source
-commit. Only four required cached pyannote model directories are copied as regular
-files (including pyannote 4's small PLDA dependency, not new account downloads);
-credentials and user meetings are never copied. The guest rejects stale commit
+commit. No model caches, credentials or user meetings are copied. The guest rejects stale commit
 metadata. Do not put a release installer or real audio in this payload.
 
 With the payload present, the normal full runner additionally exercises the
 actual packaged main/preload/renderer using a marked, temporary 600-meeting
 library, normal and SwiftShader startup, helper enumeration without capture,
-configured STT/summary transport with synthetic loopback responses, and actual
-offline sidecar diarization of TTS speech. No real LLM/STT inference or signed-in
-export is claimed by the transport fixture. Packaged runs never register the
+native payload absence/presence checks and summary transport with synthetic loopback responses. Actual native speech inference is checked separately on the physical Mac with prepared Apple assets; a clean VM is not evidence of speech readiness. No real LLM inference or signed-in export is claimed by the transport fixture. Packaged runs never register the
 global URL handler or touch the installed app's data. Results include screenshots
-and sidecar logs; the temporary app/profile are removed after testing.
+and runtime logs; the temporary app/profile are removed after testing.
 
 The packaged view must match the real microphone permission state: populated
 Library on an already-granted host, or the production Permissions needed screen

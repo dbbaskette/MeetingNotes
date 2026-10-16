@@ -35,8 +35,9 @@ export interface DiarizationArtifact {
 }
 export function embeddingForLabel(diar: DiarizationArtifact, label: string): number[] | null {
   if (diar.embeddingSpace) return normalized(diar.centroids?.[label] ?? []);
-  const average = averageEmbeddingForLabel(diar.segments, label);
-  return average ? normalized(average) : null;
+  // Old artifacts remain readable/nameable, but their vectors must never
+  // train a native profile or enter the new model space.
+  return null;
 }
 const MIN_CLIP_S = 1.5;
 
@@ -122,23 +123,6 @@ export async function extractSpeakerSample(opts: ExtractOpts): Promise<ExtractRe
   const result: ExtractResult = { path: out, startS: win.start, endS: win.end };
   await fs.writeFile(metaPath, JSON.stringify(result));
   return result;
-}
-
-/** Average embedding vector for a local label — used to confirm a speaker
- *  into the roster from the UI without the renderer needing to see embeddings. */
-export function averageEmbeddingForLabel(
-  segments: readonly DiarizationSegment[],
-  label: string,
-): number[] | null {
-  const own = segments.filter((s) => s.speaker === label && Array.isArray(s.embedding) && normalized(s.embedding));
-  if (own.length === 0) return null;
-  const dim = own[0]!.embedding!.length;
-  if (own.some(s => s.embedding!.length !== dim)) return null;
-  const sum = new Array<number>(dim).fill(0);
-  for (const s of own) {
-    for (let i = 0; i < dim; i++) sum[i] = (sum[i] ?? 0) + (s.embedding![i] ?? 0);
-  }
-  return sum.map((x) => x / own.length);
 }
 
 function safeLabel(label: string): string {

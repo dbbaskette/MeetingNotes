@@ -9,7 +9,7 @@ Run before merging significant feature work or releasing. ~10 min total.
 
 - [ ] LM Studio open, a chat model loaded (`qwen/qwen3.5-9b` or similar), local server enabled.
 - [ ] HuggingFace token saved at `~/.cache/huggingface/token` (for diarization).
-- [ ] Whisper server running (`scripts/whisper-server.sh status` reports Running).
+- [ ] Apple silicon/macOS 26+; Processing Settings shows Apple language and SpeakerKit assets ready. No Whisper/HF setup controls or downloads.
 - [ ] Latest installer built: `npm run dist` produces a versioned DMG and ZIP under `release/` (the loose `.app` is removed after packaging).
 
 ## Meeting groups
@@ -56,7 +56,7 @@ Run before merging significant feature work or releasing. ~10 min total.
 
 ### Pipeline on captured audio
 
-- [ ] Process the recorded file through the pipeline. Whisper accepts the .m4a (no codec errors).
+- [ ] Process the recorded file through the pipeline. Apple transcription and SpeakerKit accept the .m4a (no codec errors).
 - [ ] Transcript is plausible (your voice + app audio surface as different speakers).
 
 ### Lifecycle edge cases

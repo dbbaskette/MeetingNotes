@@ -6,7 +6,7 @@ import { performance } from 'node:perf_hooks';
 import { describe, expect, it, vi } from 'vitest';
 import { registerIpcHandlers, type IpcServices } from '../ipc/handlers.js';
 import { buildSpeakerReviewMetadata } from '../speakers/review-metadata.js';
-import type { DiarSegment, WhisperSegment } from '../lib/merge-transcript.js';
+import type { DiarSegment, TranscriptSegment } from '../lib/merge-transcript.js';
 import { ArtifactCache } from './artifact-cache.js';
 
 const TRANSCRIPT_LINES = 250_000;
@@ -27,7 +27,7 @@ interface Measurement {
   serializedPayloadBytes: number;
 }
 
-interface RawTranscript { text: string; segments: WhisperSegment[] }
+interface RawTranscript { text: string; segments: TranscriptSegment[] }
 interface Diarization { segments: DiarSegment[] }
 type Handler = (event: unknown, id: string) => unknown;
 
