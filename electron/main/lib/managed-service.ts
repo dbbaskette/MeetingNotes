@@ -1,9 +1,7 @@
 // electron/main/lib/managed-service.ts
 //
 // Lifecycle controller for any HTTP-fronted child process we manage:
-// pyannote sidecar (diarization), whisper-server (STT), and eventually
-// LM Studio / Ollama (summary LLM). Replaces the old eager-start
-// supervisor pattern. Three behavior knobs distinguish this from a
+// LM Studio / Ollama (summary LLM). Three behavior knobs distinguish this from a
 // plain spawn():
 //
 //   1. Lazy spawn via ensureReady() — the process is not started at
@@ -13,12 +11,11 @@
 //
 //   2. Idle shutdown — every ensureReady() call resets a timer.
 //      After idleShutdownMs of no calls, stop() is invoked
-//      automatically. Frees RAM (1.5 GB for whisper, 500 MB for
-//      pyannote) when the user isn't actively transcribing.
+//      automatically, releasing the idle managed model workload.
 //      idleShutdownMs <= 0 keeps the service always-on once started.
 //
 //   3. Adopt-existing — if /health is already ok at the configured
-//      port (e.g. user has whisper-server running as a daemon), we
+//      port (e.g. user has Ollama running as a daemon), we
 //      mark the service `external` and don't try to manage its
 //      lifecycle. Idle shutdown does NOT kill external instances.
 //
@@ -35,7 +32,7 @@ export interface ProbeResult {
    *  When set on both sides (probe + expectedBuildId), a mismatch
    *  causes us to kill the running instance and respawn — this is
    *  what catches "I rebuilt the bundle but the bug is still there"
-   *  cases when an old sidecar is still bound to the port. */
+   *  cases when an old service is still bound to the port. */
   buildId?: string;
 }
 
@@ -52,7 +49,7 @@ export interface ManagedServiceDeps {
   host?: string;
   port: number;
   /** Builds the spawn arguments. Called each start so it can read
-   *  current settings (e.g. which whisper model is selected). */
+   *  current settings (e.g. which summary model is selected). */
   resolveLaunch: (host: string, port: number) => LaunchSpec;
   /** Defaults to GET http://${host}:${port}/health expecting
    *  { status: 'ok', build_id?: string }. */
@@ -76,7 +73,7 @@ export interface ManagedServiceDeps {
   startupTimeoutMs?: number;
   /** The launch command is a LAUNCHER that daemonizes the real server and
    *  exits 0 (e.g. `lms server start`), unlike daemon-style children
-   *  (`ollama serve`, whisper-server) that stay alive. A clean exit during
+   *  (`ollama serve`) that stay alive. A clean exit during
    *  startup then means "keep polling health", not "the service died".
    *  Non-zero exits still fail fast. */
   launcherExitsOk?: boolean;
@@ -85,7 +82,7 @@ export interface ManagedServiceDeps {
    *  {@link startupAttemptTimeoutMs}. Between attempts a wedged
    *  (alive-but-never-healthy) process is force-killed and respawned.
    *  Default 1 — single attempt, the historical behavior. Services prone
-   *  to wedging on cold start (whisper) set this > 1. */
+   *  to wedging on cold start set this > 1. */
   startupMaxAttempts?: number;
   /** Per-attempt /health timeout. Defaults to {@link startupTimeoutMs} so
    *  single-attempt services are unchanged. With N attempts the total
@@ -125,7 +122,7 @@ async function defaultHealthProbe(
  *  CRITICAL: this must select listeners only (`-sTCP:LISTEN`). The naive
  *  `lsof -ti :PORT` matches BOTH ends of every socket on the port — so it
  *  also returns our own Electron main process, which holds a keep-alive
- *  client connection to the sidecar/whisper `/health` endpoint from the
+ *  client connection to the service `/health` endpoint from the
  *  adoption probe we just made. Piping that into `kill -9` SIGKILLs the app
  *  itself (no crash report — it's a signal, not a fault), which is exactly
  *  what "the app crashes when I click Process" was. Restricting to LISTEN
@@ -364,7 +361,7 @@ export class ManagedService {
 
   /** Poll /health until ok, the process exits, a port conflict surfaces,
    *  or the per-attempt timeout elapses. The child takes a beat to bind
-   *  the socket and (for pyannote) load the model — we MUST wait or the
+   *  the socket and load the model — we MUST wait or the
    *  first pipeline call will hit ECONNREFUSED. */
   private async pollHealth(
     host: string,

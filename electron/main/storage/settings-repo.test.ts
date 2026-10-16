@@ -16,13 +16,13 @@ describe('SettingsRepo', () => {
     expect(repo.get('lmStudioUrl')).toBe(DEFAULT_SETTINGS.lmStudioUrl);
   });
   it('set + get round-trips', () => {
-    repo.set('sttModel', 'whisper-large-v3');
-    expect(repo.get('sttModel')).toBe('whisper-large-v3');
+    repo.set('llmModel', 'summary-model');
+    expect(repo.get('llmModel')).toBe('summary-model');
   });
   it('getAll returns merged defaults + overrides', () => {
-    repo.set('sttModel', 'x');
+    repo.set('llmModel', 'x');
     const all = repo.getAll();
-    expect(all.sttModel).toBe('x');
+    expect(all.llmModel).toBe('x');
     expect(all.lmStudioUrl).toBe(DEFAULT_SETTINGS.lmStudioUrl);
   });
   it('reads a legacy autoDetectMeetings boolean as the new object shape', () => {

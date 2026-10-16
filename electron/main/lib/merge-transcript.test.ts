@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { mergeTranscriptWithDiarization, mergedToMarkdown,
-  type WhisperSegment, type DiarSegment } from './merge-transcript.js';
+  type TranscriptSegment, type DiarSegment } from './merge-transcript.js';
 
-const whisper: WhisperSegment[] = [
+const whisper: TranscriptSegment[] = [
   { start: 0.0, end: 2.0, text: 'Hello there.' },
   { start: 2.0, end: 5.0, text: 'General Kenobi.' },
   { start: 5.0, end: 7.5, text: 'You are a bold one.' },
@@ -54,7 +54,7 @@ describe('mergeTranscriptWithDiarization', () => {
   });
 
   it('finishes a 4-hour-scale merge without a nested full scan', () => {
-    const whisper: WhisperSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
+    const whisper: TranscriptSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
       start: i, end: i + 0.9, text: 'x',
     }));
     const many: DiarSegment[] = Array.from({ length: 4_800 }, (_, i) => ({

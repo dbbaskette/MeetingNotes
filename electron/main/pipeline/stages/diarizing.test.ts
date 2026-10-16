@@ -1,98 +1,35 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-
-// Prevent ensureWav from shelling out to ffmpeg in tests — the audio path
-// is a stub. The no-op mock returns the original path unchanged.
-vi.mock('../../lib/ensure-wav.js', () => ({
-  ensureWav: async (p: string) => ({ path: p, cleanup: () => {} }),
-}));
-
 import { runDiarizing } from './diarizing.js';
-
-describe('runDiarizing', () => {
-  it('calls diarization client and writes diarization.json', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-'));
-    const mFolder = path.join(dir, 'meetings', 'slug');
-    fs.mkdirSync(mFolder, { recursive: true });
-
-    const ctx: any = {
-      libraryRoot: dir,
-      diarSupervisor: { ensureReady: async () => {} },
-      diarization: {
-        diarize: vi.fn(async () => ({
-          segments: [
-            { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) },
-          ],
-          num_speakers: 1,
-        })),
-      },
-      meetings: { findById: () => ({ slug: 'slug', audioPath: '/x.mp3' }) },
-      logger: { info: vi.fn() },
-    };
-    await runDiarizing({ meetingId: 'm' }, ctx);
-    const raw = fs.readFileSync(path.join(mFolder, 'diarization.json'), 'utf8');
-    const got = JSON.parse(raw);
-    expect(got.num_speakers).toBe(1);
-    // Compact JSON — the embeddings make this file multi-MB; pretty-print
-    // indentation roughly doubles the on-disk and re-parse cost.
-    expect(raw).toBe(JSON.stringify(got));
-  });
-
-  it('writes a tiny diarization.meta.json sidecar with num_speakers', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-meta-'));
-    const mFolder = path.join(dir, 'meetings', 'slug');
-    fs.mkdirSync(mFolder, { recursive: true });
-
-    const ctx: any = {
-      libraryRoot: dir,
-      diarSupervisor: { ensureReady: async () => {} },
-      diarization: {
-        diarize: vi.fn(async () => ({
-          segments: [
-            { start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) },
-            { start: 1, end: 2, speaker: 'SPEAKER_01', embedding: new Array(512).fill(0) },
-          ],
-          num_speakers: 2,
-        })),
-      },
-      meetings: { findById: () => ({ slug: 'slug', audioPath: '/x.mp3' }) },
-      logger: { info: vi.fn() },
-    };
-    await runDiarizing({ meetingId: 'm' }, ctx);
-    const meta = JSON.parse(fs.readFileSync(path.join(mFolder, 'diarization.meta.json'), 'utf8'));
-    expect(meta).toEqual({ num_speakers: 2 });
-  });
-
-  it('diarizes the mixed file (not any stem) even when stems exist', async () => {
-    // Stem-aware diarization is currently disabled because transcription
-    // had to revert to the mixed file pending #27 (voice stem silence).
-    // Running diarize on a different audio source than transcribe causes
-    // UNKNOWN-speaker segments, so they must stay paired.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-d-stem-'));
-    const mFolder = path.join(dir, 'meetings', 'slug');
-    fs.mkdirSync(mFolder, { recursive: true });
-    const mixed = path.join(mFolder, 'rec.m4a');
-    const system = path.join(mFolder, 'rec.system.m4a');
-    const voice = path.join(mFolder, 'rec.voice.m4a');
-    fs.writeFileSync(mixed, 'x');
-    fs.writeFileSync(system, 'x');
-    fs.writeFileSync(voice, 'x');
-
-    const diarize = vi.fn(async () => ({
-      segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00', embedding: new Array(512).fill(0) }],
-      num_speakers: 1,
-    }));
-    const ctx: any = {
-      libraryRoot: dir,
-      diarSupervisor: { ensureReady: async () => {} },
-      diarization: { diarize },
-      meetings: { findById: () => ({ slug: 'slug', audioPath: mixed }) },
-      logger: { info: vi.fn() },
-    };
-    await runDiarizing({ meetingId: 'm' }, ctx);
-    expect(diarize).toHaveBeenCalledTimes(1);
-    expect(diarize.mock.calls[0][0]).toBe(mixed);
-  });
+let root: string, folder: string, ctx: any;
+const result = { segments: [{ start: 0, end: 1, speaker: 'SPEAKER_00' }], centroids: { SPEAKER_00: [1, 0] }, embeddingSpace: 'native:1', num_speakers: 1 };
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-native-diarize-')); folder = path.join(root, 'meetings', 'slug'); fs.mkdirSync(folder, { recursive: true });
+  for (const name of ['audio.m4a', 'audio.system.m4a', 'audio.voice.m4a']) fs.writeFileSync(path.join(folder, name), 'fixture');
+  ctx = { libraryRoot: root, nativeSpeech: { diarize: vi.fn(async () => result) },
+    meetings: { findById: () => ({ slug: 'slug', audioPath: path.join(folder, 'audio.m4a') }) },
+    speakers: { unlinkMeeting: vi.fn() }, artifactCache: { invalidate: vi.fn() }, logger: { info: vi.fn() } };
+});
+afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+it('uses mixed audio despite stems, saves compact artifacts, clears old numeric labels', async () => {
+  await runDiarizing({ meetingId: 'm' }, ctx);
+  expect(ctx.nativeSpeech.diarize).toHaveBeenCalledWith(path.join(folder, 'audio.m4a'));
+  const file = path.join(folder, 'diarization.json');
+  expect(fs.readFileSync(file, 'utf8')).toBe(JSON.stringify(result));
+  expect(JSON.parse(fs.readFileSync(path.join(folder, 'diarization.meta.json'), 'utf8'))).toEqual({ num_speakers: 1 });
+  expect(ctx.speakers.unlinkMeeting).toHaveBeenCalledWith('m');
+  expect(ctx.artifactCache.invalidate).toHaveBeenCalledWith(file);
+});
+it('never falls back when the native helper is missing', async () => {
+  ctx.nativeSpeech = undefined;
+  await expect(runDiarizing({ meetingId: 'm' }, ctx)).rejects.toThrow('Native speech helper');
+});
+it('preserves prior artifacts and links on helper failure', async () => {
+  const file = path.join(folder, 'diarization.json'); fs.writeFileSync(file, 'previous');
+  ctx.nativeSpeech.diarize.mockRejectedValue(new Error('Native failure'));
+  await expect(runDiarizing({ meetingId: 'm' }, ctx)).rejects.toThrow('Native failure');
+  expect(fs.readFileSync(file, 'utf8')).toBe('previous');
+  expect(ctx.speakers.unlinkMeeting).not.toHaveBeenCalled();
 });

@@ -99,7 +99,7 @@ export function TranscriptPanel({
       <>
         {showRaw && (
           <div className="mb-3 text-xs text-status-warnText bg-status-warnBg border border-status-warn/40 rounded-lg px-3 py-2">
-            Early preview — raw whisper output. Speaker labels and timestamps
+            Early preview — raw transcription output. Speaker labels and timestamps
             will be filled in once diarization + merge finish.
           </div>
         )}

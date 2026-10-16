@@ -1,30 +1,17 @@
-// electron/renderer/src/views/OnboardingView.tsx
-//
-// First-run wizard (#43). Gated on settings.onboardedAt — shown on launch
-// when null. Walks the user through the four taxes a new install has to pay
-// before the pipeline can run end-to-end:
-//
-//   1. macOS mic + screen/system-audio permissions
-//   2. A downloaded Whisper model
-//   3. A Hugging Face token accepted against the pyannote gates
-//   4. A reachable LM Studio with a chat model loaded
-//
-// Every step has a Skip. Even a full skip stamps onboardedAt so the wizard
-// doesn't re-prompt on every launch. Users can re-run via Settings → "Run
-// setup again".
+// First-run setup: capture permissions, native speech assets, and summaries.
 import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 import { type StepStatus, statusFromProbe } from '../lib/setup-wizard';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { Icon } from '../components/icons';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
-import type { SpeechProvider } from '../../../shared/native-speech';
 
 interface Props {
   onFinished: () => void;
 }
 
-type StepKey = 'permissions' | 'native' | 'whisper' | 'hf' | 'llm' | 'stt';
+type StepKey = 'permissions' | 'native' | 'llm';
+const STEPS: StepKey[] = ['permissions', 'native', 'llm'];
 
 /** Small colored pip a step reports up so the stepper bar reflects
  *  pending / checking / ok / warn without each step owning its own chrome. */
@@ -39,13 +26,11 @@ function StatusPip({ status }: { status: StepStatus }): JSX.Element {
 
 export function OnboardingView({ onFinished }: Props): JSX.Element {
   const [idx, setIdx] = useState(0);
-  const [provider, setProvider] = useState<SpeechProvider>('legacy');
   const [language, setLanguage] = useState('en');
-  useEffect(() => { void api.settings.getAll().then(s => { setProvider(s.speechProvider ?? 'legacy'); setLanguage(s.sttLanguage); }); }, []);
-  const STEPS: StepKey[] = provider === 'native' ? ['permissions', 'native', 'llm'] : ['permissions', 'whisper', 'hf', 'llm', 'stt'];
+  useEffect(() => { void api.settings.getAll().then(s => { setLanguage(s.sttLanguage); }); }, []);
   const step = STEPS[idx]!;
   const [stepStatus, setStepStatus] = useState<Record<StepKey, StepStatus>>({
-    permissions: 'pending', native: 'pending', whisper: 'pending', hf: 'pending', llm: 'pending', stt: 'pending',
+    permissions: 'pending', native: 'pending', llm: 'pending',
   });
   const setStatus = (k: StepKey, s: StepStatus): void =>
     setStepStatus((prev) => ({ ...prev, [k]: s }));
@@ -71,12 +56,9 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
       </div>
 
       <div className="p-6 min-h-[260px]">
-        {(step === 'native' || step === 'whisper') && <div className="mb-5"><NativeSpeechPanel provider={provider} language={language} onProvider={value => { setProvider(value); setIdx(1); }} onReady={ready => setStatus('native', ready ? 'ok' : 'warn')} /></div>}
+        {step === 'native' && <NativeSpeechPanel language={language} onReady={ready => setStatus('native', ready ? 'ok' : 'warn')} />}
         {step === 'permissions' && <PermissionsStep onStatus={(s) => setStatus('permissions', s)} />}
-        {step === 'whisper' && <WhisperStep onStatus={(s) => setStatus('whisper', s)} />}
-        {step === 'hf' && <HfStep onStatus={(s) => setStatus('hf', s)} />}
         {step === 'llm' && <LlmStep onStatus={(s) => setStatus('llm', s)} />}
-        {step === 'stt' && <SttStep onStatus={(s) => setStatus('stt', s)} />}
       </div>
 
       {/* Skip lives in the action row, not buried in a corner. Both are
@@ -236,286 +218,6 @@ function PermRow({
   );
 }
 
-// ─── Step 2: Whisper model ─────────────────────────────────────────────
-
-const WHISPER_MODELS: { name: string; size: string; desc: string }[] = [
-  { name: 'tiny.en', size: '75 MB', desc: 'Fastest, English, low accuracy' },
-  { name: 'base.en', size: '142 MB', desc: 'Fast, English, decent on clean audio' },
-  { name: 'small.en', size: '466 MB', desc: 'Good balance for English' },
-  { name: 'medium.en', size: '1.5 GB', desc: 'Recommended for English meetings' },
-  { name: 'medium', size: '1.5 GB', desc: 'Multilingual medium' },
-  { name: 'large-v3', size: '2.9 GB', desc: 'Best accuracy, slower' },
-  { name: 'large-v3-turbo', size: '1.5 GB', desc: 'Near large-v3 accuracy, much faster' },
-];
-
-/** Button label while a download runs: percent + sizes when the host sent
- *  content-length, MB received when it didn't, and the old static line
- *  until the first progress event arrives. */
-function whisperDownloadLabel(
-  progress: { received: number; total: number | null } | null,
-): string {
-  if (!progress) return 'Downloading… (this can take a few minutes)';
-  const mb = (bytes: number): string => (bytes / (1024 * 1024)).toFixed(0);
-  if (progress.total !== null && progress.total > 0) {
-    const pct = Math.min(100, Math.floor((progress.received / progress.total) * 100));
-    return `Downloading… ${pct}% (${mb(progress.received)} of ${mb(progress.total)} MB)`;
-  }
-  return `Downloading… ${mb(progress.received)} MB so far`;
-}
-
-export function WhisperStep({ onStatus, activeModel, onUse }: { onStatus: (s: StepStatus) => void;
-  activeModel?: string; onUse?: (model: string) => Promise<boolean> }): JSX.Element {
-  const [installed, setInstalled] = useState<string[] | null>(null);
-  const [picked, setPicked] = useState<string>(WHISPER_MODELS.some(m => m.name === activeModel) ? activeModel! : 'medium.en');
-  const [installing, setInstalling] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  // The model that just finished downloading this session — drives the
-  // explicit "✓ downloaded and ready" confirmation.
-  const [justDownloaded, setJustDownloaded] = useState<string | null>(null);
-  // Live download progress pushed from main (~4 events/sec). `total` is
-  // null when the model host omitted content-length — render MB received
-  // instead of a percent in that case.
-  const [progress, setProgress] = useState<{ received: number; total: number | null } | null>(null);
-
-  // Subscribe for the whole time the step is mounted; the events only flow
-  // while a download is running, and unmounting (wizard nav) unsubscribes.
-  useEffect(() => {
-    const off = api.onboarding.onWhisperProgress((e) => {
-      if (e.model === picked) setProgress({ received: e.received, total: e.total });
-    });
-    return () => { off(); };
-  }, [picked]);
-
-  async function refresh(): Promise<string[]> {
-    try {
-      const models = (await api.onboarding.listWhisperModels()) as string[];
-      setInstalled(models);
-      onStatus((models?.length ?? 0) > 0 ? 'ok' : 'pending');
-      return models ?? [];
-    }
-    catch (e) { setErr((e as Error).message); return []; }
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
-  useEffect(() => { void refresh(); }, []);
-
-  async function install(): Promise<void> {
-    setInstalling(true); setErr(null); setJustDownloaded(null); setProgress(null);
-    const target = picked;
-    try {
-      await api.onboarding.installWhisperModel(target);
-      // Verify the model the user actually picked is now on disk, rather than
-      // trusting the call resolved — a partial/interrupted download would leave
-      // it absent, and the user deserves to know either way.
-      const models = await refresh();
-      if (models.includes(target)) {
-        setJustDownloaded(target);
-      } else {
-        setErr(`Download finished but ${target} isn't showing as installed. Check free disk space and that whisper-cpp is installed, then retry.`);
-      }
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally { setInstalling(false); }
-  }
-
-  const hasAny = (installed?.length ?? 0) > 0;
-  const pickedInstalled = installed?.includes(picked) ?? false;
-  return (
-    <div>
-      <StepHeader title="Download a Whisper model" />
-      <p className="text-sm text-ink-muted leading-relaxed mb-4">
-        Whisper runs on your machine for speech-to-text. Pick a model to
-        download once — bigger models = more accurate but slower. Stored
-        at{' '}
-        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">
-          ~/Library/Application Support/MeetingNotes/whisper-models
-        </code>
-      </p>
-      {hasAny && (
-        <div className="text-xs text-status-ok mb-3">
-          ✓ Installed: {installed!.join(', ')}
-        </div>
-      )}
-      <select
-        value={picked}
-        onChange={(e) => { setPicked(e.target.value); setErr(null); setJustDownloaded(null); }}
-        disabled={installing}
-        className="input mb-1"
-      >
-        {WHISPER_MODELS.map((m) => (
-          <option key={m.name} value={m.name}>
-            {m.name} · {m.size} · {m.desc}{installed?.includes(m.name) ? ' · installed' : ''}
-          </option>
-        ))}
-      </select>
-      {onUse && <p className="text-xs text-ink-muted mb-2">Configured model: {activeModel || 'Automatic'}. Changes apply after restarting MeetingNotes; finish active processing first.</p>}
-      <div className="text-xs text-ink-muted mb-2 h-4">
-        {pickedInstalled && `${picked} is already installed — you're set.`}
-      </div>
-      <button
-        onClick={() => void install()}
-        disabled={installing}
-        className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2 disabled:opacity-50"
-      >
-        {installing ? whisperDownloadLabel(progress)
-          : pickedInstalled ? `Re-download ${picked}`
-            : `Download ${picked}`}
-      </button>
-      {onUse && <button type="button" disabled={installing || !pickedInstalled || activeModel === picked}
-        className="mt-2 text-xs font-semibold underline disabled:opacity-40"
-        onClick={() => void onUse(picked).then(ok => { if (!ok) setErr('Could not select this model. Finish processing and correct any Settings errors, then retry.'); }).catch(e => setErr((e as Error).message))}>
-        {activeModel === picked ? 'Selected for transcription' : `Use ${picked}`}
-      </button>}
-      {installing && progress && (
-        <div className="mt-2" aria-hidden>
-          <div className="h-1.5 rounded-full bg-surface-sunken overflow-hidden">
-            <div
-              className={`h-full bg-brand-indigo rounded-full transition-[width] duration-300 ${
-                progress.total === null ? 'animate-pulse' : ''
-              }`}
-              style={{
-                width: progress.total !== null && progress.total > 0
-                  ? `${Math.min(100, (progress.received / progress.total) * 100)}%`
-                  : '100%',
-              }}
-            />
-          </div>
-        </div>
-      )}
-      {justDownloaded && (
-        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1.5 mt-2">
-          ✓ {justDownloaded} downloaded and ready to transcribe.
-        </div>
-      )}
-      {err && <div className="text-xs text-danger mt-2">{err}</div>}
-      <div className="text-xs text-ink-muted mt-3">
-        Requires <code className="bg-surface-sunken px-1 py-0.5 rounded">whisper-cpp</code> installed via Homebrew. If the install button errors, run{' '}
-        <code className="bg-surface-sunken px-1 py-0.5 rounded">brew install whisper-cpp</code> in Terminal and retry.
-      </div>
-    </div>
-  );
-}
-
-// ─── Step 3: Hugging Face token ────────────────────────────────────────
-
-function HfStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
-  const [token, setToken] = useState('');
-  const [validating, setValidating] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'valid' | 'invalid' | 'error'>('idle');
-  const [err, setErr] = useState<string | null>(null);
-  const [savedUser, setSavedUser] = useState<string | null>(null);
-  const [alreadySaved, setAlreadySaved] = useState(false);
-
-  // Steps unmount when you navigate away, so this component re-mounts blank on
-  // "Back". The token itself lives on disk — reflect that instead of showing an
-  // empty field that looks like the token was lost. (We never read the secret
-  // back into the UI; replacing it just means typing a new one.)
-  useEffect(() => {
-    void (async () => {
-      try {
-        const { saved } = await api.onboarding.hfTokenStatus();
-        if (saved) { setAlreadySaved(true); onStatus('ok'); }
-      } catch { /* best-effort */ }
-    })();
-    // onStatus is stable enough for a mount-only effect here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function validateAndSave(): Promise<void> {
-    const trimmed = token.trim();
-    if (!trimmed) { setStatus('invalid'); onStatus('warn'); setErr('Token is empty.'); return; }
-    setValidating(true); setErr(null); setStatus('idle');
-    try {
-      const resp = await fetch('https://huggingface.co/api/whoami-v2', {
-        headers: { Authorization: `Bearer ${trimmed}` },
-      });
-      if (!resp.ok) {
-        setStatus('invalid');
-        onStatus('warn');
-        setErr(`HF rejected the token (${resp.status}). Double-check it's copied in full.`);
-        return;
-      }
-      const who = (await resp.json()) as { name?: string };
-      await api.onboarding.saveHfToken(trimmed);
-      setStatus('valid');
-      onStatus('ok');
-      setSavedUser(who.name ?? null);
-    } catch (e) {
-      setStatus('error');
-      onStatus('warn');
-      setErr((e as Error).message);
-    } finally { setValidating(false); }
-  }
-
-  return (
-    <div>
-      <StepHeader title="Add your Hugging Face token" />
-      <p className="text-sm text-ink-muted leading-relaxed mb-3">
-        pyannote&apos;s diarization models are gated on Hugging Face. Accept
-        the licence on all three pages below, then paste a <strong>
-        fine-grained</strong> token with &ldquo;Read gated repos&rdquo;
-        scope.
-      </p>
-      <ul className="text-xs text-brand-indigo space-y-1 mb-3">
-        {[
-          ['pyannote/speaker-diarization-3.1', 'https://huggingface.co/pyannote/speaker-diarization-3.1'],
-          ['pyannote/segmentation-3.0', 'https://huggingface.co/pyannote/segmentation-3.0'],
-          ['pyannote/speaker-diarization-community-1', 'https://huggingface.co/pyannote/speaker-diarization-community-1'],
-        ].map(([label, url]) => (
-          <li key={label}>
-            <a
-              href={url}
-              onClick={(e) => { e.preventDefault(); void api.onboarding.openExternal(url!); }}
-              className="hover:underline"
-            >
-              → {label}
-            </a>
-          </li>
-        ))}
-      </ul>
-      {alreadySaved && status !== 'valid' && (
-        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1.5 mb-2">
-          ✓ A Hugging Face token is already saved on this Mac — you&apos;re set.
-          Enter a new one below only if you want to replace it.
-        </div>
-      )}
-      <input
-        type="password"
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
-        placeholder={alreadySaved ? 'hf_… (replace the saved token)' : 'hf_...'}
-        disabled={validating || status === 'valid'}
-        className="input mb-2"
-      />
-      <button
-        onClick={() => void validateAndSave()}
-        disabled={validating || status === 'valid'}
-        className="w-full bg-brand-indigo text-white font-semibold text-sm rounded-lg py-2 disabled:opacity-50"
-      >
-        {validating ? 'Checking…'
-          : status === 'valid' ? '✓ Saved'
-            : alreadySaved ? 'Replace token' : 'Validate & save'}
-      </button>
-      {status === 'valid' && savedUser && (
-        <div className="text-xs text-status-ok mt-2">
-          ✓ Token valid — signed in as {savedUser}. Saved to{' '}
-          <code className="bg-surface-sunken px-1 py-0.5 rounded">~/.cache/huggingface/token</code>.
-        </div>
-      )}
-      {err && <div className="text-xs text-danger mt-2">{err}</div>}
-      <div className="text-xs text-ink-muted mt-3">
-        Create a token at{' '}
-        <a
-          href="https://huggingface.co/settings/tokens"
-          onClick={(e) => { e.preventDefault(); void api.onboarding.openExternal('https://huggingface.co/settings/tokens'); }}
-          className="text-brand-indigo hover:underline"
-        >
-          huggingface.co/settings/tokens
-        </a>. Pick &ldquo;Fine-grained&rdquo; → enable &ldquo;Read access to contents of all public gated repos you can access&rdquo;.
-      </div>
-    </div>
-  );
-}
-
 // ─── Step 4: LM Studio ─────────────────────────────────────────────────
 
 function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
@@ -645,80 +347,6 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
         Re-check
       </button>
       {err && <div className="text-xs text-danger mt-2">{err}</div>}
-    </div>
-  );
-}
-
-// ─── Step 5: STT (transcription) endpoint ─────────────────────────────
-//
-// New in the first-run wizard: verify the whisper-server actually answers
-// BEFORE the first meeting, instead of failing the transcribe stage later.
-// Reuses the exact stt:probe handler the Settings "Test" button uses — it
-// fetches <url>/health and checks for {"status":"ok"}, so a green here is a
-// real signal (unlike system-audio capture, which can't be verified upfront).
-function SttStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
-  const [url, setUrl] = useState<string>('');
-  const [result, setResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
-  const [checking, setChecking] = useState(false);
-
-  async function probe(target: string): Promise<void> {
-    if (!target) return;
-    setChecking(true); onStatus('checking');
-    try {
-      const r = await api.stt.probe(target);
-      setResult(r);
-      onStatus(statusFromProbe(r));
-    } catch (e) {
-      const r = { ok: false as const, error: (e as Error).message };
-      setResult(r);
-      onStatus('warn');
-    } finally { setChecking(false); }
-  }
-
-  useEffect(() => {
-    void (async () => {
-      const all = (await api.settings.getAll()) as { sttUrl: string };
-      setUrl(all.sttUrl);
-      void probe(all.sttUrl);
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; the callback is recreated every render
-  }, []);
-
-  return (
-    <div>
-      <StepHeader title="Verify transcription (whisper-server)" />
-      <p className="text-sm text-ink-muted leading-relaxed mb-3">
-        Meetings are transcribed by a local whisper-server. Confirm it&apos;s
-        reachable now so the transcribe stage doesn&apos;t fail on your first
-        meeting. Start it with{' '}
-        <code className="text-xs bg-surface-sunken px-1 py-0.5 rounded">./scripts/whisper-server.sh</code>.
-      </p>
-      <div className="flex gap-2 mb-2">
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onBlur={() => void api.settings.set('sttUrl', url)}
-          className="input flex-1"
-          placeholder="http://127.0.0.1:8080"
-        />
-        <button
-          onClick={() => { void api.settings.set('sttUrl', url); void probe(url); }}
-          disabled={checking}
-          className="text-sm font-semibold bg-brand-indigo text-white px-3 py-1.5 rounded-lg disabled:opacity-50"
-        >
-          {checking ? 'Checking…' : 'Test'}
-        </button>
-      </div>
-      {result?.ok === true && (
-        <div className="text-xs text-status-ok bg-status-okBg/40 border border-status-ok/30 rounded-lg px-2.5 py-1">
-          ✓ whisper-server is up and answering /health.
-        </div>
-      )}
-      {result && result.ok === false && (
-        <div className="text-xs text-status-warnText bg-status-warnBg border border-status-warn/30 rounded-lg px-2.5 py-1">
-          ⚠ Couldn&apos;t reach whisper-server: {result.error}. You can continue and fix this later in Settings.
-        </div>
-      )}
     </div>
   );
 }

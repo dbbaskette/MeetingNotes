@@ -40,19 +40,14 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
 const file = (name: string) => path.join(folder, name);
 const words = ['Keith', 'will', 'review', 'Salsa', 'compliance.'].map((text, i) => ({ start: i, end: i + 0.9, text }));
-it('defaults only genuinely fresh supported installations to native speech', () => {
-  // The fixture's preexisting meeting marks this as an upgrade, even with no
-  // settings rows. Removing it simulates a genuinely new installation.
-  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('legacy');
-  db.exec('DELETE FROM settings; DELETE FROM meetings');
-  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('native');
-  settings.initializeSpeechProvider(false); expect(settings.get('speechProvider')).toBe('native');
-  db.exec('DELETE FROM settings'); settings.set('sttUrl', 'http://localhost:9090');
-  settings.initializeSpeechProvider(true); expect(settings.get('speechProvider')).toBe('legacy');
-  expect(settings.get('sttUrl')).toBe('http://localhost:9090');
+it('ignores obsolete settings without deleting rollback configuration', () => {
+  for (const [key, value] of Object.entries({ speechProvider: 'legacy', sttUrl: 'http://localhost:9090', sttModel: 'medium.en' }))
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en' });
+  for (const key of ['speechProvider', 'sttUrl', 'sttModel']) expect(settings.getAll()).not.toHaveProperty(key);
+  expect(db.prepare("SELECT value FROM settings WHERE key = 'speechProvider'").get()).toEqual({ value: '"legacy"' });
 });
 it('uses native processing, human review, shared terminology, notes, tasks and export end to end', async () => {
-  settings.set('speechProvider', 'native');
   const legacyId = roster.confirmSpeaker({ displayName: 'Keith', embedding: [0, 1] });
   const nativeSpeech = { transcribe: vi.fn(async () => ({ text: 'Keith will review Salsa compliance.', segments: words, provider: 'apple' })),
     diarize: vi.fn(async () => ({ segments: [{ start: 0, end: 6, speaker: 'SPEAKER_00' }], centroids: { SPEAKER_00: [1, 0] }, embeddingSpace: space, num_speakers: 1 })) };
@@ -78,7 +73,7 @@ it('uses native processing, human review, shared terminology, notes, tasks and e
   expect(fs.readFileSync(file('transcript.md'), 'utf8').split('\n')).toHaveLength(1);
   expect(fs.readFileSync(file('transcript.raw.json'), 'utf8')).toContain('Salsa');
   const id = roster.confirmSpeaker({ displayName: 'Keith', embedding: [1, 0] }, space);
-  expect(id).toBe(legacyId); expect(roster.loadEmbedding(id)).toEqual([0, 1]);
+  expect(id).toBe(legacyId); expect(new VoiceProfiles(root).load(space, id)).toEqual([1, 0]);
   speakers.linkToMeeting('m', 'SPEAKER_00', id, 1);
   await runMerging({ meetingId: 'm' }, ctx);
   meetings.updateStage('m', 'summarizing'); meetings.updateStatus('m', 'processing');
@@ -90,13 +85,15 @@ it('uses native processing, human review, shared terminology, notes, tasks and e
     summaryMd: fs.readFileSync(file('summary.md'), 'utf8') });
   expect(fs.readFileSync(exported, 'utf8')).toContain('Review SLSA compliance');
   expect(roster.suggestionsFor({ label: 'next', embedding: [1, 0] }, 3, space)[0]).toMatchObject({ id, scoreKind: 'similarity' });
-  expect(roster.identifyUnknowns([{ label: 'next', embedding: [1, 0] }], space)[0]?.rosterId).toBeNull();
+  expect(roster.identifyUnknowns([{ label: 'next', embedding: [1, 0] }])[0]?.rosterId).toBeNull();
 });
 it('isolates equal-dimension vectors by model and retains legacy files', () => {
   const id = roster.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] });
+  const legacyFile = path.join(root, 'speakers', 'embeddings', id + '.bin');
+  fs.mkdirSync(path.dirname(legacyFile), { recursive: true }); fs.writeFileSync(legacyFile, 'legacy profile');
   expect(roster.suggestionsFor({ label: 'x', embedding: [1, 0] }, 3, space)).toEqual([]);
   roster.confirmSpeakerFor(id, [0, 1], space);
-  expect(roster.loadEmbedding(id)).toEqual([1, 0]);
+  expect(fs.readFileSync(legacyFile, 'utf8')).toBe('legacy profile');
   expect(roster.suggestionsFor({ label: 'x', embedding: [0, 1] }, 3, 'other-model')).toEqual([]);
   expect(new VoiceProfiles(root).load(space, id)).toEqual([0, 1]);
 });
@@ -115,13 +112,17 @@ it('allows a name without a centroid and rejects unusable observations', () => {
   expect(new VoiceProfiles(root).load(space, id)).toBeNull();
   for (const vector of [[0, 0], [NaN, 1], []]) expect(embeddingForLabel({ segments: [], centroids: { x: vector }, embeddingSpace: space }, 'x')).toBeNull();
 });
-it('keeps the selected engine across recovery until explicit upstream reprocessing', () => {
-  settings.set('speechProvider', 'native');
+it('pins the native locale across recovery until explicit upstream reprocessing', () => {
   expect(selectSpeech(folder, settings).provider).toBe('native');
-  settings.set('speechProvider', 'legacy'); settings.set('sttLanguage', 'fr');
+  settings.set('sttLanguage', 'fr');
   expect(selectSpeech(folder, settings)).toMatchObject({ provider: 'native', language: 'en' });
   clearArtifactsFromStage(folder, 'transcribing', new ArtifactCache());
-  expect(selectSpeech(folder, settings)).toMatchObject({ provider: 'legacy', language: 'fr' });
+  expect(selectSpeech(folder, settings)).toMatchObject({ provider: 'native', language: 'fr' });
+});
+it('replaces a recovered legacy engine manifest with native processing', () => {
+  fs.writeFileSync(file('processing-speech.json'), JSON.stringify({ provider: 'legacy', language: 'en', model: 'medium.en' }));
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en' });
+  expect(JSON.parse(fs.readFileSync(file('processing-speech.json'), 'utf8')).provider).toBe('native');
 });
 it('only offers native speech on supported Apple silicon systems', () => {
   expect(supportsNativeSpeech('darwin', 'arm64', '25.0.0')).toBe(true);

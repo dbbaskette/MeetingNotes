@@ -7,7 +7,7 @@ enum AppleTranscription {
     static func transcriber(_ requested: String) async throws -> SpeechTranscriber {
         guard SpeechTranscriber.isAvailable,
               let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: requested)) else {
-            throw SpeechFailure("Apple transcription is unavailable for this Mac or language. Choose a supported language or the legacy provider.")
+            throw SpeechFailure("Apple transcription is unavailable for this Mac or language. Use Apple silicon with macOS 26 or newer and choose a supported language.")
         }
         return SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
     }

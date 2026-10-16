@@ -31,21 +31,15 @@ announcing every sample. A quiet app during a mic-only recording is not the
 same as no audio being recorded. Check finalized playback in Library.
 
 Settings **Setup & health** is compact and read-only. Required permissions,
-helper, storage, configured models/endpoints and gated-model access are separate
-from optional exporters. Idle managed services are not reported as healthy
+helper, storage, Apple language assets, SpeakerKit assets and summary models/endpoints are separate
+from optional exporters. Idle managed LLM services are not reported as healthy
 running servers. Opening Settings does not record or wake a model service.
 **Test recording… → source → Start test** explicitly records eight seconds;
 audio is discarded after confirmed Stop, outside watched folders, without a
 Library meeting or automatic processing/export. Failed Stop retains the slot
 and temporary file until Retry Stop or actual exit confirms safety.
 
-Processing Settings reuses onboarding's Whisper model controls: download,
-progress, installed-model refresh and active selection. Downloads validate
-HTTP completion, declared length when supplied, and a GGML header before atomic
-replacement. This is structural validation, **not a cryptographic checksum or
-proof that the model can run**. Invalid downloads keep the previous model.
-Custom absolute model paths remain in Advanced. Active processing blocks model
-selection/replacement; restart the app to use a changed managed model safely.
+Processing Settings offers explicit Apple language and public SpeakerKit asset preparation, progress, cancel and retry. Inference never downloads models. Saved locale changes require idle processing/queue/setup. Whisper management, Python sidecars, STT endpoints and HF-token setup have been removed; reinstall 1.15.0 for the former engine. Old caches and credentials are left untouched for rollback.
 
 ## Processing and review
 

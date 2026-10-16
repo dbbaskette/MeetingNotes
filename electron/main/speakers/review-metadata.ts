@@ -1,4 +1,4 @@
-import { mergeTranscriptWithDiarization, type WhisperSegment } from '../lib/merge-transcript.js';
+import { mergeTranscriptWithDiarization, type TranscriptSegment } from '../lib/merge-transcript.js';
 import type { DiarizationSegment } from './sample-extractor.js';
 
 export type SpeakerReviewState = 'unknown' | 'probable' | 'confirmed';
@@ -20,7 +20,7 @@ interface SpeakerLink {
 export function buildSpeakerReviewMetadata(input: {
   links: readonly SpeakerLink[];
   diarization: readonly DiarizationSegment[];
-  transcript: readonly WhisperSegment[];
+  transcript: readonly TranscriptSegment[];
 }): Map<string, SpeakerReviewMetadata> {
   const merged = mergeTranscriptWithDiarization(input.transcript, input.diarization);
   const lineCounts = new Map<string, number>();

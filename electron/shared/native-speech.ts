@@ -1,4 +1,3 @@
-export type SpeechProvider = 'native' | 'legacy';
 export interface NativeSpeechStatus {
   supported: boolean;
   appleReady: boolean;
@@ -8,4 +7,4 @@ export interface NativeSpeechStatus {
   progress: number;
   error: string | null;
 }
-export interface SpeechSelection { provider: SpeechProvider; language: string; model: string; }
+export interface SpeechSelection { provider: 'native'; language: string; }

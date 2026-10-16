@@ -1,8 +1,6 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { Agent } from 'undici';
 
-// Local LLM calls (chat completions, audio transcription) routinely hold
+// Local LLM chat completions routinely hold
 // a response open for 5–10+ minutes on large inputs while the model
 // generates. undici's default `headersTimeout` is 5 minutes, which fires
 // BEFORE our AbortSignal.timeout(10min) and surfaces as
@@ -31,18 +29,6 @@ function getSlowLLMAgent(): Agent {
 type FetchInit = Parameters<typeof fetch>[1] & { dispatcher?: Agent };
 function fetchWithDispatcher(url: string, init: FetchInit): Promise<Response> {
   return fetch(url, init as Parameters<typeof fetch>[1]);
-}
-
-function mimeFromExt(filePath: string): string {
-  const ext = filePath.toLowerCase().split('.').pop();
-  switch (ext) {
-    case 'wav': return 'audio/wav';
-    case 'mp3': return 'audio/mpeg';
-    case 'm4a': case 'mp4': return 'audio/mp4';
-    case 'flac': return 'audio/flac';
-    case 'ogg': return 'audio/ogg';
-    default: return 'application/octet-stream';
-  }
 }
 
 /** Substring of the reasoning-runaway error thrown by chat() below. The
@@ -77,18 +63,6 @@ function describeFetchError(e: unknown): string {
     return `${e.message}: ${String((cause as { code: unknown }).code)}`;
   }
   return e.message || 'unknown error';
-}
-
-export interface TranscribeInput {
-  audioPath: string;
-  model: string;
-  language?: string;
-  readFile?: (p: string) => Promise<Uint8Array>;
-}
-
-export interface TranscribeResult {
-  text: string;
-  segments: { start: number; end: number; text: string }[];
 }
 
 export interface ChatMessage {
@@ -154,71 +128,6 @@ export class LMStudioClient {
     if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/models`);
     const body = (await resp.json()) as { data?: { id: string }[] };
     return (body.data ?? []).map((m) => m.id);
-  }
-
-  async transcribe(input: TranscribeInput): Promise<TranscribeResult> {
-    const read = input.readFile ?? ((p: string) => fs.readFile(p));
-    const bytes = await read(input.audioPath);
-
-    // whisper.cpp's whisper-server exposes BOTH /inference (native, always
-    // available) and /v1/audio/transcriptions (OpenAI-compat, newer builds).
-    // Try OpenAI first for consistency with other STT servers, fall back to
-    // /inference on 404 so older whisper-cpp builds still work.
-    const buildForm = (modelField: boolean): FormData => {
-      const f = new FormData();
-      if (modelField) f.append('model', input.model);
-      f.append('response_format', 'verbose_json');
-      if (input.language) f.append('language', input.language);
-      // Anti-hallucination settings for whisper.cpp. Meeting audio with long
-      // pauses or side chatter is prone to "stuck in a loop" output like
-      // "Do I have to create a new one?" repeated 50x. These params break the
-      // loop: no_context stops conditioning each chunk on the previous chunk's
-      // (possibly bad) output, and the temperature fallback lets the decoder
-      // re-sample when the greedy path looks degenerate.
-      f.append('temperature', '0.0');
-      f.append('temperature_inc', '0.2');
-      f.append('no_context', 'true');
-      // entropy_thold / logprob_thold trigger the temperature fallback when
-      // the decoder's confidence tanks (signature of a loop).
-      f.append('entropy_thold', '2.4');
-      f.append('logprob_thold', '-1.0');
-      f.append(
-        'file',
-        new Blob([bytes as BlobPart], { type: mimeFromExt(input.audioPath) }),
-        path.basename(input.audioPath),
-      );
-      return f;
-    };
-
-    const post = async (path: string, modelField: boolean): Promise<Response> => {
-      try {
-        return await fetchWithDispatcher(`${this.baseUrl}${path}`, {
-          method: 'POST',
-          body: buildForm(modelField),
-          signal: AbortSignal.timeout(10 * 60 * 1000),
-          dispatcher: getSlowLLMAgent(),
-        });
-      } catch (e) {
-        throw new LMStudioError(`STT POST ${this.baseUrl}${path} failed: network`, e);
-      }
-    };
-
-    let resp = await post('/v1/audio/transcriptions', true);
-    if (resp.status === 404) {
-      // Older whisper.cpp or a server that only exposes /inference.
-      resp = await post('/inference', false);
-    }
-    if (!resp.ok) {
-      const detail = await resp.text().catch(() => '');
-      throw new LMStudioError(
-        `STT ${resp.status} from ${this.baseUrl} (${detail.slice(0, 200) || 'no body'})`,
-      );
-    }
-    const body = (await resp.json()) as {
-      text: string;
-      segments?: { start: number; end: number; text: string }[];
-    };
-    return { text: body.text, segments: body.segments ?? [] };
   }
 
   async chat(input: ChatInput): Promise<string> {

@@ -62,19 +62,6 @@ extraResources:
     to: licenses/Argmax-LICENSE
   - from: speech-engine/.build/checkouts/argmax-oss-swift/NOTICES
     to: licenses/Argmax-NOTICES
-  # Ship only the PyInstaller bundle — the user does not need Python installed.
-  # Dev runs out of the source tree where the .venv path is used instead.
-  - from: sidecar/dist/meeting-notes-diarize
-    to: sidecar/dist/meeting-notes-diarize
-    filter:
-      - "**/*"
-  - from: sidecar
-    to: sidecar
-    filter:
-      - "meeting_notes_diarize/**/*.py"
-      - "BUILD_ID"
-      - "!**/__pycache__/**"
-      - "!**/*.pyc"
   # Built-in audio capture helper. Bundled inside MeetingNotes.app so that
   # macOS attributes the audio-capture TCC request to the parent app's stable
   # signed identity (a bare CLI binary cannot be granted Privacy & Security
@@ -82,6 +69,7 @@ extraResources:
   - from: audio-tap/build/meeting-notes-tap
     to: bin/meeting-notes-tap
 mac:
+  minimumSystemVersion: '26.0.0'
   # App/Dock/Finder icon: bold indigo waveform on a bright rounded-square tile.
   # Regenerate all resolutions from build/icon-1024.png with npm run build:icons.
   # electron-builder would auto-detect build/icon.icns, but we name it

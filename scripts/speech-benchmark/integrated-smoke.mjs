@@ -38,7 +38,7 @@ try {
   execFileSync('/usr/bin/say', ['-v', 'Samantha', '-r', '170', '-o', aiff, 'We approved the release, but do not delete the backup. Keith will review the security report on Friday.']);
   execFileSync('/opt/homebrew/bin/ffmpeg', ['-v', 'error', '-i', aiff, '-c:a', 'aac', '-b:a', '128k', audio]);
   db = openDb(path.join(root, 'db.sqlite'));
-  const settings = new SettingsRepo(db); settings.set('speechProvider', 'native');
+  const settings = new SettingsRepo(db);
   const meetings = new MeetingsRepo(db), speakers = new SpeakersRepo(db), roster = new RosterService(speakers, root);
   const id = 'synthetic', folder = path.join(root, 'meetings', id); fs.mkdirSync(folder, { recursive: true });
   meetings.insert({ id, slug: id, title: 'Native integration check', startedAt: null, durationS: 8, audioPath: audio, status: 'processing', pipelineStage: 'discovered' });

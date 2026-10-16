@@ -32,7 +32,7 @@ const sampleMeetings = [
   { id: 'p2', slug: 'p2', title: 'recording-20260421-150500-def456', startedAt: '2026-04-21T15:05:00', durationS: 2700, pipelineStage: 'discovered', status: 'pending', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 0, speakers: [] },
   { id: 'b', slug: 'b', title: 'Design critique — detail view', startedAt: '2026-04-20T11:00:00', durationS: 2100, pipelineStage: 'awaiting_speaker_id', status: 'awaiting_user', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 2, actionItemsCount: 0, speakers: [] },
   { id: 'live', slug: 'live', title: 'Sync with design', startedAt: '2026-04-20T09:00:00', durationS: 600, pipelineStage: 'diarizing', status: 'processing', stageStartedAt: new Date(Date.now() - 90000).toISOString(), skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 0, speakers: [] },
-  { id: 'c', slug: 'c', title: 'Whisper misfire', startedAt: '2026-04-20T14:00:00', durationS: 400, pipelineStage: 'transcribing', status: 'failed', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 0, speakers: [] },
+  { id: 'c', slug: 'c', title: 'Speech processing interrupted', startedAt: '2026-04-20T14:00:00', durationS: 400, pipelineStage: 'transcribing', status: 'failed', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 0, speakers: [] },
   { id: 'a', slug: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', durationS: 3200, pipelineStage: 'done', status: 'done', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 9, speakers: [{ localLabel: 'A', rosterId: 'r', displayName: 'Alice', confidence: 0.95 }, { localLabel: 'B', rosterId: 'r', displayName: 'Bob', confidence: 0.95 }] },
   { id: 'd', slug: 'd', title: 'Standup notes', startedAt: '2026-04-19T09:00:00', durationS: 900, pipelineStage: 'done', status: 'done', stageStartedAt: null, skipSpeakerId: false, unidentifiedCount: 0, actionItemsCount: 3, speakers: [{ localLabel: 'A', rosterId: 'r', displayName: 'Alice', confidence: 0.95 }] },
 ];
@@ -40,11 +40,8 @@ const sampleMeetings = [
 // Typed as the full Settings record so adding a setting in main fails
 // typecheck here until the preview has a value for it.
 const previewSettings: Settings = {
-  speechProvider: 'legacy',
   obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
-  sttUrl: 'http://127.0.0.1:8080',
-  sttModel: 'whisper-1',
   llmModel: 'qwen/qwen3.5-9b',
   audioHijackSessionName: 'Meeting',
   libraryPath: '~/Documents/MeetingNotes',
@@ -132,7 +129,7 @@ export const overrides: PreviewOverrides = {
     confirm: async () => '',
     sample: async () => null,
   },
-  onboarding: { listWhisperModels: async () => [] },
+  onboarding: { openExternal: async () => {} },
   search: { query: async () => [], run: async () => ({ hits: [], status: 'complete' }) },
   groups: { list: async () => ({ groups: [], allCount: rows.length, ungroupedCount: rows.length }) },
   trash: { list: async () => [] },
@@ -173,7 +170,6 @@ export const overrides: PreviewOverrides = {
     detectProviders: async () => ({ lmStudio: { binary: false, running: false }, ollama: { binary: false, running: false } }),
     probe: async () => ({ ok: true, models: [] }),
   },
-  stt: { probe: async () => ({ ok: true }) },
   weekly: {
     get: async () => ({}),
     getStructured: async () => ({

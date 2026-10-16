@@ -26,4 +26,4 @@ for rendering in hardware software; do
   rm -rf "$task_profile"
 done
 env ELECTRON_RUN_AS_NODE=1 "$task_bin" scripts/ci/package-runtime.mjs "$task_app" "$fixture_root" "$results_root" > "$results_root/runtime.log" 2>&1
-printf 'PASS packaged renderer (normal + SwiftShader), helper, configured provider transport, offline synthetic inference\n'
+printf 'PASS packaged renderer (normal + SwiftShader), helper, summary transport, native-only payload (inference checked on physical Mac)\n'

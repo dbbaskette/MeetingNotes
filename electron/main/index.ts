@@ -9,7 +9,7 @@ import { SummaryTemplateStore } from './storage/summary-template-store.js';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { NativeSpeechService, nativeModelFolder, supportsNativeSpeech } from './speech/service.js';
+import { NativeSpeechService, nativeModelFolder } from './speech/service.js';
 import { fileURLToPath } from 'node:url';
 import { recoveryMediaHandler } from './recording/recovery-media.js';
 
@@ -27,9 +27,6 @@ import { ActionItemsRepo } from './storage/action-items-repo.js';
 import { StageDurationsRepo } from './storage/stage-durations-repo.js';
 import { SettingsRepo } from './storage/settings-repo.js';
 import { LMStudioClient } from './lm-studio/client.js';
-import { DiarizationClient } from './diarization/client.js';
-import { createDiarizationSupervisor } from './diarization/supervisor.js';
-import { createConfiguredWhisperSupervisor } from './whisper/supervisor.js';
 import { LLMSupervisor } from './llm/supervisor.js';
 import { WeeklySummariesRepo } from './storage/weekly-summaries-repo.js';
 import { WeeklyAggregator } from './weekly/aggregator.js';
@@ -210,7 +207,6 @@ app.whenReady().then(async () => {
 
   const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
   const settings = new SettingsRepo(settingsDb);
-  settings.initializeSpeechProvider(!smokeRoot && supportsNativeSpeech());
   // Secrets are encrypted with the keychain and never sent to the renderer.
   // Values saved as plaintext by earlier versions are converted here (#249).
   const secrets = new SecretSettings(settings, safeStorage);
@@ -280,29 +276,6 @@ app.whenReady().then(async () => {
     if (provider === 'lm-studio') return 'http://127.0.0.1:1234';
     if (provider === 'ollama') return 'http://127.0.0.1:11434';
     return settings.get('lmStudioUrl');
-  });
-  const stt = new LMStudioClient(s.sttUrl);
-  const diarization = new DiarizationClient('http://127.0.0.1:8765');
-  // In dev, sidecar lives next to source. In a packaged .app, electron-builder
-  // copies it to process.resourcesPath/sidecar as an extraResource.
-  const sidecarDir = isDev
-    ? path.join(app.getAppPath(), 'sidecar')
-    : path.join(process.resourcesPath, 'sidecar');
-  // Lazy-spawn supervisors. Neither the pyannote sidecar nor
-  // whisper-server starts at app launch — the first pipeline stage
-  // that needs them calls `await ensureReady()`. Both shut down
-  // automatically after 10 minutes of inactivity to free RAM
-  // (~500 MB pyannote, ~1.5–3 GB whisper depending on model).
-  const diarSupervisor = createDiarizationSupervisor({
-    sidecarDir,
-    onLog: (l) => logger.info('sidecar', { line: l }),
-  });
-  // Match the transcription endpoint. Only plain-HTTP loopback URLs are
-  // locally managed; remote/TLS/proxy services remain user-managed.
-  const whisperSupervisor = createConfiguredWhisperSupervisor({
-    getModelId: () => settings.get('sttModel'),
-    endpoint: s.sttUrl,
-    onLog: (l) => logger.info('whisper', { line: l }),
   });
   // Phase 3 LLM-provider lifecycle. When summaryProvider='external'
   // (the default), this is a no-op and behavior matches today's
@@ -410,10 +383,6 @@ app.whenReady().then(async () => {
     libraryRoot,
     artifactCache,
     lmStudio,
-    stt,
-    diarization,
-    diarSupervisor,
-    whisperSupervisor,
     llmSupervisor,
     meetings,
     speakers,
@@ -921,8 +890,6 @@ app.whenReady().then(async () => {
         nativeAppDetector.stop();
         clearInterval(trashPurgeTimer);
         await Promise.all([
-          diarSupervisor.stop(),
-          whisperSupervisor.stop(),
           llmSupervisor.stop(),
           watcher.stop(),
         ]);

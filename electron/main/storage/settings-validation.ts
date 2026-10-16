@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from './settings-repo.js';
 import { existingFolder } from '../lib/pasted-path.js';
 
 const enums: Record<string, readonly [string, ...string[]]> = {
-  theme: ['system', 'light', 'dark'], summaryProvider: ['external', 'lm-studio', 'ollama'], speechProvider: ['native', 'legacy'],
+  theme: ['system', 'light', 'dark'], summaryProvider: ['external', 'lm-studio', 'ollama'],
   summaryDetail: ['concise', 'standard', 'detailed'], webhookTemplate: ['compact', 'full', 'telegram-markdown', 'slack-blocks'],
   webhookOwnerFilter: ['mine', 'all', 'none'],
 };
@@ -19,7 +19,7 @@ export function validateSetting(key: string, value: unknown): unknown {
     const input = z.string().max(4096).parse(value);
     return key === 'audioWatchPath' && !input.trim() ? '' : existingFolder(input);
   }
-  if (key === 'lmStudioUrl' || key === 'sttUrl' || key === 'webhookUrl') {
+  if (key === 'lmStudioUrl' || key === 'webhookUrl') {
     const input = z.string().max(4096).parse(value).trim();
     if (key === 'webhookUrl' && !input) return '';
     let url: URL;

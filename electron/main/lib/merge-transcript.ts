@@ -1,6 +1,6 @@
 import { VOICE_SPEAKER_LABEL } from './stem-paths.js';
 
-export interface WhisperSegment {
+export interface TranscriptSegment {
   /** Native word timing is retained raw, grouped into readable turns on render. */
   wordTiming?: boolean;
   start: number;
@@ -12,14 +12,14 @@ export interface WhisperSegment {
   source?: 'voice' | 'system';
 }
 export interface DiarSegment { start: number; end: number; speaker: string; }
-export interface MergedSegment extends WhisperSegment { speaker: string; }
+export interface MergedSegment extends TranscriptSegment { speaker: string; }
 
 function overlap(a: { start: number; end: number }, b: { start: number; end: number }): number {
   return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start));
 }
 
 export function mergeTranscriptWithDiarization(
-  whisper: readonly WhisperSegment[],
+  whisper: readonly TranscriptSegment[],
   diar: readonly DiarSegment[],
 ): MergedSegment[] {
   if (whisper.length === 0) return [];

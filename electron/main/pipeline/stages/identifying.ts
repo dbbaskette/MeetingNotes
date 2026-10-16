@@ -14,7 +14,7 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
     const embedding = embeddingForLabel(diar, label);
     return embedding ? [{ label, embedding }] : [];
   });
-  const matches = ctx.roster.identifyUnknowns(detected, diar.embeddingSpace);
+  const matches = ctx.roster.identifyUnknowns(detected);
   const byLabel = new Map(matches.map(m => [m.label, m]));
   // Preserved only for this artifact: new diarization invalidates run-local links.
   const existing = new Map(ctx.speakers.listForMeeting(meetingId).map(s => [s.localLabel, s.rosterSpeakerId]));

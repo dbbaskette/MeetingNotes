@@ -1,0 +1,11 @@
+# Native-only speech: owner-approved clean break
+
+The owner explicitly supersedes 1.15.0's legacy-provider compatibility strategy: remove Whisper/pyannote processing, downloads, setup and payloads from the app. Rollback is the retained 1.15.0 release, not an in-app fallback. Target 1.16.0, Apple silicon/macOS 26+.
+
+1. Make processing unconditionally Apple + SpeakerKit, including upgrades and recovered old provider manifests. Remove legacy workers, endpoint clients/IPC, downloads and engine selectors. Keep old completed meeting artifacts readable and permit manual naming without training native profiles from legacy vectors.
+2. Reduce onboarding to capture permissions, explicit native asset preparation and summary-model setup. Remove HF-token and Whisper controls from main, preload and renderer. Keep public SpeakerKit assets, summary runtimes and FFmpeg requirements accurately described.
+3. Remove the Python sidecar and legacy speech build/source components. Package only the capture and native speech helpers, with a macOS 26 minimum. Simplify setup/start/rebuild/doctor and packaging fixtures. Old user model caches, HF credentials, recordings and legacy profile files are not deleted; obsolete saved settings are ignored, not erased.
+4. Replace obsolete provider tests with native-only upgrade/recovery, API-removal, old-artifact, UI and package-content regressions. Run targeted checks at coherent boundaries and full relevant verification with the existing local CI runner. Reuse unchanged Swift/model evidence but recheck the actual new package.
+5. Update README/guides and release notes with what was removed, what remains, the new system requirement, voice-profile enrollment and rollback. Build a distinct installer. Do not replace the running installed app or touch private meetings. GitHub publication remains source/notes only under the already-authorized release workflow.
+
+SpeakerKit's pinned SDK transitively contains WhisperKit utility code and pyannote-family Core ML models. No Whisper ASR model is downloaded or used, no Python runtime ships, and no HF account/token is requested. Removing or forking those upstream utility dependencies is not necessary to remove the app's legacy engines.
