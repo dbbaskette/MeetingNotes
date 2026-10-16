@@ -100,6 +100,14 @@ it('isolates equal-dimension vectors by model and retains legacy files', () => {
   expect(roster.suggestionsFor({ label: 'x', embedding: [0, 1] }, 3, 'other-model')).toEqual([]);
   expect(new VoiceProfiles(root).load(space, id)).toEqual([0, 1]);
 });
+it('never creates profiles for unknown or path-shaped roster IDs', () => {
+  for (const id of ['missing-person', '../../unexpected']) {
+    expect(() => roster.confirmSpeakerFor(id, [1, 0])).toThrow('Roster speaker not found');
+    expect(() => roster.confirmSpeakerFor(id, [1, 0], space)).toThrow('Roster speaker not found');
+  }
+  expect(fs.existsSync(path.join(root, 'unexpected.bin'))).toBe(false);
+  expect(fs.existsSync(path.join(root, 'voice-profiles'))).toBe(false);
+});
 it('allows a name without a centroid and rejects unusable observations', () => {
   const id = roster.confirmSpeaker({ displayName: 'Quiet speaker', embedding: null }, space);
   roster.confirmSpeakerFor(id, [0, 0], space);

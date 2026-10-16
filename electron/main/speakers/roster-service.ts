@@ -23,6 +23,9 @@ export class RosterService {
   }
 
   confirmSpeakerFor(id: string, observed: number[], space?: string): void {
+    // Renderer-supplied IDs must resolve to an actual roster entry before
+    // creating either a hashed native profile or a legacy embedding file.
+    if (!this.repo.findById(id)) throw new Error('Roster speaker not found');
     if (!normalized(observed)) return;
     if (space) { new VoiceProfiles(this.libraryRoot).confirm(space, id, observed); return; }
     const old = this.safeLoad(id);
