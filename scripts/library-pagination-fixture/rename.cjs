@@ -27,6 +27,9 @@ app.whenReady().then(async () => {
   const input = async (selector, value) => {
     await run(`(() => { const input = document.querySelector(${JSON.stringify(selector)}); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   };
+  // Virtual rows measure layout in requestAnimationFrame. Read scroll only
+  // after both that measurement and the resulting React layout have painted.
+  const settleLayout = () => run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   const open = async title => {
     await until(`!!${row(title)}`); await run(`${row(title)}.click()`);
     await until(`!!document.querySelector('[title="Click to rename"]')`);
@@ -52,11 +55,14 @@ app.whenReady().then(async () => {
   await until(`!!${planning} && ${planning}.textContent.includes('Load more (50 of 200)')`);
   await click('Load more (50 of 200)');
   await until(`${planning}.textContent.includes('Load more (100 of 200)')`);
+  await settleLayout();
   await run(`(() => { const scroll = ${scroller}; scroll.scrollTop += ${planning}.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 300; })()`);
+  await settleLayout();
   const before = await run(`${scroller}.scrollTop`);
   await open('Synthetic meeting 205');
   await inlineRename('Updated grouped meeting'); await click('← Back');
   await until(`!!${row('Updated grouped meeting')}`);
+  await settleLayout();
   assert.equal(await run(`${scroller}.scrollTop`), before, 'Return preserves scroll');
   assert.equal(await run('document.querySelectorAll("section [aria-expanded=true]").length'), 1, 'Return preserves expansion');
   assert.ok(await run(`${planning}.textContent.includes('Load more (100 of 200)')`), 'Return preserves loaded pages');
