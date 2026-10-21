@@ -125,6 +125,7 @@ describe('Weekly input ownership', () => {
         decisions: ['Original decision'], inputHash: 'obsolete hash' });
       // Recreate the prior schema, then exercise the real upgrade twice.
       s.db.exec('ALTER TABLE weekly_summaries DROP COLUMN snapshot_json');
+      s.db.exec('ALTER TABLE meeting_speakers DROP COLUMN assignment_source');
       s.db.prepare('UPDATE schema_version SET version = 23').run();
       runMigrations(s.db); runMigrations(s.db);
       const date = s.weeklySummaries.get(2026, 17)!.generatedAt;

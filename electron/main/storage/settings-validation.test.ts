@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
 import { validateSetting } from './settings-validation.js';
+it('accepts only explicit booleans for voice auto-matching', () => {
+  expect(validateSetting('autoMatchSpeakers', true)).toBe(true);
+  expect(validateSetting('autoMatchSpeakers', false)).toBe(false);
+  for (const value of ['true', 'false', 1, null, undefined]) expect(() => validateSetting('autoMatchSpeakers', value)).toThrow();
+});
 it('validates types, enum values and finite bounds at the IPC boundary', () => {
   expect(() => validateSetting('theme', 'purple')).toThrow();
   expect(() => validateSetting('recordingBitrateKbps', 0)).toThrow();

@@ -14,14 +14,19 @@ export const runIdentifying: StageHandler = async ({ meetingId }, ctx) => {
     const embedding = embeddingForLabel(diar, label);
     return embedding ? [{ label, embedding }] : [];
   });
-  const matches = ctx.roster.identifyUnknowns(detected);
-  const byLabel = new Map(matches.map(m => [m.label, m]));
   // Preserved only for this artifact: new diarization invalidates run-local links.
   const existing = new Map(ctx.speakers.listForMeeting(meetingId).map(s => [s.localLabel, s.rosterSpeakerId]));
+  const matches = ctx.roster.identifyUnknowns(detected.filter(s => !existing.get(s.label)), {
+    enabled: ctx.settings.get('autoMatchSpeakers') === true,
+    space: diar.embeddingSpace, segments: diar.segments,
+    reservedRosterIds: [...existing.values()].filter((id): id is string => !!id),
+  });
+  const byLabel = new Map(matches.map(m => [m.label, m]));
   for (const label of labels) {
     if (existing.get(label)) continue;
     const match = byLabel.get(label);
-    ctx.speakers.linkToMeeting(meetingId, label, match?.rosterId ?? null, match?.confidence ?? 0);
+    ctx.speakers.linkToMeeting(meetingId, label, match?.rosterId ?? null, match?.confidence ?? 0,
+      match?.rosterId ? 'automatic' : null);
   }
   ctx.logger.info('identify:done', { meetingId, matched: matches.filter(m => m.rosterId).length, total: labels.length });
 };

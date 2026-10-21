@@ -74,6 +74,7 @@ export const MeetingSpeakerSchema = z.object({
   rosterId: z.string().nullable(),
   displayName: z.string().nullable(),
   confidence: z.number().nullable(),
+  assignmentSource: z.enum(['automatic', 'manual']).nullable().optional(),
 });
 
 export const MeetingSummarySchema = z.object({
@@ -171,7 +172,7 @@ export const MeetingSummaryPageSchema = z.object({
 export type MeetingSummaryPage = z.infer<typeof MeetingSummaryPageSchema>;
 
 export const ReviewedSpeakerSchema = MeetingSpeakerSchema.extend({
-  state: z.enum(['unknown', 'probable', 'confirmed']),
+  state: z.enum(['unknown', 'probable', 'confirmed', 'automatic']),
   needsReview: z.boolean(),
   segmentCount: z.number(),
   durationS: z.number(),

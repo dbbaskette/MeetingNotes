@@ -393,6 +393,10 @@ export const MIGRATIONS: Migration[] = [
   { version: 24, up: `
     ALTER TABLE weekly_summaries ADD COLUMN snapshot_json TEXT;
   ` },
+  { version: 25, up: `
+    ALTER TABLE meeting_speakers ADD COLUMN assignment_source TEXT
+      CHECK (assignment_source IN ('automatic', 'manual'));
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

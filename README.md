@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.17.0-brightgreen)](docs/releases/v1.17.0.md)
+[![Version](https://img.shields.io/badge/version-1.18.0-brightgreen)](docs/releases/v1.18.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -16,7 +16,11 @@
 
 ![A finished meeting: notes in the centre, speakers and export on the right, audio player below](docs/screenshots/summary.png)
 
-## A clearer, calmer interface
+## Optional automatic voice matching
+
+1.18 restores automatic naming for strong native voiceprint matches as an explicit opt-in. Enable **Settings → Processing → Automatically match known voices**. Short, ambiguous and duplicate identity matches stay in review; automatic names are clearly labeled and remain editable. Only your explicit confirmations train voiceprints. Existing assignments are not rewritten. See the [1.18 release notes](docs/releases/v1.18.0.md) for safeguards, upgrade details and verification.
+
+### A clearer, calmer interface
 
 1.17 applies the Golden Gate-inspired design across Library, meeting details, Weekly, Settings and setup: cool layered surfaces, restrained diffused navigation/menus, flatter expandable groups and readable opaque notes. Light and dark themes share clear selection and keyboard focus, with reduced-effects fallbacks. This is a CSS interpretation, not native OS Liquid Glass. Existing workflows and library data are unchanged; no speech assets need to be prepared again if they are already ready.
 
@@ -27,7 +31,7 @@ The reusable, stack-neutral [Golden Gate design skill](macos-goldengate-skill/SK
 - **Capture without a virtual audio device.** One click records any app's audio (Zoom, Teams, FaceTime, a browser tab) mixed with your microphone, using the macOS 14.2 process tap.
   Microphone timing accounts for delayed buffers; see the [1.14.9 capture fix and playback check](docs/releases/v1.14.9.md).
 - **Local transcription with simpler setup.** On Apple Silicon/macOS 26+, Apple SpeechTranscriber transcribes and SpeakerKit OSS separates the voices. This is the only speech engine: no Whisper installation, Python environment, Hugging Face account, token or gated-model approval.
-- **A transcript with real names.** Name voices using your existing roster. Confirmed native voice samples power similarity-ranked suggestions in later meetings; you confirm the suggestion before it is applied.
+- **A transcript with real names.** Name voices using your existing roster. Confirmed native voice samples power similarity-ranked suggestions in later meetings. Confirm suggestions yourself, or opt into conservative automatic matching in Settings → Processing.
 - **Notes you can act on.** A local LLM writes an overview, discussion points, decisions and open questions, then extracts action items with owners and due dates. Each item links back to the line it came from.
 - **Notes shaped for your meeting.** Choose General, 1:1, Standup, Customer call, Interview or Decision review templates per group or meeting. Existing notes change only when you explicitly re-run processing.
 - **A Library that stays organised.** Groups, search across titles, notes and transcripts, and a **Needs attention** panel for failed runs, voices to name and interrupted recordings. Renames made in meeting details appear when you return, without switching filters or reloading your groups.
@@ -77,7 +81,7 @@ More detail: [Recording](docs/guide/recording.md) · [Working with meetings](doc
 
 **What this buys us:** fewer setup steps and accounts, no local Whisper/Python servers or bundled Python/PyTorch payload, on-device Apple transcription with genuine word timing, compact native speaker centroids, and the same full meeting workflow. The helper runs only for its operation, then exits. Whisper management, HF-token setup, remote STT endpoints and the engine selector are removed, not hidden. There is no in-app fallback. Initial Apple language assets and public SpeakerKit downloads still require internet; LLM setup remains separate.
 
-**Voice matching is preserved, not silently converted.** Different models produce incompatible embedding spaces, even at the same vector length. Native profiles are tagged by SDK/model revision and representation. Suggestions show **similarity**, not a confidence percentage, and require confirmation pending broader cross-meeting calibration. Missing/zero vectors leave a voice available for manual naming instead of failing processing.
+**Voice matching is preserved, not silently converted.** Different models produce incompatible embedding spaces, even at the same vector length. Native profiles are tagged by SDK/model revision and representation. Suggestions show **similarity**, not a confidence percentage. Automatic matching is off by default; enable **Settings → Processing → Automatically match known voices** for conservative heuristic assignments (similarity ≥ 0.98, margin ≥ 0.05, at least 10 seconds of non-overlapping speech across two turns). Short/ambiguous voices, duplicate identity claims and incompatible profiles stay in review. **Auto-matched** names remain editable, do not train profiles, and are never labeled human-confirmed; **Confirm this voice** explicitly teaches the profile. Enabling/disabling the setting does not rewrite existing meetings. Broader cross-meeting calibration remains follow-up work. Missing/zero vectors leave a voice available for manual naming instead of failing processing.
 
 **Beta users:** the separate **MeetingNotes Beta** comparison workspace is retained, with its copied audio, original transcripts and native profiles. It is not the regular app's live library and its changes are not automatically imported. Use the regular app to process/name voices going forward; keep the beta for side-by-side comparisons. See the [comparison guide](docs/guide/speech-beta.md).
 

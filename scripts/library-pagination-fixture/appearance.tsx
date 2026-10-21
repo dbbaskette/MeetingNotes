@@ -12,7 +12,7 @@ HTMLMediaElement.prototype.setAttribute = function (name, value) {
   if (name === 'src' && value.startsWith('file://')) return;
   setMediaAttribute.call(this, name, value);
 };
-const fixture = { captures: 0, preparations: 0 };
+const fixture = { captures: 0, preparations: 0, confirmations: 0 };
 (window as any).fixture = fixture;
 const groupId = '00000000-0000-4000-8000-000000000001';
 const meeting: MeetingDetail = {
@@ -46,8 +46,14 @@ window.api.meetings.getMany = async ids => rows.filter(row => ids.includes(row.i
 window.api.meetings.get = async id => ({ ...meeting, id, transcriptMd: undefined, rawTranscriptText: undefined }) as any;
 window.api.meetings.getTranscript = async () => ({ transcriptMd: meeting.transcriptMd, rawTranscriptText: null });
 window.api.meetings.getSpeakerReview = async () => ({ speakers: meeting.speakers.map(sp => ({ ...sp,
-  state: 'confirmed', needsReview: false, segmentCount: 12, durationS: 450, lineCount: 32,
+  state: sp.assignmentSource === 'automatic' ? 'automatic' : 'confirmed', needsReview: false, segmentCount: 12, durationS: 450, lineCount: 32,
 })) }) as any;
+window.api.speakers.assign = async () => {
+  fixture.confirmations++;
+  meeting.speakers[0]!.assignmentSource = 'manual';
+  return 'alice';
+};
+(window as any).setAutomaticVoice = () => { meeting.speakers[0]!.assignmentSource = 'automatic'; };
 window.api.meetings.getStatus = async () => meeting as any;
 window.api.speakers.list = async () => [{ id: 'alice', displayName: 'Alice' }, { id: 'bob', displayName: 'Bob' }] as any;
 window.api.speakers.suggestions = async () => [];

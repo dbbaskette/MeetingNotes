@@ -33,10 +33,10 @@ describe('SpeakersRepo', () => {
     const ids = ['first', ...Array.from({ length: 900 }, (_, i) => `missing-${i}`), 'last', 'first'];
     expect(repo.listForMeetings(ids)).toEqual(new Map([
       ['first', [
-        { localLabel: 'A', rosterSpeakerId: rosterId, displayName: 'Alex', confidence: 1 },
-        { localLabel: 'B', rosterSpeakerId: null, displayName: null, confidence: 0 },
+        { localLabel: 'A', rosterSpeakerId: rosterId, displayName: 'Alex', confidence: 1, assignmentSource: 'manual' },
+        { localLabel: 'B', rosterSpeakerId: null, displayName: null, confidence: 0, assignmentSource: null },
       ]],
-      ['last', [{ localLabel: 'A', rosterSpeakerId: null, displayName: null, confidence: 0 }]],
+      ['last', [{ localLabel: 'A', rosterSpeakerId: null, displayName: null, confidence: 0, assignmentSource: null }]],
     ]));
     expect(repo.listForMeetings([])).toEqual(new Map());
   });

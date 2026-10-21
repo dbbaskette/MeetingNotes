@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { buildSpeakerReviewMetadata } from './review-metadata.js';
 
 describe('buildSpeakerReviewMetadata', () => {
+  it('does not call even a perfect automatic match human-confirmed', () => {
+    const result = buildSpeakerReviewMetadata({
+      links: [{ localLabel: 'A', rosterId: 'alice', displayName: 'Alice', confidence: 1, assignmentSource: 'automatic' }],
+      diarization: [{ speaker: 'A', start: 0, end: 6 }, { speaker: 'A', start: 10, end: 16 }], transcript: [],
+    });
+    expect(result.get('A')).toMatchObject({ state: 'automatic', needsReview: false });
+  });
   it('distinguishes unknown, probable, and manually confirmed speakers with impact counts', () => {
     const result = buildSpeakerReviewMetadata({
       links: [

@@ -59,6 +59,13 @@ app.whenReady().then(async () => {
   await run('document.querySelector("dialog button.w-full").click()'); await settle(); assert(await run('document.querySelector("dialog").innerText.includes("Completed original task")'));
   await click('Restore selected version'); await settle(); assert.equal(await run('window.fixture.restored'),'Old notes'); assert.equal(await run('!!document.querySelector("dialog")'),false);
   await click('Processing'); await settle();
+  const matching = `Array.from(document.querySelectorAll('label')).find(l => l.textContent.includes('Automatically match known voices'))?.querySelector('input')`;
+  assert.equal(await run(`${matching}.checked`), false, 'Voice auto-matching is opt-in');
+  await run(`${matching}.click()`); await settle();
+  assert.equal(await run('window.fixture.saves.at(-1).key'), 'autoMatchSpeakers');
+  assert.equal(await run('window.fixture.saves.at(-1).value'), true);
+  await run(`${matching}.click()`); await settle();
+  assert.equal(await run('window.fixture.saves.at(-1).value'), false);
   assert.equal(await run('Array.from(document.querySelectorAll("select")).some(s => s.getAttribute("aria-label") === "Transcription and speaker engine")'),false,'No legacy selector even with saved legacy settings');
   assert.equal(await run('/Whisper|Hugging Face|token input/.test(document.body.innerText)'),false);
   assert.equal(await run('window.fixture.preparations'),0,'Opening settings never provisions assets');

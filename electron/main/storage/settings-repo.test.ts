@@ -12,6 +12,13 @@ beforeEach(() => {
 });
 
 describe('SettingsRepo', () => {
+  it('defaults voice auto-matching off and persists explicit opt-in/out', () => {
+    expect(repo.get('autoMatchSpeakers')).toBe(false);
+    repo.set('autoMatchSpeakers', true);
+    expect(repo.getAll().autoMatchSpeakers).toBe(true);
+    repo.set('autoMatchSpeakers', false);
+    expect(repo.get('autoMatchSpeakers')).toBe(false);
+  });
   it('falls back to defaults when unset', () => {
     expect(repo.get('lmStudioUrl')).toBe(DEFAULT_SETTINGS.lmStudioUrl);
   });

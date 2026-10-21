@@ -3,6 +3,14 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 interface Person { id: string; displayName: string; }
+export function rankVoiceProfiles(vector: readonly number[], profiles: (Person & { vector: number[] })[]): (Person & { similarity: number })[] {
+  const observed = normalized(vector); if (!observed) return [];
+  return profiles.flatMap(profile => {
+    if (profile.vector.length !== observed.length) return [];
+    const similarity = Math.max(-1, Math.min(1, profile.vector.reduce((sum, value, i) => sum + value * observed[i]!, 0)));
+    return [{ id: profile.id, displayName: profile.displayName, similarity }];
+  }).sort((a, b) => b.similarity - a.similarity).slice(0, 3);
+}
 
 const Profile = z.object({ version: z.literal(1), space: z.string().min(1).max(500), rosterId: z.string().max(200), vector: z.array(z.number().finite()).min(1).max(8192) });
 export function normalized(vector: readonly number[]): number[] | null {
@@ -43,12 +51,10 @@ export class VoiceProfiles {
     } catch { return null; }
   }
   suggestions(space: string, vector: readonly number[], roster: Person[]): (Person & { similarity: number })[] {
-    const observed = normalized(vector); if (!observed) return [];
-    return roster.flatMap(person => {
+    if (!normalized(vector)) return [];
+    return rankVoiceProfiles(vector, roster.flatMap(person => {
       const saved = this.load(space, person.id);
-      if (!saved || saved.length !== observed.length) return [];
-      const similarity = Math.max(-1, Math.min(1, saved.reduce((sum, value, i) => sum + value * observed[i]!, 0)));
-      return [{ ...person, similarity }];
-    }).sort((a, b) => b.similarity - a.similarity).slice(0, 3);
+      return saved ? [{ ...person, vector: saved }] : [];
+    }));
   }
 }

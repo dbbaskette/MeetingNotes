@@ -30,7 +30,8 @@ type MeetingSummary = {
   pipelineStage: string; stageStartedAt: string | null; status: string; errorMessage: string | null;
   unidentifiedCount: number; actionItemsCount: number; stageEtaMs: number | null;
   stageEtaRough: boolean; skipSpeakerId: boolean;
-  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[];
+  speakers: { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null;
+    assignmentSource?: 'automatic' | 'manual' | null }[];
 };
 type MeetingSummaryPage = {
   items: MeetingSummary[]; nextCursor: string | null; total: number;
@@ -225,7 +226,8 @@ const api = {
           rosterId: string | null;
           displayName: string | null;
           confidence: number | null;
-          state: 'unknown' | 'probable' | 'confirmed';
+          assignmentSource?: 'automatic' | 'manual' | null;
+          state: 'unknown' | 'probable' | 'confirmed' | 'automatic';
           needsReview: boolean;
           segmentCount: number;
           durationS: number;

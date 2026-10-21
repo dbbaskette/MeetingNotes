@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { MeetingNotesApi } from '../../../preload';
+import type { ReviewedSpeaker } from '../../../main/ipc/contracts';
 import { createDetailArtifacts, mergeSpeakerReview, type DetailSpeaker } from './detail-artifacts';
 
 function deferred<T>() {
@@ -9,6 +11,14 @@ function deferred<T>() {
 }
 
 describe('detail artifact generations', () => {
+  it('drops stale automatic review state when a perfect match is manually confirmed', () => {
+    type BridgedSpeaker = NonNullable<Awaited<ReturnType<MeetingNotesApi['meetings']['getSpeakerReview']>>>['speakers'][number];
+    expectTypeOf<BridgedSpeaker>().toEqualTypeOf<ReviewedSpeaker>();
+    const speaker: DetailSpeaker = { localLabel: 'A', rosterId: 'alice', displayName: 'Alice', confidence: 1, assignmentSource: 'manual' };
+    const result = mergeSpeakerReview([speaker], [{ ...speaker, assignmentSource: 'automatic', state: 'automatic', needsReview: false }]);
+    expect(result[0]?.state).toBeUndefined();
+    expect(result[0]?.assignmentSource).toBe('manual');
+  });
   it('does not publish meeting A after switching to B, even when returning to A', async () => {
     const old = deferred<string>();
     const published: string[] = [];
