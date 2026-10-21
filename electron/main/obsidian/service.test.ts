@@ -127,13 +127,14 @@ describe('Obsidian sync', () => {
       ALTER TABLE meetings DROP COLUMN group_revision; ALTER TABLE meetings DROP COLUMN action_revision; ALTER TABLE meetings DROP COLUMN title_explicit;
       ALTER TABLE recording_sessions DROP COLUMN title;
       ALTER TABLE weekly_summaries DROP COLUMN snapshot_json;
+      ALTER TABLE meeting_speakers DROP COLUMN assignment_source;
       ALTER TABLE meetings DROP COLUMN summary_template; ALTER TABLE groups DROP COLUMN summary_template;`);
     db.exec(
       'DROP TABLE processing_history; DROP TABLE notes_restore_pending; DROP TABLE notes_versions; DROP TABLE obsidian_exports; DROP TABLE obsidian_destinations; DROP TABLE obsidian_meta; DROP TABLE obsidian_revisions; UPDATE schema_version SET version=18;',
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 24 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 25 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,
