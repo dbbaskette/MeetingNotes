@@ -8,6 +8,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
+import { SPEAKER_AUTO_MATCH } from '../../../shared/speaker-matching';
 import { SetupHealth } from '../components/SetupHealth';
 import { Icon } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
@@ -40,6 +41,7 @@ interface Settings {
   };
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
+  autoMatchSpeakers: boolean;
   showMenuBarIcon: boolean;
   recordShortcut: string;
   userName: string;
@@ -185,6 +187,16 @@ export function SettingsView({
       <SettingsNavigation>
       <SettingsSection section="Processing" keywords="Apple SpeakerKit native speech language transcription STT setup">
         <NativeSpeechPanel language={s.sttLanguage} />
+      </SettingsSection>
+      <SettingsSection section="Processing" keywords="speaker voices voiceprints automatic match identity similarity">
+        <label className="flex items-start gap-3 text-sm">
+          <input type="checkbox" checked={s.autoMatchSpeakers ?? false}
+            onChange={e => void update('autoMatchSpeakers', e.target.checked)} />
+          <span>Automatically match known voices
+            <span className="block text-xs text-ink-muted mt-1">Off by default. Applies on the next identification run, not to existing assignments. Requires similarity ≥ {SPEAKER_AUTO_MATCH.similarity}, a {SPEAKER_AUTO_MATCH.margin} lead over the next candidate, and {SPEAKER_AUTO_MATCH.cleanDurationS}s of non-overlapping speech across {SPEAKER_AUTO_MATCH.cleanTurns} turns. Short, ambiguous or duplicate matches stay in review.</span>
+            <span className="block text-xs text-ink-muted mt-1">Experimental heuristics, not confidence percentages. Automatic names are labeled and remain editable. Only your confirmations teach voiceprints.</span>
+          </span>
+        </label>
       </SettingsSection>
       <SettingsSection section="Processing" keywords="automatic auto process recordings queue">
         <label className="flex items-start gap-3 text-sm">

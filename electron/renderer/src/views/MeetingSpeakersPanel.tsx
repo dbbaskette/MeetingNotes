@@ -91,6 +91,9 @@ export function SpeakersPanel({
         {meeting.speakers.length > 0 && (
           <div className="text-[10px] text-ink-muted tabular-nums">
             {meeting.speakers.filter((sp) => sp.rosterId).length}/{meeting.speakers.length} named
+            {meeting.speakers.some(sp => sp.assignmentSource === 'automatic') && <span className="block text-brand-indigo">
+              {meeting.speakers.filter(sp => sp.assignmentSource === 'automatic').length} auto-matched
+            </span>}
           </div>
         )}
       </div>
@@ -208,7 +211,7 @@ function SpeakerRow({
   displayName: string | null;
   rosterId: string | null;
   confidence: number | null;
-  reviewState?: 'unknown' | 'probable' | 'confirmed';
+  reviewState?: 'unknown' | 'probable' | 'confirmed' | 'automatic';
   needsReview?: boolean;
   durationS?: number;
   lineCount?: number;
@@ -260,10 +263,11 @@ function SpeakerRow({
           {reviewState !== undefined && <div className={layout.status}>
             <span className={`max-w-full text-[10px] px-1.5 py-0.5 rounded-full ${
               reviewState === 'confirmed' ? 'bg-status-okBg text-status-ok'
-                : reviewState === 'probable' ? 'bg-brand-indigo/10 text-brand-indigo'
+                : reviewState === 'probable' || reviewState === 'automatic' ? 'bg-brand-indigo/10 text-brand-indigo'
                   : 'bg-status-warnBg text-status-warnText'
             }`}>
               {reviewState === 'confirmed' ? 'Confirmed'
+                : reviewState === 'automatic' ? `Auto-matched · similarity ${(confidence ?? 0).toFixed(2)}`
                 : reviewState === 'probable' ? `Probably ${displayName ?? ''} ${Math.round((confidence ?? 0) * 100)}%`
                   : 'Unknown'}
             </span>
@@ -284,6 +288,7 @@ function SpeakerRow({
           meetingId={meetingId}
           localLabel={localLabel}
           rosterId={rosterId}
+          automatic={reviewState === 'automatic'}
           roster={roster}
           lineCount={lineCount}
           onChanged={onChanged}
@@ -294,11 +299,12 @@ function SpeakerRow({
 }
 
 function SpeakerEditor({
-  meetingId, localLabel, rosterId, roster, lineCount, onChanged,
+  meetingId, localLabel, rosterId, roster, lineCount, onChanged, automatic = false,
 }: {
   meetingId: string;
   localLabel: string;
   rosterId: string | null;
+  automatic?: boolean;
   roster: RosterEntry[];
   lineCount?: number;
   onChanged: () => void;
@@ -385,6 +391,11 @@ function SpeakerEditor({
 
   return (
     <div className="border-t border-surface-border px-2 py-2 space-y-2">
+      {automatic && rosterId && <div className="space-y-1">
+        <p className="text-[11px] text-ink-muted">This name was matched automatically and has not trained the voiceprint. Listen before confirming, or assign a different person below.</p>
+        <button disabled={busy} onClick={() => void assignExisting(rosterId)}
+          className="text-xs text-brand-indigo font-semibold disabled:opacity-40">Confirm this voice</button>
+      </div>}
       {/* Audio player */}
       {loading && (
         <div className="text-[11px] text-ink-muted italic flex items-center gap-1.5">

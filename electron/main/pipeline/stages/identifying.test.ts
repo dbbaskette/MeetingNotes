@@ -23,6 +23,7 @@ describe('runIdentifying', () => {
     const linkFn = vi.fn();
     const ctx: any = {
       libraryRoot: dir,
+      settings: { get: () => true },
       meetings: { findById: () => ({ slug: 'slug' }) },
       roster: {
         identifyUnknowns: vi.fn(() => [
@@ -37,7 +38,13 @@ describe('runIdentifying', () => {
       logger: { info: () => {} },
     };
     await runIdentifying({ meetingId: 'm' }, ctx);
-    expect(ctx.roster.identifyUnknowns).toHaveBeenCalledWith([{ label: 'SPEAKER_00', embedding: [1, 0, 0] }, { label: 'SPEAKER_01', embedding: [0, 1, 0] }]);
-    expect(linkFn).toHaveBeenCalledWith('m', 'SPEAKER_00', 'spk_a', 0.9);
+    expect(ctx.roster.identifyUnknowns).toHaveBeenCalledWith([{ label: 'SPEAKER_00', embedding: [1, 0, 0] }, { label: 'SPEAKER_01', embedding: [0, 1, 0] }], expect.objectContaining({ enabled: true, space: 'native:1', reservedRosterIds: [] }));
+    expect(linkFn).toHaveBeenCalledWith('m', 'SPEAKER_00', 'spk_a', 0.9, 'automatic');
+    ctx.speakers.listForMeeting = () => [{ localLabel: 'SPEAKER_00', rosterSpeakerId: 'manual' }];
+    linkFn.mockClear();
+    await runIdentifying({ meetingId: 'm' }, ctx);
+    expect(ctx.roster.identifyUnknowns).toHaveBeenLastCalledWith([{ label: 'SPEAKER_01', embedding: [0, 1, 0] }], expect.objectContaining({ reservedRosterIds: ['manual'] }));
+    expect(linkFn).not.toHaveBeenCalledWith('m', 'SPEAKER_00', expect.anything(), expect.anything(), expect.anything());
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

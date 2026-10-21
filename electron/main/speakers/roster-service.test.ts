@@ -14,6 +14,48 @@ beforeEach(() => {
 });
 afterEach(() => { db.close(); fs.rmSync(tmp, { recursive: true, force: true }); });
 describe('RosterService', () => {
+  const segments = [{ start: 0, end: 6, speaker: 'A' }, { start: 10, end: 16, speaker: 'A' }];
+  const options = { enabled: true, space, segments };
+  it('auto-assigns a strong native match only when explicitly enabled, without training', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    const before = profiles.load(space, id);
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [0.99, 0.1] }], options)[0])
+      .toMatchObject({ rosterId: id, confidence: expect.any(Number) });
+    expect(profiles.load(space, id)).toEqual(before);
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], { ...options, enabled: false })[0]?.rosterId).toBeNull();
+  });
+  it('compares unrounded scores and refuses insufficient score or runner-up separation', () => {
+    svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    const score = 0.9799;
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [score, Math.sqrt(1 - score * score)] }], options)[0]?.rosterId).toBeNull();
+    svc.confirmSpeaker({ displayName: 'Similar voice', embedding: [0.97, Math.sqrt(1 - 0.97 ** 2)] }, space);
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], options)[0]?.rosterId).toBeNull();
+  });
+  it('leaves short, one-turn and overlapped voices in review', () => {
+    svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    for (const evidence of [[], [{ start: 0, end: 20, speaker: 'A' }],
+      [{ start: 0, end: 3, speaker: 'A' }, { start: 5, end: 8, speaker: 'A' }],
+      [...segments, { start: 0, end: 20, speaker: 'B' }]]) {
+      expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], { ...options, segments: evidence })[0]?.rosterId).toBeNull();
+    }
+  });
+  it('refuses duplicate identity claims and already named identities', () => {
+    const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], { ...options, reservedRosterIds: [id] })[0]?.rosterId).toBeNull();
+    const detected = [{ label: 'A', embedding: [1, 0] }, { label: 'B', embedding: [1, 0] }];
+    const both = { ...options, segments: [...segments, { start: 20, end: 26, speaker: 'B' }, { start: 30, end: 36, speaker: 'B' }] };
+    expect(svc.identifyUnknowns(detected, both).every(s => s.rosterId === null)).toBe(true);
+    expect(svc.identifyUnknowns([...detected].reverse(), both).every(s => s.rosterId === null)).toBe(true);
+  });
+  it('never crosses model spaces/dimensions or uses invalid vectors', () => {
+    svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
+    for (const overrides of [{ space: undefined }, { space: 'different-model' }]) {
+      expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], { ...options, ...overrides })[0]?.rosterId).toBeNull();
+    }
+    for (const embedding of [[1, 0, 0], [], [0, 0], [NaN, 0]]) {
+      expect(svc.identifyUnknowns([{ label: 'A', embedding }], options)[0]?.rosterId).toBeNull();
+    }
+  });
   it('persists only confirmed model-tagged native embeddings', () => {
     const id = svc.confirmSpeaker({ displayName: 'Dan', embedding: [3, 4] }, space);
     expect(profiles.load(space, id)).toEqual([0.6, 0.8]);

@@ -59,6 +59,7 @@ const previewSettings: Settings = {
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
   autoProcessRecordings: false,
+  autoMatchSpeakers: false,
   showMenuBarIcon: true,
   recordShortcut: '',
   userName: '',

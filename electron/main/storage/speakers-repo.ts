@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import type { SpeakerAssignmentSource } from '../../shared/speaker-matching.js';
 import { shortId } from '../lib/slug.js';
 
 export interface SpeakerRow { id: string; displayName: string; createdAt: string; notes: string | null; }
@@ -136,9 +137,10 @@ export class SpeakersRepo {
     rosterSpeakerId: string | null;
     displayName: string | null;
     confidence: number | null;
+    assignmentSource?: SpeakerAssignmentSource;
   }[]> {
     const rows = this.db.prepare(`
-      SELECT ms.meeting_id, ms.local_label, ms.roster_speaker_id, ms.confidence, sp.display_name
+      SELECT ms.meeting_id, ms.local_label, ms.roster_speaker_id, ms.confidence, ms.assignment_source, sp.display_name
       FROM meeting_speakers ms
       LEFT JOIN speakers sp ON sp.id = ms.roster_speaker_id
       ORDER BY ms.meeting_id, ms.local_label
@@ -148,6 +150,7 @@ export class SpeakersRepo {
       rosterSpeakerId: string | null;
       displayName: string | null;
       confidence: number | null;
+      assignmentSource?: SpeakerAssignmentSource;
     }[]>();
     for (const r of rows) {
       const id = r.meeting_id as string;
@@ -157,6 +160,7 @@ export class SpeakersRepo {
         rosterSpeakerId: (r.roster_speaker_id as string) ?? null,
         displayName: (r.display_name as string) ?? null,
         confidence: (r.confidence as number) ?? null,
+        assignmentSource: (r.assignment_source as SpeakerAssignmentSource) ?? null,
       });
       out.set(id, list);
     }
@@ -170,7 +174,7 @@ export class SpeakersRepo {
     for (let i = 0; i < ids.length; i += 900) {
       const chunk = ids.slice(i, i + 900);
       const rows = this.db.prepare(`
-        SELECT ms.meeting_id, ms.local_label, ms.roster_speaker_id, ms.confidence, sp.display_name
+        SELECT ms.meeting_id, ms.local_label, ms.roster_speaker_id, ms.confidence, ms.assignment_source, sp.display_name
         FROM meeting_speakers ms
         LEFT JOIN speakers sp ON sp.id = ms.roster_speaker_id
         WHERE ms.meeting_id IN (${chunk.map(() => '?').join(',')})
@@ -184,6 +188,7 @@ export class SpeakersRepo {
           rosterSpeakerId: (r.roster_speaker_id as string) ?? null,
           displayName: (r.display_name as string) ?? null,
           confidence: (r.confidence as number) ?? null,
+          assignmentSource: (r.assignment_source as SpeakerAssignmentSource) ?? null,
         });
         out.set(id, list);
       }
@@ -196,9 +201,10 @@ export class SpeakersRepo {
     rosterSpeakerId: string | null;
     displayName: string | null;
     confidence: number | null;
+    assignmentSource?: SpeakerAssignmentSource;
   }[] {
     const rows = this.db.prepare(`
-      SELECT ms.local_label, ms.roster_speaker_id, ms.confidence, sp.display_name
+      SELECT ms.local_label, ms.roster_speaker_id, ms.confidence, ms.assignment_source, sp.display_name
       FROM meeting_speakers ms
       LEFT JOIN speakers sp ON sp.id = ms.roster_speaker_id
       WHERE ms.meeting_id = ?
@@ -209,6 +215,7 @@ export class SpeakersRepo {
       rosterSpeakerId: (r.roster_speaker_id as string) ?? null,
       displayName: (r.display_name as string) ?? null,
       confidence: (r.confidence as number) ?? null,
+      assignmentSource: (r.assignment_source as SpeakerAssignmentSource) ?? null,
     }));
   }
 
@@ -218,16 +225,17 @@ export class SpeakersRepo {
     this.db.prepare('DELETE FROM meeting_speakers WHERE meeting_id = ?').run(meetingId);
   }
 
-  linkToMeeting(meetingId: string, localLabel: string, rosterId: string | null, confidence: number): void {
+  linkToMeeting(meetingId: string, localLabel: string, rosterId: string | null, confidence: number, source: SpeakerAssignmentSource = 'manual'): void {
     // rosterId=null lets the caller "unlink" a previously-identified speaker
     // without dropping the meeting_speakers row — the local label stays in
     // the UI list, just un-identified again.
     this.db.prepare(`
-      INSERT INTO meeting_speakers (meeting_id, local_label, roster_speaker_id, confidence)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO meeting_speakers (meeting_id, local_label, roster_speaker_id, confidence, assignment_source)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(meeting_id, local_label) DO UPDATE SET
         roster_speaker_id = excluded.roster_speaker_id,
-        confidence = excluded.confidence
-    `).run(meetingId, localLabel, rosterId, confidence);
+        confidence = excluded.confidence,
+        assignment_source = excluded.assignment_source
+    `).run(meetingId, localLabel, rosterId, confidence, rosterId ? source : null);
   }
 }

@@ -64,6 +64,8 @@ export interface Settings {
    *  the banner. */
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
+  /** Explicit opt-in to conservative native voiceprint auto-assignment. */
+  autoMatchSpeakers: boolean;
   /** Show the macOS menu-bar item with recording status and controls. */
   showMenuBarIcon: boolean;
   /** Global accelerator that starts or stops recording from any app.
@@ -161,6 +163,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
   autoProcessRecordings: false,
+  autoMatchSpeakers: false,
   showMenuBarIcon: true,
   recordShortcut: '',
   userName: '',

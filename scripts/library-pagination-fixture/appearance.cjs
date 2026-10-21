@@ -32,10 +32,15 @@ app.whenReady().then(async () => {
     await run(`document.documentElement.classList.toggle('dark',${dark})`);
     const theme = dark ? 'dark' : 'light';
     for (const view of ['library', 'detail', 'weekly', 'settings', 'onboarding']) {
+      if (view === 'detail') await run('window.setAutomaticVoice()');
       await run(`window.showView(${JSON.stringify(view)})`); await settle();
       await until('!!document.querySelector(".app-chrome")');
       if (view === 'detail') {
         await until('document.body.innerText.includes("Overview")');
+        await until('document.body.innerText.includes("Auto-matched · similarity 1.00")');
+        await run(`Array.from(document.querySelectorAll('.detail-inspector button[aria-expanded]')).find(b=>b.textContent.includes('Alice')).click()`);
+        await click('Confirm this voice');
+        await until('!document.body.innerText.includes("Auto-matched") && document.body.innerText.includes("Confirmed")');
         await click('transcript'); await until('document.body.innerText.includes("prototype is ready")');
         await click('actions'); await until('document.body.innerText.includes("Share the revised design")');
         await click('summary');
@@ -83,7 +88,7 @@ app.whenReady().then(async () => {
   assert.notEqual(await run('getComputedStyle(document.querySelector(".library-search")).outlineStyle'), 'none');
   await screenshot('reduced-effects-dark');
   win.webContents.debugger.detach();
-  assert.deepEqual(await run('window.fixture'), { captures: 0, preparations: 0 });
+  assert.deepEqual(await run('window.fixture'), { captures: 0, preparations: 0, confirmations: 2 });
   assert.deepEqual(errors, []);
   console.log('APPEARANCE PASS: five real screens, light/dark, desktop/narrow, detail tabs, navigation/disclosure/dialog/source picker, focus and opaque/reduced-effects fallback; no capture or setup.');
   win.destroy(); app.quit();

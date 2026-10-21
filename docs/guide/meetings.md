@@ -6,7 +6,24 @@ Speaker review, notes and action items, the Weekly view, and search and playback
 
 *Name unknown voices once.*
 
-After diarize + identify, meetings continue automatically when no voices need review, including recordings with no detected voices. The pipeline uses the same **Needs review** rules as the Speakers panel: an unknown voice, a match below 80% confidence, or fewer than two diarization segments pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds; automatic continuation also re-merges names before summarizing. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
+After diarize + identify, meetings continue automatically when no voices need review, including recordings with no detected voices. The pipeline uses the same **Needs review** rules as the Speakers panel: an unknown voice, a match below 80% confidence, or fewer than two diarization segments pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>** (legacy), **Auto-matched · similarity …**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds; automatic continuation also re-merges names before summarizing. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
+
+### Optional automatic voice matching
+
+Enable **Settings → Processing → Automatically match known voices** to apply
+strong native voiceprint matches during future identification runs. It is off
+by default. Initial heuristics require unrounded similarity ≥ 0.98, a ≥ 0.05
+lead over the runner-up, and ≥ 10 seconds of non-overlapping speech across two
+distinct turns (each with ≥ 1.5 seconds of clean speech). Close candidates,
+duplicate identity claims, short voices, missing/invalid evidence and incompatible
+model profiles remain in review. Scores are not identity probabilities.
+
+Names appear as **Auto-matched**, not **Confirmed**, even for similarity 1.00.
+Expand the voice, listen and choose **Confirm this voice** to teach that profile;
+use **Assign to** to correct it. Automatic matches never train themselves.
+Confirmed assignments survive identification retries on the same diarization.
+Changing the setting does not process old meetings, alter saved assignments or
+undo prior matches. New diarization still resets run-local numeric labels.
 
 ## Summary + action items
 

@@ -1,7 +1,7 @@
 import { mergeTranscriptWithDiarization, type TranscriptSegment } from '../lib/merge-transcript.js';
 import type { DiarizationSegment } from './sample-extractor.js';
 
-export type SpeakerReviewState = 'unknown' | 'probable' | 'confirmed';
+export type SpeakerReviewState = 'unknown' | 'probable' | 'confirmed' | 'automatic';
 export interface SpeakerReviewMetadata {
   state: SpeakerReviewState;
   needsReview: boolean;
@@ -15,6 +15,7 @@ interface SpeakerLink {
   rosterId: string | null;
   displayName: string | null;
   confidence: number | null;
+  assignmentSource?: 'automatic' | 'manual' | null;
 }
 
 export function buildSpeakerReviewMetadata(input: {
@@ -38,6 +39,7 @@ export function buildSpeakerReviewMetadata(input: {
   for (const link of input.links) {
     const own = diarStats.get(link.localLabel) ?? { segmentCount: 0, durationS: 0 };
     const state: SpeakerReviewState = !link.rosterId ? 'unknown'
+      : link.assignmentSource === 'automatic' ? 'automatic'
       : (link.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable';
     result.set(link.localLabel, {
       state,

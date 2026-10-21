@@ -9,7 +9,8 @@ export interface DetailSpeaker {
   rosterId: string | null;
   displayName: string | null;
   confidence: number | null;
-  state?: 'unknown' | 'probable' | 'confirmed';
+  assignmentSource?: 'automatic' | 'manual' | null;
+  state?: 'unknown' | 'probable' | 'confirmed' | 'automatic';
   needsReview?: boolean;
   segmentCount?: number;
   durationS?: number;
@@ -26,7 +27,7 @@ export function mergeSpeakerReview(shell: DetailSpeaker[], review?: DetailSpeake
     // Counts belong to the local voice, but review badges describe a
     // particular roster assignment/confidence and become stale on mutation.
     const compatibleIdentity = cached.rosterId === speaker.rosterId
-      && cached.confidence === speaker.confidence;
+      && cached.confidence === speaker.confidence && cached.assignmentSource === speaker.assignmentSource;
     return {
       ...speaker,
       segmentCount: cached.segmentCount,

@@ -129,12 +129,13 @@ const RerunSchema = z.object({
 function listMeetingSpeakers(
   speakers: SpeakersRepo,
   meetingId: string,
-): { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null }[] {
+): { localLabel: string; rosterId: string | null; displayName: string | null; confidence: number | null; assignmentSource?: 'automatic' | 'manual' | null }[] {
   return speakers.listForMeeting(meetingId).map((s) => ({
     localLabel: s.localLabel,
     rosterId: s.rosterSpeakerId,
     displayName: s.displayName,
     confidence: s.confidence,
+    assignmentSource: s.assignmentSource,
   }));
 }
 
@@ -150,7 +151,7 @@ function meetingSummary(
 ): MeetingSummary {
   const speakers = links.map((sp) => ({
     localLabel: sp.localLabel, rosterId: sp.rosterSpeakerId,
-    displayName: sp.displayName, confidence: sp.confidence,
+    displayName: sp.displayName, confidence: sp.confidence, assignmentSource: sp.assignmentSource,
   }));
   const eta = stageEtaForMeeting(s.stageDurations, m.pipelineStage, () => transcriptChars(s.libraryRoot, m.slug));
   return {
@@ -397,7 +398,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       speakers: speakers.map((speaker) => ({
         ...speaker,
         ...(review.get(speaker.localLabel) ?? {
-          state: speaker.rosterId ? ((speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
+          state: speaker.rosterId ? (speaker.assignmentSource === 'automatic' ? 'automatic' : (speaker.confidence ?? 0) >= 0.999 ? 'confirmed' : 'probable') : 'unknown',
           needsReview: !speaker.rosterId, segmentCount: 0, durationS: 0, lineCount: 0,
         }),
       })),

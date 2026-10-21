@@ -149,7 +149,7 @@ describe('Pipeline', () => {
     expect(meetings.findById('m1')!.status).toBe('awaiting_user');
   });
 
-  it('sails past the gate when every voice meets the UI review policy, re-merging names before summary', async () => {
+  it.each(['legacy', 'automatic'] as const)('sails past the gate with %s matches, re-merging names before summary', async (source) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-gate-matched-'));
     const db = openDb(path.join(dir, 'db.sqlite'));
     const meetings = new MeetingsRepo(db);
@@ -159,8 +159,8 @@ describe('Pipeline', () => {
     const aliceId = speakers.create({ displayName: 'Alice' });
     const bobId = speakers.create({ displayName: 'Bob' });
     // Exactly 80% is sufficient when supported by at least two segments.
-    speakers.linkToMeeting('m3', 'SPEAKER_00', aliceId, 0.8);
-    speakers.linkToMeeting('m3', 'SPEAKER_01', bobId, 0.88);
+    speakers.linkToMeeting('m3', 'SPEAKER_00', aliceId, source === 'automatic' ? 1 : 0.8, source === 'automatic' ? 'automatic' : null);
+    speakers.linkToMeeting('m3', 'SPEAKER_01', bobId, source === 'automatic' ? 0.99 : 0.88, source === 'automatic' ? 'automatic' : null);
     const folder = writeDiarization(dir, 'm3', [
       { speaker: 'SPEAKER_00', start: 0, end: 2 },
       { speaker: 'SPEAKER_00', start: 2, end: 4 },
