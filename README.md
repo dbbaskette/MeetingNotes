@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.17.0-brightgreen)](docs/releases/v1.17.0.md)
+[![Version](https://img.shields.io/badge/version-1.18.0-brightgreen)](docs/releases/v1.18.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -16,7 +16,11 @@
 
 ![A finished meeting: notes in the centre, speakers and export on the right, audio player below](docs/screenshots/summary.png)
 
-## A clearer, calmer interface
+## Optional automatic voice matching
+
+1.18 restores automatic naming for strong native voiceprint matches as an explicit opt-in. Enable **Settings → Processing → Automatically match known voices**. Short, ambiguous and duplicate identity matches stay in review; automatic names are clearly labeled and remain editable. Only your explicit confirmations train voiceprints. Existing assignments are not rewritten. See the [1.18 release notes](docs/releases/v1.18.0.md) for safeguards, upgrade details and verification.
+
+### A clearer, calmer interface
 
 1.17 applies the Golden Gate-inspired design across Library, meeting details, Weekly, Settings and setup: cool layered surfaces, restrained diffused navigation/menus, flatter expandable groups and readable opaque notes. Light and dark themes share clear selection and keyboard focus, with reduced-effects fallbacks. This is a CSS interpretation, not native OS Liquid Glass. Existing workflows and library data are unchanged; no speech assets need to be prepared again if they are already ready.
 
