@@ -119,7 +119,7 @@ window.api = {
     outputPath: `/tmp/synthetic-${index}.m4a`, status: 'orphaned', reason: 'unreadable',
     durationS: null, sizeBytes: 1024, canRecover: false, canTrim: false,
   })) : [] }, trash: { list: async () => [] },
-  speakers: { list: async () => [] }, google: { authStatus: async () => ({ signedIn: false, email: null }) },
+  speakers: { list: async () => [], review: async () => [] }, google: { authStatus: async () => ({ signedIn: false, email: null }) },
 } as any;
 
 const { librarySelection } = await import('../../electron/renderer/src/lib/selection');
