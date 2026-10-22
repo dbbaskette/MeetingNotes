@@ -131,6 +131,8 @@ it('only offers native speech on supported Apple silicon systems', () => {
   expect(supportsNativeSpeech('linux', 'arm64', '27.0.0')).toBe(false);
 });
 it('waits for the sibling speech worker after failure before releasing the meeting', async () => {
+  // Explicitly exercise parallel scheduling, independent of host/VM free memory.
+  vi.spyOn(os, 'freemem').mockReturnValue(4 * 1024 ** 3);
   let finish!: () => void;
   const sibling = new Promise<void>(resolve => { finish = resolve; });
   const ctx = { meetings, speakers, libraryRoot: root, artifactCache: new ArtifactCache(), logger: { info() {}, error() {} } } as unknown as PipelineContext;
@@ -138,7 +140,9 @@ it('waits for the sibling speech worker after failure before releasing the meeti
   const pipeline = new Pipeline({ ctx, stages: { transcribing: async () => { throw new Error('speech failed'); },
     diarizing: () => sibling, merging: noop, identifying: noop, summarizing: noop, extracting: noop } });
   let settled = false;
-  const run = pipeline.run('m').catch(error => { settled = true; throw error; });
-  await new Promise(resolve => setTimeout(resolve, 10)); expect(settled).toBe(false);
-  finish(); await expect(run).rejects.toThrow('speech failed');
+  const run = pipeline.run('m').then(() => null, error => { settled = true; return error; });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 10)); expect(settled).toBe(false);
+  } finally { finish(); }
+  expect(await run).toMatchObject({ message: 'speech failed' });
 });
