@@ -34,6 +34,9 @@ Saved weekly reports remain immutable. Transcription and voice analysis show sep
 progress, long meetings use memory-saving scheduling, and **Cancel current** stops
 only the current meeting while retaining its audio. See the [1.19 release notes](docs/releases/v1.19.0.md).
 
+**1.19.1** fixes a startup packaging regression in 1.19.0. Install the hotfix if
+launch reports a missing `ActionFilterSchema` export. See the [hotfix notes](docs/releases/v1.19.1.md).
+
 ## Optional automatic voice matching
 
 1.18 restores automatic naming for strong native voiceprint matches as an explicit opt-in. Enable **Settings → Processing → Automatically match known voices**. Short, ambiguous and duplicate identity matches stay in review; automatic names are clearly labeled and remain editable. Only your explicit confirmations train voiceprints. Existing assignments are not rewritten. See the [1.18 release notes](docs/releases/v1.18.0.md) for safeguards, upgrade details and verification.

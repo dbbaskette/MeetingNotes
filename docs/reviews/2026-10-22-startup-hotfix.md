@@ -47,5 +47,19 @@ Actions and speaker-review IPC, including on a permission-gated clean Mac.
 DMG SHA-256: `cf3d0bfc6e3378e96d90918b9e011cd8eb42d2bd078b21c10d3874505282f0b2`.
 ZIP SHA-256: `1ae6a7cbbef2a0c3c726cb81a011ecf42eb49af008301a5344f28986eb91bd4c`.
 
-Full regression CI is pending at this checkpoint. Results will be recorded here
-before merging and publishing the hotfix.
+## Regression CI
+
+The project Tart quick tier passed at
+`bc6e9d04444d586a65986855f097fa2e941678b1`: all 1,393 tests passed, six optional
+tests skipped, along with renderer/fixture/main types, production build including
+the emitted-module guard, actual source launch, docs and lint. The clean VM
+rendered its real Permissions view and completed paging, Actions and voice-review
+IPC without granting capture permissions. The task-owned VM was deleted.
+
+Environment: arm64 macOS 27.0 (26A428), Node 22.23.2, Electron 44.7.0.
+Logs: `~/Library/Logs/MacOS Test Suite/meetingnotes/meetingnotes-test-20261022212157-28226-6ca60675/`.
+Physical packaged checks used arm64 macOS 27.0.1 (26A434). Subsequent commits
+change documentation only; the packaged application source matches this tested
+commit. The previous release's full UI/native coverage is reused for unchanged
+functionality; this hotfix additionally verifies stable/beta preload startup and
+the actual signed package on the physical Mac. No installer VM test was run.
