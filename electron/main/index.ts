@@ -151,7 +151,7 @@ async function createWindow(backgroundColor = '#fafaf9'): Promise<BrowserWindow>
     // fully-rendered library, never an empty white frame.
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
+      preload: path.join(__dirname, '../../preload/electron/preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
