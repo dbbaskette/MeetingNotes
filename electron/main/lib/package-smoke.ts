@@ -8,13 +8,15 @@ import type { MeetingNotesApi } from '../../preload/index.js';
 
 // Serialized into the real renderer; type-check against the actual preload
 // contract so the smoke cannot confuse repository rows with IPC page items.
-async function rendererSnapshot(): Promise<{ rows: number; hasNext: boolean; active: number; autoProcess: boolean; micStatus: string; title: string; text: string }> {
+async function rendererSnapshot(): Promise<{ rows: number; hasNext: boolean; active: number; openActions: number; speakerReviews: number; autoProcess: boolean; micStatus: string; title: string; text: string }> {
   const api = (globalThis as unknown as { api: MeetingNotesApi }).api;
   const page = await api.meetings.listPage({ filter: 'all', sort: 'newest', pageSize: 50 });
   const active = await api.recording.active();
   const settings = await api.settings.getAll();
   const micStatus = await api.permissions.micStatus();
-  return { rows: page.items.length, hasNext: !!page.nextCursor, active: active.length, autoProcess: settings.autoProcessRecordings,
+  const actions = await api.actionItems.list({ owner: 'all' });
+  const review = await api.speakers.review('smoke-0000');
+  return { rows: page.items.length, hasNext: !!page.nextCursor, active: active.length, openActions: actions.total, speakerReviews: review.length, autoProcess: settings.autoProcessRecordings,
     micStatus, title: document.title, text: document.body.innerText.slice(0, 2000) };
 }
 
@@ -59,7 +61,7 @@ export async function verifyPackageSmoke(root: string, win: BrowserWindow, packa
   }
   if (!painted) throw new Error('Packaged app did not render its Library or permission gate');
   const state = await win.webContents.executeJavaScript(`(${rendererSnapshot.toString()})()`);
-  if (state.rows !== 50 || !state.hasNext || state.active !== 0 || state.autoProcess !== false) throw new Error('Packaged IPC smoke assertion failed');
+  if (state.rows !== 50 || !state.hasNext || state.active !== 0 || state.openActions !== 0 || state.speakerReviews !== 0 || state.autoProcess !== false) throw new Error('Packaged IPC smoke assertion failed');
   const view = state.micStatus === 'granted' ? 'library' : 'permissions';
   if (view === 'library' ? !state.text.includes('Synthetic package meeting')
     : !['Permissions needed', 'Microphone', 'System audio', 'Grant'].every(label => state.text.includes(label))) {

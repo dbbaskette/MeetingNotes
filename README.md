@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.19.0-brightgreen)](docs/releases/v1.19.0.md)
+[![Version](https://img.shields.io/badge/version-1.19.1-brightgreen)](docs/releases/v1.19.1.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -33,6 +33,9 @@ with a Notes history snapshot; it never guesses substitutions for existing names
 Saved weekly reports remain immutable. Transcription and voice analysis show separate
 progress, long meetings use memory-saving scheduling, and **Cancel current** stops
 only the current meeting while retaining its audio. See the [1.19 release notes](docs/releases/v1.19.0.md).
+
+**1.19.1** fixes a startup packaging regression in 1.19.0. Install the hotfix if
+launch reports a missing `ActionFilterSchema` export. See the [hotfix notes](docs/releases/v1.19.1.md).
 
 ## Optional automatic voice matching
 

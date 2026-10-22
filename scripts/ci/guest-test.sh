@@ -42,6 +42,7 @@ fi
 run_check renderer-types npx tsc --noEmit -p tsconfig.json
 run_check fixture-types npx tsc --noEmit -p scripts/library-pagination-fixture/tsconfig.json
 run_check build npm run build
+run_check source-launch bash scripts/ci/source-smoke.sh
 run_check main-types npx tsc --noEmit -p tsconfig.node.json
 # README and guides: links resolve and version/Electron badges match the code.
 run_check docs node scripts/ci/check-docs.mjs

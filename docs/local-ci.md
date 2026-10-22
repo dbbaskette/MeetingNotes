@@ -23,6 +23,12 @@ Vitest runs under Electron's own Node (`npm test`), so `better-sqlite3` is
 built once, for Electron, and never rebuilt for system Node. Lint covers the
 whole repository with zero warnings allowed.
 
+Every production build imports the emitted shared ESM modules and Actions
+repository and verifies isolated CommonJS preload output. Every CI tier then
+launches the built app with a disposable library, checking real preload paging,
+Actions and speaker-review IPC. This catches compiler output collisions that
+TypeScript-source tests and renderer API mocks cannot detect.
+
 For a quick local check that the app still starts, `npm run smoke:source`
 builds and launches the real main process against a disposable synthetic
 library and fails on any logged warning, error or Content-Security-Policy

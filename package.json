@@ -1,14 +1,15 @@
 {
   "name": "meeting-notes",
-  "version": "1.19.0",
+  "version": "1.19.1",
   "description": "Local-first meeting notes for macOS: record, transcribe, name speakers, summarize and extract action items on your own machine",
   "main": "dist/electron/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\"",
     "dev:renderer": "vite",
-    "dev:main": "tsc -p tsconfig.node.json --watch & wait-on tcp:5174 && electron .",
-    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.node.json && tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/electron/preload/package.json', JSON.stringify({type:'commonjs'}))\" && vite build",
+    "dev:main": "npm run build:preload && concurrently -k \"tsc -p tsconfig.node.json --watch\" \"wait-on tcp:5174 && electron .\"",
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.node.json && npm run build:preload && vite build && node scripts/ci/build-runtime-smoke.mjs",
+    "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json', JSON.stringify({type:'commonjs'}))\"",
     "build:audio-tap": "./audio-tap/scripts/build.sh",
     "build:speech": "swift build --package-path speech-engine --configuration release",
     "beta": "npm run build:speech && npm run build && electron dist/electron/main/beta/index.js",

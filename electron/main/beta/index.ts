@@ -54,7 +54,7 @@ void app.whenReady().then(async () => {
   });
   window = new BrowserWindow({ width: 1240, height: 850, minWidth: 780, minHeight: 560,
     title: 'MeetingNotes Beta — local speech comparison', backgroundColor: '#fafaf9',
-    webPreferences: { preload: path.join(directory, '../../preload/beta.js'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+    webPreferences: { preload: path.join(directory, '../../../preload/electron/preload/beta.js'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   const contents = window.webContents;
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
   contents.on('will-navigate', event => event.preventDefault());
