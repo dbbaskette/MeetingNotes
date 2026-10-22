@@ -39,7 +39,7 @@ enum AppleTranscription {
         progress(1)
     }
 
-    static func transcribe(_ request: Request) async throws -> [String: Any] {
+    static func transcribe(_ request: Request, progress: @escaping (Double) -> Void = { _ in }) async throws -> [String: Any] {
         let url = try requiredAudio(request)
         let module = try await transcriber(request.locale ?? "en-US")
         guard await AssetInventory.status(forModules: [module]) == .installed else {
@@ -68,6 +68,7 @@ enum AppleTranscription {
                 // Use true word timing for speaker attribution; never estimate word offsets.
                 if words.isEmpty { throw SpeechFailure("Apple returned no usable word timestamps.") }
                 segments.append(contentsOf: words)
+                if duration > 0, let end = words.last?.end { progress(min(0.99, max(0, end / duration))) }
             }
             return segments
         }

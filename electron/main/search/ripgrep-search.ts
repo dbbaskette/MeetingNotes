@@ -5,6 +5,8 @@ export interface RgMatch { file:string; lineNumber:number; lineText:string }
 export interface RipgrepOptions {
   maxCountPerFile?:number; globs?:string[]; timeoutMs?:number; maxTotalMatches?:number;
   signal?:AbortSignal; acceptFile?:(file:string)=>boolean;
+  /** Explicit eligible folders; never fall back to the entire library when empty. */
+  paths?: string[];
   /** Optional diagnostics; invoked once on spawn and once after actual exit. */
   onProcess?:(state:'started'|'closed')=>void;
 }
@@ -16,10 +18,34 @@ export async function ripgrepSearch(searchRoot:string,query:string,opts:RipgrepO
 export async function ripgrepSearchDetailed(searchRoot:string,query:string,opts:RipgrepOptions={}):Promise<RipgrepResult> {
   if(opts.signal?.aborted) return {matches:[],status:'cancelled'};
   if(!query) return {matches:[],status:'complete'};
+  if (opts.paths) {
+    const matches: RgMatch[] = [], deadline = Date.now() + (opts.timeoutMs ?? 3000);
+    let status: RipgrepResult['status'] = 'complete';
+    for (let i = 0; i < opts.paths.length;) {
+      if (opts.signal?.aborted) return { matches: [], status: 'cancelled' };
+      if (Date.now() >= deadline) return { matches, status: 'partial', message: 'Search timed out; refine the filters.' };
+      const batch: string[] = []; let bytes = 0;
+      while (i < opts.paths.length && batch.length < 128) {
+        const file = opts.paths[i]!, size = Buffer.byteLength(file) + 1;
+        if (batch.length && bytes + size > 64_000) break;
+        batch.push(file); bytes += size; i++;
+      }
+      const result = await runSearch(batch, query, { ...opts, paths: undefined, timeoutMs: deadline - Date.now(), maxTotalMatches: (opts.maxTotalMatches ?? 10000) - matches.length });
+      if (result.status === 'cancelled') return result;
+      matches.push(...result.matches);
+      if (result.status !== 'complete' && result.status !== 'limit') return { ...result, matches };
+      if (result.status === 'limit') status = 'limit';
+      if (matches.length >= (opts.maxTotalMatches ?? 10000)) return { matches, status: 'limit' };
+    }
+    return { matches, status };
+  }
+  return runSearch([searchRoot], query, opts);
+}
+async function runSearch(paths: string[], query: string, opts: RipgrepOptions): Promise<RipgrepResult> {
   const args=['--json','--no-config','--no-ignore','--no-messages','-F','-i'];
   if(opts.maxCountPerFile) args.push('--max-count',String(opts.maxCountPerFile));
   for(const g of opts.globs??[]) args.push('-g',g);
-  args.push('--',query,searchRoot);
+  args.push('--',query,...paths);
   return new Promise(resolve=>{
     const matches:RgMatch[]=[], counts=new Map<string,number>();
     let buffer='', reason:RipgrepResult['status']|null=null, message:string|undefined, settled=false, perFileLimited=false;

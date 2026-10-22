@@ -6,7 +6,7 @@ const fixture = {failStop:true,failRetry:true,state:'recording',stops:0,stopped:
 window.api={recording:{onLevel:(cb:any)=>{fixture.level=cb;return()=>{fixture.level=null;};},stop:async()=>{fixture.stops++;if(fixture.holdStop)await new Promise<void>(resolve=>{fixture.resolveStop=resolve;});if(fixture.failStop)throw new Error('Synthetic Stop unavailable');fixture.state='idle';},state:async()=>fixture.state,active:async()=>[{state:fixture.state,disposable:false}],listSources:async()=>[],start:async(input:unknown)=>{fixture.starts.push(input);if(fixture.failStart)throw new Error(`Error invoking remote method 'recording:start': Error: ${fixture.failStart}`);return{sessionId:'next'};}},
   groups:{list:async()=>({groups:[],ungroupedCount:0})},
   meetings:{rerun:async()=>{fixture.retries++;if(fixture.failRetry)throw new Error('Synthetic service unavailable');}},
-  speakers:{list:async()=>[{id:'dan',displayName:'Dan'}],sample:async()=>null,suggestions:async()=>[],assignBulk:async()=>{}},
+  speakers:{list:async()=>[{id:'dan',displayName:'Dan'}],sample:async()=>null,suggestions:async()=>[],review:async()=>[],assignBulk:async()=>{}},
 } as any;
 const {LiveRecordingRow}=await import('../../electron/renderer/src/components/LiveRecordingRow');
 const {RecordButton}=await import('../../electron/renderer/src/components/RecordButton');

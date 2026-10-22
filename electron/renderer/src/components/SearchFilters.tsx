@@ -51,7 +51,7 @@ export function SearchFilters({
     [name, setName] = useState(''),
     [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) return;
+    if (!open && !facets.speakerId) return;
     let alive = true;
     void api.speakers
       .list()
@@ -64,7 +64,7 @@ export function SearchFilters({
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, facets.speakerId]);
   function set(key: keyof SearchFacets, value: string | boolean): void {
     const next = { ...facets };
     if (value === '') delete next[key];
@@ -99,7 +99,13 @@ export function SearchFilters({
             onClick={() => set(key as keyof SearchFacets, '')}
             className="rounded-full bg-brand-indigo/10 text-brand-indigo px-2 py-1"
           >
-            {key}: {String(value)} ×
+            {key === 'speakerId' ? `Speaker: ${speakers.find(speaker => speaker.id === value)?.displayName ?? 'Saved speaker'}`
+              : key === 'status' ? `Status: ${{ done: 'Processed', awaiting_user: 'Needs speaker review', pending: 'Pending', processing: 'Processing', failed: 'Failed' }[String(value)] ?? value}`
+              : key === 'actions' ? value === 'mine' ? 'My open actions' : 'Has open actions'
+              : key === 'warning' ? 'Capture recovery warning'
+              : key === 'source' ? value === 'capture' ? 'Built-in recording' : 'Imported'
+              : key === 'content' ? value === 'summary' ? 'Notes only' : 'Transcript only'
+              : `${key === 'from' ? 'From' : key === 'to' ? 'Through' : 'Week'}: ${String(value)}`} ×
           </button>
         ))}
         {Object.keys(facets).length > 0 && (

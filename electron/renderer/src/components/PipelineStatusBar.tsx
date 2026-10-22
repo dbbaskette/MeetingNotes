@@ -15,6 +15,7 @@ import {
   type PipelineStatusSnapshot,
 } from '../lib/status-bar';
 import { api } from '../ipc/client';
+import { speechWorkText } from '../../../shared/processing-progress';
 
 interface Props {
   onOpenMeeting: (id: string) => void;
@@ -67,6 +68,8 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
       }`}
       onClick={clickable ? () => onOpenMeeting(model!.meetingId!) : undefined}
       role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={event => { if (clickable && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpenMeeting(model!.meetingId!); } }}
       title={clickable ? 'Open this meeting' : undefined}
     >
       {model?.kind === 'processing' && model.meetingId ? (
@@ -75,7 +78,7 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-status-ok/70" />
       )}
       <span className="truncate">
-        {model ? statusBarText(model, elapsed) : `MeetingNotes${version ? ` v${version}` : ''} · Ready`}
+        {status.cancelling ? 'Cancelling current meeting…' : status.speechWork ? speechWorkText(status.speechWork) : model ? statusBarText(model, elapsed) : `MeetingNotes${version ? ` v${version}` : ''} · Ready`}
       </span>
     </div>
   );

@@ -7,6 +7,7 @@ export interface MeetingGroup {
   count: number;
   createdAt: string;
   updatedAt: string;
+  pinned?: boolean;
   statusCounts?: ActionableCounts;
 }
 export interface ActionableCounts { pending: number; processing: number; failed: number }
@@ -41,12 +42,13 @@ export class GroupsRepo {
     const rows = this.db.prepare(`
       SELECT g.*, COUNT(m.id) AS meeting_count FROM groups g
       LEFT JOIN meetings m ON m.group_id = g.id AND m.deleted_at IS NULL
-      GROUP BY g.id ORDER BY g.name COLLATE NOCASE, g.id
+      GROUP BY g.id ORDER BY g.pinned DESC, g.name COLLATE NOCASE, g.id
     `).all() as Record<string, unknown>[];
     return rows.map((row) => ({
       id: row.id as string, name: row.name as string,
       count: row.meeting_count as number,
       createdAt: row.created_at as string, updatedAt: row.updated_at as string,
+      pinned: row.pinned === 1,
     }));
   }
 
@@ -66,6 +68,14 @@ export class GroupsRepo {
 
   exists(id: string): boolean {
     return Boolean(this.db.prepare('SELECT 1 FROM groups WHERE id = ?').get(id));
+  }
+  pin(id: string, pinned: boolean): void {
+    if (!this.db.prepare('UPDATE groups SET pinned=? WHERE id=?').run(Number(pinned), id).changes) throw new Error('Group no longer exists');
+  }
+  recentMeetings(id: string): { id: string; title: string; slug: string; startedAt: string }[] {
+    if (!this.exists(id)) throw new Error('Group no longer exists');
+    return this.db.prepare(`SELECT id,title,slug,started_at AS startedAt FROM meetings
+      WHERE group_id=? AND deleted_at IS NULL AND status='done' ORDER BY started_at DESC,id LIMIT 5`).all(id) as { id: string; title: string; slug: string; startedAt: string }[];
   }
 
   create(rawName: string): MeetingGroup {

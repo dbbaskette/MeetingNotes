@@ -31,6 +31,7 @@ import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 export const EXTRACT_MAX_TOKENS = 6000;
 
 export interface ExtractActionItemsDeps {
+  signal?: AbortSignal;
   lmStudio: Pick<LMStudioClient, 'chat'>;
   /** Wakes a managed LLM provider on demand; no-op for user-managed ones. */
   llmSupervisor: { ensureReady(): Promise<void> };
@@ -83,6 +84,7 @@ export async function extractActionItemsFromSummary(
   const runExtraction = async (temperature: number): Promise<string> =>
     deps.lmStudio.chat({
       model: deps.settings.get('llmModel'),
+      signal: deps.signal,
       temperature,
       disableThinking: deps.settings.get('disableThinking'),
       maxTokens: EXTRACT_MAX_TOKENS,
@@ -111,6 +113,7 @@ export async function extractActionItemsFromSummary(
   if (items.length === 0 && summaryClaimsActionItems(summary)) {
     throw new Error('Action items could not be extracted after retry. Existing items were kept. Try Re-extract or a stronger model.');
   }
+  deps.signal?.throwIfAborted();
   deps.beforeReplace?.();
   fs.writeFileSync(path.join(folder, 'action-items.json'), JSON.stringify(items, null, 2));
   deps.actionItems.replaceForMeeting(meetingId, items);

@@ -46,6 +46,7 @@ import { InvalidAudioError } from './library/ffprobe.js';
 import { RecordingRecoveryService, revealPathInFinder } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
 import { RosterService } from './speakers/roster-service.js';
+import { VoiceProfiles } from './speakers/voice-profiles.js';
 import { Pipeline } from './pipeline/pipeline.js';
 import { recoverPendingMeetings } from './pipeline/recovery.js';
 import { runTranscribing } from './pipeline/stages/transcribing.js';
@@ -256,8 +257,8 @@ app.whenReady().then(async () => {
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
   // Idempotent — a no-op once the roster is clean.
-  {
-    const remap = speakers.dedupeByDisplayName();
+  try {
+    const remap = speakers.dedupeByDisplayName((source, target) => new VoiceProfiles(libraryRoot).merge(source, target));
     if (remap.size > 0) {
       const currentUser = settings.get('userSpeakerId');
       if (currentUser && remap.has(currentUser)) {
@@ -265,6 +266,8 @@ app.whenReady().then(async () => {
       }
       logger.info('speakers.dedupe', { merged: remap.size });
     }
+  } catch (error) {
+    logger.warn('speakers.dedupe-skipped', { reason: String(error) });
   }
 
   // The LLM URL follows the active provider so a `lmStudio.chat()` call

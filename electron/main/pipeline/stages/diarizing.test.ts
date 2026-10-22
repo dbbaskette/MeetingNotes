@@ -14,8 +14,9 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 it('uses mixed audio despite stems, saves compact artifacts, clears old numeric labels', async () => {
+  ctx.signal = new AbortController().signal;
   await runDiarizing({ meetingId: 'm' }, ctx);
-  expect(ctx.nativeSpeech.diarize).toHaveBeenCalledWith(path.join(folder, 'audio.m4a'));
+  expect(ctx.nativeSpeech.diarize).toHaveBeenCalledWith(path.join(folder, 'audio.m4a'), { signal: ctx.signal });
   const file = path.join(folder, 'diarization.json');
   expect(fs.readFileSync(file, 'utf8')).toBe(JSON.stringify(result));
   expect(JSON.parse(fs.readFileSync(path.join(folder, 'diarization.meta.json'), 'utf8'))).toEqual({ num_speakers: 1 });

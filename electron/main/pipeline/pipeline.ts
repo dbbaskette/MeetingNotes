@@ -2,6 +2,9 @@
 import type { PipelineContext, StageHandler, StageInput } from './context.js';
 import { processingDiagnosis } from '../../shared/processing-recovery.js';
 import path from 'node:path';
+import os from 'node:os';
+import { sequentialSpeech } from './speech-scheduling.js';
+import type { SpeechWork } from '../../shared/processing-progress.js';
 import { STAGES, previousCompletedOnCrash, type Stage } from '../lib/stage-machine.js';
 import { bucketForChars } from '../lib/stage-eta.js';
 import { transcriptChars } from './transcript-chars.js';
@@ -35,6 +38,8 @@ export interface PipelineStatus {
   queueLength: number;
   /** IDs of queued (not-yet-started) meetings, in order. */
   queueIds: string[];
+  speechWork?: SpeechWork;
+  cancelling?: boolean;
 }
 
 export type PipelineStatusListener = (s: PipelineStatus) => void;
@@ -55,6 +60,8 @@ export class Pipeline {
   private draining = false;
   private paused = false;
   private currentId: string | null = null;
+  private controller?: AbortController;
+  private speechWork?: SpeechWork;
   private readonly statusListeners: Set<PipelineStatusListener> = new Set();
   private readonly stageListeners: Set<MeetingStageListener> = new Set();
   private readonly completeListeners: Set<MeetingCompleteListener> = new Set();
@@ -114,12 +121,20 @@ export class Pipeline {
     return dropped;
   }
 
+  cancelCurrent(meetingId: string): void {
+    if (this.currentId !== meetingId || !this.controller) throw new Error('That meeting is no longer processing.');
+    this.controller.abort(new Error('Processing cancelled by you. Original audio is retained; retry when ready.'));
+    this.notify();
+  }
+
   getStatus(): PipelineStatus {
     return {
       paused: this.paused,
       currentId: this.currentId,
       queueLength: this.queue.length,
       queueIds: this.queue.slice(),
+      ...(this.speechWork ? { speechWork: { ...this.speechWork } } : {}),
+      ...(this.controller?.signal.aborted ? { cancelling: true } : {}),
     };
   }
 
@@ -173,6 +188,7 @@ export class Pipeline {
         if (this.paused) break;
         const id = this.queue.shift()!;
         this.currentId = id;
+        this.controller = new AbortController();
         this.notify();
         try {
           await this.process(id);
@@ -186,12 +202,14 @@ export class Pipeline {
             // Record WHY it failed so the detail view can show it (and the
             // user can retry) instead of a bare FAILED pill. The stage that
             // threw is also captured by the rolled-back pipeline_stage.
-            this.deps.ctx.meetings.recordFailure(id, String(e));
+            this.deps.ctx.meetings.recordFailure(id, String(this.controller?.signal.aborted ? this.controller.signal.reason : e));
             this.notifyMeeting(id);
           }
           this.deps.ctx.logger.error('pipeline:failure', { id, err: String(e), ...processingDiagnosis(String(e)) });
         } finally {
           this.currentId = null;
+          this.controller = undefined;
+          this.speechWork = undefined;
           this.notify();
         }
       }
@@ -213,7 +231,7 @@ export class Pipeline {
     }
 
     let stage = m.pipelineStage as Stage;
-    const ctx = { ...this.deps.ctx };
+    const ctx: PipelineContext = { ...this.deps.ctx, signal: this.controller?.signal };
 
     // Parallel block: transcribing + diarizing. Treat any of these as a single
     // entry point so a rerun-from-transcribing still produces diarization.
@@ -221,12 +239,30 @@ export class Pipeline {
       if (ctx.nativeSpeech) ctx.speechSelection = selectSpeech(meetingFolderPath(ctx.libraryRoot, m.slug), ctx.settings);
       this.deps.ctx.meetings.updateStage(meetingId, 'transcribing');
       this.notifyMeeting(meetingId);
-      const parallel = await Promise.allSettled([
-        this.timeStage('transcribing', input, m.slug, ctx),
-        this.timeStage('diarizing', input, m.slug, ctx),
-      ]);
-      const failed = parallel.find(result => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
+      const sequential = sequentialSpeech(m.durationS, os.freemem());
+      this.speechWork = { transcription: 'waiting', speakers: 'waiting', sequential };
+      ctx.onTranscriptionProgress = fraction => {
+        if (!this.speechWork || ctx.signal?.aborted) return;
+        const bounded = Math.min(1, Math.max(0, fraction));
+        if (Math.floor(bounded * 100) === Math.floor((this.speechWork.transcriptionFraction ?? -1) * 100)) return;
+        this.speechWork.transcriptionFraction = bounded; this.notify();
+      };
+      const speech = async (work: 'transcribing' | 'diarizing'): Promise<void> => {
+        ctx.signal?.throwIfAborted();
+        const key = work === 'transcribing' ? 'transcription' : 'speakers';
+        this.speechWork![key] = 'running'; this.notify();
+        await this.timeStage(work, input, m.slug, ctx);
+        ctx.signal?.throwIfAborted();
+        this.speechWork![key] = 'complete'; this.notify();
+      };
+      ctx.logger.info('speech:scheduling', { meetingId, durationS: m.durationS, sequential });
+      if (sequential) { await speech('transcribing'); await speech('diarizing'); }
+      else {
+        const parallel = await Promise.allSettled([speech('transcribing'), speech('diarizing')]);
+        const failed = parallel.find(result => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+      }
+      this.speechWork = undefined; this.notify();
       stage = 'merging';
     }
 
@@ -234,6 +270,7 @@ export class Pipeline {
     if (startIdx >= 0) {
       for (let i = startIdx; i < LINEAR_STAGES.length; i++) {
         const s = LINEAR_STAGES[i]!;
+        ctx.signal?.throwIfAborted();
         // Speaker-ID gate: after `identifying` completes, the next entry in
         // LINEAR_STAGES is `awaiting_speaker_id`. It has no handler — this is
         // where we stop so the user can label unknown voices in the UI. When
@@ -245,7 +282,7 @@ export class Pipeline {
           // Match the Speakers panel's review policy, not merely linkage:
           // a linked voice can still be low-confidence or have too little
           // evidence. Clear matches and zero-voice meetings flow through.
-          const needsReview = !fresh?.skipSpeakerId
+          const needsReview = !ctx.settings?.get('notesFirst') && !fresh?.skipSpeakerId
             && await this.needsSpeakerReview(meetingId, m.slug);
           // Respect a user override made while the artifact read was pending.
           if (needsReview && !this.deps.ctx.meetings.findById(meetingId)?.skipSpeakerId) {
@@ -270,9 +307,10 @@ export class Pipeline {
         }
         this.deps.ctx.meetings.updateStage(meetingId, s);
         this.notifyMeeting(meetingId);
-        await this.timeStage(s as WorkStage, input, m.slug);
+        await this.timeStage(s as WorkStage, input, m.slug, ctx);
       }
     }
+    ctx.signal?.throwIfAborted();
     this.deps.ctx.meetings.updateStage(meetingId, 'done');
     this.deps.ctx.meetings.updateStatus(meetingId, 'done');
     this.notifyMeeting(meetingId);

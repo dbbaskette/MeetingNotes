@@ -14,8 +14,9 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 it('uses the native helper with mixed audio and pinned locale, preserving word timing', async () => {
+  ctx.signal = new AbortController().signal; ctx.onTranscriptionProgress = vi.fn();
   await runTranscribing({ meetingId: 'm' }, ctx);
-  expect(ctx.nativeSpeech.transcribe).toHaveBeenCalledWith('/mixed.m4a', 'fr');
+  expect(ctx.nativeSpeech.transcribe).toHaveBeenCalledWith('/mixed.m4a', 'fr', { signal: ctx.signal, progress: ctx.onTranscriptionProgress });
   const file = path.join(folder, 'transcript.raw.json');
   expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ ...result, segments: [{ ...result.segments[0], wordTiming: true }] });
   expect(ctx.artifactCache.invalidate).toHaveBeenCalledWith(file);

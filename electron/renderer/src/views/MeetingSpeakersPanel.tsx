@@ -12,6 +12,7 @@ function MiniSpinner(): JSX.Element {
 }
 
 interface RosterEntry { id: string; displayName: string; }
+type VoiceReview = Awaited<ReturnType<typeof api.speakers.review>>[number];
 
 /** Named voices beyond this many fold into a single "N named voices" row. */
 const NAMED_VOICES_SHOWN = 4;
@@ -32,6 +33,12 @@ export function SpeakersPanel({
   const [bulkRosterId, setBulkRosterId] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [reviews, setReviews] = useState<VoiceReview[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void api.speakers.review(meeting.id).then(rows => { if (alive) setReviews(rows); }).catch(() => { if (alive) setReviews([]); });
+    return () => { alive = false; };
+  }, [meeting.id, version]);
 
   useEffect(() => {
     void (async () => {
@@ -144,6 +151,7 @@ export function SpeakersPanel({
             rosterId={sp.rosterId}
             confidence={sp.confidence}
             reviewState={sp.state}
+            review={reviews.find(review => review.label === sp.localLabel)}
             needsReview={sp.needsReview}
             durationS={sp.durationS}
             lineCount={sp.lineCount}
@@ -181,6 +189,7 @@ export function SpeakersPanel({
             rosterId={sp.rosterId}
             confidence={sp.confidence}
             reviewState={sp.state}
+            review={reviews.find(review => review.label === sp.localLabel)}
             needsReview={sp.needsReview}
             durationS={sp.durationS}
             lineCount={sp.lineCount}
@@ -203,7 +212,7 @@ export function SpeakersPanel({
 
 function SpeakerRow({
   meetingId, localLabel, displayName, rosterId, colorIdx, roster,
-  confidence, reviewState, needsReview, durationS, lineCount,
+  confidence, reviewState, needsReview, durationS, lineCount, review,
   isOpen, onToggle, onChanged, selectable, selected, onSelect,
 }: {
   meetingId: string;
@@ -211,6 +220,7 @@ function SpeakerRow({
   displayName: string | null;
   rosterId: string | null;
   confidence: number | null;
+  review?: VoiceReview;
   reviewState?: 'unknown' | 'probable' | 'confirmed' | 'automatic';
   needsReview?: boolean;
   durationS?: number;
@@ -289,6 +299,7 @@ function SpeakerRow({
           localLabel={localLabel}
           rosterId={rosterId}
           automatic={reviewState === 'automatic'}
+          review={review}
           roster={roster}
           lineCount={lineCount}
           onChanged={onChanged}
@@ -299,12 +310,13 @@ function SpeakerRow({
 }
 
 function SpeakerEditor({
-  meetingId, localLabel, rosterId, roster, lineCount, onChanged, automatic = false,
+  meetingId, localLabel, rosterId, roster, lineCount, onChanged, automatic = false, review,
 }: {
   meetingId: string;
   localLabel: string;
   rosterId: string | null;
   automatic?: boolean;
+  review?: VoiceReview;
   roster: RosterEntry[];
   lineCount?: number;
   onChanged: () => void;
@@ -314,7 +326,7 @@ function SpeakerEditor({
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<{ id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[]>([]);
+  const suggestions = review?.suggestions ?? [];
   const [pendingAssignment, setPendingAssignment] = useState<{ rid: string; impact: string } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -340,16 +352,6 @@ function SpeakerEditor({
     return () => { alive = false; };
   }, [meetingId, localLabel]);
 
-  // Ranked "might be X" guesses, fetched alongside the audio sample. Best-
-  // effort: if it fails, the panel just falls back to the plain dropdown —
-  // this is a convenience, not a required capability.
-  useEffect(() => {
-    let alive = true;
-    api.speakers.suggestions(meetingId, localLabel)
-      .then((list) => { if (alive) setSuggestions(list); })
-      .catch(() => { /* fall back silently to the manual dropdown */ });
-    return () => { alive = false; };
-  }, [meetingId, localLabel]);
 
   async function assignExisting(rid: string, confirmed = false): Promise<void> {
     const impact = lineCount === undefined ? 'Transcript lines for this voice will change.'
@@ -425,6 +427,7 @@ function SpeakerEditor({
       {/* Confidence-ranked guesses computed from the same voice-embedding
           match the auto-linker uses — tap one to confirm instead of typing
           a name from scratch. Excludes whichever entry is already linked. */}
+      {!rosterId && review?.reason && <p className="text-xs text-ink-muted" role="status">{review.reason}</p>}
       {suggestions.filter((sug) => sug.id !== rosterId).length > 0 && (
         <div>
           <div className="text-[10px] font-bold text-ink-muted uppercase mb-1">Might be</div>

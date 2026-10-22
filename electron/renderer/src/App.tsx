@@ -19,6 +19,7 @@ import { recordingStartFeedback } from './lib/recording-start-feedback';
 const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
 const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
 const WeeklyView = lazy(() => import('./views/WeeklyView').then((m) => ({ default: m.WeeklyView })));
+const ActionsView = lazy(() => import('./views/ActionsView').then((m) => ({ default: m.ActionsView })));
 const OnboardingView = lazy(() => import('./views/OnboardingView').then((m) => ({ default: m.OnboardingView })));
 
 type View =
@@ -35,6 +36,7 @@ type View =
       hint?: { title?: string; pipelineStage?: string; status?: string };
     }
   | { kind: 'settings' }
+  | { kind: 'actions' }
   | { kind: 'weekly' };
 
 /** The exact arguments a recording was started with. Kept on the live-
@@ -464,7 +466,9 @@ function AppInner(): JSX.Element {
     <OnboardingView onFinished={() => { setForceOpenSetup(false); setOnboardStatus('done'); }} />
   ) : !permsOk ? (
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
-  ) : view.kind === 'library' || view.kind === 'weekly' ? null : view.kind === 'detail' ? (
+  ) : view.kind === 'library' || view.kind === 'weekly' ? null : view.kind === 'actions' ? (
+    <ActionsView onNav={target => void navigate({ kind: target })} onOpen={id => void navigate({ kind: 'detail', id })} />
+  ) : view.kind === 'detail' ? (
     <MeetingDetailView
       id={view.id}
       seekSeconds={view.seekSeconds}
@@ -484,7 +488,7 @@ function AppInner(): JSX.Element {
   const activeLabel = view.kind === 'detail' ? 'This meeting' : view.kind === 'settings' ? 'Settings' : 'This screen';
   const body = <Suspense fallback={<div className="p-8 text-sm text-ink-muted" role="status">Loading view…</div>}>{readyForViews && libraryView}{readyForViews && weeklyView}
     {activeView && <ErrorBoundary scope={activeScope} label={activeLabel} resetKey={view.kind === 'detail' ? `detail:${view.id}` : activeScope}
-      onLeave={activeScope === 'detail' || activeScope === 'settings' ? () => void navigate({ kind: 'library' }) : undefined}>{activeView}</ErrorBoundary>}</Suspense>;
+      onLeave={activeScope === 'detail' || activeScope === 'settings' || activeScope === 'actions' ? () => void navigate({ kind: 'library' }) : undefined}>{activeView}</ErrorBoundary>}</Suspense>;
 
   // Persistent recording banner on views that don't show the LibraryView's
   // inline live row. Keeps the user aware that capture is still going even

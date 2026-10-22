@@ -10,10 +10,11 @@
 // clicks route through App's history-aware navigate() (pushes a new
 // entry; ⌘[ / ⌘] walk the stack back and forward).
 
-export type NavTarget = 'library' | 'weekly' | 'settings';
+export type NavTarget = 'library' | 'weekly' | 'actions' | 'settings';
 
 const TABS: { target: NavTarget; label: string }[] = [
   { target: 'library', label: 'Library' },
+  { target: 'actions', label: 'Actions' },
   { target: 'weekly', label: 'Weekly' },
   { target: 'settings', label: 'Settings' },
 ];

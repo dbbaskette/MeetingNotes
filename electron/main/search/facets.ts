@@ -68,6 +68,9 @@ export function searchScope(
 /** Parameter-bound metadata filtering before either title or file result limits. */
 export class FacetedMeetings {
   constructor(private db: Database.Database) {}
+  slugs(scope: ReturnType<typeof searchScope>): string[] {
+    return (this.db.prepare(`SELECT m.slug FROM meetings m WHERE ${scope.sql} ORDER BY m.started_at DESC, m.id`).all(scope.params) as { slug: string }[]).map(row => row.slug);
+  }
   titles(
     q: string,
     limit: number,

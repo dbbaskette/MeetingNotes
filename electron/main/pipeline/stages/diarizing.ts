@@ -9,7 +9,8 @@ export const runDiarizing: StageHandler = async ({ meetingId }, ctx) => {
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(ctx.libraryRoot, meeting.slug);
   if (!ctx.nativeSpeech) throw new Error('Native speech helper is not configured.');
-  const result = await ctx.nativeSpeech.diarize(meeting.audioPath);
+  const result = await ctx.nativeSpeech.diarize(meeting.audioPath, { signal: ctx.signal });
+  ctx.signal?.throwIfAborted();
   atomicJson(path.join(folder, 'diarization.json'), result);
   atomicJson(path.join(folder, 'diarization.meta.json'), { num_speakers: result.num_speakers });
   // Labels belong to this run, never to the same numeric label in an old run.

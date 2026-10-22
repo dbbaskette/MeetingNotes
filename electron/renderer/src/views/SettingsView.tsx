@@ -42,6 +42,7 @@ interface Settings {
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
   autoMatchSpeakers: boolean;
+  notesFirst: boolean;
   showMenuBarIcon: boolean;
   recordShortcut: string;
   userName: string;
@@ -77,6 +78,8 @@ export function SettingsView({
   const [models, setModels] = useState<string[]>([]);
   const [perms, setPerms] = useState<AudioPerms | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
+  const [speakerQuery, setSpeakerQuery] = useState('');
+  const [speakerLimit, setSpeakerLimit] = useState(10);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, string>>({});
@@ -199,6 +202,12 @@ export function SettingsView({
         </label>
       </SettingsSection>
       <SettingsSection section="Processing" keywords="automatic auto process recordings queue">
+        <label className="flex items-start gap-3 text-sm mb-4">
+          <input type="checkbox" checked={s.notesFirst ?? false} onChange={e => void update('notesFirst', e.target.checked)} />
+          <span>Generate notes before naming every voice
+            <span className="block text-xs text-ink-muted mt-1">Keep processing with speaker labels when names are unknown. Name voices later; exact speaker labels in notes and action items can be resolved without regenerating your notes. Existing saved weekly reports do not change.</span>
+          </span>
+        </label>
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" checked={s.autoProcessRecordings ?? false} onChange={e => void update('autoProcessRecordings', e.target.checked)} />
           <span>Process recordings automatically when capture finishes
@@ -447,8 +456,9 @@ export function SettingsView({
             No speakers yet — confirm a voice in any meeting&rsquo;s Speakers panel first.
           </div>
         ) : (
+          <><input className="input mb-2" aria-label="Find a saved speaker" placeholder="Find a speaker…" value={speakerQuery} onChange={event => { setSpeakerQuery(event.target.value); setSpeakerLimit(10); }} />
           <ul className="space-y-1.5">
-            {speakers.map((sp) => (
+            {speakers.filter(sp => sp.displayName.toLocaleLowerCase().includes(speakerQuery.toLocaleLowerCase())).slice(0, speakerLimit).map((sp) => (
               <SpeakerRosterRow
                 key={sp.id}
                 speaker={sp}
@@ -457,6 +467,8 @@ export function SettingsView({
               />
             ))}
           </ul>
+          {speakers.filter(sp => sp.displayName.toLocaleLowerCase().includes(speakerQuery.toLocaleLowerCase())).length > speakerLimit && <button className="text-brand-indigo text-xs mt-2" onClick={() => setSpeakerLimit(limit => limit + 10)}>Show 10 more speakers</button>}
+          </>
         )}
       </section>
 
@@ -1188,6 +1200,15 @@ function SpeakerRosterRow({
   // Pending merge target — non-null while the styled ConfirmDialog (#192)
   // is open. The old window.confirm here rendered un-themed OS chrome.
   const [mergeTarget, setMergeTarget] = useState<SpeakerListEntry | null>(null);
+  const [showProfiles, setShowProfiles] = useState(false);
+  const [profiles, setProfiles] = useState<Awaited<ReturnType<typeof api.speakers.profiles>>>([]);
+  const [profileError, setProfileError] = useState('');
+  useEffect(() => {
+    if (!showProfiles) return;
+    let alive = true;
+    void api.speakers.profiles(speaker.id).then(rows => { if (alive) setProfiles(rows); }).catch(error => { if (alive) setProfileError(String(error)); });
+    return () => { alive = false; };
+  }, [showProfiles, speaker.id]);
 
   async function saveRename(): Promise<void> {
     const name = draft.trim();
@@ -1197,7 +1218,7 @@ function SpeakerRosterRow({
       await api.speakers.rename(speaker.id, name);
       await onChanged();
       setEditing(false);
-    } finally {
+    } catch (error) { setProfileError(String(error)); } finally {
       setBusy(false);
     }
   }
@@ -1214,14 +1235,14 @@ function SpeakerRosterRow({
     try {
       await api.speakers.merge(speaker.id, mergeTarget.id);
       await onChanged();
-    } finally {
+    } catch (error) { setProfileError(String(error)); } finally {
       setBusy(false);
       setMergeTarget(null);
     }
   }
 
   return (
-    <li className="flex items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-1.5">
+    <li className="flex flex-wrap items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-1.5">
       {editing ? (
         <input
           value={draft}
@@ -1251,7 +1272,8 @@ function SpeakerRosterRow({
           </button>
         </>
       )}
-      {others.length > 0 && !editing && (
+      <button className="text-xs text-brand-indigo" aria-expanded={showProfiles} onClick={() => setShowProfiles(value => !value)}>Voiceprints</button>
+      {showProfiles && others.length > 0 && !editing && (
         <select
           value=""
           onChange={(e) => { if (e.target.value) void mergeInto(e.target.value); }}
@@ -1265,6 +1287,19 @@ function SpeakerRosterRow({
           ))}
         </select>
       )}
+      {showProfiles && <div className="w-full text-xs text-ink-muted space-y-2">
+        {!profiles.length && <p>No native voiceprint saved. Confirm this person in a meeting to teach their voice.</p>}
+        {profiles.map(profile => <div key={profile.space} className="border-t border-surface-border pt-2">
+          <p className="break-words">Native voiceprint · {profile.confirmedAt ? new Date(profile.confirmedAt).toLocaleDateString() : 'Imported profile'}</p>
+          <p className="break-words">{profile.source ?? 'Earlier confirmation (source not recorded)'}</p>
+          <button className="text-brand-indigo disabled:opacity-40" disabled={busy || !profile.canUndo} onClick={() => {
+            setBusy(true); setProfileError('');
+            void api.speakers.undoProfile(speaker.id, profile.space).then(() => api.speakers.profiles(speaker.id)).then(setProfiles).catch(error => setProfileError(String(error))).finally(() => setBusy(false));
+          }}>Undo last voiceprint change</button>
+        </div>)}
+        <p>Undo changes future voice matching only. Existing meeting names stay unchanged.</p>
+      </div>}
+      {profileError && <p role="alert" className="w-full text-xs text-danger">{profileError}</p>}
       <ConfirmDialog
         open={mergeTarget !== null}
         title={`Merge "${speaker.displayName}" into "${mergeTarget?.displayName ?? ''}"?`}

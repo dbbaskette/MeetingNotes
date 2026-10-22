@@ -60,6 +60,7 @@ const previewSettings: Settings = {
   autoRecordZoom: false,
   autoProcessRecordings: false,
   autoMatchSpeakers: false,
+  notesFirst: false,
   showMenuBarIcon: true,
   recordShortcut: '',
   userName: '',
@@ -126,13 +127,17 @@ export const overrides: PreviewOverrides = {
     active: async () => null,
   },
   speakers: {
+    review: async () => [],
+    profiles: async () => [],
+    undoProfile: async () => {},
     list: async () => [],
     confirm: async () => '',
     sample: async () => null,
   },
   onboarding: { openExternal: async () => {} },
   search: { query: async () => [], run: async () => ({ hits: [], status: 'complete' }) },
-  groups: { list: async () => ({ groups: [], allCount: rows.length, ungroupedCount: rows.length }) },
+  groups: { list: async () => ({ groups: [], allCount: rows.length, ungroupedCount: rows.length }), pin: async () => {}, brief: async () => ({ meetings: [], actions: [], openActionCount: 0 }) },
+  actionItems: { list: async () => ({ items: [], total: 0, owners: [], identified: false }), setStatus: async () => {} },
   trash: { list: async () => [] },
   summaryTemplates: {
     list: async () => ({
@@ -164,6 +169,7 @@ export const overrides: PreviewOverrides = {
     setupHealth: async () => [],
   },
   pipeline: {
+    cancel: async () => {},
     status: async () => ({ paused: false, currentId: null, queueLength: 0, queueIds: [] }),
     clear: async () => ({ cleared: [] }),
   },

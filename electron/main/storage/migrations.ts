@@ -397,6 +397,10 @@ export const MIGRATIONS: Migration[] = [
     ALTER TABLE meeting_speakers ADD COLUMN assignment_source TEXT
       CHECK (assignment_source IN ('automatic', 'manual'));
   ` },
+  { version: 26, up: `
+    ALTER TABLE groups ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1));
+    CREATE INDEX IF NOT EXISTS action_items_status_due ON action_items(status, due_date);
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

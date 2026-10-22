@@ -22,7 +22,10 @@ export interface StatusBarMeeting {
 }
 
 /** Mirror of the pipeline:status snapshot (see preload `pipeline.status`). */
+import type { SpeechWork } from '../../../shared/processing-progress';
 export interface PipelineStatusSnapshot {
+  speechWork?: SpeechWork;
+  cancelling?: boolean;
   paused: boolean;
   currentId: string | null;
   queueLength: number;

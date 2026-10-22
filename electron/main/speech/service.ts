@@ -56,16 +56,16 @@ export class NativeSpeechService {
   }
   cancelSetup(): void { this.provisioning?.abort(); }
   close(): void { this.cancelSetup(); this.client.cancel(); }
-  async transcribe(audioPath: string, language: string) {
+  async transcribe(audioPath: string, language: string, options: { signal?: AbortSignal; progress?: (fraction: number) => void } = {}) {
     this.requireSupported();
-    const value = Transcript.parse((await this.client.request('transcribe', { audioPath, locale: appleLocale(language) })).result);
+    const value = Transcript.parse((await this.client.request('transcribe', { audioPath, locale: appleLocale(language) }, options)).result);
     if (value.segments.some(s => s.end < s.start || s.end > value.durationS + 0.5)) throw new Error('Apple returned invalid transcript timestamps.');
     return value;
   }
-  async diarize(audioPath: string) {
+  async diarize(audioPath: string, options: { signal?: AbortSignal } = {}) {
     this.requireSupported();
     if (!modelsReady(this.modelFolder)) throw new Error('Prepare native speech in Settings → Processing before processing this meeting.');
-    const value = Diarization.parse((await this.client.request('diarize', { audioPath, modelFolder: this.modelFolder, modelRevision: SPEAKER_REVISION })).result);
+    const value = Diarization.parse((await this.client.request('diarize', { audioPath, modelFolder: this.modelFolder, modelRevision: SPEAKER_REVISION }, options)).result);
     if (value.modelRevision !== SPEAKER_REVISION || value.embeddingSpace !== `speakerkit:1.1.1:${SPEAKER_REVISION}:raw-preplda:trainableOnly:16khz`
       || value.segments.some(s => s.end < s.start)) throw new Error('Speaker engine returned incompatible output.');
     return value;

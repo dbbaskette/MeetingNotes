@@ -65,6 +65,7 @@ export interface ExtractOpts {
   audioPath: string;
   /** Absolute path to diarization.json. */
   diarizationPath: string;
+  diarization?: DiarizationArtifact;
   /** Folder to write the cached clip into (created if missing). */
   sampleDir: string;
   /** Local diarizer label, e.g. "SPEAKER_03". */
@@ -84,7 +85,7 @@ export async function extractSpeakerSample(opts: ExtractOpts): Promise<ExtractRe
   const runner: Runner = opts.runner ?? ((c, a) => pExecFile(c, a, { timeout: 20000 }));
   const out = path.join(opts.sampleDir, `${safeLabel(opts.localLabel)}.mp3`);
 
-  const diar = JSON.parse(await fs.readFile(opts.diarizationPath, 'utf8')) as {
+  const diar = opts.diarization ?? JSON.parse(await fs.readFile(opts.diarizationPath, 'utf8')) as {
     segments: DiarizationSegment[];
   };
   const win = pickSampleWindow(diar.segments, opts.localLabel);

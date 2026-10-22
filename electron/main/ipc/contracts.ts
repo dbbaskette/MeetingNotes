@@ -261,6 +261,9 @@ export const IPC_CHANNELS = {
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
   groupsList: 'groups:list',
+  groupsPin: 'groups:pin',
+  groupsBrief: 'groups:brief',
+  actionsList: 'actions:list',
   groupsCreate: 'groups:create',
   groupsRename: 'groups:rename',
   groupsDelete: 'groups:delete',
@@ -304,6 +307,9 @@ export const IPC_CHANNELS = {
   speakersAssign: 'speakers:assign',
   speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
+  speakersReview: 'speakers:review',
+  speakersProfiles: 'speakers:profiles',
+  speakersUndoProfile: 'speakers:undo-profile',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
   actionItemsUpdate: 'action-items:update',
@@ -360,6 +366,7 @@ export const IPC_CHANNELS = {
   /** Pause the queue runner — current meeting finishes; nothing new
    *  starts until resume. Idempotent. */
   pipelinePause: 'pipeline:pause',
+  pipelineCancel: 'pipeline:cancel',
   /** Resume the queue runner. Idempotent. */
   pipelineResume: 'pipeline:resume',
   /** Drop all queued (not-yet-started) meetings. Returns the IDs that

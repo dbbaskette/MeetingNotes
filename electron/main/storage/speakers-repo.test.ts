@@ -126,7 +126,7 @@ describe('SpeakersRepo', () => {
       expect(item.owner_speaker_id).toBe(target);
     });
 
-    it("when a meeting links both, keeps the target's row and drops the source's", () => {
+    it('when a meeting links both, keeps both diarizer labels linked to the target', () => {
       const source = repo.create({ displayName: 'Daniel' });
       const target = repo.create({ displayName: 'Dan' });
       insertMeeting('m1');
@@ -137,8 +137,7 @@ describe('SpeakersRepo', () => {
 
       expect(affected).toEqual(['m1']);
       const links = db.prepare('SELECT local_label, roster_speaker_id FROM meeting_speakers ORDER BY local_label').all();
-      // The source's SPEAKER_01 row is gone; the target's original link survives untouched.
-      expect(links).toEqual([{ local_label: 'SPEAKER_00', roster_speaker_id: target }]);
+      expect(links).toEqual([{ local_label: 'SPEAKER_00', roster_speaker_id: target }, { local_label: 'SPEAKER_01', roster_speaker_id: target }]);
     });
 
     it('merging an unlinked speaker just deletes the roster row', () => {
