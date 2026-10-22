@@ -24,6 +24,8 @@ import type { MeetingDetector } from '../meeting-detector/detector.js';
 import type { NativeAppDetector } from '../meeting-detector/native-app-detector.js';
 import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
+import { VoiceProfiles } from '../speakers/voice-profiles.js';
+import { ActionFilterSchema, briefSection, resolveSpeakerLabels } from '../../shared/productivity.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
@@ -307,6 +309,22 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.meetings.listIds(MeetingListFilterSchema.parse(input), OptionalGroupScopeSchema.parse(groupId)));
 
   ipc.handle(IPC_CHANNELS.groupsList, () => s.groups.listWithCounts());
+  ipc.handle(IPC_CHANNELS.groupsPin, (_e, id: string, pinned: boolean) => s.groups.pin(id, pinned));
+  ipc.handle(IPC_CHANNELS.actionsList, (_e, input: unknown) => {
+    const id = s.settings.get('userSpeakerId');
+    return s.actionItems.live(ActionFilterSchema.parse(input), { id, name: id ? s.speakers.findById(id)?.displayName ?? null : s.settings.get('userName') || null });
+  });
+  ipc.handle(IPC_CHANNELS.groupsBrief, async (_e, id: string) => {
+    const rows = s.groups.recentMeetings(id);
+    const meetings = await Promise.all(rows.map(async row => {
+      const notes = await s.artifactCache.readText(path.join(meetingFolderPath(s.libraryRoot, row.slug), 'summary.md'));
+      return { id: row.id, title: row.title, startedAt: row.startedAt, missingNotes: !notes,
+        decisions: briefSection(notes ?? '', 'Decisions'), questions: briefSection(notes ?? '', 'Open Questions'),
+        overview: briefSection(notes ?? '', 'Overview').join(' ').slice(0, 1500) };
+    }));
+    const actions = s.actionItems.live({ owner: 'all', groupId: id }, { id: null, name: null });
+    return { meetings, actions: actions.items, openActionCount: actions.total };
+  });
   ipc.handle(IPC_CHANNELS.groupsCreate, (_e, name: unknown) => s.groups.create(GroupNameSchema.parse(name)));
   ipc.handle(IPC_CHANNELS.groupsRename, (_e, id: unknown, name: unknown) => {
     s.groups.rename(GroupIdSchema.parse(id), GroupNameSchema.parse(name));
@@ -712,14 +730,20 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.permissionsMicStatus, () => getMicAccessStatus());
 
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
+  const requireSpeakerEditable = (meetingId: string): void => {
+    const meeting = s.meetings.findById(meetingId);
+    if (!meeting || meeting.deletedAt) throw new Error('Meeting not found');
+    if (meeting.status === 'processing') throw new Error('Wait for this meeting to finish processing before changing its speakers.');
+  };
   ipc.handle(IPC_CHANNELS.speakersConfirm, (_e, input: unknown) => {
     const parsed = ConfirmSpeakerSchema.parse(input);
+    requireSpeakerEditable(parsed.meetingId);
     const meeting = s.meetings.findById(parsed.meetingId);
     if (!meeting) throw new Error('meeting not found');
     const file = path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'diarization.json');
     const diar = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) as DiarizationArtifact : null;
     const embedding = diar?.embeddingSpace ? embeddingForLabel(diar, parsed.localLabel) : null;
-    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding }, diar?.embeddingSpace);
+    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding, source: `${meeting.title} · ${parsed.localLabel}` }, diar?.embeddingSpace);
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     return id;
   });
@@ -739,12 +763,29 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
           artifactCache: s.artifactCache,
           userName: s.settings.get('userName'),
         });
+        const meeting = s.meetings.findById(meetingId);
+        if (meeting?.status === 'done') {
+          const names = Object.fromEntries(s.speakers.listForMeeting(meetingId).filter(link => link.displayName).map(link => [link.localLabel, link.displayName!]));
+          const file = path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'summary.md');
+          const previous = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+          const updated = resolveSpeakerLabels(previous, names);
+          const changes = updated !== previous || s.actionItems.listByMeeting(meetingId).some(item => [item.text, item.ownerName, item.sourceQuote].some(value => value && resolveSpeakerLabels(value, names) !== value));
+          if (changes) {
+            s.notesHistory?.capture(meetingId, 'Before speaker labels resolved');
+            if (updated !== previous) {
+              if (s.terminology) s.terminology.saveSummary(meetingId, updated);
+              else { fs.writeFileSync(file, updated); s.artifactCache.invalidate(file); }
+            }
+            s.actionItems.resolveLabels(meetingId, names);
+          }
+        }
       } catch { /* see note above */ }
     }
   };
 
   ipc.handle(IPC_CHANNELS.speakersRename, (_e, id: string, name: string) => {
     if (typeof id !== 'string' || typeof name !== 'string') throw new Error('invalid args');
+    s.speakers.meetingIdsForSpeaker(id).forEach(requireSpeakerEditable);
     s.speakers.rename(id, name.slice(0, 200));
     // Push the new name into the transcripts of every meeting this speaker
     // appears in (previously the rename only touched the roster row).
@@ -757,7 +798,9 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (sourceId === targetId) throw new Error('cannot merge a speaker into itself');
     if (!s.speakers.findById(sourceId)) throw new Error('source speaker not found');
     if (!s.speakers.findById(targetId)) throw new Error('target speaker not found');
-    const affectedMeetingIds = s.speakers.mergeSpeakers(sourceId, targetId);
+    s.speakers.meetingIdsForSpeaker(sourceId).forEach(requireSpeakerEditable);
+    let affectedMeetingIds: string[] = [];
+    new VoiceProfiles(s.libraryRoot).merge(sourceId, targetId, () => { affectedMeetingIds = s.speakers.mergeSpeakers(sourceId, targetId); });
     // Keep the "You are…" pointer valid if it referenced the deleted source
     // (mirrors the startup dedupe pass in electron/main/index.ts).
     if (s.settings.get('userSpeakerId') === sourceId) s.settings.set('userSpeakerId', targetId);
@@ -777,6 +820,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     const clip = await extractSpeakerSample({
       audioPath: m.audioPath,
       diarizationPath: diarPath,
+      diarization: await s.artifactCache.readJson<DiarizationArtifact>(diarPath) ?? undefined,
       sampleDir: path.join(folder, 'samples'),
       localLabel,
     });
@@ -797,6 +841,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
   ipc.handle(IPC_CHANNELS.speakersAssign, (_e, input: unknown) => {
     const parsed = AssignSchema.parse(input);
+    requireSpeakerEditable(parsed.meetingId);
     const m = s.meetings.findById(parsed.meetingId);
     if (!m) throw new Error('meeting not found');
 
@@ -812,7 +857,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         try {
           const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
           const embedding = embeddingForLabel(diar, parsed.localLabel);
-          if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diar.embeddingSpace);
+          if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diar.embeddingSpace, `${m.title} · ${parsed.localLabel}`);
         } catch { /* roster update is best-effort; don't fail the link */ }
       }
       s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, parsed.rosterId, 1.0);
@@ -828,7 +873,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!fs.existsSync(diarPath)) throw new Error('diarization not available yet');
     const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
     const embedding = embeddingForLabel(diar, parsed.localLabel);
-    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding }, diar.embeddingSpace);
+    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding, source: `${m.title} · ${parsed.localLabel}` }, diar.embeddingSpace);
     s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
     remergeMeetings([parsed.meetingId]);
     return id;
@@ -851,9 +896,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       speakerReviewForFolder(folder, links, s.artifactCache),
       s.artifactCache.readJson<DiarizationArtifact>(path.join(folder, 'diarization.json')),
     ]);
+    requireSpeakerEditable(parsed.meetingId);
     for (const localLabel of labels) {
       const embedding = diarFile ? embeddingForLabel(diarFile, localLabel) : null;
-      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diarFile?.embeddingSpace);
+      if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diarFile?.embeddingSpace, `${meeting.title} · ${localLabel}`);
       s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
     }
     remergeMeetings([parsed.meetingId]);
@@ -863,21 +909,43 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     };
   });
 
-  ipc.handle(IPC_CHANNELS.speakersSuggestions, (_e, meetingId: unknown, localLabel: unknown) => {
+  ipc.handle(IPC_CHANNELS.speakersSuggestions, async (_e, meetingId: unknown, localLabel: unknown) => {
     if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
     const m = s.meetings.findById(meetingId);
     if (!m) throw new Error('meeting not found');
     const folder = meetingFolderPath(s.libraryRoot, m.slug);
     const diarPath = path.join(folder, 'diarization.json');
     if (!fs.existsSync(diarPath)) return [];
-    const diar = JSON.parse(fs.readFileSync(diarPath, 'utf8')) as DiarizationArtifact;
+    const diar = await s.artifactCache.readJson<DiarizationArtifact>(diarPath);
+    if (!diar) return [];
     const embedding = embeddingForLabel(diar, localLabel);
     if (!embedding) return [];
     return s.roster.suggestionsFor({ label: localLabel, embedding }, 3, diar.embeddingSpace);
   });
 
+  ipc.handle(IPC_CHANNELS.speakersReview, async (_e, meetingId: string) => {
+    const meeting = s.meetings.findById(meetingId);
+    if (!meeting || meeting.deletedAt) throw new Error('Meeting not found');
+    const diar = await s.artifactCache.readJson<DiarizationArtifact>(path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'diarization.json'));
+    if (!diar) return [];
+    const labels = [...new Set(diar.segments.map(segment => segment.speaker))];
+    const detected = labels.map(label => ({ label, embedding: embeddingForLabel(diar, label) ?? [] }));
+    const linked = new Map(s.speakers.listForMeeting(meetingId).map(link => [link.localLabel, link.rosterSpeakerId]));
+    const matches = s.roster.identifyUnknowns(detected.filter(item => !linked.get(item.label)), { enabled: s.settings.get('autoMatchSpeakers'), space: diar.embeddingSpace, segments: diar.segments,
+      reservedRosterIds: [...linked.values()].filter((id): id is string => !!id) });
+    const suggestions = s.roster.suggestionsBatch(detected, diar.embeddingSpace);
+    return detected.map(item => ({ label: item.label, reason: matches.find(match => match.label === item.label)?.reason,
+      suggestions: suggestions.get(item.label) ?? [] }));
+  });
+  ipc.handle(IPC_CHANNELS.speakersProfiles, (_e, id: string) => new VoiceProfiles(s.libraryRoot).info(id));
+  ipc.handle(IPC_CHANNELS.speakersUndoProfile, (_e, id: string, space: string) => {
+    if (!s.speakers.findById(id)) throw new Error('Speaker not found');
+    new VoiceProfiles(s.libraryRoot).undo(space, id);
+  });
+
   ipc.handle(IPC_CHANNELS.speakersUnlink, (_e, meetingId: unknown, localLabel: unknown) => {
     if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
+    requireSpeakerEditable(meetingId);
     // "Unlink" removes the roster_speaker_id but keeps the meeting_speakers
     // row so the local label still shows up as an unidentified voice.
     s.speakers.linkToMeeting(meetingId, localLabel, null, 0);
@@ -1026,16 +1094,19 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // additionally take only the first match below (one hit per
     // meeting is plenty, since a summary is short).
     const meetingsRoot = path.join(s.libraryRoot, 'meetings');
-    const fileEligibility = new Map<string,boolean>();
+    const eligibleSlugs = new Set(faceted && scope ? faceted.slugs(scope) : []);
     const detailed = request ? await ripgrepSearchDetailed(meetingsRoot,q,{
+      paths: [...eligibleSlugs].map(slug => meetingFolderPath(s.libraryRoot, slug)).filter(folder => {
+        if (path.dirname(folder) !== meetingsRoot) return false;
+        try { return fs.lstatSync(folder).isDirectory(); } catch { return false; }
+      }),
       maxCountPerFile:3,maxTotalMatches:10000,signal:owner!.signal,
       globs:facets.content?[`${facets.content}.md`]:['summary.md','transcript.md'],
       acceptFile:file=>{
         const parts=path.relative(meetingsRoot,file).split(path.sep);
         if(parts.length!==2||parts[0]==='..')return false;
         const slug=parts[0]!;
-        if(!fileEligibility.has(slug)){if(fileEligibility.size>=1000)fileEligibility.delete(fileEligibility.keys().next().value!);fileEligibility.set(slug,faceted!.matchesSlug(slug,scope!));}
-        return fileEligibility.get(slug)!;
+        return eligibleSlugs.has(slug);
       },
     }) : null;
     const rgHits = detailed?.matches ?? await ripgrepSearch(meetingsRoot,q,{maxCountPerFile:3,globs:['summary.md','transcript.md']});
@@ -1213,6 +1284,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 
   ipc.handle(IPC_CHANNELS.pipelineStatus, () => s.pipeline.getStatus());
+  ipc.handle(IPC_CHANNELS.pipelineCancel, (_e, id: string) => s.pipeline.cancelCurrent(id));
   ipc.handle(IPC_CHANNELS.pipelinePause, () => { s.pipeline.pause(); });
   ipc.handle(IPC_CHANNELS.pipelineResume, () => { s.pipeline.resume(); });
   ipc.handle(IPC_CHANNELS.pipelineClear, () => {

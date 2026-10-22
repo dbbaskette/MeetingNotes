@@ -91,6 +91,9 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
 
   // Groups
   [C.groupsList]: none,
+  [C.groupsPin]: z.tuple([Id, z.boolean()]),
+  [C.groupsBrief]: z.tuple([Id]),
+  [C.actionsList]: z.tuple([handlerValidated]),
   [C.groupsCreate]: z.tuple([handlerValidated]),
   [C.groupsRename]: z.tuple([Id, handlerValidated]),
   [C.groupsDelete]: z.tuple([Id]),
@@ -125,6 +128,9 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.speakersAssign]: z.tuple([handlerValidated]),
   [C.speakersAssignBulk]: z.tuple([handlerValidated]),
   [C.speakersSuggestions]: z.tuple([Id, Label]),
+  [C.speakersReview]: z.tuple([Id]),
+  [C.speakersProfiles]: z.tuple([Id]),
+  [C.speakersUndoProfile]: z.tuple([Id, z.string().min(1).max(500)]),
   [C.speakersUnlink]: z.tuple([Id, Label]),
   [C.actionItemsSetStatus]: z.tuple([Id, handlerValidated]),
   [C.actionItemsUpdate]: z.tuple([Id, handlerValidated]),
@@ -137,6 +143,7 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.searchQuery]: z.tuple([Text, z.number().optional(), Id.nullable().optional(), handlerValidated]),
   [C.searchCancel]: z.tuple([handlerValidated]),
   [C.pipelineStatus]: none,
+  [C.pipelineCancel]: z.tuple([Id]),
   [C.pipelinePause]: none,
   [C.pipelineResume]: none,
   [C.pipelineClear]: none,

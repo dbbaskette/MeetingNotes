@@ -71,6 +71,7 @@ export interface ChatMessage {
 }
 
 export interface ChatInput {
+  signal?: AbortSignal;
   model: string;
   messages: ChatMessage[];
   temperature?: number;
@@ -235,7 +236,7 @@ export class LMStudioClient {
             ? { chat_template_kwargs: { enable_thinking: false } }
             : {}),
         }),
-        signal: AbortSignal.timeout(10 * 60 * 1000),
+        signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]) : AbortSignal.timeout(10 * 60 * 1000),
         dispatcher: getSlowLLMAgent(),
       },
     );

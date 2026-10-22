@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
   for (const dark of [false, true]) {
     await run(`document.documentElement.classList.toggle('dark',${dark})`);
     const theme = dark ? 'dark' : 'light';
-    for (const view of ['library', 'detail', 'weekly', 'settings', 'onboarding']) {
+    for (const view of ['library', 'actions', 'detail', 'weekly', 'settings', 'onboarding']) {
       if (view === 'detail') await run('window.setAutomaticVoice()');
       await run(`window.showView(${JSON.stringify(view)})`); await settle();
       await until('!!document.querySelector(".app-chrome")');
@@ -47,6 +47,7 @@ app.whenReady().then(async () => {
       }
       if (view === 'settings') { await click('Processing'); await until(`!!document.querySelector('[aria-label="Speech engine"]')`); }
       if (view === 'weekly') await until('document.body.innerText.includes("Saved report") && document.body.innerText.includes("Product quality")');
+      if (view === 'actions') await until('document.body.innerText.includes("1 open actions")');
       await screenshot(`${view}-${theme}`);
       win.setContentSize(780, 650); await settle();
       assert(await run('document.documentElement.scrollWidth <= innerWidth'), `${view}/${theme}: no horizontal overflow`);
@@ -69,6 +70,15 @@ app.whenReady().then(async () => {
   await until('!!document.querySelector(".material-popover")'); await screenshot('source-picker-dark');
   assert(await run(`(() => {const p=document.querySelector('.material-popover'),r=p.getBoundingClientRect();return p.contains(document.elementFromPoint(r.left+20,r.top+20));})()`), 'Source picker remains above Library content');
   await click('Cancel');
+  await run(`document.querySelector('button[aria-label="Options for Product & design"]').click()`);
+  await click('Pin group'); await until('document.body.innerText.includes("Pinned")');
+  await run(`document.querySelector('button[aria-label="Options for Product & design"]').click()`);
+  await click('Prepare next meeting'); await until('document.body.innerText.includes("When should we share the prototype?")');
+  await screenshot('group-preparation-dark'); await click('Close');
+  await click('Actions'); await until('document.body.innerText.includes("1 open actions")');
+  await run('document.querySelector("input[type=checkbox]").click()');
+  await until('document.body.innerText.includes("0 open actions")');
+  await click('Library'); await until('document.querySelectorAll(".meeting-row").length === 8');
   // Validate the fallback rather than assuming CSS media queries work.
   win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
@@ -90,6 +100,6 @@ app.whenReady().then(async () => {
   win.webContents.debugger.detach();
   assert.deepEqual(await run('window.fixture'), { captures: 0, preparations: 0, confirmations: 2 });
   assert.deepEqual(errors, []);
-  console.log('APPEARANCE PASS: five real screens, light/dark, desktop/narrow, detail tabs, navigation/disclosure/dialog/source picker, focus and opaque/reduced-effects fallback; no capture or setup.');
+  console.log('APPEARANCE PASS: six real screens, light/dark, desktop/narrow, Actions completion, group pin/preparation, detail tabs, navigation/disclosure/dialog/source picker, focus and opaque/reduced-effects fallback; no capture or setup.');
   win.destroy(); app.quit();
 }).catch(error => { console.error(error); app.exit(1); });

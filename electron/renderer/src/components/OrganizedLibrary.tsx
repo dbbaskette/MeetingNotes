@@ -27,6 +27,8 @@ interface Props {
   onFilterGroup: (groupId: string | null, filter: MeetingFilter) => void;
   onRenameGroup: (groupId: string) => void;
   onDeleteGroup: (groupId: string) => void;
+  onPinGroup?: (groupId: string, pinned: boolean) => void;
+  onPrepareGroup?: (groupId: string) => void;
 }
 
 /** Named groups and Ungrouped share one scroll surface. Collapsed sections
@@ -34,7 +36,7 @@ interface Props {
 export function OrganizedLibrary({
   sections, filter, sort, searching, searchPending, searchQuery, searchResults,
   refreshRevision, revealGroupId, renderRow, onLoadedChange, onFocusGroup,
-  onRenameGroup, onDeleteGroup, onFilterGroup,
+  onRenameGroup, onDeleteGroup, onFilterGroup, onPinGroup, onPrepareGroup,
   scrollRef: parentScrollRef,
 }: Props): JSX.Element {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -103,13 +105,15 @@ export function OrganizedLibrary({
       onRows={reportRows} onFilter={filter => onFilterGroup(section.groupId, filter)} onFocus={() => onFocusGroup(section.groupId)}
       onRename={section.groupId ? () => onRenameGroup(section.groupId!) : undefined}
       onDelete={section.groupId ? () => onDeleteGroup(section.groupId!) : undefined}
+      onPin={section.groupId && onPinGroup ? () => onPinGroup(section.groupId!, !section.pinned) : undefined}
+      onPrepare={section.groupId && onPrepareGroup ? () => onPrepareGroup(section.groupId!) : undefined}
     />)}
     </div>
   </div>;
 }
 
 function GroupSection({ section, filter, sort, searching, searchRows, expanded, refreshRevision, scrollRef,
-  renderRow, onToggle, onRows, onFocus, onFilter, onRename, onDelete }: {
+  renderRow, onToggle, onRows, onFocus, onFilter, onRename, onDelete, onPin, onPrepare }: {
   section: OrganizedSection;
   scrollRef: RefObject<HTMLDivElement>;
   filter: MeetingFilter;
@@ -125,6 +129,8 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
   onFilter: (filter: MeetingFilter) => void;
   onRename?: () => void;
   onDelete?: () => void;
+  onPin?: () => void;
+  onPrepare?: () => void;
 }): JSX.Element {
   const [pageStore] = useState(() => createPagedMeetings(api.meetings.listPage));
   const { items, total, hasMore, loadingInitial, loadingMore, refreshing, error } = useStore(pageStore);
@@ -155,7 +161,7 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
     if (!menuOpen || !menuButtonRef.current) return;
     const rect = menuButtonRef.current.getBoundingClientRect();
     const right = window.innerWidth - rect.right;
-    setMenuAnchor(window.innerHeight - rect.bottom < 110
+    setMenuAnchor(window.innerHeight - rect.bottom < 180
       ? { bottom: window.innerHeight - rect.top + 6, right }
       : { top: rect.bottom + 6, right });
   }, [menuOpen]);
@@ -185,7 +191,7 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
         onClick={onToggle} className="min-w-0 flex-1 flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">
         <span aria-hidden="true" className="w-4 shrink-0 text-ink-muted">{expanded ? '⌄' : '›'}</span>
         <svg viewBox="0 0 20 20" className="w-4 h-4 shrink-0 text-brand-indigo" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M2 5h6l2 2h8v9H2z" /></svg>
-        <span id={`group-label-${section.key}`} className="truncate text-sm font-semibold" title={section.name}>{section.name}</span>
+        <span id={`group-label-${section.key}`} className="truncate text-sm font-semibold" title={section.name}>{section.name}{section.pinned && <span className="ml-2 text-xs text-brand-indigo">Pinned</span>}</span>
         <span className="shrink-0 text-xs font-normal text-ink-muted tabular-nums">{countText}</span>
       </button>
       {!searching && ([["pending", "Unprocessed"], ["processing", "In progress / review"], ["failed", "Failed"]] as const).map(([status, label]) => (section.statusCounts?.[status] ?? 0) > 0 && <button key={status} type="button"
@@ -201,6 +207,8 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
         {menuOpen && menuAnchor && createPortal(<div ref={menuRef} role="menu"
           style={{ position: 'fixed', top: menuAnchor.top, bottom: menuAnchor.bottom, right: menuAnchor.right, zIndex: 1000 }}
           className="material-popover w-40 rounded-lg border border-surface-border bg-surface p-1 shadow-pop">
+          {onPrepare && <button role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPrepare(); }}>Prepare next meeting</button>}
+          {onPin && <button role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPin(); }}>{section.pinned ? 'Unpin group' : 'Pin group'}</button>}
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onRename(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken">Rename group…</button>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onDelete(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm text-danger hover:bg-danger-bg">Delete group…</button>
         </div>, document.body)}

@@ -66,6 +66,7 @@ export interface Settings {
   autoProcessRecordings: boolean;
   /** Explicit opt-in to conservative native voiceprint auto-assignment. */
   autoMatchSpeakers: boolean;
+  notesFirst: boolean;
   /** Show the macOS menu-bar item with recording status and controls. */
   showMenuBarIcon: boolean;
   /** Global accelerator that starts or stops recording from any app.
@@ -164,6 +165,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoRecordZoom: false,
   autoProcessRecordings: false,
   autoMatchSpeakers: false,
+  notesFirst: false,
   showMenuBarIcon: true,
   recordShortcut: '',
   userName: '',

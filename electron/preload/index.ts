@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { ActionFilter, ActionPage, GroupBrief } from '../shared/productivity.js';
+import type { SpeechWork } from '../shared/processing-progress.js';
 import type { NativeSpeechStatus } from '../shared/native-speech.js';
 import type { SearchRequest, SearchResponse } from '../shared/search';
 import type {BackupPreview,BackupStatus} from '../shared/backup';
@@ -81,6 +83,9 @@ const IPC_CHANNELS = {
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
   meetingsSaveSummary: 'meetings:save-summary',
   groupsList: 'groups:list',
+  groupsPin: 'groups:pin',
+  groupsBrief: 'groups:brief',
+  actionsList: 'actions:list',
   groupsCreate: 'groups:create',
   groupsRename: 'groups:rename',
   groupsDelete: 'groups:delete',
@@ -120,6 +125,9 @@ const IPC_CHANNELS = {
   speakersAssign: 'speakers:assign',
   speakersAssignBulk: 'speakers:assign-bulk',
   speakersSuggestions: 'speakers:suggestions',
+  speakersReview: 'speakers:review',
+  speakersProfiles: 'speakers:profiles',
+  speakersUndoProfile: 'speakers:undo-profile',
   speakersUnlink: 'speakers:unlink',
   actionItemsSetStatus: 'action-items:set-status',
   actionItemsUpdate: 'action-items:update',
@@ -154,6 +162,7 @@ const IPC_CHANNELS = {
   meetingsImportDropped: 'meetings:import-dropped',
   transcriptExport: 'transcript:export',
   pipelinePause: 'pipeline:pause',
+  pipelineCancel: 'pipeline:cancel',
   pipelineResume: 'pipeline:resume',
   pipelineClear: 'pipeline:clear',
   pipelineStatus: 'pipeline:status',
@@ -320,8 +329,10 @@ const api = {
     },
   },
   groups: {
+    pin: (id: string, pinned: boolean) => ipcRenderer.invoke(IPC_CHANNELS.groupsPin, id, pinned) as Promise<void>,
+    brief: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsBrief, id) as Promise<GroupBrief>,
     list: () => ipcRenderer.invoke(IPC_CHANNELS.groupsList) as Promise<{
-      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string; statusCounts?: {pending:number;processing:number;failed:number} }[];
+      groups: { id: string; name: string; count: number; createdAt: string; updatedAt: string; pinned?: boolean; statusCounts?: {pending:number;processing:number;failed:number} }[];
       allCount: number; ungroupedCount: number; ungroupedStatus?: {pending:number;processing:number;failed:number};
     }>,
     create: (name: string) => ipcRenderer.invoke(IPC_CHANNELS.groupsCreate, name) as Promise<{
@@ -398,6 +409,9 @@ const api = {
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
+    review: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersReview, meetingId) as Promise<{ label: string; reason?: string; suggestions: { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[] }[]>,
+    profiles: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersProfiles, id) as Promise<{ space: string; confirmedAt?: string; source?: string; canUndo: boolean }[]>,
+    undoProfile: (id: string, space: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersUndoProfile, id, space) as Promise<void>,
     confirm: (input: { meetingId: string; localLabel: string; displayName: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
@@ -440,6 +454,7 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.speakersUnlink, meetingId, localLabel),
   },
   actionItems: {
+    list: (filter: ActionFilter) => ipcRenderer.invoke(IPC_CHANNELS.actionsList, filter) as Promise<ActionPage>,
     setStatus: (id: string, status: string) => ipcRenderer.invoke(IPC_CHANNELS.actionItemsSetStatus, id, status),
     /** Inline-edit a single field of an existing item (#44). Pass undefined
      *  for fields you want to leave unchanged, null to clear. */
@@ -575,9 +590,11 @@ const api = {
       }>,
   },
   pipeline: {
+    cancel: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.pipelineCancel, id) as Promise<void>,
     /** Snapshot of current queue state. Cheap; safe to call every
      *  few seconds alongside the library refresh. */
     status: () => ipcRenderer.invoke(IPC_CHANNELS.pipelineStatus) as Promise<{
+      speechWork?: SpeechWork; cancelling?: boolean;
       paused: boolean;
       currentId: string | null;
       queueLength: number;
@@ -595,12 +612,14 @@ const api = {
      *  Avoids polling — the LibraryView refreshes the moment a
      *  meeting moves from queue to current, finishes, etc. */
     onStatusChange: (cb: (s: {
+      speechWork?: SpeechWork; cancelling?: boolean;
       paused: boolean;
       currentId: string | null;
       queueLength: number;
       queueIds: string[];
     }) => void) => {
       const wrapped = (_e: unknown, payload: {
+        speechWork?: SpeechWork; cancelling?: boolean;
         paused: boolean;
         currentId: string | null;
         queueLength: number;

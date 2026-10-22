@@ -15,6 +15,8 @@ import type { NativeSpeechService } from '../speech/service.js';
 import type { SpeechSelection } from '../../shared/native-speech.js';
 
 export interface PipelineContext {
+  signal?: AbortSignal;
+  onTranscriptionProgress?: (fraction: number) => void;
   nativeSpeech?: NativeSpeechService;
   speechSelection?: SpeechSelection;
   /** Resolves the summary template for a meeting (its own choice, its

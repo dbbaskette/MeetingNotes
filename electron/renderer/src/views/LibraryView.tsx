@@ -14,6 +14,7 @@ import { LibraryRow } from '../components/LibraryRow';
 import { VirtualMeetingList } from '../components/VirtualMeetingList';
 import { RecordButton } from '../components/RecordButton';
 import { OrganizedLibrary } from '../components/OrganizedLibrary';
+import { GroupBrief } from '../components/GroupBrief';
 import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
 import { ModalShell } from '../components/ModalShell';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
@@ -91,6 +92,7 @@ export function LibraryView({
     refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
   } = useMeetingsStore();
   const [facets,setFacets]=useState<SearchFacets>({});
+  const [prepareGroupId, setPrepareGroupId] = useState<string | null>(null);
   const searchClientId=useRef(`library-${crypto.randomUUID()}`),searchRequestId=useRef(0);
   const [searchCompletion,setSearchCompletion]=useState<string|null>(null);
   const [newBaseline, setNewBaseline] = useState(arrivalBaseline);
@@ -630,6 +632,8 @@ export function LibraryView({
               onClick={() => setGroupOptionsOpen((open) => !open)}
               className="w-8 h-8 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">⋯</button>
             {groupOptionsOpen && <div role="menu" className="material-popover absolute right-0 top-full mt-1 z-50 w-40 bg-surface rounded-lg border border-surface-border shadow-pop p-1">
+              <button role="menuitem" className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken" onClick={() => { setGroupOptionsOpen(false); setPrepareGroupId(activeGroup.id); }}>Prepare next meeting</button>
+              <button role="menuitem" className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken" onClick={() => { setGroupOptionsOpen(false); void api.groups.pin(activeGroup.id, !activeGroup.pinned).then(refreshGroups).catch(error => toast.show({ message: String(error), variant: 'error' })); }}>{activeGroup.pinned ? 'Unpin group' : 'Pin group'}</button>
               <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('rename'); setGroupError(null); }}
                 className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken">Rename group…</button>
               <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('delete'); setGroupError(null); }}
@@ -842,6 +846,8 @@ export function LibraryView({
             onFilterGroup={(id, filter) => { changeGroup(id); setLibFilter(filter); }}
             onFocusGroup={changeGroup}
             onRenameGroup={(id) => { setTargetGroupId(id); setGroupDialog('rename'); setGroupError(null); }}
+            onPrepareGroup={setPrepareGroupId}
+            onPinGroup={(id, pinned) => { void api.groups.pin(id, pinned).then(refreshGroups).catch(error => toast.show({ message: String(error), variant: 'error' })); }}
             onDeleteGroup={(id) => { setTargetGroupId(id); setGroupDialog('delete'); setGroupError(null); }}
           />;
           if (!isSearching) return (
@@ -931,6 +937,7 @@ export function LibraryView({
 
       {moveSelection && <MoveToGroupDialog ids={moveSelection.ids} hiddenCount={moveSelection.hiddenCount} meeting={moveSelection.meeting}
         onClose={() => setMoveSelection(null)} onChanged={() => void invalidate()} />}
+      {prepareGroupId && <GroupBrief id={prepareGroupId} name={groups.find(group => group.id === prepareGroupId)?.name ?? 'this group'} onClose={() => setPrepareGroupId(null)} onOpen={id => onOpen(id, {})} />}
 
       {groupDialog === 'create' && <GroupNameDialog
         mode="create" name="" error={groupError} busy={groupBusy}
@@ -1295,6 +1302,10 @@ function QueueBanner({
           </div>
         )}
       </div>
+      {status.currentId && <button className="text-xs text-danger shrink-0" disabled={status.cancelling} onClick={() => {
+        void api.pipeline.cancel(status.currentId!).then(() => toast.show({ message: 'Stopping this meeting only. Original audio is retained.', durationMs: 4000 }))
+          .catch(error => toast.show({ message: String(error), variant: 'error' }));
+      }}>{status.cancelling ? 'Cancelling…' : 'Cancel current'}</button>}
       {status.paused ? (
         <button
           onClick={() => void resume()}

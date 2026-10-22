@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { shortId } from '../lib/slug.js';
 import type { ActionItem } from '../lib/action-item-schema.js';
+import { ActionFilterSchema, type ActionFilter, type ActionPage, resolveSpeakerLabels } from '../../shared/productivity.js';
 
 /** An action item as produced by the extract stage after provenance
  *  matching: the model's { text, owner, due_date } plus the verbatim
@@ -33,6 +34,38 @@ function row(r: Record<string, unknown>): ActionItemRow {
 export class ActionItemsRepo {
   private deleted = new Map<string,{snapshot:Record<string,unknown>;revision:number;expires:number}>();
   constructor(private readonly db: Database.Database) {}
+  live(filter: ActionFilter, me: { id: string | null; name: string | null }): ActionPage {
+    const parsed = ActionFilterSchema.parse(filter);
+    const conditions = ["a.status!='done'", 'm.deleted_at IS NULL'];
+    const params: Record<string, string | number | null> = {};
+    const owner = "COALESCE(a.owner_name,sp.display_name)";
+    if (parsed.owner === 'mine') {
+      conditions.push(`(a.owner_speaker_id=@me OR (a.owner_speaker_id IS NULL AND ${owner} COLLATE NOCASE=@name))`);
+      params.me = me.id; params.name = me.name;
+    } else if (parsed.owner !== 'all') { conditions.push(`${owner}=@owner COLLATE NOCASE`); params.owner = parsed.owner; }
+    if (parsed.groupId) { conditions.push('m.group_id=@groupId'); params.groupId = parsed.groupId; }
+    if (parsed.due === 'undated') conditions.push('a.due_date IS NULL');
+    else if (parsed.due === 'overdue') conditions.push("a.due_date < date('now','localtime')");
+    else if (parsed.due === 'soon') conditions.push("a.due_date BETWEEN date('now','localtime') AND date('now','localtime','+7 days')");
+    const join = 'FROM action_items a JOIN meetings m ON m.id=a.meeting_id LEFT JOIN speakers sp ON sp.id=a.owner_speaker_id LEFT JOIN groups g ON g.id=m.group_id';
+    const where = conditions.join(' AND ');
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n ${join} WHERE ${where}`).get(params) as { n: number }).n;
+    const rows = this.db.prepare(`SELECT a.id,a.meeting_id AS meetingId,m.title AS meetingTitle,a.text,
+      ${owner} AS ownerName,a.due_date AS dueDate,g.name AS groupName,m.status='processing' AS processing
+      ${join} WHERE ${where} ORDER BY a.due_date IS NULL,a.due_date,m.started_at DESC,a.id LIMIT 100 OFFSET @offset`).all({ ...params, offset: parsed.offset }) as (Omit<ActionPage['items'][number], 'processing'> & { processing: number })[];
+    const owners = (this.db.prepare(`SELECT DISTINCT ${owner} AS name ${join} WHERE a.status!='done' AND m.deleted_at IS NULL AND ${owner} IS NOT NULL ORDER BY name COLLATE NOCASE`).all() as { name: string }[]).map(row => row.name);
+    return { items: rows.map(row => ({ ...row, processing: !!row.processing })), total, owners, identified: !!(me.id || me.name) };
+  }
+  resolveLabels(meetingId: string, names: Record<string, string>): void {
+    const update = this.db.prepare('UPDATE action_items SET text=?,owner_name=?,source_quote=? WHERE id=?');
+    this.db.transaction(() => {
+      for (const item of this.listByMeeting(meetingId)) {
+        const text = resolveSpeakerLabels(item.text, names), owner = item.ownerName ? resolveSpeakerLabels(item.ownerName, names) : null;
+        const quote = item.sourceQuote ? resolveSpeakerLabels(item.sourceQuote, names) : null;
+        if (text !== item.text || owner !== item.ownerName || quote !== item.sourceQuote) update.run(text, owner, quote, item.id);
+      }
+    })();
+  }
   findById(id:string):ActionItemRow|null{const found=this.db.prepare('SELECT * FROM action_items WHERE id=?').get(id) as Record<string,unknown>|undefined;return found?row(found):null;}
 
   replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {

@@ -6,6 +6,16 @@ import { SearchOwners } from './owners.js';
 import { ripgrepSearchDetailed } from './ripgrep-search.js';
 import { FacetsSchema } from './facets.js';
 describe('owned search', () => {
+  it('scans only eligible folders, including an empty scope and a multi-batch scope', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-scoped-search-'));
+    try {
+      const folders = Array.from({ length: 130 }, (_, i) => path.join(root, String(i)));
+      for (const folder of folders) { fs.mkdirSync(folder); fs.writeFileSync(path.join(folder, 'summary.md'), 'needle'); }
+      expect((await ripgrepSearchDetailed(root, 'needle', { paths: [] })).matches).toEqual([]);
+      expect((await ripgrepSearchDetailed(root, 'needle', { paths: folders.slice(0, 2) })).matches).length(2);
+      expect((await ripgrepSearchDetailed(root, 'needle', { paths: folders })).matches).length(130);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
   it('bounds real subprocess concurrency during a rapid burst and cancels a running child', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-search-burst-'));
     try {

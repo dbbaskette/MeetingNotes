@@ -132,6 +132,7 @@ export function SearchPalette({
           </svg>
           <input
             ref={inputRef}
+            role="combobox" aria-expanded={true} aria-controls="meeting-search-results" aria-activedescendant={results[selected] ? `meeting-search-result-${selected}` : undefined}
             maxLength={500}
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -146,7 +147,7 @@ export function SearchPalette({
           </kbd>
         </div>
         <div className="px-4 py-2"><SearchFilters facets={facets} onChange={setFacets} query={q} onQuery={setQ}/>{completion&&<p role="status" className="text-xs text-status-warnText">{completion}</p>}</div>
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div id="meeting-search-results" role="listbox" aria-label="Matching meetings" className="max-h-[60vh] overflow-y-auto">
           {(() => {
             const view = paletteSearchView({ query: q || (Object.keys(facets).length ? 'filtered meetings' : ''), loading, error, results });
             if (view.kind === 'hint') {
@@ -185,6 +186,7 @@ export function SearchPalette({
             if (view.kind === 'loading' && results.length === 0) return null;
             return results.map((r, i) => (
               <ResultRow
+                id={`meeting-search-result-${i}`}
                 key={`${r.meetingId}-${r.source}-${i}`}
                 result={r}
                 query={q}
@@ -202,8 +204,9 @@ export function SearchPalette({
 }
 
 function ResultRow({
-  result, query, active, onHover, onClick,
+  result, query, active, onHover, onClick, id,
 }: {
+  id: string;
   result: SearchResult;
   query: string;
   active: boolean;
@@ -211,8 +214,11 @@ function ResultRow({
   onClick: (e: React.MouseEvent) => void;
 }): JSX.Element {
   const highlighted = useMemo(() => highlight(result.snippet, query), [result.snippet, query]);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (active) rowRef.current?.scrollIntoView({ block: 'nearest' }); }, [active]);
   return (
     <div
+      ref={rowRef} id={id} role="option" aria-selected={active}
       onMouseMove={onHover}
       onClick={onClick}
       className={`px-4 py-3 cursor-pointer border-b border-surface-border/50 last:border-0

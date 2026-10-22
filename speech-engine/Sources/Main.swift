@@ -36,7 +36,9 @@ enum SpeechMain {
                 result = ["installed": true]
             case "transcribe":
                 guard #available(macOS 26, *) else { throw SpeechFailure("Apple transcription requires macOS 26 or later.") }
-                result = try await AppleTranscription.transcribe(request)
+                result = try await AppleTranscription.transcribe(request) { fraction in
+                    emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
+                }
             case "provision-speakers": result = try await SpeakerProcessing.provision(request)
             case "diarize": result = try await SpeakerProcessing.diarize(request)
             default: throw SpeechFailure("Unknown speech operation.")

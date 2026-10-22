@@ -322,6 +322,32 @@ function baseServices(overrides: Record<string, unknown> = {}): IpcServices {
 }
 
 describe('registerIpcHandlers', () => {
+  it('later speaker naming resolves exact labels in notes and tasks after capturing history', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-label-resolution-'));
+    const db = openDb(':memory:');
+    try {
+      const meetings = new MeetingsRepo(db), speakers = new SpeakersRepo(db), actionItems = new ActionItemsRepo(db);
+      meetings.insert({ id: 'm', slug: 'm', title: 'Planning', audioPath: '/synthetic', startedAt: null, durationS: 60, status: 'done', pipelineStage: 'done' });
+      const person = speakers.create({ displayName: 'Dana' });
+      speakers.linkToMeeting('m', 'SPEAKER_00', null, 0);
+      actionItems.replaceForMeeting('m', [{ text: 'SPEAKER_00 will call Dan', owner: null, due_date: null }]);
+      const task = actionItems.listByMeeting('m')[0]!; actionItems.update(task.id, { ownerName: 'SPEAKER_00' });
+      const folder = path.join(root, 'meetings', 'm'); await fs.mkdir(folder, { recursive: true });
+      const summary = path.join(folder, 'summary.md'); await fs.writeFile(summary, '## Notes\nSPEAKER_00 follows up. Dan keeps his name. My manual edit.');
+      const capture = vi.fn(() => {
+        expect(fsSync.readFileSync(summary, 'utf8')).toContain('SPEAKER_00');
+        expect(actionItems.listByMeeting('m')[0]?.ownerName).toBe('SPEAKER_00');
+      });
+      const handle = vi.fn(); registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({ libraryRoot: root, meetings, speakers, actionItems, notesHistory: { capture } }));
+      const assign = handle.mock.calls.find(call => call[0] === 'speakers:assign')![1] as TestHandler;
+      await assign(ipcEvent, { meetingId: 'm', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: person });
+      expect(capture).toHaveBeenCalledOnce();
+      expect(fsSync.readFileSync(summary, 'utf8')).toBe('## Notes\nDana follows up. Dan keeps his name. My manual edit.');
+      expect(actionItems.listByMeeting('m')[0]).toMatchObject({ ownerName: 'Dana', text: 'Dana will call Dan' });
+      meetings.updateStatus('m', 'processing');
+      expect(() => assign(ipcEvent, { meetingId: 'm', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: person })).toThrow(/finish processing/);
+    } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+  });
   it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
     const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-save-cache-'));
     try {
@@ -717,6 +743,7 @@ describe('registerIpcHandlers', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
+      meetings: { findById: () => ({ status: 'awaiting_user' }) },
       speakers: {
         list: () => [],
         rename,
@@ -744,7 +771,9 @@ describe('registerIpcHandlers', () => {
     const handle = vi.fn();
     const fakeIpc = { handle } as unknown as IpcMain;
     const services = baseServices({
+      meetings: { findById: () => ({ status: 'awaiting_user' }) },
       speakers: {
+        meetingIdsForSpeaker: () => ['m1', 'm3'],
         list: () => [],
         findById: (id: string) => (known.has(id) ? { id, displayName: id } : null),
         mergeSpeakers,

@@ -51,7 +51,7 @@ export class SpeakersRepo {
    *  deleted. Returns a map of `loserId -> winnerId` so callers can update
    *  references kept in other databases (e.g. the user-speaker pointer in
    *  settings). Idempotent — running it twice with no new dups is a no-op. */
-  dedupeByDisplayName(): Map<string, string> {
+  dedupeByDisplayName(preserveProfiles?: (source: string, target: string) => void): Map<string, string> {
     const groups = this.db.prepare(`
       SELECT id, created_at, LOWER(TRIM(display_name)) AS key
       FROM speakers
@@ -81,6 +81,7 @@ export class SpeakersRepo {
 
     this.db.transaction(() => {
       for (const [loser, winner] of remap) {
+        preserveProfiles?.(loser, winner);
         updateMeetingSpeakers.run(winner, loser);
         updateActionItems.run(winner, loser);
         deleteSpeaker.run(loser);
@@ -104,19 +105,15 @@ export class SpeakersRepo {
 
   /** Merge one roster speaker into another: every meeting_speakers link and
    *  action-item ownership moves source → target, then the source roster row
-   *  is deleted. When a meeting links BOTH speakers, the target's link wins
-   *  and the source's row is dropped (re-pointing it would leave two local
-   *  labels claiming the same person with no way to tell them apart).
+   *  is deleted. Both local labels survive when a meeting links both people:
+   *  the diarizer may have split one person's voice into several labels.
    *  Returns the ids of meetings that referenced the source, so callers can
    *  re-merge their transcripts. */
   mergeSpeakers(sourceId: string, targetId: string): string[] {
     const affected = this.meetingIdsForSpeaker(sourceId);
     this.db.transaction(() => {
-      this.db.prepare(`
-        DELETE FROM meeting_speakers
-        WHERE roster_speaker_id = ?
-          AND meeting_id IN (SELECT meeting_id FROM meeting_speakers WHERE roster_speaker_id = ?)
-      `).run(sourceId, targetId);
+      // Multiple diarizer labels may legitimately be one person. Preserve both
+      // labels so a roster merge never turns their transcript lines unnamed.
       this.db.prepare('UPDATE meeting_speakers SET roster_speaker_id = ? WHERE roster_speaker_id = ?')
         .run(targetId, sourceId);
       this.db.prepare('UPDATE action_items SET owner_speaker_id = ? WHERE owner_speaker_id = ?')

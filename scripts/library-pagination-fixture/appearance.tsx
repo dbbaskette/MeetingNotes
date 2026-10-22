@@ -15,6 +15,7 @@ HTMLMediaElement.prototype.setAttribute = function (name, value) {
 const fixture = { captures: 0, preparations: 0, confirmations: 0 };
 (window as any).fixture = fixture;
 const groupId = '00000000-0000-4000-8000-000000000001';
+let pinned = false, actionDone = false;
 const meeting: MeetingDetail = {
   id: 'design', title: 'Product planning — autumn release', groupId, groupName: 'Product & design',
   startedAt: '2026-10-15T14:00:00Z', durationS: 1800, pipelineStage: 'done', status: 'done',
@@ -36,7 +37,14 @@ const rows = Array.from({ length: 8 }, (_, i) => ({ ...meeting, id: `design-${i}
   actionItemsCount: 1, unidentifiedCount: 0,
 }));
 const counts = { all: 8, pending: 0, processing: 0, done: 8, failed: 0 };
-window.api.groups.list = async () => ({ groups: [{ id: groupId, name: meeting.groupName!, count: 6 }], allCount: 8, ungroupedCount: 2 }) as any;
+window.api.groups.list = async () => ({ groups: [{ id: groupId, name: meeting.groupName!, count: 6, pinned }], allCount: 8, ungroupedCount: 2 }) as any;
+window.api.groups.pin = async (_id, value) => { pinned = value; };
+const task = { id: 'live-action', meetingId: 'design', meetingTitle: meeting.title, text: 'Share the revised design for feedback', ownerName: 'Bob', dueDate: '2026-10-30', groupName: meeting.groupName, processing: false };
+window.api.actionItems.list = async filter => ({ items: actionDone || filter.due === 'undated' ? [] : [task], total: actionDone || filter.due === 'undated' ? 0 : 1, owners: ['Bob'], identified: true });
+window.api.actionItems.setStatus = async () => { actionDone = true; };
+window.api.groups.brief = async () => ({ meetings: [{ id: 'design', title: meeting.title, startedAt: meeting.startedAt!, decisions: ['Keep expandable meeting groups'], questions: ['When should we share the prototype?'], overview: 'Review the autumn release', missingNotes: false }], actions: [task], openActionCount: 1 });
+window.api.speakers.profiles = async () => [{ space: 'synthetic-native', confirmedAt: '2026-10-22T12:00:00Z', source: 'Planning · SPEAKER_00', canUndo: true }];
+window.api.speakers.review = async () => [{ label: 'SPEAKER_00', reason: 'Needs at least 10 seconds of clear speech across two turns.', suggestions: [] }];
 window.api.meetings.listPage = async query => {
   const items = rows.filter(row => query.groupId === undefined || row.groupId === query.groupId);
   return { items, total: items.length, nextCursor: null, counts } as any;
@@ -76,6 +84,7 @@ window.localStorage.setItem('libraryViewMode', 'organized');
 window.localStorage.setItem('libraryExpandedGroups', JSON.stringify(['ungrouped', groupId]));
 const { LibraryView } = await import('../../electron/renderer/src/views/LibraryView');
 const { WeeklyView } = await import('../../electron/renderer/src/views/WeeklyView');
+const { ActionsView } = await import('../../electron/renderer/src/views/ActionsView');
 const { SettingsView } = await import('../../electron/renderer/src/views/SettingsView');
 const { MeetingDetailView } = await import('../../electron/renderer/src/views/MeetingDetailView');
 const { OnboardingView } = await import('../../electron/renderer/src/views/OnboardingView');
@@ -87,6 +96,7 @@ function Fixture(): JSX.Element {
     {view === 'library' ? <LibraryView onOpen={() => setView('detail')} onNav={setView}
       onOpenSearch={() => {}} liveRecording={null} onStartRecording={() => {}} onRecordingStopped={() => {}} />
       : view === 'weekly' ? <WeeklyView onNav={setView} onOpenMeeting={() => setView('detail')} />
+      : view === 'actions' ? <ActionsView onNav={setView} onOpen={() => setView('detail')} />
       : view === 'settings' ? <SettingsView onNav={setView} />
       : view === 'onboarding' ? <OnboardingView onFinished={() => setView('library')} />
       : <MeetingDetailView id="design" onBack={() => setView('library')} />}
