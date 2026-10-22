@@ -70,8 +70,38 @@ explicitly select the parallel path. All 42 tests across those three files pass.
 - Saved profile cache validates file identity and explicit mutations invalidate it.
   Search narrows folder input before scanning and retains cancellation/limits.
 
-## Final gates
+## Final verification — 2026-10-22
 
-Full local CI, native PCM tests, final memory results, release commit and installer
-verification are pending at this development checkpoint. This is not yet a shipment
-claim.
+The application implementation is unchanged since `d066a15`. CI evidence is reused
+across test-fixture and documentation-only follow-ups, not represented as one
+uninterrupted successful run:
+
+- Full Tart run at `f3f315a1020570b8998f00af0fd2706b3bf566b4`: **1,393 tests
+  passed**, six optional tests skipped (164 files passed, two skipped). Native
+  audio-helper synthetic tests, renderer/main/fixture types, build, docs, lint and
+  browse benchmark passed. This run stopped at an outdated capture-fixture bridge
+  missing the new speaker-review method; the rename fixture shared that omission.
+- Corrected synthetic bridges only; no app-code changes. The complete isolated
+  renderer suite at `1b90061db64dbd3b173441ffe000198d03eed130` passed all twelve
+  fixture modes and the speech-beta comparison UI. Types, build, docs and lint
+  also passed again. Both task-owned VMs were deleted by the runner.
+- Guest environment: arm64 macOS 27.0 (26A428), Node 22.23.2, Electron 44.7.0.
+  Physical native/PCM/memory checks: arm64 macOS 27.0.1 (26A434).
+- Logs under `~/Library/Logs/MacOS Test Suite/meetingnotes/`:
+  `meetingnotes-test-20261022210326-9431-0f01af3b` (full checks), and
+  `meetingnotes-test-20261022210943-21453-9b107c64` (renderer completion).
+
+## Installer
+
+Built from `f3f315a` with the unchanged tested app source. Final source changes
+after that revision are UI fixtures and release documentation only.
+
+- Version 1.19.0, arm64, minimum macOS 26.0.0; both native helpers bundled.
+- All 181 packaged application files matched `dist` byte-for-byte.
+- Deep/strict code-signature verification, DMG verification and ZIP integrity passed.
+- Apple Development signing, not Developer ID notarization. No app installation,
+  app restart, real recording or installer VM test performed.
+- Removed only the loose packaging `.app` to prevent duplicate registration;
+  the verified DMG/ZIP retain a recoverable copy.
+- DMG SHA-256: `dda4aee891eb25604433ff3f7dd35891498784e1506f8639909ad0dff88ec1e0`.
+- ZIP SHA-256: `5b1425716dc93ac4667326e844aab5143fffd4af007ce43b12354b1366d9b1aa`.
