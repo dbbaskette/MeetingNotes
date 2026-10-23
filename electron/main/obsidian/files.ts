@@ -10,6 +10,17 @@ export function identity(file: string): string {
     throw new Error('Expected an existing folder, not a symbolic link');
   return `${s.dev}:${s.ino}`;
 }
+/** Device numbers may change after a reboot/remount. Only accept a coherent
+ * device change for BOTH existing directories; callers must also verify ownership. */
+export function deviceRenumbered(vault: string, root: string | null, currentVault: string, currentRoot: string): boolean {
+  const parse = (value: string | null) => value?.match(/^(\d+):(\d+)$/);
+  const previousVault = parse(vault), previousRoot = parse(root);
+  const actualVault = parse(currentVault), actualRoot = parse(currentRoot);
+  return Boolean(previousVault && previousRoot && actualVault && actualRoot
+    && previousVault[1] === previousRoot[1] && actualVault[1] === actualRoot[1]
+    && previousVault[1] !== actualVault[1]
+    && previousVault[2] === actualVault[2] && previousRoot[2] === actualRoot[2]);
+}
 export function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return (

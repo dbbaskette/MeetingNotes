@@ -16,7 +16,7 @@ import type { ActionItemsRepo } from '../storage/action-items-repo.js';
 import type { SettingsRepo } from '../storage/settings-repo.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
 import {backupIsLocked} from '../storage/backup-gate.js';
-import { atomicWrite, hash, identity, inside, readText, safePath, validateVault } from './files.js';
+import { atomicWrite, deviceRenumbered, hash, identity, inside, readText, safePath, validateVault } from './files.js';
 import {
   browse,
   filename,
@@ -106,19 +106,36 @@ export class ObsidianSync {
     if (!d) throw new Error('Destination is not registered. Configure sync again.');
     return d;
   }
-  private root(d: Destination): string {
+  private root(d: Destination, refreshIdentity = false): string {
     // Never recreate a vanished mount point or an owned folder that was removed.
-    if (identity(d.vault) !== d.identity)
-      throw new Error('Vault is unavailable or was replaced. Re-select it before syncing.');
+    const vaultIdentity = identity(d.vault);
     identity(path.join(d.vault, '.obsidian'));
     const root = safePath(d.vault, d.folder);
-    if (d.root_identity && identity(root) !== d.root_identity)
+    let rootIdentity: string;
+    try { rootIdentity = identity(root); }
+    catch (error) {
+      if (vaultIdentity !== d.identity)
+        throw new Error('Vault is unavailable or was replaced. Re-select it before syncing.');
+      throw error;
+    }
+    const renumbered = deviceRenumbered(d.identity, d.root_identity, vaultIdentity, rootIdentity);
+    if (vaultIdentity !== d.identity && !renumbered)
+      throw new Error('Vault is unavailable or was replaced. Re-select it before syncing.');
+    if (d.root_identity && rootIdentity !== d.root_identity && !renumbered)
       throw new Error('Sync folder was moved or replaced. Restore it before retrying.');
     const marker = readText(safePath(root, '.meetingnotes-owner.json'));
     if (marker !== JSON.stringify({ owner: this.owner, destination: d.id }))
       throw new Error('Sync folder ownership is missing or belongs to another library');
     identity(safePath(root, 'Notes'));
     fs.accessSync(root, fs.constants.W_OK);
+    // Preview/folder lookup remain read-only. Persist only after all directory,
+    // ownership and access checks pass at the start of an enabled sync batch.
+    if (renumbered && refreshIdentity) {
+      this.db.prepare('UPDATE obsidian_destinations SET identity=?, root_identity=? WHERE id=?')
+        .run(vaultIdentity, rootIdentity, d.id);
+      d.identity = vaultIdentity;
+      d.root_identity = rootIdentity;
+    }
     return root;
   }
   preview(input: unknown): ObsidianPreview {
@@ -371,7 +388,7 @@ export class ObsidianSync {
     this.running = true;
     try {
       const d = this.dest(c),
-        root = this.root(d);
+        root = this.root(d, true);
       const candidates = this.db
         .prepare(
           `SELECT r.meeting_id AS id,r.revision FROM obsidian_revisions r
