@@ -109,6 +109,46 @@ describe('Obsidian sync', () => {
     sync.retry(true); await idle();
     expect(read.mock.calls.some(([file]) => typeof file === 'string' && file.endsWith('summary.md'))).toBe(true);
   });
+  it('recovers the same owned vault after device renumbering without changing a preview', async () => {
+    await enable();
+    const original = db.prepare('SELECT identity,root_identity FROM obsidian_destinations').get() as { identity: string; root_identity: string };
+    const previousDevice = String(Number(original.identity.split(':')[0]) + 1);
+    const before = { identity: `${previousDevice}:${original.identity.split(':')[1]}`, root_identity: `${previousDevice}:${original.root_identity.split(':')[1]}` };
+    db.prepare('UPDATE obsidian_destinations SET identity=?,root_identity=?').run(before.identity, before.root_identity);
+    sync = make();
+    expect(sync.preview(opts()).destination).toBe(fs.realpathSync(root()));
+    expect(db.prepare('SELECT identity,root_identity FROM obsidian_destinations').get()).toEqual(before);
+    meetings.updateTitle('one', 'After remount');
+    await sync.run();
+    expect(sync.status().error).toBeNull();
+    expect(db.prepare('SELECT identity,root_identity FROM obsidian_destinations').get()).toEqual(original);
+    expect(fs.readFileSync(exported(), 'utf8')).toContain('After remount');
+  });
+  it.each(['root inode', 'vault inode', 'root device', 'owner', 'destination', 'missing root identity'])(
+    'refuses device recovery with a mismatched %s and preserves all bytes', async mismatch => {
+      await enable();
+      const original = db.prepare('SELECT identity,root_identity FROM obsidian_destinations').get() as { identity: string; root_identity: string };
+      const previousDevice = String(Number(original.identity.split(':')[0]) + 1);
+      const vaultInode = original.identity.split(':')[1]!, rootInode = original.root_identity.split(':')[1]!;
+      const before = { identity: `${previousDevice}:${mismatch === 'vault inode' ? Number(vaultInode) + 1 : vaultInode}`,
+        root_identity: mismatch === 'missing root identity' ? null : `${mismatch === 'root device' ? Number(previousDevice) + 1 : previousDevice}:${mismatch === 'root inode' ? Number(rootInode) + 1 : rootInode}` };
+      db.prepare('UPDATE obsidian_destinations SET identity=?,root_identity=?').run(before.identity, before.root_identity);
+      if (mismatch === 'owner' || mismatch === 'destination') {
+        const file = path.join(root(), '.meetingnotes-owner.json');
+        const marker = JSON.parse(fs.readFileSync(file, 'utf8'));
+        marker[mismatch] = 'another-library';
+        fs.writeFileSync(file, JSON.stringify(marker));
+      }
+      const file = exported(), content = fs.readFileSync(file, 'utf8');
+      meetings.updateTitle('one', 'Must not export');
+      sync = make();
+      expect(() => sync.preview(opts())).toThrow();
+      await sync.run();
+      expect(sync.status().error).toBeTruthy();
+      expect(db.prepare('SELECT identity,root_identity FROM obsidian_destinations').get()).toEqual(before);
+      expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    },
+  );
   it('rechecks content when options change, including a previously used destination', async () => {
     await enable(); expect(fs.readFileSync(exported(),'utf8')).not.toContain('A long transcript');
     sync.enable(sync.preview({...opts(),transcript: true}).token); await idle();
