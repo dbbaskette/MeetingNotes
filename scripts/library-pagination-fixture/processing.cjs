@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
     await settle();
   };
   await win.loadURL(base + '?startup&processing');
-  await until('!!window.fixture && document.querySelectorAll("section [aria-expanded=true]").length === 3');
+  await until('!!window.fixture && document.querySelectorAll("section [aria-controls^=group-rows-][aria-expanded=true]").length === 3');
   await settle();
   await run('window.fixture.selection.getState().toggle("selection-1"); window.fixture.selection.getState().toggle("selection-12")');
   await until(`!!${button('Process (1)')}`);
@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
   if (process.env.MN_FIXTURE_RESULTS) fs.writeFileSync(path.join(process.env.MN_FIXTURE_RESULTS, 'processing-after.png'), (await win.webContents.capturePage()).toPNG());
   await win.loadURL(base + '?startup&processing&live');
   const stopButton = `[...document.querySelectorAll('button')].find(button=>button.textContent.trim().endsWith('Stop'))`;
-  await until(`!!${stopButton} && document.querySelectorAll('section [aria-expanded=true]').length === 3`);
+  await until(`!!${stopButton} && document.querySelectorAll('section [aria-controls^=group-rows-][aria-expanded=true]').length === 3`);
   await run(`${scroller}.scrollTop=1700`); await settle();
   assert.ok(await run(`(() => { const stop=${stopButton}, rect=stop.getBoundingClientRect(); return rect.top>=0 && rect.bottom<innerHeight && stop.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)); })()`), 'Capture Stop remains reachable while meetings scroll');
   assert.equal(await run(`document.documentElement.scrollHeight > innerHeight + 1`), false);
