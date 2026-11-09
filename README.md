@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.19.2-brightgreen)](docs/releases/v1.19.2.md)
+[![Version](https://img.shields.io/badge/version-1.20.0-brightgreen)](docs/releases/v1.20.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -34,9 +34,11 @@ Saved weekly reports remain immutable. Transcription and voice analysis show sep
 progress, long meetings use memory-saving scheduling, and **Cancel current** stops
 only the current meeting while retaining its audio. See the [1.19 release notes](docs/releases/v1.19.0.md).
 
-**1.19.2** fixes Obsidian sync falsely reporting an existing vault as unavailable
-after disk device numbers change across a reboot or remount. It also includes
-the 1.19.1 startup packaging fix. See the [hotfix notes](docs/releases/v1.19.2.md).
+**1.20** lets you delete unwanted captures from **Needs attention → Capture recovery**
+without hunting for them in Finder. **Delete…** lists the recording's files by what
+they hold, then moves them to the macOS Trash. It also fixes Obsidian sync falsely
+reporting an existing vault as unavailable after a reboot or remount changes disk
+device numbers. See the [1.20 release notes](docs/releases/v1.20.0.md).
 
 ## Optional automatic voice matching
 

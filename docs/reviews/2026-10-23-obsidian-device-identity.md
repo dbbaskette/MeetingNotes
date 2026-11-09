@@ -1,5 +1,7 @@
 # Obsidian device identity recovery — 1.19.2
 
+> Built locally as 1.19.2 but never published; the fix shipped in 1.20.0.
+
 ## Diagnosis
 
 The configured iCloud vault and its managed sync folder both existed. Their

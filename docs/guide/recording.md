@@ -8,7 +8,7 @@
 
 Each recording writes up to three AAC files to the Library's `recordings/` directory (by default `~/Documents/MeetingNotes/recordings/`; mono, 128 kbps ≈ 60 MB/hour): the **mixed** file (used by the pipeline), a `.voice` microphone stem, and a `.system` app-audio stem. The live row reports Mic, App, and File health independently so a silent source is distinguishable from a stalled output. When app audio is missing, it offers an explicit restart using **All system audio**.
 
-If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Finder**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched.
+If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Show in Finder**, **Delete…**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched. **Delete…** lists the capture's files (combined recording, your microphone, app audio) with their sizes and names, then moves them to the macOS Trash so you can still put them back from Finder. Nothing is deleted if a Library meeting uses one of the files.
 
 ## From the menu bar or a shortcut
 
