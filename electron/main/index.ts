@@ -477,6 +477,7 @@ app.whenReady().then(async () => {
     meetings,
     catalog: catalogRecording,
     reveal: (audioPath) => revealPathInFinder(audioPath, shell),
+    trash: (file) => shell.trashItem(file),
   });
   protocol.handle('recovery-audio', recoveryMediaHandler(recordingRecovery));
 

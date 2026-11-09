@@ -128,4 +128,56 @@ describe('RecordingRecoveryService', () => {
     expect(dismissRecovery).not.toHaveBeenCalled();
     await expect(service.reveal('missing')).rejects.toThrow('Recovery item not found');
   });
+
+  function discardFixture(options: { meetingFile?: 'primary' | 'voice' | 'system'; files?: Array<'primary' | 'voice' | 'system'> } = {}) {
+    const dir = fixtureDir('mn-recovery-discard-');
+    const primary = path.join(dir, 'recording-1.m4a');
+    const paths = { primary, voice: path.join(dir, 'recording-1.voice.m4a'), system: path.join(dir, 'recording-1.system.m4a') };
+    for (const key of options.files ?? ['primary', 'voice']) fs.writeFileSync(paths[key], `${key} data`);
+    const session = {
+      id: 'old', helperPid: 1, targetPid: null, targetLabel: 'Zoom', outputPath: primary,
+      startedAt: '2026-08-12T14:00:00.000Z', finalizedAt: null, status: 'error', dismissedAt: null,
+    } as const;
+    const dismissRecovery = vi.fn();
+    const trash = vi.fn(async (file: string) => { fs.rmSync(file); });
+    const service = new RecordingRecoveryService({
+      sessions: { findRecoverable: () => [session], findById: () => session, dismissRecovery } as unknown as RecordingSessionsRepo,
+      meetings: { findByAudioPath: (file: string) => options.meetingFile && file === paths[options.meetingFile] ? { id: 'm1' } : null } as unknown as MeetingsRepo,
+      probe: vi.fn(async () => { throw new Error('invalid'); }),
+      catalog: vi.fn(), reveal: vi.fn(), trash,
+    });
+    return { service, paths, trash, dismissRecovery };
+  }
+
+  it('lists the files that belong to each capture so they can be told apart', async () => {
+    const { service } = discardFixture({ files: ['primary', 'voice', 'system'] });
+    const [item] = await service.list();
+    expect(item!.files).toEqual([
+      { name: 'recording-1.m4a', role: 'combined', sizeBytes: 12 },
+      { name: 'recording-1.voice.m4a', role: 'microphone', sizeBytes: 10 },
+      { name: 'recording-1.system.m4a', role: 'app', sizeBytes: 11 },
+    ]);
+  });
+
+  it('moves every remaining file of a capture to the Trash and removes it from the list', async () => {
+    const { service, paths, trash, dismissRecovery } = discardFixture();
+    expect(await service.discard('old')).toEqual({ trashed: 2 });
+    expect(trash.mock.calls.map(([file]) => file)).toEqual([paths.primary, paths.voice]);
+    expect(dismissRecovery).toHaveBeenCalledWith('old');
+  });
+
+  it('only clears the list entry when no capture files are left', async () => {
+    const { service, trash, dismissRecovery } = discardFixture({ files: [] });
+    expect(await service.discard('old')).toEqual({ trashed: 0 });
+    expect(trash).not.toHaveBeenCalled();
+    expect(dismissRecovery).toHaveBeenCalledWith('old');
+  });
+
+  it('refuses to delete anything when a Library meeting uses one of the files', async () => {
+    const { service, paths, trash, dismissRecovery } = discardFixture({ meetingFile: 'voice' });
+    await expect(service.discard('old')).rejects.toThrow('recording-1.voice.m4a is used by a meeting in your Library');
+    expect(trash).not.toHaveBeenCalled();
+    expect(dismissRecovery).not.toHaveBeenCalled();
+    expect(fs.existsSync(paths.primary)).toBe(true);
+  });
 });

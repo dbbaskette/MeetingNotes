@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../ipc/client';
 import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
 import { RecoveryRow } from './RecoveryRow';
+import { formatBytes, formatRecordedAt, type RecoveryFileInput } from '../lib/recovery-files';
 
 export interface RecoveryInboxItem {
   id: string;
@@ -14,6 +15,7 @@ export interface RecoveryInboxItem {
   sizeBytes: number;
   canRecover: boolean;
   canTrim: boolean;
+  files: RecoveryFileInput[];
 }
 
 interface AttentionMeeting {
@@ -93,7 +95,7 @@ export function NeedsAttentionPanel({
               {group.items.map((item) => {
                 const rec = item.kind === 'recovery' ? recoveryById.get(item.id) : undefined;
                 if (rec) return <RecoveryRow key={rec.id} item={rec}
-                  detail={`${item.ageLabel} · ${reasonLabel(rec.reason)} · ${formatDuration(rec.durationS)} · ${formatBytes(rec.sizeBytes)}`}
+                  detail={`${formatRecordedAt(rec.startedAt) ?? item.ageLabel} · ${reasonLabel(rec.reason)} · ${formatDuration(rec.durationS)} · ${formatBytes(rec.sizeBytes)}`}
                   onOpen={onOpen} onChanged={onChanged} />;
                 return (
                   <div key={`${item.kind}:${item.id}`} className="flex items-center gap-3 text-sm">
@@ -140,9 +142,4 @@ function formatDuration(seconds: number | null): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60);
   return `${minutes}:${String(remainder).padStart(2, '0')}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

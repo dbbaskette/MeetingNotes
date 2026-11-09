@@ -12,6 +12,7 @@ interface RecoveryItem {
   id: string; targetLabel: string; startedAt: string; outputPath: string;
   status: string; reason: 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
   durationS: number | null; sizeBytes: number; canRecover: boolean; canTrim: boolean;
+  files: { name: string; role: 'combined' | 'microphone' | 'app'; sizeBytes: number }[];
 }
 let recoveryRequest = 0;
 
@@ -114,6 +115,7 @@ const IPC_CHANNELS = {
   recoveryPreview: 'recovery:preview',
   recoveryReveal: 'recovery:reveal',
   recoveryDismiss: 'recovery:dismiss',
+  recoveryDiscard: 'recovery:discard',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
@@ -406,6 +408,8 @@ const api = {
     preview: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryPreview, id) as Promise<{ url: string; durationS: number }>,
     reveal: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryReveal, id) as Promise<void>,
     dismiss: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryDismiss, id) as Promise<void>,
+    /** Move the recording's files to the macOS Trash and drop it from the list. */
+    discard: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.recoveryDiscard, id) as Promise<{ trashed: number }>,
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
