@@ -117,7 +117,7 @@ window.api = {
   recovery: { list: async () => startup && !rename ? Array.from({length: 113}, (_, index) => ({
     id: `recovery-${index}`, targetLabel: 'Synthetic call', startedAt: '2026-01-01T00:00:00Z',
     outputPath: `/tmp/synthetic-${index}.m4a`, status: 'orphaned', reason: 'unreadable',
-    durationS: null, sizeBytes: 1024, canRecover: false, canTrim: false,
+    durationS: null, sizeBytes: 1024, canRecover: false, canTrim: false, files: [],
   })) : [] }, trash: { list: async () => [] },
   speakers: { list: async () => [], review: async () => [] }, google: { authStatus: async () => ({ signedIn: false, email: null }) },
 } as any;

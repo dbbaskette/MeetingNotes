@@ -114,6 +114,7 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.recoveryPreview]: z.tuple([Id]),
   [C.recoveryReveal]: z.tuple([Id]),
   [C.recoveryDismiss]: z.tuple([Id]),
+  [C.recoveryDiscard]: z.tuple([Id]),
   [C.meetingDetectorDismiss]: z.tuple([handlerValidated]),
   [C.permissionsAudioGet]: none,
   [C.permissionsMicStatus]: none,

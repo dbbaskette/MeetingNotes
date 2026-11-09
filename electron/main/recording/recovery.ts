@@ -14,6 +14,12 @@ import type { CatalogResult } from '../library/catalog.js';
 const pExecFile = promisify(execFile);
 
 export type RecoveryReason = 'not-indexed' | 'microphone-only' | 'system-only' | 'unreadable';
+/** One file on disk that belongs to a capture: the combined recording or one of its stems. */
+export interface RecoveryFile {
+  name: string;
+  role: 'combined' | 'microphone' | 'app';
+  sizeBytes: number;
+}
 export interface RecoveryItem {
   id: string;
   targetLabel: string;
@@ -25,7 +31,11 @@ export interface RecoveryItem {
   sizeBytes: number;
   canRecover: boolean;
   canTrim: boolean;
+  /** Files of this capture that still exist on disk. */
+  files: RecoveryFile[];
 }
+
+const FILE_ROLES: RecoveryFile['role'][] = ['combined', 'microphone', 'app'];
 
 type Probe = (file: string) => Promise<AudioInfo>;
 type Trim = (source: string, destination: string, endSeconds: number, startSeconds: number) => Promise<void>;
@@ -66,6 +76,8 @@ export class RecordingRecoveryService {
     probe?: Probe;
     catalog: (audioPath: string) => Promise<CatalogResult>;
     reveal: (audioPath: string) => void | Promise<void>;
+    /** Move a file to the macOS Trash so a mistaken delete can be undone in Finder. */
+    trash?: (file: string) => Promise<void>;
     trim?: Trim;
   }) {}
 
@@ -125,7 +137,7 @@ export class RecordingRecoveryService {
   }
 
   private async exclusive<T>(id: string, action: () => Promise<T>): Promise<T> {
-    if (this.busy.has(id)) throw new Error('This recording is already being recovered.');
+    if (this.busy.has(id)) throw new Error('Another action is already running for this recording.');
     this.busy.add(id);
     try { return await action(); } finally { this.busy.delete(id); }
   }
@@ -190,6 +202,31 @@ export class RecordingRecoveryService {
     await this.deps.reveal(this.requireSession(id).outputPath);
   }
 
+  /**
+   * Move every file of an unwanted capture to the Trash, then remove it from
+   * the recovery list. Only paths derived from the stored session are touched,
+   * and a file a Library meeting still uses is never deleted.
+   */
+  async discard(id: string): Promise<{ trashed: number }> {
+    return this.exclusive(id, async () => {
+      const trash = this.deps.trash;
+      if (!trash) throw new Error('Deleting recordings is not available.');
+      const session = this.requireSession(id);
+      const stems = deriveStemPaths(session.outputPath);
+      const files = [session.outputPath, stems.voice, stems.system].filter((file) => {
+        try { return fs.statSync(file).isFile(); } catch { return false; }
+      });
+      const inUse = files.find((file) => this.deps.meetings.findByAudioPath(file));
+      if (inUse) throw new Error(`${path.basename(inUse)} is used by a meeting in your Library, so nothing was deleted`);
+      for (const file of files) {
+        await trash(file);
+        this.probes.delete(file);
+      }
+      this.deps.sessions.dismissRecovery(id);
+      return { trashed: files.length };
+    });
+  }
+
   dismiss(id: string): void {
     if (this.busy.has(id)) throw new Error('Wait for recovery to finish before dismissing.');
     this.requireSession(id);
@@ -209,6 +246,8 @@ export class RecordingRecoveryService {
       try { return await fs.promises.stat(file); } catch { return null; }
     }));
     const sizes = stats.map((stat) => stat?.size ?? 0);
+    const files: RecoveryFile[] = candidates.flatMap((file, index) => stats[index]?.isFile()
+      ? [{ name: path.basename(file), role: FILE_ROLES[index]!, sizeBytes: sizes[index]! }] : []);
     const durations = await Promise.all(candidates.map(async (file, index) => {
       const stat = stats[index];
       if (!stat?.isFile() || stat.size === 0) {
@@ -226,7 +265,7 @@ export class RecordingRecoveryService {
       id: session.id, targetLabel: session.targetLabel, startedAt: session.startedAt,
       outputPath: session.outputPath, status: session.status, reason, durationS,
       sizeBytes: sizes.reduce((sum, size) => sum + size, 0),
-      canRecover: durationS !== null, canTrim: durationS !== null && durationS > 1,
+      canRecover: durationS !== null, canTrim: durationS !== null && durationS > 1, files,
     };
   }
 

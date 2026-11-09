@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import type { RecoveryInboxItem } from './NeedsAttentionPanel';
+import { describeRecoveryFile, discardSummary } from '../lib/recovery-files';
 
 const button = 'px-2.5 py-1.5 rounded-md border border-surface-border bg-surface text-xs font-medium hover:border-brand-indigo focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-indigo disabled:opacity-50';
 
@@ -13,6 +14,7 @@ export function RecoveryRow({ item, detail, onChanged, onOpen }: {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ url: string; durationS: number } | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [start, setStart] = useState('0');
   const [end, setEnd] = useState('');
   const startS = start.trim() === '' ? NaN : Number(start);
@@ -35,6 +37,12 @@ export function RecoveryRow({ item, detail, onChanged, onOpen }: {
     const result = trim ? await api.recovery.trim(item.id, endS, startS) : await api.recovery.recover(item.id);
     await onChanged(); onOpen(result.meetingId);
   }
+  async function discard(): Promise<void> {
+    audio.current?.pause();
+    await api.recovery.discard(item.id);
+    setConfirmingDelete(false);
+    await onChanged();
+  }
   function applyPlaybackPosition(which: 'start' | 'end'): void {
     const position = audio.current?.currentTime;
     if (position === undefined || !Number.isFinite(position)) return;
@@ -50,13 +58,31 @@ export function RecoveryRow({ item, detail, onChanged, onOpen }: {
       <div className="flex flex-wrap items-center gap-2">
         {item.canRecover && <button className={button} disabled={busy !== null} aria-expanded={preview !== null} aria-controls={panelId}
           onClick={() => preview ? setPreview(null) : void run('Preview', openPreview)}>{preview ? 'Close preview' : 'Preview / trim'}</button>}
-        <button className={button} disabled={busy !== null} onClick={() => void run('Finder', () => api.recovery.reveal(item.id))}>Finder</button>
+        <button className={button} disabled={busy !== null} onClick={() => void run('Finder', () => api.recovery.reveal(item.id))}>Show in Finder</button>
+        <button className={`${button} text-danger`} disabled={busy !== null} aria-expanded={confirmingDelete} aria-controls={`${panelId}-delete`}
+          onClick={() => setConfirmingDelete(!confirmingDelete)}>Delete…</button>
         <button className={button} disabled={busy !== null} onClick={() => void run('Dismiss', async () => { await api.recovery.dismiss(item.id); await onChanged(); })}>Dismiss</button>
         <button className={button} disabled={busy !== null || !item.canRecover} onClick={() => void run('Recovery', () => recovered(false))}>
           {item.canRecover ? 'Recover full recording' : 'No usable audio'}
         </button>
       </div>
     </div>
+    {confirmingDelete && <div id={`${panelId}-delete`} role="group" aria-label={`Delete ${item.targetLabel}`}
+      className="mt-3 p-3 rounded-lg bg-danger-bg border border-danger-border space-y-2">
+      <p className="text-xs font-medium text-ink">Delete this recording?</p>
+      {item.files.length > 0 && <ul className="space-y-1">
+        {item.files.map(file => <li key={file.name} className="text-xs">
+          <span className="text-ink">{describeRecoveryFile(file)}</span>
+          <span className="block font-mono text-[11px] text-ink-muted break-all">{file.name}</span>
+        </li>)}
+      </ul>}
+      <p className="text-xs text-ink-muted">{discardSummary(item.files)}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button className="px-2.5 py-1.5 rounded-md bg-danger-solid text-white text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-indigo disabled:opacity-50"
+          disabled={busy !== null} onClick={() => void run('Delete', discard)}>{item.files.length > 0 ? 'Move to Trash' : 'Remove from list'}</button>
+        <button className={button} disabled={busy !== null} onClick={() => setConfirmingDelete(false)}>Cancel</button>
+      </div>
+    </div>}
     {preview && <div id={panelId} className="mt-3 p-3 rounded-lg bg-surface border border-surface-border space-y-3">
       <p className="text-xs text-ink-muted">Listen, then choose the part to keep. Your original recording stays unchanged.</p>
       <audio ref={audio} controls preload="metadata" src={preview.url} className="w-full min-w-0" aria-label={`Preview ${item.targetLabel}`}

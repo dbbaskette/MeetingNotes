@@ -292,6 +292,7 @@ export const IPC_CHANNELS = {
   recoveryPreview: 'recovery:preview',
   recoveryReveal: 'recovery:reveal',
   recoveryDismiss: 'recovery:dismiss',
+  recoveryDiscard: 'recovery:discard',
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',

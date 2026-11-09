@@ -705,6 +705,10 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof id !== 'string' || !id) throw new Error('recovery id required');
     s.recordingRecovery.dismiss(id);
   });
+  ipc.handle(IPC_CHANNELS.recoveryDiscard, (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) throw new Error('recovery id required');
+    return s.recordingRecovery.discard(id);
+  });
 
   ipc.handle(IPC_CHANNELS.meetingDetectorDismiss, (_e, input: unknown) => {
     // Two banner sources (browser-tab URL, native-app bundle id) share one
