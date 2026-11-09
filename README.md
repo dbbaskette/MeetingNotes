@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.20.0-brightgreen)](docs/releases/v1.20.0.md)
+[![Version](https://img.shields.io/badge/version-1.21.0-brightgreen)](docs/releases/v1.21.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -39,6 +39,12 @@ without hunting for them in Finder. **Delete…** lists the recording's files by
 they hold, then moves them to the macOS Trash. It also fixes Obsidian sync falsely
 reporting an existing vault as unavailable after a reboot or remount changes disk
 device numbers. See the [1.20 release notes](docs/releases/v1.20.0.md).
+
+**1.21** adds motion to the interface: a recording pill in the title bar when you
+are away from the Library, a **Needs attention** inbox you can collapse to one line,
+a selection highlight that glides between tabs, and toasts that slide in and wait
+while you read them. Error toasts now stay until you dismiss them. Animations
+follow the macOS **Reduce Motion** setting. See the [1.21 release notes](docs/releases/v1.21.0.md).
 
 ## Optional automatic voice matching
 
