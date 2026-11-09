@@ -51,7 +51,7 @@ app.whenReady().then(async () => {
   const planning = `document.querySelector('#group-rows-${group}')`;
   const scroller = `document.querySelector('[aria-label="Meeting library"]')`;
   await win.loadURL(base + '?startup&rename');
-  await until('!!window.fixture && document.querySelectorAll("section [aria-expanded=true]").length === 3');
+  await until('!!window.fixture && document.querySelectorAll("section [aria-controls^=group-rows-][aria-expanded=true]").length === 3');
   // Keep one expanded group and load two pages. Returning must not recreate it.
   await run('document.querySelector("[aria-controls=group-rows-ungrouped]").click(); document.querySelector("[aria-controls=group-rows-00000000-0000-4000-8000-000000000002]").click()');
   await until(`!!${planning} && ${planning}.textContent.includes('Load more (50 of 200)')`);
@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
   await settleLayout();
   assert.deepEqual(await run('({ width: innerWidth, height: innerHeight })'), viewport, 'Navigation does not resize the fixture viewport');
   assert.equal(await run(`${scroller}.scrollTop`), before, 'Return preserves scroll');
-  assert.equal(await run('document.querySelectorAll("section [aria-expanded=true]").length'), 1, 'Return preserves expansion');
+  assert.equal(await run('document.querySelectorAll("section [aria-controls^=group-rows-][aria-expanded=true]").length'), 1, 'Return preserves expansion');
   assert.ok(await run(`${planning}.textContent.includes('Load more (100 of 200)')`), 'Return preserves loaded pages');
   // A stale group page pending before rename cannot win after navigation.
   await run('window.fixture.holdGroupRefresh()'); await until('window.fixture.groupPageHeld()');

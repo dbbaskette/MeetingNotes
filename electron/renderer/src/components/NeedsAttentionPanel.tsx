@@ -3,6 +3,8 @@ import { api } from '../ipc/client';
 import { buildNeedsAttention, capAttentionGroups, ATTENTION_GROUP_CAP } from '../lib/needs-attention';
 import { RecoveryRow } from './RecoveryRow';
 import { formatBytes, formatRecordedAt, type RecoveryFileInput } from '../lib/recovery-files';
+import { attentionSummary, readAttentionCollapsed, saveAttentionCollapsed } from '../lib/attention-summary';
+import { Expandable } from './motion/Expandable';
 
 export interface RecoveryInboxItem {
   id: string;
@@ -37,6 +39,7 @@ export function NeedsAttentionPanel({
   onChanged: () => void | Promise<void>;
 }): JSX.Element | null {
   const [expanded, setExpanded] = useState(false);
+  const [collapsedChoice, setCollapsedChoice] = useState(() => readAttentionCollapsed());
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -51,6 +54,14 @@ export function NeedsAttentionPanel({
   );
   if (groups.length === 0 && !error) return null;
 
+  // A failed refresh or action is never hidden behind a collapsed inbox.
+  const collapsed = collapsedChoice && !error && !actionError;
+  const toggleCollapsed = (): void => {
+    const next = !collapsed;
+    setCollapsedChoice(next);
+    saveAttentionCollapsed(next);
+  };
+  const total = allGroups.reduce((n, group) => n + group.items.length, 0);
   const recoveryById = new Map(recovery.map((item) => [item.id, item]));
   async function primaryAction(kind: string, id: string): Promise<void> {
     if (busy) return;
@@ -68,13 +79,23 @@ export function NeedsAttentionPanel({
 
   return (
     <section className="shrink-0 mb-5 rounded-xl border border-status-warn/30 bg-status-warnBg/40 overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-status-warn/20">
-        <span className="w-2 h-2 rounded-full bg-status-warn" />
-        <h2 className="text-sm font-semibold text-ink">Needs attention</h2>
-        <span className="text-xs text-ink-muted">{groups.reduce((n, group) => n + group.totalCount, 0)}</span>
-        <button type="button" aria-expanded={expanded} aria-controls="attention-items" className="ml-auto text-xs font-semibold underline"
-          onClick={() => { setExpanded(!expanded); setLimits({}); }}>{expanded ? 'Show compact inbox' : 'View all'}</button>
+      <div className={`flex items-center gap-2 px-4 py-3 ${collapsed ? '' : 'border-b border-status-warn/20'}`}>
+        <h2 className="min-w-0 text-sm font-semibold text-ink">
+          <button type="button" aria-expanded={!collapsed} aria-controls="attention-body" onClick={toggleCollapsed}
+            className="flex min-w-0 items-center gap-2 rounded-md -mx-1 px-1 py-0.5 hover:bg-status-warn/10">
+            <svg viewBox="0 0 16 16" aria-hidden="true" className={`w-3 h-3 shrink-0 text-ink-muted transition-transform ${collapsed ? '' : 'rotate-90'}`}
+              fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 4l4 4-4 4" /></svg>
+            <span className="w-2 h-2 shrink-0 rounded-full bg-status-warn" />
+            <span className="shrink-0">Needs attention</span>
+            <span className="shrink-0 text-xs font-normal text-ink-muted">{total}</span>
+          </button>
+        </h2>
+        {collapsed
+          ? <span className="min-w-0 truncate text-xs text-ink-muted">{attentionSummary(allGroups.map(group => ({ label: group.label, totalCount: group.items.length })))}</span>
+          : <button type="button" aria-expanded={expanded} aria-controls="attention-items" className="ml-auto text-xs font-semibold underline"
+            onClick={() => { setExpanded(!expanded); setLimits({}); }}>{expanded ? 'Show compact inbox' : 'View all'}</button>}
       </div>
+      <Expandable open={!collapsed} id="attention-body">
       {error && (
         <div role="alert" className="px-4 py-2.5 text-xs text-danger border-b border-status-warn/20">
           Couldn&apos;t refresh this inbox: {error}
@@ -127,6 +148,7 @@ export function NeedsAttentionPanel({
           </div>
         ))}
       </div>
+      </Expandable>
     </section>
   );
 }

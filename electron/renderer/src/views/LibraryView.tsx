@@ -25,6 +25,7 @@ import { useToast } from '../components/Toasts';
 import { useGroupsStore } from '../store/groups';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { AppNav, type NavTarget } from '../components/AppNav';
+import { SlidingPill } from '../components/motion/SlidingPill';
 import { Icon } from '../components/icons';
 import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
@@ -533,7 +534,8 @@ export function LibraryView({
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
-        <AppNav active="library" onNav={onNav} />
+        {/* Remount on return so the selection pill glides back from the view just left. */}
+        <AppNav key={active ? 'shown' : 'hidden'} active="library" onNav={onNav} />
         <div className="flex-1" />
         <RecordButton
           active={active}
@@ -618,9 +620,11 @@ export function LibraryView({
             <span className="min-w-0 truncate text-sm font-semibold" title={scopeName}>{scopeName}</span>
           </> : <div role="group" aria-label="Library view" className="segmented-control inline-flex rounded-lg border border-surface-border bg-surface p-0.5">
             <button type="button" aria-pressed={viewMode === 'organized'} onClick={() => changeViewMode('organized')}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'organized' ? 'bg-brand-solid text-white' : 'text-ink-muted hover:text-ink'}`}>Organized</button>
+              className={`relative rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'organized' ? 'text-ink' : 'text-ink-muted hover:text-ink'}`}>
+              {viewMode === 'organized' && <SlidingPill group="library-view-mode" className="inset-y-0 pill-surface" />}<span className="relative">Organized</span></button>
             <button type="button" aria-pressed={viewMode === 'flat'} onClick={() => changeViewMode('flat')}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'flat' ? 'bg-brand-solid text-white' : 'text-ink-muted hover:text-ink'}`}>All meetings</button>
+              className={`relative rounded-md px-2.5 py-1 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 ${viewMode === 'flat' ? 'text-ink' : 'text-ink-muted hover:text-ink'}`}>
+              {viewMode === 'flat' && <SlidingPill group="library-view-mode" className="inset-y-0 pill-surface" />}<span className="relative">All meetings</span></button>
           </div>}
           <span className="text-[11px] text-ink-muted">
             {libCounts.all} {libCounts.all === 1 ? 'meeting' : 'meetings'}

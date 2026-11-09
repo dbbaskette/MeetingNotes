@@ -10,6 +10,8 @@
 // clicks route through App's history-aware navigate() (pushes a new
 // entry; ⌘[ / ⌘] walk the stack back and forward).
 
+import { SlidingPill } from './motion/SlidingPill';
+
 export type NavTarget = 'library' | 'weekly' | 'actions' | 'settings';
 
 const TABS: { target: NavTarget; label: string }[] = [
@@ -37,11 +39,12 @@ export function AppNav({
             aria-current={isActive ? 'page' : undefined}
             className={
               isActive
-                ? 'px-3 py-1.5 rounded-md bg-surface-sunken text-ink font-medium'
-                : 'px-3 py-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-sunken transition'
+                ? 'relative px-3 py-1.5 rounded-md text-ink font-medium'
+                : 'relative px-3 py-1.5 rounded-md text-ink-muted hover:text-ink hover:bg-surface-sunken transition'
             }
           >
-            {label}
+            {isActive && <SlidingPill group="primary-nav" className="inset-y-0 pill-surface" />}
+            <span className="relative">{label}</span>
           </button>
         );
       })}

@@ -29,7 +29,7 @@ app.whenReady().then(async () => {
     await until(`!!window.fixture?.calls.pages.some(q => q.groupId === "00000000-0000-4000-8000-000000000002") && !!${libraryView}`);
     await settle();
     assert.deepEqual(errors, []);
-    assert.equal(await run('document.querySelectorAll("section [aria-expanded=true]").length'), 3);
+    assert.equal(await run('document.querySelectorAll("section [aria-controls^=group-rows-][aria-expanded=true]").length'), 3);
     assert.ok(await run('document.body.innerText.includes("Needs attention") && document.body.innerText.includes("Planning")'));
     await run(`${button('View all')}.click()`); await settle();
     assert.equal(await run('document.querySelectorAll("#attention-items button").length < 100'),true,'Full inbox keeps bounded pages');
@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
     }
     await run(`${button('All meetings')}.click()`); await settle();
     await run(`${button('Organized')}.click()`); await settle();
-    await until('document.querySelectorAll("section [aria-expanded=true]").length === 3');
+    await until('document.querySelectorAll("section [aria-controls^=group-rows-][aria-expanded=true]").length === 3');
     await run(`${planningButton}.click()`); await settle();
     assert.equal(await run(`${planningButton}.getAttribute("aria-expanded")`), 'false');
     assert.deepEqual(errors, []);

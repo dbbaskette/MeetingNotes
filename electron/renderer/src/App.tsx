@@ -4,7 +4,10 @@ import { RenameDialog } from './components/MeetingRowMenu';
 import { LibraryView } from './views/LibraryView';
 import { PermissionsModal } from './components/PermissionsModal';
 import { ToastHost, useToast } from './components/Toasts';
-import { LiveRecordingRow } from './components/LiveRecordingRow';
+import { LazyMotion, MotionConfig } from 'motion/react';
+
+const loadMotionFeatures = () => import('./components/motion/features').then((module) => module.default);
+import { RecordingPill } from './components/motion/RecordingPill';
 import { SearchPalette, type PaletteTarget } from './components/SearchPalette';
 import { PipelineStatusBar } from './components/PipelineStatusBar';
 import { Icon } from './components/icons';
@@ -67,9 +70,16 @@ export interface LiveRecording {
 export function App(): JSX.Element {
   return (
     <ErrorBoundary scope="app" label="MeetingNotes" variant="root">
-      <ToastHost>
-        <AppInner />
-      </ToastHost>
+      {/* Springs follow the macOS Reduce Motion setting. */}
+      {/* LazyMotion + `m` components ship only the animation features in
+          use, not the layout and drag engines. */}
+      <LazyMotion features={loadMotionFeatures} strict>
+        <MotionConfig reducedMotion="user">
+          <ToastHost>
+            <AppInner />
+          </ToastHost>
+        </MotionConfig>
+      </LazyMotion>
     </ErrorBoundary>
   );
 }
@@ -490,14 +500,16 @@ function AppInner(): JSX.Element {
     {activeView && <ErrorBoundary scope={activeScope} label={activeLabel} resetKey={view.kind === 'detail' ? `detail:${view.id}` : activeScope}
       onLeave={activeScope === 'detail' || activeScope === 'settings' || activeScope === 'actions' ? () => void navigate({ kind: 'library' }) : undefined}>{activeView}</ErrorBoundary>}</Suspense>;
 
-  // Persistent recording banner on views that don't show the LibraryView's
-  // inline live row. Keeps the user aware that capture is still going even
-  // when they've drilled into a meeting or wandered into settings.
+  // Compact recording pill on views that don't show the LibraryView's inline
+  // live row. Keeps the user aware that capture is still going even when
+  // they've drilled into a meeting or wandered into settings.
   const showTopBanner = liveRecording && view.kind !== 'library';
 
   return (
     <>
-      <div className="window-drag-strip" />
+      {showTopBanner
+        ? <><div className="window-drag-strip" data-split="left" /><div className="window-drag-strip" data-split="right" /></>
+        : <div className="window-drag-strip" />}
       {/* The shell is a flex column that fills #root (height: 100% from
           index.css). Views below render inside the flex-1 slot and own
           their own scroll regions — the document itself doesn't scroll
@@ -505,18 +517,16 @@ function AppInner(): JSX.Element {
           headers and filter chips pinned in place. */}
       <div className="h-full flex flex-col">
         {showTopBanner && (
-          <div className="shrink-0 z-[900] max-w-6xl mx-auto w-full px-6 pt-2">
-            <LiveRecordingRow
-              sessionId={liveRecording!.sessionId}
-              label={liveRecording!.label}
-              startedAt={liveRecording!.startedAt}
-              groupId={liveRecording!.startInput?.groupId}
-              title={liveRecording!.startInput?.title}
-              micEnabled={liveRecording!.startInput?.mic}
-              onStopped={stopped}
-              onRestarted={setLiveRecording}
-            />
-          </div>
+          <RecordingPill
+            sessionId={liveRecording!.sessionId}
+            label={liveRecording!.label}
+            startedAt={liveRecording!.startedAt}
+            groupId={liveRecording!.startInput?.groupId}
+            title={liveRecording!.startInput?.title}
+            micEnabled={liveRecording!.startInput?.mic}
+            onStopped={stopped}
+            onRestarted={setLiveRecording}
+          />
         )}
         <div className="flex-1 min-h-0">
           {body}
