@@ -227,7 +227,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
           <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
           <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
         </div>
-        <AppNav active="weekly" onNav={onNav} />
+        <AppNav key={active ? 'shown' : 'hidden'} active="weekly" onNav={onNav} />
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <button

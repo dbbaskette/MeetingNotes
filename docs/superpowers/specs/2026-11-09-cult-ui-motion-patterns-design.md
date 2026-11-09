@@ -28,10 +28,16 @@ New folder `electron/renderer/src/components/motion/`:
 |---|---|
 | `spring.ts` | The one spring setting and durations every pattern uses. |
 | `Expandable.tsx` | Animates children open and closed by height with `AnimatePresence`. Props: `open`, `id`, `children`. |
-| `SlidingPill.tsx` | A `motion.span` with a `layoutId` that renders behind the selected item of a group. Props: `groupId`, `className`. |
+| `SlidingPill.tsx` | Renders behind the selected item of a group and glides in from the group's last position using the Web Animations API (no inline styles left behind; works across views that each render their own nav). Props: `group`, `className`. |
+| `features.ts` | The `motion` feature bundle, loaded on demand through `LazyMotion` so it stays out of the startup chunk. Components use `m.*`, not `motion.*`. |
 | `RecordingPill.tsx` | Compact recording indicator that expands to the full controls. |
 
-`MotionConfig` is added in `App.tsx` around `AppInner`.
+`LazyMotion` and `MotionConfig` are added in `App.tsx` around `AppInner`.
+
+Measured cost (production build): the startup chunk went from 218.6 kB to
+270.3 kB (62.2 → 80.3 kB gzip), plus a 52 kB (20 kB gzip) chunk loaded after
+first paint. Toasts animate their height instead of using `layout`, which
+would need the larger feature set.
 
 ## 1. Expandable panels
 

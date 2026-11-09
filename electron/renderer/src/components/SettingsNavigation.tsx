@@ -1,5 +1,6 @@
 import { Children, isValidElement, createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../ipc/client';
+import { SlidingPill } from './motion/SlidingPill';
 
 const sections = ['Recording', 'Processing', 'Organization', 'Integrations', 'Storage', 'Advanced'] as const;
 type Section = typeof sections[number];
@@ -24,8 +25,10 @@ export function SettingsNavigation({ children }: { children: ReactNode }): JSX.E
       <input className="input w-full" type="search" aria-label="Search settings" placeholder="Find a setting…" value={query} onChange={e => setQuery(e.target.value)}/>
       <nav aria-label="Settings sections" className="flex flex-wrap gap-1">
         {sections.map(name => <button key={name} type="button" aria-pressed={!query && section === name}
-          className={`rounded-md px-2 py-1 text-xs font-semibold ${!query && section === name ? 'bg-brand-solid text-white' : 'text-ink-muted hover:bg-surface-sunken'}`}
-          onClick={() => { setSection(name); setQuery(''); }}>{name}</button>)}
+          className={`relative rounded-md px-2 py-1 text-xs font-semibold ${!query && section === name ? 'text-ink' : 'text-ink-muted hover:bg-surface-sunken'}`}
+          onClick={() => { setSection(name); setQuery(''); }}>
+          {!query && section === name && <SlidingPill group="settings-sections" className="inset-y-0 pill-surface" />}
+          <span className="relative">{name}</span></button>)}
       </nav>
       {normalized && <p role="status" className="text-xs text-ink-muted">{matches ? 'Showing matching sections, including advanced settings.' : 'No matching settings. Try audio, summary, vault, or storage.'}</p>}
     </div>

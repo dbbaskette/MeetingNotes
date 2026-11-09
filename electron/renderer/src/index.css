@@ -131,7 +131,12 @@ body {
 .primary-nav button[aria-current='page'], .segmented-control button[aria-pressed='true'],
 .settings-navigation button[aria-pressed='true'] {
   color: rgb(var(--ink));
+}
+/* The selected background is its own element (components/motion/SlidingPill)
+   so it can glide between items instead of jumping. */
+.sliding-pill.pill-surface {
   background: rgb(var(--surface));
+  border-radius: 6px;
   box-shadow: 0 1px 3px rgb(var(--material-shadow) / 0.14), inset 0 1px 0 rgb(var(--material-highlight) / 0.5);
 }
 .segmented-control { background: rgb(var(--chrome)); }
@@ -203,6 +208,10 @@ body {
   -webkit-app-region: drag;
   z-index: 9999;
 }
+/* While the recording pill sits in the title bar the strip is drawn as two
+   halves with a gap in the centre, so the pill is never underneath it. */
+.window-drag-strip[data-split='left'] { right: calc(50% + 130px); }
+.window-drag-strip[data-split='right'] { left: calc(50% + 130px); }
 button, a, input, select, textarea {
   -webkit-app-region: no-drag;
 }

@@ -24,6 +24,8 @@ import { TranscriptPanel } from './MeetingTranscriptPanel';
 import { RememberTerms, TerminologyPanel } from '../components/Terminology';
 import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
 import { NotesHistory } from '../components/NotesHistory';
+import { SlidingPill } from '../components/motion/SlidingPill';
+import { nextTabIndex } from '../lib/tab-keys';
 import { processingDiagnosis, primaryProcessingStatus } from '../../../shared/processing-recovery';
 
 // Audio is no longer a tab — it lives in a sticky footer below the
@@ -1303,6 +1305,8 @@ function ArtifactFeedback({ label, state, onRetry }: {
   return null;
 }
 
+const DETAIL_TABS = ['summary', 'transcript', 'actions'] as const;
+
 function CenterPane({
   meeting, tab, onTab, currentTime, seekRevision, onSeek, onReload, onShowSource, provenance,
   summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
@@ -1337,21 +1341,37 @@ function CenterPane({
           Sticky-pinned to the top of the center-pane scroll container
           so SUMMARY/TRANSCRIPT/ACTIONS stay reachable while paging
           through a long summary or transcript. */}
-      <div className="detail-tabs sticky top-0 z-10 bg-surface flex border-b border-surface-border px-4">
-        {(['summary', 'transcript', 'actions'] as const).map((t) => (
+      <div role="tablist" aria-label="Meeting sections" className="detail-tabs sticky top-0 z-10 bg-surface flex border-b border-surface-border px-4">
+        {DETAIL_TABS.map((t, index) => (
           <button
             key={t}
+            type="button"
+            role="tab"
+            id={`detail-tab-${t}`}
+            aria-selected={tab === t}
+            aria-controls="detail-tabpanel"
+            tabIndex={tab === t ? 0 : -1}
             onClick={() => onTab(t)}
-            className={`px-3 py-3 text-[13px] capitalize transition
-              ${tab === t
-                ? 'text-brand-indigo border-b-2 border-brand-indigo font-semibold -mb-px'
-                : 'text-ink-muted hover:text-ink'}`}
+            onKeyDown={(event) => {
+              const next = nextTabIndex(event.key, index, DETAIL_TABS.length);
+              if (next === null) return;
+              // Left/Right also drive the audio transport; inside the tab
+              // list they move between tabs instead.
+              event.preventDefault();
+              event.stopPropagation();
+              event.nativeEvent.stopImmediatePropagation();
+              onTab(DETAIL_TABS[next]!);
+              document.getElementById(`detail-tab-${DETAIL_TABS[next]!}`)?.focus();
+            }}
+            className={`relative px-3 py-3 text-[13px] capitalize transition
+              ${tab === t ? 'text-brand-indigo font-semibold' : 'text-ink-muted hover:text-ink'}`}
           >
             {t}
+            {tab === t && <SlidingPill group="detail-tabs" className="-bottom-px h-0.5 bg-brand-indigo" />}
           </button>
         ))}
       </div>
-      <div className="p-5">
+      <div id="detail-tabpanel" role="tabpanel" aria-labelledby={`detail-tab-${tab}`} className="p-5">
         {tab === 'summary' && (
           <ErrorBoundary scope="detail:notes" label="Notes" variant="panel" resetKey={meeting.id}>
           <SummaryPanel
