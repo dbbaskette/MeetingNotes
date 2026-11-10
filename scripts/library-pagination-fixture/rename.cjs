@@ -107,7 +107,25 @@ app.whenReady().then(async () => {
   await open('Synthetic meeting 110'); await inlineRename('Updated search title'); await click('← Back');
   await until(`!!${row('Updated search title')}`);
   assert.equal(await run(`document.querySelector('input[placeholder^="Search titles"]').value`), 'synthetic');
+  // One real click on the group button while the title is being edited saves
+  // the title and opens the group dialog. The header used to move between
+  // mouse-down and mouse-up, so the click was lost.
+  win.webContents.debugger.attach();
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+  await open('Updated search title');
+  await run(`document.querySelector('[title="Click to rename"]').click()`);
+  await until('document.activeElement?.getAttribute("aria-label") === "Meeting title"');
+  await input('[aria-label="Meeting title"]', 'Renamed then grouped');
+  const at = await run(`(() => { const box = document.querySelector('[aria-label^="Change group"]').getBoundingClientRect(); return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }; })()`);
+  // The window is hidden, so the press and release go through the debugger
+  // protocol, which hit-tests each one like a real mouse.
+  const mouse = type => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...at, button: 'left', clickCount: 1 });
+  await mouse('mousePressed'); await mouse('mouseReleased');
+  win.webContents.debugger.detach();
+  await until('!!document.querySelector("[role=dialog][aria-label=\\"Move meetings to a group\\"]")');
+  await until(`document.querySelector('[title="Click to rename"]')?.textContent.includes('Renamed then grouped')`);
+  await click('Cancel');
   assert.deepEqual(errors, []);
-  console.log('RENAME PASS: real detail inline/menu rename and Back refresh grouped/flat/scoped/search views; pages, expansion and scroll retained; pending stale page, rejected write and Library row rename covered.');
+  console.log('RENAME PASS: real detail inline/menu rename and Back refresh grouped/flat/scoped/search views; pages, expansion and scroll retained; pending stale page, rejected write, Library row rename and a group-button click during a title edit covered.');
   win.destroy(); app.quit();
 }).catch(error => { console.error(error); app.exit(1); });

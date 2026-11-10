@@ -636,10 +636,25 @@ function EditableTitle({
   // a value the user just escaped out of).
   const settledRef = useRef(false);
 
+  // True while a pointer button is held. A press on a neighbouring control
+  // blurs the field; see the blur handler for why that matters.
+  const pressedRef = useRef(false);
+
   useEffect(() => {
     if (!editing) return;
     inputRef.current?.focus();
     inputRef.current?.select();
+    const down = (): void => { pressedRef.current = true; };
+    const up = (): void => { pressedRef.current = false; };
+    window.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    return () => {
+      pressedRef.current = false;
+      window.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+    };
   }, [editing]);
 
   function start(): void {
@@ -648,8 +663,8 @@ function EditableTitle({
     setEditing(true);
   }
 
-  async function commit(): Promise<void> {
-    setEditing(false);
+  async function commit(leave = true): Promise<void> {
+    if (leave) setEditing(false);
     const trimmed = value.trim();
     // Empty/whitespace → cancel, don't save. Unchanged → no-op.
     if (trimmed === '' || trimmed === title || busy) return;
@@ -698,7 +713,20 @@ function EditableTitle({
       }}
       onBlur={() => {
         if (settledRef.current) return;
-        void commit();
+        if (!pressedRef.current) { void commit(); return; }
+        // The blur came from pressing another control. The field is wider
+        // than the title, so leaving edit mode now would slide the header
+        // out from under the pointer and the click would never arrive. Save
+        // now; put the title back once the click has been delivered.
+        settledRef.current = true;
+        void commit(false);
+        const leave = (): void => {
+          window.removeEventListener('pointerup', leave, true);
+          window.removeEventListener('pointercancel', leave, true);
+          setTimeout(() => setEditing(false), 0);
+        };
+        window.addEventListener('pointerup', leave, true);
+        window.addEventListener('pointercancel', leave, true);
       }}
       aria-label="Meeting title"
       className="w-full max-w-md text-center font-semibold bg-surface border border-brand-indigo/60
