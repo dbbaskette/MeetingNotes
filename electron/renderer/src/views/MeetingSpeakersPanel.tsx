@@ -3,6 +3,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { api } from '../ipc/client';
 import { colorForSpeakerIndex } from '../theme/tokens';
 import { partitionSpeakerReview, speakerReviewLayout } from '../lib/speaker-review-layout';
+import { SPEAKER_AUTO_MATCH, suggestedMatch } from '../../../shared/speaker-matching';
 import type { MeetingDetail } from './MeetingDetailView';
 
 function MiniSpinner(): JSX.Element {
@@ -69,6 +70,36 @@ export function SpeakersPanel({
   const [showNamed, setShowNamed] = useState(false);
   const collapseNamed = !compact && !showNamed && groupedSpeakers.rest.length > NAMED_VOICES_SHOWN;
   const namedPreview = groupedSpeakers.rest.map((sp) => sp.displayName ?? sp.localLabel).join(', ');
+  const [showBrief, setShowBrief] = useState(false);
+  // A person already named in this meeting is never offered for a second voice.
+  const takenRosterIds = useMemo(
+    () => new Set(meeting.speakers.flatMap((speaker) => (speaker.rosterId ? [speaker.rosterId] : []))),
+    [meeting.speakers],
+  );
+  const renderRow = (sp: (typeof groupedSpeakers.rest)[number]): JSX.Element => (
+    <SpeakerRow
+      key={sp.localLabel}
+      meetingId={meeting.id}
+      localLabel={sp.localLabel}
+      displayName={sp.displayName}
+      rosterId={sp.rosterId}
+      confidence={sp.confidence}
+      reviewState={sp.state}
+      review={reviews.find(review => review.label === sp.localLabel)}
+      takenRosterIds={takenRosterIds}
+      needsReview={sp.needsReview}
+      durationS={sp.durationS}
+      lineCount={sp.lineCount}
+      colorIdx={sp.colorIdx}
+      roster={roster}
+      isOpen={expanded === sp.localLabel}
+      onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
+      onChanged={reloadMeeting}
+      selectable={sp.needsReview ?? false}
+      selected={selected.has(sp.localLabel)}
+      onSelect={() => toggleSelected(sp.localLabel)}
+    />
+  );
   function toggleSelected(label: string): void {
     setSelected((current) => {
       const next = new Set(current);
@@ -142,29 +173,7 @@ export function SpeakersPanel({
         {groupedSpeakers.needsReview.length > 0 && groupedSpeakers.rest.length > 0 && (
           <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted">Needs review</div>
         )}
-        {reviewRows.map((sp) => (
-          <SpeakerRow
-            key={sp.localLabel}
-            meetingId={meeting.id}
-            localLabel={sp.localLabel}
-            displayName={sp.displayName}
-            rosterId={sp.rosterId}
-            confidence={sp.confidence}
-            reviewState={sp.state}
-            review={reviews.find(review => review.label === sp.localLabel)}
-            needsReview={sp.needsReview}
-            durationS={sp.durationS}
-            lineCount={sp.lineCount}
-            colorIdx={sp.colorIdx}
-            roster={roster}
-            isOpen={expanded === sp.localLabel}
-            onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
-            onChanged={reloadMeeting}
-            selectable={sp.needsReview ?? false}
-            selected={selected.has(sp.localLabel)}
-            onSelect={() => toggleSelected(sp.localLabel)}
-          />
-        ))}
+        {reviewRows.map(renderRow)}
         {!compact && groupedSpeakers.rest.length > 0 && groupedSpeakers.needsReview.length > 0 && (
           <div className="text-[10px] uppercase tracking-wider font-semibold text-ink-muted pt-1">Named</div>
         )}
@@ -180,29 +189,24 @@ export function SpeakersPanel({
             <span className="text-brand-indigo font-medium">Show all</span>
           </button>
         )}
-        {!compact && !collapseNamed && groupedSpeakers.rest.map((sp) => (
-          <SpeakerRow
-            key={sp.localLabel}
-            meetingId={meeting.id}
-            localLabel={sp.localLabel}
-            displayName={sp.displayName}
-            rosterId={sp.rosterId}
-            confidence={sp.confidence}
-            reviewState={sp.state}
-            review={reviews.find(review => review.label === sp.localLabel)}
-            needsReview={sp.needsReview}
-            durationS={sp.durationS}
-            lineCount={sp.lineCount}
-            colorIdx={sp.colorIdx}
-            roster={roster}
-            isOpen={expanded === sp.localLabel}
-            onToggle={() => setExpanded((prev) => (prev === sp.localLabel ? null : sp.localLabel))}
-            onChanged={reloadMeeting}
-            selectable={sp.needsReview ?? false}
-            selected={selected.has(sp.localLabel)}
-            onSelect={() => toggleSelected(sp.localLabel)}
-          />
-        ))}
+        {!compact && !collapseNamed && groupedSpeakers.rest.map(renderRow)}
+        {/* Voices heard for only a few seconds: often a chime or a goodbye,
+            sometimes a real person. They never hold the meeting for review,
+            and stay one click away for naming. */}
+        {!compact && groupedSpeakers.brief.length > 0 && (
+          <button
+            type="button"
+            aria-expanded={showBrief}
+            aria-controls="brief-voices"
+            onClick={() => setShowBrief((value) => !value)}
+            className="w-full text-left rounded-lg border border-surface-border px-3 py-2 text-xs text-ink-soft hover:border-brand-indigo/50 transition"
+          >
+            <span className="font-semibold text-ink">{groupedSpeakers.brief.length} brief voice{groupedSpeakers.brief.length === 1 ? '' : 's'}</span>
+            <span className="block text-ink-muted">Under {SPEAKER_AUTO_MATCH.briefVoiceS} seconds of speech each. No review needed.</span>
+            <span className="text-brand-indigo font-medium">{showBrief ? 'Hide' : 'Show'}</span>
+          </button>
+        )}
+        {!compact && showBrief && <div id="brief-voices" className="space-y-1.5">{groupedSpeakers.brief.map(renderRow)}</div>}
       </div>
       {compact && <a href="#meeting-speakers" className="inline-block text-xs font-semibold text-brand-indigo underline">Open full speaker review{groupedSpeakers.needsReview.length > 3 ? ` (${groupedSpeakers.needsReview.length - 3} more need review)` : ''}</a>}
       {bulkError && !selected.size && <p role="alert" className="text-xs text-danger">Could not load speaker roster: {bulkError}</p>}
@@ -212,7 +216,7 @@ export function SpeakersPanel({
 
 function SpeakerRow({
   meetingId, localLabel, displayName, rosterId, colorIdx, roster,
-  confidence, reviewState, needsReview, durationS, lineCount, review,
+  confidence, reviewState, needsReview, durationS, lineCount, review, takenRosterIds,
   isOpen, onToggle, onChanged, selectable, selected, onSelect,
 }: {
   meetingId: string;
@@ -221,6 +225,7 @@ function SpeakerRow({
   rosterId: string | null;
   confidence: number | null;
   review?: VoiceReview;
+  takenRosterIds: ReadonlySet<string>;
   reviewState?: 'unknown' | 'probable' | 'confirmed' | 'automatic';
   needsReview?: boolean;
   durationS?: number;
@@ -237,6 +242,21 @@ function SpeakerRow({
   const named = rosterId !== null;
   const color = colorForSpeakerIndex(colorIdx);
   const layout = speakerReviewLayout();
+  // One clear best guess is offered on the row itself, so a likely name is
+  // a single click instead of open, listen, pick.
+  const best = named ? null : suggestedMatch((review?.suggestions ?? []).filter((s) => s.scoreKind === 'similarity'));
+  const suggestion = best && !takenRosterIds.has(best.id) ? best : null;
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  async function confirmSuggestion(): Promise<void> {
+    if (!suggestion) return;
+    setConfirming(true); setConfirmError(null);
+    try {
+      await api.speakers.assign({ meetingId, localLabel, mode: 'existing', rosterId: suggestion.id });
+      onChanged();
+    } catch (e) { setConfirmError((e as Error).message); }
+    finally { setConfirming(false); }
+  }
 
   return (
     <div
@@ -293,6 +313,17 @@ function SpeakerRow({
         </svg>
         </button>
       </div>
+      {suggestion && !isOpen && (
+        <div className="flex flex-wrap items-center gap-2 px-2 pb-2 pl-10">
+          <span className="min-w-0 truncate text-[11px] text-ink-soft">Sounds like <span className="font-semibold text-ink">{suggestion.displayName}</span> · similarity {suggestion.confidence.toFixed(2)}</span>
+          <button type="button" disabled={confirming} onClick={() => void confirmSuggestion()}
+            aria-label={`Confirm ${localLabel} is ${suggestion.displayName}`}
+            className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-brand-solid text-white disabled:opacity-40">
+            {confirming ? 'Confirming…' : 'Confirm'}
+          </button>
+          {confirmError && <span role="alert" className="basis-full text-[11px] text-danger">{confirmError}</span>}
+        </div>
+      )}
       {isOpen && (
         <SpeakerEditor
           meetingId={meetingId}

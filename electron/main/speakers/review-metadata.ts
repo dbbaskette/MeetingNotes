@@ -1,5 +1,6 @@
 import { mergeTranscriptWithDiarization, type TranscriptSegment } from '../lib/merge-transcript.js';
 import type { DiarizationSegment } from './sample-extractor.js';
+import { isBriefVoice } from '../../shared/speaker-matching.js';
 
 export type SpeakerReviewState = 'unknown' | 'probable' | 'confirmed' | 'automatic';
 export interface SpeakerReviewMetadata {
@@ -46,7 +47,10 @@ export function buildSpeakerReviewMetadata(input: {
       segmentCount: own.segmentCount,
       durationS: own.durationS,
       lineCount: lineCounts.get(link.localLabel) ?? 0,
-      needsReview: state === 'unknown' || (link.confidence ?? 0) < 0.8 || own.segmentCount < 2,
+      // A barely-heard unnamed voice stays nameable but never holds the
+      // meeting at the speaker gate.
+      needsReview: !isBriefVoice({ rosterId: link.rosterId, ...own })
+        && (state === 'unknown' || (link.confidence ?? 0) < 0.8 || own.segmentCount < 2),
     });
   }
   return result;

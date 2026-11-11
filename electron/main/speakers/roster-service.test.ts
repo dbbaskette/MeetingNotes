@@ -26,8 +26,10 @@ describe('RosterService', () => {
   });
   it('compares unrounded scores and refuses insufficient score or runner-up separation', () => {
     svc.confirmSpeaker({ displayName: 'Dan', embedding: [1, 0] }, space);
-    const score = 0.9799;
-    expect(svc.identifyUnknowns([{ label: 'A', embedding: [score, Math.sqrt(1 - score * score)] }], options)[0]?.rosterId).toBeNull();
+    const at = (score: number) => svc.identifyUnknowns([{ label: 'A', embedding: [score, Math.sqrt(1 - score * score)] }], options)[0]?.rosterId;
+    expect(at(0.7999)).toBeNull();
+    // 0.80 was measured on real meetings: no wrong names, where 0.98 named almost nobody.
+    expect(at(0.8001)).not.toBeNull();
     svc.confirmSpeaker({ displayName: 'Similar voice', embedding: [0.97, Math.sqrt(1 - 0.97 ** 2)] }, space);
     expect(svc.identifyUnknowns([{ label: 'A', embedding: [1, 0] }], options)[0]?.rosterId).toBeNull();
   });

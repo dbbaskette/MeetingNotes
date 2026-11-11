@@ -18,6 +18,7 @@ describe('buildSpeakerReviewMetadata', () => {
       ],
       diarization: [
         { speaker: 'SPEAKER_00', start: 0, end: 1 },
+        { speaker: 'SPEAKER_00', start: 20, end: 31 },
         { speaker: 'SPEAKER_01', start: 1, end: 4 },
         { speaker: 'SPEAKER_01', start: 4, end: 7 },
         { speaker: 'SPEAKER_02', start: 7, end: 11 },
@@ -35,6 +36,28 @@ describe('buildSpeakerReviewMetadata', () => {
     expect(result.get('SPEAKER_02')).toMatchObject({ state: 'confirmed', needsReview: true, lineCount: 1 });
   });
 
+  it('does not hold a meeting for an unnamed voice with under ten seconds of speech', () => {
+    const result = buildSpeakerReviewMetadata({
+      links: [
+        { localLabel: 'BRIEF', rosterId: null, displayName: null, confidence: 0 },
+        { localLabel: 'TEN', rosterId: null, displayName: null, confidence: 0 },
+        { localLabel: 'NAMED', rosterId: 'alice', displayName: 'Alice', confidence: 0.5 },
+        { localLabel: 'NO_EVIDENCE', rosterId: null, displayName: null, confidence: 0 },
+      ],
+      diarization: [
+        { speaker: 'BRIEF', start: 0, end: 4 }, { speaker: 'BRIEF', start: 5, end: 10.9 },
+        { speaker: 'TEN', start: 20, end: 25 }, { speaker: 'TEN', start: 30, end: 35 },
+        { speaker: 'NAMED', start: 40, end: 42 }, { speaker: 'NAMED', start: 43, end: 45 },
+      ], transcript: [],
+    });
+    expect(result.get('BRIEF')).toMatchObject({ state: 'unknown', needsReview: false });
+    expect(result.get('TEN')).toMatchObject({ state: 'unknown', needsReview: true });
+    // A weakly matched name is still reviewed however little it spoke, and
+    // an unknown voice with no diarization evidence is never waved through.
+    expect(result.get('NAMED')).toMatchObject({ needsReview: true });
+    expect(result.get('NO_EVIDENCE')).toMatchObject({ needsReview: true });
+  });
+
   it('counts lines and duration once across many speakers instead of rescanning per link', () => {
     const links = Array.from({ length: 40 }, (_, i) => ({
       localLabel: `SPEAKER_${String(i).padStart(2, '0')}`,
@@ -50,7 +73,7 @@ describe('buildSpeakerReviewMetadata', () => {
       start: i * 4, end: i * 4 + 1.5, text: link.localLabel,
     }));
     const result = buildSpeakerReviewMetadata({ links, diarization, transcript });
-    expect(result.get('SPEAKER_00')).toMatchObject({ lineCount: 1, durationS: 3, segmentCount: 2, needsReview: true });
+    expect(result.get('SPEAKER_00')).toMatchObject({ lineCount: 1, durationS: 3, segmentCount: 2, needsReview: false });
     expect(result.get('SPEAKER_01')).toMatchObject({ lineCount: 1, durationS: 3, segmentCount: 2, needsReview: false });
     expect(result.size).toBe(40);
   });

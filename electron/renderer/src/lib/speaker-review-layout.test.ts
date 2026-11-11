@@ -26,6 +26,16 @@ describe('speaker review row layout', () => {
         { localLabel: 'SPEAKER_00', needsReview: false },
         { localLabel: 'SPEAKER_02', needsReview: false },
       ],
+      brief: [],
+    });
+  });
+
+  it('sets barely-heard unnamed voices apart from review work and named voices', () => {
+    const brief = { localLabel: 'SPEAKER_04', rosterId: null, needsReview: false, durationS: 4, segmentCount: 2 };
+    const unknown = { localLabel: 'SPEAKER_05', rosterId: null, needsReview: true, durationS: 40, segmentCount: 9 };
+    const quietButNamed = { localLabel: 'SPEAKER_06', rosterId: 'alice', needsReview: false, durationS: 4, segmentCount: 2 };
+    expect(partitionSpeakerReview([brief, unknown, quietButNamed])).toEqual({
+      needsReview: [unknown], rest: [quietButNamed], brief: [brief],
     });
   });
 });
