@@ -270,6 +270,8 @@ export const IPC_CHANNELS = {
   groupsAssign: 'groups:assign',
   groupsUndo: 'groups:undo',
   searchCancel: 'search:cancel',
+  searchAsk: 'search:ask',
+  searchAskCancel: 'search:ask-cancel',
   actionItemsUndoDelete: 'action-items:undo-delete',
   appUndoEdit: 'app:undo-edit',
   backupPreview: 'backup:preview',

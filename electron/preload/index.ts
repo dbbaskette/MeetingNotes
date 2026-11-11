@@ -3,6 +3,7 @@ import type { ActionFilter, ActionPage, GroupBrief } from '../shared/productivit
 import type { SpeechWork } from '../shared/processing-progress.js';
 import type { NativeSpeechStatus } from '../shared/native-speech.js';
 import type { SearchRequest, SearchResponse } from '../shared/search';
+import type { AskResult } from '../shared/ask';
 import type {BackupPreview,BackupStatus} from '../shared/backup';
 import type { NotesVersion, NotesComparison } from '../shared/notes-history';
 import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
@@ -93,6 +94,8 @@ const IPC_CHANNELS = {
   groupsAssign: 'groups:assign',
   groupsUndo: 'groups:undo',
   searchCancel: 'search:cancel',
+  searchAsk: 'search:ask',
+  searchAskCancel: 'search:ask-cancel',
   actionItemsUndoDelete: 'action-items:undo-delete',
   appUndoEdit: 'app:undo-edit',
   backupPreview: 'backup:preview',
@@ -545,6 +548,11 @@ const api = {
     run: (q:string, limit:number, groupId:string|null|undefined, request:SearchRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.searchQuery,q,limit,groupId,request) as Promise<SearchResponse>,
     cancel: (clientId:string, requestId:number) => ipcRenderer.invoke(IPC_CHANNELS.searchCancel,{clientId,requestId}) as Promise<void>,
+    /** Answer a question from every meeting's notes and transcript, with
+     *  numbered sources. Runs the local model, so it can take a while; a new
+     *  question or `cancelAsk` stops the one in flight. */
+    ask: (question: string) => ipcRenderer.invoke(IPC_CHANNELS.searchAsk, question) as Promise<AskResult>,
+    cancelAsk: () => ipcRenderer.invoke(IPC_CHANNELS.searchAskCancel) as Promise<void>,
     /** Full-text search across meeting titles + summaries + transcripts.
      *  Returns at most `limit` results, sorted title > summary >
      *  transcript. Each result carries the meeting id, the matched
