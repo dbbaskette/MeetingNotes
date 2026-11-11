@@ -223,7 +223,7 @@ describe('Pipeline', () => {
     speakers.linkToMeeting('review', 'SPEAKER_00', linked ? rosterId : null, confidence);
     speakers.linkToMeeting('review', 'SPEAKER_01', rosterId, 0.95);
     writeDiarization(dir, 'review', [
-      ...Array.from({ length: segments }, (_, i) => ({ speaker: 'SPEAKER_00', start: i, end: i + 1 })),
+      ...Array.from({ length: segments }, (_, i) => ({ speaker: 'SPEAKER_00', start: 10 + i * 20, end: 21 + i * 20 })),
       { speaker: 'SPEAKER_01', start: 3, end: 4 },
       { speaker: 'SPEAKER_01', start: 4, end: 5 },
     ]);
@@ -354,8 +354,8 @@ describe('Pipeline', () => {
       readFile: async () => {
         speakers.linkToMeeting('changed', 'SPEAKER_00', null, 0);
         return JSON.stringify({ segments: [
-          { speaker: 'SPEAKER_00', start: 0, end: 1 },
-          { speaker: 'SPEAKER_00', start: 1, end: 2 },
+          { speaker: 'SPEAKER_00', start: 0, end: 6 },
+          { speaker: 'SPEAKER_00', start: 6, end: 12 },
         ] });
       },
     });

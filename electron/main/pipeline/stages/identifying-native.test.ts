@@ -23,7 +23,7 @@ it('identifies from native profiles when enabled, preserves manual links, gates 
     const bob = roster.confirmSpeaker({ displayName: 'Bob', embedding: [0, 1, 0] }, space);
     const profiles = new VoiceProfiles(root), before = profiles.load(space, alice);
     const segments = [{ speaker: 'A', start: 0, end: 6 }, { speaker: 'A', start: 10, end: 16 },
-      { speaker: 'B', start: 20, end: 26 }, { speaker: 'B', start: 30, end: 36 }, { speaker: 'unknown', start: 40, end: 41 }];
+      { speaker: 'B', start: 20, end: 26 }, { speaker: 'B', start: 30, end: 36 }, { speaker: 'unknown', start: 40, end: 52 }];
     const folder = path.join(root, 'meetings', 'm'); fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(folder, 'diarization.json'), JSON.stringify({ embeddingSpace: space,
       centroids: { A: [1, 0, 0], B: [0, 1, 0], unknown: [0, 0, 1] }, segments }));

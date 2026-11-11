@@ -1,3 +1,4 @@
+import { isBriefVoice } from '../../../shared/speaker-matching';
 /**
  * Responsive layout contract for the compact speaker-review rail. The rail
  * is only 240px wide on desktop, so the identity details must be allowed to
@@ -16,17 +17,19 @@ export function speakerReviewLayout(): {
   };
 }
 
-/** Gate work first, confirmed/probable voices after. Relative order inside
- *  each group is preserved so color indexes stay stable when the caller
- *  maps back to the original array. */
-export function partitionSpeakerReview<T extends { needsReview?: boolean }>(
+/** Gate work first, confirmed/probable voices after, barely-heard unnamed
+ *  voices last. Relative order inside each group is preserved so color
+ *  indexes stay stable when the caller maps back to the original array. */
+export function partitionSpeakerReview<T extends { needsReview?: boolean; rosterId?: string | null; durationS?: number; segmentCount?: number }>(
   speakers: readonly T[],
-): { needsReview: T[]; rest: T[] } {
+): { needsReview: T[]; rest: T[]; brief: T[] } {
   const needsReview: T[] = [];
   const rest: T[] = [];
+  const brief: T[] = [];
   for (const speaker of speakers) {
-    if (speaker.needsReview) needsReview.push(speaker);
+    if (isBriefVoice({ rosterId: speaker.rosterId ?? null, durationS: speaker.durationS, segmentCount: speaker.segmentCount })) brief.push(speaker);
+    else if (speaker.needsReview) needsReview.push(speaker);
     else rest.push(speaker);
   }
-  return { needsReview, rest };
+  return { needsReview, rest, brief };
 }

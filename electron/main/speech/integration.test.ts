@@ -50,7 +50,7 @@ it('ignores obsolete settings without deleting rollback configuration', () => {
 it('uses native processing, human review, shared terminology, notes, tasks and export end to end', async () => {
   const legacyId = roster.confirmSpeaker({ displayName: 'Keith', embedding: [0, 1] });
   const nativeSpeech = { transcribe: vi.fn(async () => ({ text: 'Keith will review Salsa compliance.', segments: words, provider: 'apple' })),
-    diarize: vi.fn(async () => ({ segments: [{ start: 0, end: 6, speaker: 'SPEAKER_00' }], centroids: { SPEAKER_00: [1, 0] }, embeddingSpace: space, num_speakers: 1 })) };
+    diarize: vi.fn(async () => ({ segments: [{ start: 0, end: 12, speaker: 'SPEAKER_00' }], centroids: { SPEAKER_00: [1, 0] }, embeddingSpace: space, num_speakers: 1 })) };
   const forbidden = vi.fn(async () => { throw new Error('Legacy server must not start'); });
   const terminology = new TerminologyService(new TerminologyRepo(db), { libraryRoot: root, meetings, speakers, artifactCache: new ArtifactCache(), userName: () => '' });
   terminology.repo.save({ source: 'Salsa compliance', replacement: 'SLSA compliance', groupId: null, enabled: true, mode: 'automatic', caseSensitive: false });

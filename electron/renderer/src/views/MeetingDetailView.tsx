@@ -884,7 +884,9 @@ function SpeakerIdControls({
   if (placement === 'above-timeline' && !parked) return null;
   if (placement === 'below-timeline' && !preGate) return null;
 
-  const unidentified = meeting.speakers.filter((s) => s.needsReview || !s.rosterId).length;
+  // Review metadata, once loaded, is the gate's own policy: a barely-heard
+  // unnamed voice does not count as work for the user.
+  const unidentified = meeting.speakers.filter((s) => s.needsReview ?? !s.rosterId).length;
   const totalSpeakers = meeting.speakers.length;
 
   async function setSkip(skip: boolean): Promise<void> {
