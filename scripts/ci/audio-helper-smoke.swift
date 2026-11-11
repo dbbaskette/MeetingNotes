@@ -14,6 +14,8 @@ import Foundation
     print("PASS: encoded batched mic/dual-source speech has no periodic dropout; stems/finalization aligned")
     try await CaptureTimelineSmoke.encodedMicFidelity()
     print("PASS: decoded mic-only primary/voice fidelity, gain, clipping and aligned duration")
+    try TapWatchdogSmoke.stallAndRecoveryTests()
+    print("PASS: stalled app-audio tap restarts, backs off, reports recovery")
     if let file = ProcessInfo.processInfo.environment["MN_AUDIO_SPEECH_FIXTURE"] {
       try await CaptureTimelineSmoke.encodedMicFidelity(speechURL: URL(fileURLWithPath: file))
       print("PASS: decoded synthetic speech primary/voice RMS, gain, clipping and aligned duration")

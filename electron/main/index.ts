@@ -318,8 +318,11 @@ app.whenReady().then(async () => {
     },
     onAutoStop: (sessionId, silenceMs) =>
       logger.info('recording:auto-stop-silence', { sessionId, silenceMs }),
-    onDiagnostic: (sessionId, diagnostic) =>
-      logger.info('recording:capture-timing', { sessionId, ...diagnostic }),
+    onDiagnostic: (sessionId, diagnostic) => {
+      if (diagnostic.stage === 'tap_stalled') logger.warn('recording:app-audio-stalled', { sessionId, ...diagnostic });
+      else if (diagnostic.stage === 'tap_recovered') logger.info('recording:app-audio-recovered', { sessionId, ...diagnostic });
+      else logger.info('recording:capture-timing', { sessionId, ...diagnostic });
+    },
   });
   const appEnumerator = new AppEnumerator({ helperPath });
 

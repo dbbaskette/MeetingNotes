@@ -9,8 +9,10 @@ swiftc -parse-as-library -target arm64-apple-macos14.2 \
   audio-tap/Sources/meeting-notes-tap/AACWriter.swift \
   audio-tap/Sources/meeting-notes-tap/CaptureTimeline.swift \
   audio-tap/Sources/meeting-notes-tap/StatusEvents.swift \
+  audio-tap/Sources/meeting-notes-tap/TapWatchdog.swift \
   audio-tap/Tests/meeting-notes-tap-tests/AACWriterSmoke.swift \
   audio-tap/Tests/meeting-notes-tap-tests/CaptureTimelineSmoke.swift \
+  audio-tap/Tests/meeting-notes-tap-tests/TapWatchdogSmoke.swift \
   scripts/ci/audio-helper-smoke.swift -o "$task_native_root/writer-smoke"
 # Offline TTS fixture: no microphone, user speech or meeting content.
 /usr/bin/say -o "$task_native_root/speech.aiff" 'This is a synthetic meeting test. We will review the project milestones, name the speakers, and preserve the action items. The next meeting is scheduled for Friday. Please check the recording timeline and audio quality.'

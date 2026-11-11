@@ -10,5 +10,6 @@ final class AACWriterTests: XCTestCase {
   func testCaptureTimelineGapsAndSources() throws { try CaptureTimelineSmoke.gapAndSourceTests() }
   func testBatchedMicrophoneCallbacks() throws { try CaptureTimelineSmoke.batchedCallbackTests() }
   func testEncodedBatchedMicFidelity() async throws { try await CaptureTimelineSmoke.encodedBatchedMicFidelity() }
+  func testTapWatchdogStallAndRecovery() throws { try TapWatchdogSmoke.stallAndRecoveryTests() }
   func testEncodedMicFidelity() async throws { try await CaptureTimelineSmoke.encodedMicFidelity() }
 }
