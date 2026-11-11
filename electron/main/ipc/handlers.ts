@@ -50,6 +50,8 @@ import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { clearGateNotified } from '../pipeline/gate-alert.js';
 import type { WeeklyAggregator } from '../weekly/aggregator.js';
 import { registerWeeklyHandlers } from './weekly-handlers.js';
+import { registerAskHandlers } from './ask-handlers.js';
+import type { AskIndex } from '../ask/ask-index.js';
 import { detectProviders, type ProviderAvailability } from '../llm/supervisor.js';
 import { registerSettingsHandlers } from './settings-handlers.js';
 import { ripgrepSearch, ripgrepSearchDetailed } from '../search/ripgrep-search.js';
@@ -101,6 +103,8 @@ export interface IpcServices {
   meetingDetector?: MeetingDetector;
   nativeAppDetector?: NativeAppDetector;
   weeklyAggregator: WeeklyAggregator;
+  /** Full-text index behind "ask across meetings"; absent in tests that do not need it. */
+  askIndex?: AskIndex;
   logger: Logger;
   /** Per-group and per-meeting summary template choices. */
   summaryTemplates?: SummaryTemplateStore;
@@ -1178,6 +1182,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 
   registerWeeklyHandlers(ipc, s);
+  registerAskHandlers(ipc, s);
 
   // Phase 3 LLM-provider lifecycle. Settings UI calls this to dim
   // managed-mode options when their CLI isn't installed and to show

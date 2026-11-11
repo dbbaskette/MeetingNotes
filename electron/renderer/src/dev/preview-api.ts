@@ -135,7 +135,18 @@ export const overrides: PreviewOverrides = {
     sample: async () => null,
   },
   onboarding: { openExternal: async () => {} },
-  search: { query: async () => [], run: async () => ({ hits: [], status: 'complete' }) },
+  search: {
+    query: async () => [], run: async () => ({ hits: [], status: 'complete' }),
+    ask: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return { found: true, answer: 'Pricing stays at twenty dollars through the year [1]. Bob will send the rollback plan by Friday [2].',
+        sources: [
+          { n: 1, meetingId: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', kind: 'summary', startS: null, heading: 'Decisions', snippet: 'Pricing stays at twenty dollars through the year.' },
+          { n: 2, meetingId: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', kind: 'transcript', startS: 754, heading: null, snippet: 'Bob: I will send the rollback plan by Friday.' },
+        ] };
+    },
+    cancelAsk: async () => {},
+  },
   groups: { list: async () => ({ groups: [], allCount: rows.length, ungroupedCount: rows.length }), pin: async () => {}, brief: async () => ({ meetings: [], actions: [], openActionCount: 0 }) },
   actionItems: { list: async () => ({ items: [], total: 0, owners: [], identified: false }), setStatus: async () => {} },
   trash: { list: async () => [] },

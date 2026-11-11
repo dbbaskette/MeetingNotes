@@ -143,6 +143,8 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   // Search, pipeline, models
   [C.searchQuery]: z.tuple([Text, z.number().optional(), Id.nullable().optional(), handlerValidated]),
   [C.searchCancel]: z.tuple([handlerValidated]),
+  [C.searchAsk]: z.tuple([z.string().min(1).max(2000)]),
+  [C.searchAskCancel]: none,
   [C.pipelineStatus]: none,
   [C.pipelineCancel]: z.tuple([Id]),
   [C.pipelinePause]: none,

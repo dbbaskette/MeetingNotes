@@ -45,6 +45,7 @@ import { DiscoverFailureGate, fileState } from './library/discover-failure-gate.
 import { InvalidAudioError } from './library/ffprobe.js';
 import { RecordingRecoveryService, revealPathInFinder } from './recording/recovery.js';
 import { recordingsDirFor, libraryWatchPaths } from './lib/storage-paths.js';
+import { AskIndex } from './ask/ask-index.js';
 import { RosterService } from './speakers/roster-service.js';
 import { VoiceProfiles } from './speakers/voice-profiles.js';
 import { Pipeline } from './pipeline/pipeline.js';
@@ -845,6 +846,7 @@ app.whenReady().then(async () => {
     meetingDetector,
     nativeAppDetector,
     weeklyAggregator,
+    askIndex: new AskIndex(db, libraryRoot),
     logger,
     googleAuth,
     artifactCache,

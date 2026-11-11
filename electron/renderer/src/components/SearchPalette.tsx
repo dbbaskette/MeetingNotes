@@ -14,6 +14,7 @@ import { api } from '../ipc/client';
 import { useDialogSurface } from '../lib/dialog-surface';
 import { shortcutMod } from '../lib/shortcut';
 import { paletteSearchView } from '../lib/palette-search';
+import { AskAnswer } from './AskAnswer';
 
 export interface PaletteTarget {
   meetingId: string;
@@ -51,6 +52,10 @@ export function SearchPalette({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryToken, setRetryToken] = useState(0);
+  // The question being answered, when the palette is in Ask mode.
+  const [asking, setAsking] = useState<string | null>(null);
+  const canAsk = q.trim().length >= 3;
+  const ask = (): void => { if (canAsk) setAsking(q.trim()); };
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogSurface(dialogRef, { active: open, onClose });
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -59,7 +64,7 @@ export function SearchPalette({
   // frame so the focus trap doesn't fight the browser's default.
   useEffect(() => {
     if (!open) return;
-    setQ(''); setResults([]); setSelected(0); setError(null);
+    setQ(''); setResults([]); setSelected(0); setError(null); setAsking(null);
     const t = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(t);
   }, [open]);
@@ -102,6 +107,9 @@ export function SearchPalette({
 
   function onKey(e: React.KeyboardEvent<HTMLDivElement>): void {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    // Shift+Enter asks the question; plain Enter still opens a result.
+    if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); ask(); return; }
+    if (asking !== null) return;
     if((e.target as HTMLElement).closest('[data-search-filters]'))return;
     if (results.length === 0) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setSelected((s) => Math.min(s + 1, results.length - 1)); }
@@ -135,19 +143,26 @@ export function SearchPalette({
             role="combobox" aria-expanded={true} aria-controls="meeting-search-results" aria-activedescendant={results[selected] ? `meeting-search-result-${selected}` : undefined}
             maxLength={500}
             value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search across all meetings…"
+            onChange={(e) => { setQ(e.target.value); setAsking(null); }}
+            placeholder="Search or ask across all meetings…"
             className="flex-1 bg-transparent text-sm focus:outline-none"
           />
-          {loading && (
+          {loading && asking === null && (
             <span className="text-[11px] text-ink-muted italic">Searching…</span>
           )}
+          <button type="button" disabled={!canAsk || asking !== null} onClick={ask}
+            title="Answer this question from your meetings (Shift+Enter)"
+            className="shrink-0 rounded-md bg-brand-solid px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-40">
+            Ask
+          </button>
           <kbd className="text-[10px] font-mono tracking-wider uppercase text-ink-muted/80 bg-surface-sunken border border-surface-border rounded px-1.5 py-0.5">
             Esc
           </kbd>
         </div>
         <div className="px-4 py-2"><SearchFilters facets={facets} onChange={setFacets} query={q} onQuery={setQ}/>{completion&&<p role="status" className="text-xs text-status-warnText">{completion}</p>}</div>
-        <div id="meeting-search-results" role="listbox" aria-label="Matching meetings" className="max-h-[60vh] overflow-y-auto">
+        {asking !== null && <AskAnswer question={asking} onBack={() => { setAsking(null); inputRef.current?.focus(); }}
+          onOpen={(source) => { onOpenMeeting({ meetingId: source.meetingId, title: source.title, ...(source.startS !== null ? { seekSeconds: source.startS } : {}) }); onClose(); }} />}
+        <div id="meeting-search-results" role="listbox" aria-label="Matching meetings" hidden={asking !== null} className="max-h-[60vh] overflow-y-auto">
           {(() => {
             const view = paletteSearchView({ query: q || (Object.keys(facets).length ? 'filtered meetings' : ''), loading, error, results });
             if (view.kind === 'hint') {
@@ -156,7 +171,9 @@ export function SearchPalette({
                   Type at least 2 characters to search titles, summaries, and
                   transcripts. <kbd className="font-mono">Enter</kbd> opens;
                   {' '}<kbd className="font-mono">{shortcutMod()}+Enter</kbd> jumps to the
-                  matched timestamp.
+                  matched timestamp. Or type a question and press
+                  {' '}<kbd className="font-mono">Shift+Enter</kbd> to get an answer drawn
+                  from all your meetings.
                 </div>
               );
             }
