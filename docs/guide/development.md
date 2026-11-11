@@ -42,7 +42,7 @@ The app requires Apple silicon/macOS 26+. Source builds require Node 22, Xcode 2
 
 `npm run dist` builds both helpers and Electron, then creates local DMG/ZIP files. There is no Python/PyInstaller environment, Whisper executable/model download or HF-token prerequisite. A clean generated `dist/` prevents removed provider modules from surviving incremental TypeScript builds. Only the capture helper, native speech helper and SDK/model notices are added as resources. macOS minimum is 26.0.
 
-For versioned artifacts without overwriting rollback installers, run component builds and `npx electron-builder --mac --publish never --config.directories.output=release/v1.21.1`. Keep prior release artifacts. Remove only the task-owned unboxed app after verification to avoid LaunchServices duplicates. Existing Apple Development signing is not Developer ID distribution or notarization. Never install/restart a running app as part of building. GitHub releases publish source and notes without binary assets.
+For versioned artifacts without overwriting rollback installers, run component builds and `npx electron-builder --mac --publish never --config.directories.output=release/v1.22.0`. Keep prior release artifacts. Remove only the task-owned unboxed app after verification to avoid LaunchServices duplicates. Existing Apple Development signing is not Developer ID distribution or notarization. Never install/restart a running app as part of building. GitHub releases publish source and notes without binary assets.
 
 Main-process ESM output lives under `dist/electron`; the CommonJS preload compiler
 uses the separate `dist/preload` tree with its own module boundary. Type-only

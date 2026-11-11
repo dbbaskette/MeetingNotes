@@ -12,11 +12,16 @@ After diarize + identify, meetings continue automatically when no voices need re
 
 Enable **Settings → Processing → Automatically match known voices** to apply
 strong native voiceprint matches during future identification runs. It is off
-by default. Initial heuristics require unrounded similarity ≥ 0.98, a ≥ 0.05
+by default. The heuristics require unrounded similarity ≥ 0.80, a ≥ 0.05
 lead over the runner-up, and ≥ 10 seconds of non-overlapping speech across two
 distinct turns (each with ≥ 1.5 seconds of clean speech). Close candidates,
 duplicate identity claims, short voices, missing/invalid evidence and incompatible
 model profiles remain in review. Scores are not identity probabilities.
+
+An unnamed voice whose best candidate scores ≥ 0.60 with the same lead shows
+**Sounds like … · Confirm** on its row; one click assigns it as your own
+confirmation. Unnamed voices with under 10 seconds of speech are listed under
+**brief voices**, do not pause the meeting for review, and can still be named.
 
 Names appear as **Auto-matched**, not **Confirmed**, even for similarity 1.00.
 Expand the voice, listen and choose **Confirm this voice** to teach that profile;
