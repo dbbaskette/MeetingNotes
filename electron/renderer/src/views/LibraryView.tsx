@@ -46,7 +46,7 @@ import { arrivalBaseline, acknowledgeArrivals } from '../lib/new-arrivals';
 import {readBrowsePreferences,saveBrowsePreferences} from '../lib/library-browse-preferences';
 import { organizedSections } from '../lib/organized-sections';
 import type { MeetingSummary } from '../lib/paged-meetings';
-import type { PipelineStatusSnapshot } from '../lib/status-bar';
+import { pipelineQueueKey, type PipelineStatusSnapshot } from '../lib/status-bar';
 import { shouldPollLibrary } from '../lib/poll-gate';
 import { shortcutMod } from '../lib/shortcut';
 import logoUrl from '../assets/logo.png';
@@ -252,6 +252,9 @@ export function LibraryView({
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatusSnapshot>({
     paused: false, currentId: null, queueLength: 0, queueIds: [],
   });
+  const lastQueueKey = useRef('');
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     let cancelled = false;
     let receivedEvent = false;
@@ -262,8 +265,13 @@ export function LibraryView({
       receivedEvent = true;
       setPipelineStatus(s);
       // Queue motion is itself a reason to refresh — current meeting
-      // moved, etc. Cheaper than waiting for the next poll tick.
-      void invalidate();
+      // moved, etc. Progress ticks arrive on the same channel about a
+      // hundred times per meeting and are not: the poll covers those. A
+      // hidden Library skips the refresh too; it invalidates on return.
+      const key = pipelineQueueKey(s);
+      if (key === lastQueueKey.current) return;
+      lastQueueKey.current = key;
+      if (activeRef.current) void invalidate();
     });
     return () => { cancelled = true; off(); };
   }, [invalidate]);
@@ -1217,7 +1225,7 @@ function LibraryEmpty({
         Hit <span className="font-semibold text-ink">Record</span>{' '}
         <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">⌘R</kbd>{' '}
         to start a new session,
-        or drag an audio file (.m4a, .mp3, .wav) onto this window.
+        or drag an audio file (.m4a or .mp3) onto this window.
       </div>
     </div>
   );

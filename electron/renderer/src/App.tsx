@@ -17,7 +17,7 @@ import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
 import { requestLeave } from './lib/unsaved-guard';
 import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
-import { recordingStartFeedback } from './lib/recording-start-feedback';
+import { recordingStartFeedback, RECORDING_ACTIVE_MESSAGE } from './lib/recording-start-feedback';
 
 const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
 const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
@@ -121,6 +121,23 @@ function AppInner(): JSX.Element {
   const [dragActive, setDragActive] = useState(false);
   const dragCounter = useRef(0);
   const toast = useToast();
+  // ⌘R and File ▸ Record from any view. The Record control lives in the
+  // Library, so from elsewhere go there first and then open its picker; with
+  // a recording already running, say so instead of doing nothing.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const showToast = toast.show;
+  const toggleRecord = useCallback((): void => {
+    const fire = (): void => { window.dispatchEvent(new CustomEvent('mn:toggle-record')); };
+    if (viewRef.current.kind === 'library') { fire(); return; }
+    if (liveRecordingRef.current) { showToast({ message: RECORDING_ACTIVE_MESSAGE, durationMs: 5000 }); return; }
+    void Promise.resolve(navigate({ kind: 'library' })).then(() => {
+      // Two frames: the Library must be the active view (its Record button
+      // listens only then). A refused navigation (unsaved edits) leaves the
+      // view unchanged and nothing fires.
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (viewRef.current.kind === 'library') fire(); }));
+    });
+  }, [navigate, showToast]);
 
   // Theme: read the persisted choice, apply it, and keep it live. 'system'
   // follows the OS; 'light'/'dark' override. We mirror the resolved choice to
@@ -176,7 +193,7 @@ function AppInner(): JSX.Element {
       }
       if (!editable && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r') {
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent('mn:toggle-record'));
+        toggleRecord();
         return;
       }
       // History navigation (#190). ⌘[ back / ⌘] forward — the same
@@ -196,7 +213,7 @@ function AppInner(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [goBack, goForward]);
+  }, [goBack, goForward, toggleRecord]);
   const onPaletteOpen = (t: PaletteTarget): void => {
     // Meeting switch is destructive to an in-flight summary edit session in
     // the detail view — it registers an unsaved-edits guard while dirty.
@@ -320,7 +337,7 @@ function AppInner(): JSX.Element {
           if (!document.querySelector('[role="dialog"][aria-modal="true"]')) window.dispatchEvent(new CustomEvent('mn:undo-group-move'));
           break;
         case 'toggle-record':
-          window.dispatchEvent(new CustomEvent('mn:toggle-record'));
+          toggleRecord();
           break;
         case 'view-library':
           void navigate({ kind: 'library' });
@@ -343,7 +360,7 @@ function AppInner(): JSX.Element {
       }
     });
     return () => { off(); };
-  }, [goBack, goForward, navigate]);
+  }, [goBack, goForward, navigate, toggleRecord]);
 
   // meetingnotes://open?id=… — main process emits this when an external
   // caller invokes the URL scheme (#77). Navigate to the detail view.
@@ -396,12 +413,14 @@ function AppInner(): JSX.Element {
       setDragActive(false);
       const files = Array.from(e.dataTransfer?.files ?? []);
       if (files.length === 0) return;
-      // Electron exposes the absolute path on File via `path`; the DOM
-      // type doesn't admit it, so we cast through unknown.
       const paths = files
-        .map((f) => (f as unknown as { path?: string }).path)
+        .map((f) => api.meetings.pathForDroppedFile(f))
         .filter((p): p is string => typeof p === 'string' && p.length > 0);
-      if (paths.length === 0) return;
+      if (paths.length === 0) {
+        // Never swallow a drop: say why nothing happened.
+        toast.show({ message: "Couldn't import: drop audio files from Finder (.m4a or .mp3).", variant: 'error', durationMs: 6000 });
+        return;
+      }
       void (async () => {
         try {
           const r = await api.meetings.importDropped(paths);
@@ -556,7 +575,7 @@ function DropOverlay(): JSX.Element {
         <Icon name="download" className="w-9 h-9 text-ink-muted opacity-60 mb-1" />
         <div className="text-base font-semibold">Drop audio to import</div>
         <div className="text-xs text-ink-muted">
-          .m4a, .mp3, .wav, .aac, .flac — files land in your inbox as
+          .m4a or .mp3 — files land in your inbox as
           new pending meetings.
         </div>
       </div>
