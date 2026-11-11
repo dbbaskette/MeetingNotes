@@ -62,6 +62,19 @@ describe('RecordingManager', () => {
     expect(onDiagnostic).toHaveBeenLastCalledWith(result.sessionId, { stage: 'capture_timing_stop', holdback_ms: 234.2, mic_late_frames: 10, system_late_frames: 0 });
     await manager.stop(result.sessionId);
   });
+  it('reports a stalled and recovered app-audio tap without forwarding helper error text', async () => {
+    const onDiagnostic = vi.fn(), { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic });
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    stdout.emit('data', '{"event":"diag","stage":"tap_stalled","attempt":1,"stalled_ms":1000,"device_name":"private headset"}\n');
+    stdout.emit('data', '{"event":"diag","stage":"tap_rebuild_failed","error":"private device detail"}\n');
+    stdout.emit('data', '{"event":"diag","stage":"tap_recovered","attempt":2,"stalled_ms":2000}\n');
+    expect(onDiagnostic.mock.calls).toEqual([
+      [result.sessionId, { stage: 'tap_stalled', attempt: 1, stalled_ms: 1000 }],
+      [result.sessionId, { stage: 'tap_recovered', attempt: 2, stalled_ms: 2000 }],
+    ]);
+    await manager.stop(result.sessionId);
+  });
   it('isolates timing observer failures from audio levels and capture lifecycle', async () => {
     const { proc, stdout } = fakeRecordingProcess();
     const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic: () => { throw new Error('observer unavailable'); } });

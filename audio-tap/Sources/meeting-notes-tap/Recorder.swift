@@ -48,6 +48,14 @@ final class Recorder {
   // even when AudioDeviceStart succeeds.
   private var ioProcFireCount: UInt64 = 0
   private var diagTimer: DispatchSourceTimer?
+  // The tap, its aggregate device and its IOProc are created, watched and
+  // rebuilt on this one queue, so a rebuild can never interleave with stop.
+  private let tapQueue = DispatchQueue(label: "MeetingNotes.tap-lifecycle")
+  private let ioQueue = DispatchQueue(label: "meeting-notes-tap.ioproc", qos: .userInteractive)
+  private var watchdog = TapWatchdog()
+  private var stopping = false
+  private let micSettled = DispatchSemaphore(value: 0)
+  private var micSettledSignalled = false
 
   init(opts: RecordOptions) { self.opts = opts; timeline = CaptureTimeline(captureMic: opts.captureMic) }
 
@@ -65,11 +73,21 @@ final class Recorder {
       writerVoice = try AACWriter(outputURL: voiceURL, sampleRate: 48_000, bitrate: 128_000)
     }
     writerSystem = try AACWriter(outputURL: systemURL, sampleRate: 48_000, bitrate: 128_000)
-    try attachProcessTap()
-    watchTargetPIDIfNeeded()
-    if opts.captureMic { try attachMic() }
     originSeconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-    try startEngine()
+    // Microphone first. Opening a Bluetooth headset's mic moves the headset
+    // from its music profile to its call profile, and macOS stops all IO on
+    // it while that happens. A tap created before the switch is stopped by
+    // it and may never resume, so let the switch finish before tapping.
+    if opts.captureMic {
+      try startMicEngine()
+      if micEngine != nil { _ = micSettled.wait(timeout: .now() + 1.0) }
+    }
+    try tapQueue.sync {
+      try attachProcessTap()
+      try startTapIO()
+    }
+    watchTargetPIDIfNeeded()
+    startTapWatchdog()
     startMixClock()
     StatusEvent.emit([
       "event": "started",
@@ -115,7 +133,10 @@ final class Recorder {
   }
 
   private func finishStop() async {
-    stopAggregateIO()
+    tapQueue.sync {
+      stopping = true
+      stopAggregateIO()
+    }
     engine?.stop()
     mixTimer?.cancel(); mixTimer = nil
     // Stop inputs first, then drain the bounded ring on its single output
@@ -300,19 +321,13 @@ final class Recorder {
     if aggregateID != 0 { _ = AudioHardwareDestroyAggregateDevice(aggregateID); aggregateID = 0 }
   }
 
-  // MARK: - Mic
-  private func attachMic() throws {
-    // The mic is captured via a second AVAudioEngine in startEngine(); no
-    // separate setup needed here.
-  }
-
   // MARK: - Engine
   // SUBSTITUTION FROM PLAN: the spec wired AVAudioEngine.inputNode to the
   // aggregate device, but in practice AVAudioEngine drops Process Tap data
   // (input always reads as 1ch silence). Use the documented CoreAudio
   // IOProc on the aggregate device directly — that's the path the WWDC
   // sample uses too.
-  private func startEngine() throws {
+  private func startTapIO() throws {
     // Read the tap's actual format from the tap object itself
     // (kAudioTapPropertyFormat) — this is the authoritative format the
     // captured audio is delivered in.
@@ -368,12 +383,14 @@ final class Recorder {
       throw NSError(domain: "meeting-notes-tap", code: -10,
                     userInfo: [NSLocalizedDescriptionKey: "could not build source AVAudioFormat"])
     }
-    self.sourceFormat = src
-    self.converter = AVAudioConverter(from: src, to: writeFormat)
+    // The callback reads these on ioQueue; a rebuild replaces them there.
+    ioQueue.sync {
+      self.sourceFormat = src
+      self.converter = AVAudioConverter(from: src, to: writeFormat)
+    }
 
     var procID: AudioDeviceIOProcID?
     let unmanaged = Unmanaged.passUnretained(self).toOpaque()
-    let ioQueue = DispatchQueue(label: "meeting-notes-tap.ioproc", qos: .userInteractive)
     // SUBSTITUTION: Some macOS 14.2+ builds will not invoke the IOProc on
     // the aggregate device wrapping a tap (DeviceIsRunning stays 0 even
     // after Start). Try the tap object's own IOProc as a fallback.
@@ -394,47 +411,98 @@ final class Recorder {
     }
     aggregateRunning = true
 
-    // Task 12 diagnostics: probe DeviceIsRunning + IOProc fire count once a
-    // second so we can tell from logs whether the tap is delivering data.
-    var runAddr = AudioObjectPropertyAddress(
-      mSelector: kAudioDevicePropertyDeviceIsRunning,
-      mScope: kAudioObjectPropertyScopeGlobal,
-      mElement: kAudioObjectPropertyElementMain
-    )
-    var running: UInt32 = 0
-    var rsz = UInt32(MemoryLayout<UInt32>.size)
-    let _ = AudioObjectGetPropertyData(aggregateID, &runAddr, 0, nil, &rsz, &running)
     StatusEvent.emit([
       "event": "diag",
       "stage": "after_start",
-      "device_is_running": Int(running),
+      "device_is_running": Int(aggregateIsRunning()),
       "agg_id": Int(aggregateID),
       "tap_id": Int(tapObjectID),
       "stream_sr": tapFormat.mSampleRate,
       "stream_ch": Int(tapFormat.mChannelsPerFrame),
     ])
-    let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+  }
+
+  private func aggregateIsRunning() -> UInt32 {
+    var running: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var addr = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyDeviceIsRunning,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    guard aggregateID != 0 else { return 0 }
+    _ = AudioObjectGetPropertyData(aggregateID, &addr, 0, nil, &size, &running)
+    return running
+  }
+
+  // MARK: - Tap watchdog
+  /// Once a second: report whether the tap is delivering, and rebuild it if
+  /// it has stopped. See TapWatchdog for why a silent second means stopped.
+  private func startTapWatchdog() {
+    let timer = DispatchSource.makeTimerSource(queue: tapQueue)
     timer.schedule(deadline: .now() + 1.0, repeating: 1.0)
     timer.setEventHandler { [weak self] in
-      guard let self = self else { return }
-      var r: UInt32 = 0
-      var sz = UInt32(MemoryLayout<UInt32>.size)
-      var addr = AudioObjectPropertyAddress(
-        mSelector: kAudioDevicePropertyDeviceIsRunning,
-        mScope: kAudioObjectPropertyScopeGlobal,
-        mElement: kAudioObjectPropertyElementMain
-      )
-      _ = AudioObjectGetPropertyData(self.aggregateID, &addr, 0, nil, &sz, &r)
+      guard let self, !self.stopping else { return }
+      let fires = self.ioProcFireCount
       StatusEvent.emit([
         "event": "diag",
-        "ioproc_fires": NSNumber(value: self.ioProcFireCount),
-        "device_is_running": Int(r),
+        "ioproc_fires": NSNumber(value: fires),
+        "device_is_running": Int(self.aggregateIsRunning()),
       ])
+      switch self.watchdog.tick(fires: fires) {
+      case .none: break
+      case .recovered(let attempts, let stalledTicks):
+        StatusEvent.emit(["event": "diag", "stage": "tap_recovered",
+                          "attempt": attempts, "stalled_ms": stalledTicks * 1000])
+      case .restart(let attempt, let stalledTicks):
+        StatusEvent.emit(["event": "diag", "stage": "tap_stalled",
+                          "attempt": attempt, "stalled_ms": stalledTicks * 1000])
+        self.rebuildTap()
+      }
     }
     timer.resume()
     self.diagTimer = timer
+    simulateStallForTesting()
+  }
 
-    if opts.captureMic { try startMicEngine() }
+  /// Runs on tapQueue. A failed rebuild leaves whatever it created for the
+  /// next attempt to tear down; the watchdog keeps retrying.
+  private func rebuildTap() {
+    teardownTapIO()
+    detachProcessTap()
+    do {
+      try attachProcessTap()
+      try startTapIO()
+    } catch {
+      StatusEvent.emit(["event": "diag", "stage": "tap_rebuild_failed",
+                        "error": error.localizedDescription])
+    }
+  }
+
+  private func teardownTapIO() {
+    if let pid = ioProcID {
+      _ = AudioDeviceStop(aggregateID, pid)
+      _ = AudioDeviceDestroyIOProcID(aggregateID, pid)
+    }
+    aggregateRunning = false
+    ioProcID = nil
+    // Let a callback that was already dispatched finish before the tap and
+    // the converter it uses are replaced.
+    ioQueue.sync {}
+  }
+
+  /// Test hook: MN_TAP_TEST_STALL_AFTER_MS stops the tap's IO behind the
+  /// recorder's back, the same end state as a failed resume after a device
+  /// reconfiguration, so recovery can be exercised without real hardware
+  /// changes. Never set by the app.
+  private func simulateStallForTesting() {
+    guard let raw = ProcessInfo.processInfo.environment["MN_TAP_TEST_STALL_AFTER_MS"],
+          let ms = Int(raw), ms > 0 else { return }
+    tapQueue.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in
+      guard let self, !self.stopping, let pid = self.ioProcID else { return }
+      _ = AudioDeviceStop(self.aggregateID, pid)
+      StatusEvent.emit(["event": "diag", "stage": "test_stall_injected"])
+    }
   }
 
   /// Run a separate AVAudioEngine for the mic; convert to mono 48k Float32
@@ -471,6 +539,7 @@ final class Recorder {
         return buffer
       }
       if err != nil { return }
+      if !self.micSettledSignalled { self.micSettledSignalled = true; self.micSettled.signal() }
       self.emitLevel(source: "mic", buffer: outBuf)
       self.enqueue(outBuf, source: .mic, hostTime: time.isHostTimeValid ? time.hostTime : mach_absolute_time(), inputFrames: Int(buffer.frameLength))
     }
@@ -639,12 +708,7 @@ final class Recorder {
       "stage": "stop",
       "ioproc_fires_total": NSNumber(value: ioProcFireCount),
     ])
-    if aggregateRunning, let pid = ioProcID {
-      _ = AudioDeviceStop(aggregateID, pid)
-      _ = AudioDeviceDestroyIOProcID(aggregateID, pid)
-      aggregateRunning = false
-      ioProcID = nil
-    }
+    teardownTapIO()
     micEngine?.stop()
     micEngine?.inputNode.removeTap(onBus: 0)
   }

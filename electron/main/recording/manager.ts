@@ -24,9 +24,13 @@ export const SILENCE_TIMEOUT_MS = 5 * 60_000;
 export const SILENCE_THRESHOLD_DB = -50;
 export type RecordingLevelSource = 'mic' | 'system' | 'mixed';
 const CAPTURE_TIMING_FIELDS = ['sample_rate', 'channels', 'requested_frames', 'input_frames',
-  'converted_frames', 'callback_age_ms', 'holdback_ms', 'mic_late_frames', 'system_late_frames'] as const;
+  'converted_frames', 'callback_age_ms', 'holdback_ms', 'mic_late_frames', 'system_late_frames',
+  'attempt', 'stalled_ms'] as const;
+const CAPTURE_DIAGNOSTIC_STAGES = ['mic_format', 'capture_timing', 'capture_timing_stop',
+  // The app-audio tap stopped delivering and was rebuilt / is delivering again.
+  'tap_stalled', 'tap_recovered'] as const;
 export type CaptureDiagnostic = Partial<Record<typeof CAPTURE_TIMING_FIELDS[number], number>> & {
-  stage: 'mic_format' | 'capture_timing' | 'capture_timing_stop';
+  stage: typeof CAPTURE_DIAGNOSTIC_STAGES[number];
   source?: 'mic' | 'system';
 };
 
@@ -324,11 +328,11 @@ export class RecordingManager {
     if (!line.trim().startsWith('{')) return;
     let payload: Record<string, unknown> | undefined;
     try { payload = JSON.parse(line); } catch { return; }
-    if (payload?.event === 'diag' && (payload.stage === 'mic_format'
-      || payload.stage === 'capture_timing' || payload.stage === 'capture_timing_stop')) {
+    const stage = CAPTURE_DIAGNOSTIC_STAGES.find((known) => known === payload?.stage);
+    if (payload?.event === 'diag' && stage) {
       // Persist only stable numeric capture metadata. Never forward arbitrary
       // helper JSON (paths, device names, meeting content or error strings).
-      const diagnostic: CaptureDiagnostic = { stage: payload.stage };
+      const diagnostic: CaptureDiagnostic = { stage };
       if (payload.source === 'mic' || payload.source === 'system') diagnostic.source = payload.source;
       for (const key of CAPTURE_TIMING_FIELDS) {
         const value = payload[key];
