@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ActionFilter, ActionPage, GroupBrief } from '../shared/productivity.js';
 import type { SpeechWork } from '../shared/processing-progress.js';
 import type { NativeSpeechStatus } from '../shared/native-speech.js';
@@ -303,6 +303,10 @@ const api = {
      *  audioWatchPath; the chokidar watcher picks them up as new
      *  pending meetings. Returns counts so the renderer can toast
      *  "Imported 3 of 5 (2 unsupported)." */
+    /** Absolute path of a file dropped onto the window. `File.path` no
+     *  longer exists in Electron; this is its replacement. Empty when the
+     *  file has no path on disk. */
+    pathForDroppedFile: (file: File): string => webUtils.getPathForFile(file),
     importDropped: (paths: string[]) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsImportDropped, paths) as Promise<{
         imported: number;

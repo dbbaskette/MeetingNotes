@@ -101,6 +101,10 @@ export function MeetingDetailView({
   hint?: { title?: string; pipelineStage?: string; status?: string };
 }): JSX.Element {
   const [shell, setShell] = useState<MeetingShell | null>(null);
+  // Why there is nothing to show for `id`: the meeting is gone (stale search
+  // hit, old link, purged while open) or the read failed. Without this the
+  // loading skeleton would stay up forever.
+  const [problem, setProblem] = useState<{ id: string; kind: 'missing' | 'error'; message?: string } | null>(null);
   const [moveGroupOpen, setMoveGroupOpen] = useState(false);
   const [, setArtifactVersion] = useState(0);
   const [artifacts] = useState(() => createDetailArtifacts({
@@ -345,9 +349,17 @@ export function MeetingDetailView({
     async function load(): Promise<void> {
       if (timer) { clearTimeout(timer); timer = null; }
       const request = ++requestSerial;
-      const d = (await api.meetings.get(id)) as MeetingShell | null;
+      let d: MeetingShell | null;
+      try {
+        d = (await api.meetings.get(id)) as MeetingShell | null;
+      } catch (error) {
+        // Keep whatever is on screen; only an empty page needs the message.
+        if (alive && request === requestSerial) setProblem({ id, kind: 'error', message: (error as Error).message });
+        return;
+      }
       if (!alive || request !== requestSerial) return;
       setShell(d);
+      setProblem(d === null ? { id, kind: 'missing' } : null);
       if (d === null) return;
       void artifacts.refresh(id);
       lastLiveStateRef.current = {
@@ -416,6 +428,8 @@ export function MeetingDetailView({
     };
   }, [artifacts, id, kick]);
 
+  if (!m && problem?.id === id)
+    return <DetailUnavailable problem={problem} onBack={onBack} onRetry={() => { setProblem(null); void reload(); }} />;
   if (!m)
     return <DetailSkeleton hint={hint} onBack={onBack} />;
 
@@ -733,6 +747,36 @@ function EditableTitle({
                  rounded-md px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-indigo/30
                  disabled:opacity-60"
     />
+  );
+}
+
+/** Shown instead of an endless skeleton when a meeting cannot be shown. */
+function DetailUnavailable({ problem, onBack, onRetry }: {
+  problem: { kind: 'missing' | 'error'; message?: string };
+  onBack: () => void;
+  onRetry: () => void;
+}): JSX.Element {
+  const missing = problem.kind === 'missing';
+  return (
+    <div className="detail-view max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">← Back</button>
+      </div>
+      <div role="alert" className="px-6 py-16 text-center">
+        <h2 className="text-base font-semibold text-ink">
+          {missing ? 'This meeting is no longer available' : 'Could not open this meeting'}
+        </h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          {missing ? 'It may have been deleted or moved to another library.' : problem.message ?? 'The meeting could not be read.'}
+        </p>
+        <div className="mt-4 flex justify-center gap-2">
+          {!missing && <button type="button" onClick={onRetry}
+            className="px-3 py-1.5 text-sm font-semibold rounded-lg bg-brand-solid text-white">Try again</button>}
+          <button type="button" onClick={onBack}
+            className="px-3 py-1.5 text-sm rounded-lg border border-surface-border text-ink">Back to Library</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

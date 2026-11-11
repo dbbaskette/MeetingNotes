@@ -1,6 +1,8 @@
 import type { IpcMain } from 'electron';
 import { app, dialog, shell } from 'electron';
 import fs from 'node:fs';
+import { recordingsDirFor } from '../lib/storage-paths.js';
+import { importAudioFiles } from '../library/import-dropped.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
@@ -1322,45 +1324,12 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     return { path: result.filePath };
   });
 
-  // Drag-and-drop import. Copies dropped audio files into audioWatchPath
-  // (the chokidar-watched folder). The existing watcher then picks them
-  // up as new pending meetings — no new pipeline code required.
-  ipc.handle(IPC_CHANNELS.meetingsImportDropped, async (
-    _e, paths: unknown,
-  ): Promise<{ imported: number; skipped: { path: string; reason: string }[] }> => {
+  // Drag-and-drop import. Copies dropped audio into the library's own
+  // recordings folder, which the watcher always catalogs; the optional
+  // audioWatchPath is empty by default and cannot be relied on.
+  ipc.handle(IPC_CHANNELS.meetingsImportDropped, async (_e, paths: unknown) => {
     const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === 'string') : [];
-    const watchDir = s.settings.get('audioWatchPath');
-    fs.mkdirSync(watchDir, { recursive: true });
-    const allowed = new Set(['.m4a', '.mp3', '.wav', '.aac', '.flac']);
-    let imported = 0;
-    const skipped: { path: string; reason: string }[] = [];
-    for (const src of list) {
-      try {
-        const ext = path.extname(src).toLowerCase();
-        if (!allowed.has(ext)) {
-          skipped.push({ path: src, reason: `unsupported format ${ext || '(none)'}` });
-          continue;
-        }
-        if (!fs.existsSync(src) || !fs.statSync(src).isFile()) {
-          skipped.push({ path: src, reason: 'not a file' });
-          continue;
-        }
-        // Avoid clobbering: if a same-named file already exists in the
-        // watch folder, append a short timestamp to disambiguate.
-        const base = path.basename(src);
-        let dest = path.join(watchDir, base);
-        if (fs.existsSync(dest)) {
-          const stem = path.basename(base, ext);
-          const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-          dest = path.join(watchDir, `${stem}-${stamp}${ext}`);
-        }
-        fs.copyFileSync(src, dest);
-        imported += 1;
-      } catch (e) {
-        skipped.push({ path: src, reason: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    return { imported, skipped };
+    return importAudioFiles(list, recordingsDirFor(s.libraryRoot));
   });
 }
 

@@ -32,6 +32,13 @@ export interface PipelineStatusSnapshot {
   queueIds: string[];
 }
 
+/** Identity of the queue itself, ignoring progress. Transcription reports
+ *  every whole percent; views that refetch on status must do so only when
+ *  this changes, or one meeting costs about a hundred full refreshes. */
+export function pipelineQueueKey(status: Pick<PipelineStatusSnapshot, 'currentId' | 'queueIds' | 'paused' | 'cancelling'> | null): string {
+  return status ? JSON.stringify([status.currentId, status.queueIds, status.paused, status.cancelling === true]) : '';
+}
+
 export interface StatusBarModel {
   /** 'paused' whenever the queue is paused; 'processing' otherwise (including
    *  the transient no-current-but-queued case). */

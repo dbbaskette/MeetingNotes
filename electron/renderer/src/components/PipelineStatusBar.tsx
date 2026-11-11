@@ -4,7 +4,7 @@
 // (Library, Weekly, Settings, detail) so progress isn't hidden behind the one
 // view that happens to render it. A thin shell over the pure `status-bar`
 // module — all the string/visibility logic is unit-tested there.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPipelineHydration } from '../lib/pipeline-hydration';
 import { recycleMeetings } from '../lib/meetings-recycle';
 import type { MeetingSummary } from '../lib/paged-meetings';
@@ -12,6 +12,7 @@ import { useElapsed } from '../lib/useElapsed';
 import {
   deriveStatusBar,
   statusBarText,
+  pipelineQueueKey,
   type PipelineStatusSnapshot,
 } from '../lib/status-bar';
 import { api } from '../ipc/client';
@@ -47,7 +48,12 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
   const [hydration] = useState(() => createPipelineHydration(api.meetings.getMany, (rows) => {
     setMeetings((previous) => recycleMeetings(previous, rows));
   }));
-  useEffect(() => { hydration.update(status); }, [hydration, status]);
+  // Re-hydrate when the queue changes, not on every progress tick; the
+  // controller's own 3 s timer keeps a running meeting fresh in between.
+  const queueKey = pipelineQueueKey(status);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  useEffect(() => { hydration.update(statusRef.current); }, [hydration, queueKey]);
   useEffect(() => () => hydration.stop(), [hydration]);
 
   // Memoized: useElapsed re-renders this bar every second while processing,

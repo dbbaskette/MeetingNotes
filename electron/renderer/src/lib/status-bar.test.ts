@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveStatusBar, statusBarText, type StatusBarMeeting } from './status-bar.js';
+import { deriveStatusBar, pipelineQueueKey, statusBarText, type StatusBarMeeting } from './status-bar.js';
 
 function meeting(over: Partial<StatusBarMeeting> = {}): StatusBarMeeting {
   return {
@@ -97,5 +97,22 @@ describe('statusBarText', () => {
   it('composes the queue-only line', () => {
     const queued = deriveStatusBar([], { paused: false, currentId: null, queueLength: 2, queueIds: [] })!;
     expect(statusBarText(queued, null)).toBe('2 queued');
+  });
+});
+
+describe('pipelineQueueKey', () => {
+  const base = { paused: false, currentId: 'a', queueLength: 1, queueIds: ['b'] };
+  it('ignores progress so a percent tick is not a queue change', () => {
+    const one = { ...base, speechWork: { percent: 1 } as never };
+    const two = { ...base, speechWork: { percent: 2 } as never };
+    expect(pipelineQueueKey(one)).toBe(pipelineQueueKey(two));
+  });
+  it('changes when the current meeting, queue, pause or cancel state changes', () => {
+    const key = pipelineQueueKey(base);
+    expect(pipelineQueueKey({ ...base, currentId: 'b' })).not.toBe(key);
+    expect(pipelineQueueKey({ ...base, queueIds: [] })).not.toBe(key);
+    expect(pipelineQueueKey({ ...base, paused: true })).not.toBe(key);
+    expect(pipelineQueueKey({ ...base, cancelling: true })).not.toBe(key);
+    expect(pipelineQueueKey(null)).toBe('');
   });
 });
