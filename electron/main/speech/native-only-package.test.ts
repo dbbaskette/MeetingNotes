@@ -21,8 +21,12 @@ it('packages only capture/native speech helpers and no Python sidecar', () => {
 it('has no legacy download, HF-token or remote STT bridge', () => {
   for (const file of ['electron/preload/index.ts', 'electron/main/ipc/contracts.ts', 'electron/main/ipc/settings-handlers.ts'])
     expect(read(file)).not.toMatch(/onboardingWhisper|onboardingHfToken|sttProbe|downloadWhisperModel/);
-  for (const file of ['electron/renderer/src/views/OnboardingView.tsx', 'electron/renderer/src/views/SettingsView.tsx'])
-    expect(read(file)).not.toMatch(/WhisperStep|HfTokenStep|speechProvider|sttModel|sttUrl|installWhisperModel/);
+  // Settings is split into per-section files (#256); the guard covers all of them.
+  const settingsFiles = fs.readdirSync(path.resolve('electron/renderer/src/views/settings'))
+    .filter(name => /\.tsx?$/.test(name)).map(name => `electron/renderer/src/views/settings/${name}`);
+  expect(settingsFiles.length).toBeGreaterThan(0);
+  for (const file of ['electron/renderer/src/views/OnboardingView.tsx', 'electron/renderer/src/views/SettingsView.tsx', ...settingsFiles])
+    expect(read(file), file).not.toMatch(/WhisperStep|HfTokenStep|speechProvider|sttModel|sttUrl|installWhisperModel/);
 });
 it('keeps the speech-beta comparison app out of the production package', () => {
   const files: string[] = parse(read('electron-builder.yml')).files;
