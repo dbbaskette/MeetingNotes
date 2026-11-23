@@ -1,4 +1,9 @@
 // electron/renderer/src/App.tsx
+//
+// Kept as one file on purpose (#256): AppInner is the renderer root that
+// owns navigation, recording and global-shortcut state in one ordered set of
+// hooks; splitting it would mean threading that state through new props or
+// contexts rather than moving self-contained code.
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { RenameDialog } from './components/MeetingRowMenu';
 import { LibraryView } from './views/LibraryView';

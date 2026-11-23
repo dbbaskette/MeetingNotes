@@ -1,3 +1,6 @@
+// Kept as one file on purpose (#256): ObsidianSync is a single stateful
+// class (timer, run lock, preview and export-index state); file and render
+// helpers already live in ./files.ts and ./render.ts.
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';

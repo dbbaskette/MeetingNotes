@@ -1,3 +1,7 @@
+// Kept as one file on purpose (#256): the preload is compiled as an
+// isolated CommonJS bundle that cannot import sibling runtime modules, and
+// it holds a hand-copied IPC channel list that contracts-parity.test.ts
+// checks against electron/main/ipc/contracts.ts.
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ActionFilter, ActionPage, GroupBrief } from '../shared/productivity.js';
 import type { SpeechWork } from '../shared/processing-progress.js';
