@@ -9,10 +9,12 @@ in its prior state. Library changes wait or fail visibly until backup finishes.
 The copy includes recordings and stems, externally referenced audio, meeting
 folders/exports, speaker data, groups, terminology, action items, Notes History,
 and consistent SQLite snapshots of the active Library and canonical settings
-database. Model caches are re-downloadable and excluded. Credentials outside the
-Library (such as Google OAuth tokens or HF tokens in app support) are not copied;
-sign in again after moving machines. Settings may contain webhook secrets and
-original paths. Keep the backup private. No cloud upload happens.
+database. Model caches are re-downloadable and excluded. The settings snapshot
+contains original paths and, in keychain-encrypted form, the Google refresh
+token, Google client secret and webhook bearer token. The encryption key lives
+in this Mac's keychain and is not part of the backup, so after moving to another
+Mac sign in to Google again and re-enter the client secret and webhook token.
+Keep the backup private. No cloud upload happens.
 
 `manifest.json` lists every included regular file with its size and SHA-256,
 audio path mappings and portable relative links. Database integrity is checked

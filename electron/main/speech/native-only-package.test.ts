@@ -24,3 +24,16 @@ it('has no legacy download, HF-token or remote STT bridge', () => {
   for (const file of ['electron/renderer/src/views/OnboardingView.tsx', 'electron/renderer/src/views/SettingsView.tsx'])
     expect(read(file)).not.toMatch(/WhisperStep|HfTokenStep|speechProvider|sttModel|sttUrl|installWhisperModel/);
 });
+it('keeps the speech-beta comparison app out of the production package', () => {
+  const files: string[] = parse(read('electron-builder.yml')).files;
+  // Built into dist/ by the shared build, shipped only by electron-builder.beta.yml.
+  for (const excluded of ['!dist/electron/main/beta/**', '!dist/preload/electron/preload/beta.*', '!dist/renderer/beta.html', '!dist/renderer/assets/beta-*'])
+    expect(files).toContain(excluded);
+  const beta = parse(read('electron-builder.beta.yml'));
+  expect(beta.extraMetadata.main).toBe('dist/electron/main/beta/index.js');
+  expect(beta.files).toContain('dist/**');
+  expect(beta.files.filter((entry: string) => entry.startsWith('!') && /beta/.test(entry))).toEqual([]);
+  // Nothing the production app loads may reach into the beta sources.
+  const prodEntry = read('electron/main/index.ts') + read('electron/preload/index.ts') + read('electron/renderer/src/main.tsx');
+  expect(prodEntry).not.toMatch(/from ['"][^'"]*\/beta\//);
+});

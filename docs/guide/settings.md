@@ -1,8 +1,21 @@
 # Settings and storage
 
-The regular app now includes **Apple transcription + SpeakerKit** under Processing. It is the only speech engine, including on upgrades. Apple silicon/macOS 26+ is required. The separate [comparison beta](speech-beta.md) still uses its own copied library and never automatically writes results/profiles back.
+Speech uses **Apple transcription + SpeakerKit**, set up under **Settings → Processing**. It is the only speech engine, including on upgrades. Apple silicon/macOS 26+ is required. The [comparison beta](speech-beta.md) is a separate development app with its own copied library; it never writes results or profiles back.
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](../usability-improvements.md).
+
+| Section | What is in it |
+| --- | --- |
+| **Recording** | Meeting auto-detect, **When audio goes silent**, **Menu bar and shortcut**, Permissions |
+| **Processing** | Native speech setup and **STT Language**, **Automatically match known voices**, **Generate notes before naming every voice**, **Process recordings automatically when capture finishes**, **Notes template by group**, **Summary detail level**, **Model thinking / reasoning effort** |
+| **Organization** | **Dictionary**, **Appearance**, **Your name**, **You are…**, the **Speakers** roster |
+| **Integrations** | **Obsidian sync**, **Webhook exporter**, **Google account** |
+| **Storage** | **Library path**, storage locations, **Back up Library**, **Extra watch folder** |
+| **Advanced** | **Summary provider (LLM lifecycle)**, **LM Studio URL**, **LLM Model**, context length, Diagnostics |
+
+**Speakers:** **Settings → Organization → Speakers** lists everyone you have identified, ten at a time, with a **Find a speaker…** filter. Each row has rename, **Merge into…**, and **Voiceprints**. Expanding **Voiceprints** shows when the native voiceprint was last confirmed and from which source, and **Undo last voiceprint change** reverts the most recent change. Undo affects future voice matching only; names already assigned in meetings stay as they are.
+
+**Secrets:** the webhook bearer token, the Google client secret and the Google refresh token are encrypted with the macOS keychain (Electron `safeStorage`) before they are written to the settings table. The window only ever receives a mask for a saved value. A secret cannot be saved while keychain encryption is unavailable.
 
 **Settings → Storage → Back up Library** previews size and missing files, then creates a private local backup of the actual library and canonical settings databases, meeting audio (including external capture stems), notes, groups, speakers, and terminology. Model caches are excluded. Backup requires idle recording/processing/sync and protects writes while copying; checksummed manifests validate the result. A changed file inventory requires a fresh preview. Restore only into a new destination with the supplied script, never over a live Library. See [backup, privacy, restore, and rollback](../library-backup.md).
 
@@ -16,34 +29,48 @@ The regular app now includes **Apple transcription + SpeakerKit** under Processi
 
 Sync is one-way and runs while MeetingNotes is open. Write annotations under **Personal notes**; edits to generated text, task checkboxes, or `mn_` properties pause that note until reviewed. **Configure…** shows progress, errors, comparison, retry, and backup-before-replace controls. Existing notes are retained when sync is disabled or the source meeting is removed. A vault's own cloud/Git sync may distribute exported content outside this Mac. See [setup, preservation, limits, and rollback](../obsidian-sync.md).
 
-Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`). Edit them in the app's **Settings** view. Obsolete `speechProvider`, `sttUrl` and `sttModel` rows are ignored, not deleted, for rollback.
+Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`), in that location even when the Library path points elsewhere. Edit them in the app's **Settings** view. Rows for settings that no longer exist (for example `speechProvider`, `sttUrl` and `sttModel`) are ignored, not deleted.
 
 ## Full settings reference
 
+Every key in the `Settings` interface ([`settings-repo.ts`](../../electron/main/storage/settings-repo.ts)), with its default. The last group is state the app keeps for itself; it has no control in Settings.
+
 | Key | Default | What it does |
 | --- | --- | --- |
-| `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. Managed modes spawn the runtime, auto-load `llmModel`, and idle-shut-down. `external` = you run the server at `lmStudioUrl`. A healthy externally-started server is adopted (never killed) in any mode. |
-| `lmStudioUrl` | `http://localhost:1234` | Chat/LLM endpoint (used only in `external` mode; managed modes hardcode 1234 / 11434). |
-| `llmModel` | `qwen/qwen3.5-9b` | Model id for summarize/extract. Auto-loaded on first use. |
+| `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. Managed modes spawn the runtime, auto-load `llmModel`, and shut it down after 10 idle minutes. `external` = you run the server at `lmStudioUrl`. A healthy externally-started server is adopted (never killed) in any mode. |
+| `lmStudioUrl` | `http://localhost:1234` | Chat/LLM endpoint (used only in `external` mode; managed modes use ports 1234 / 11434). |
+| `llmModel` | `qwen/qwen3.5-9b` | Model id for notes and action-item extraction. Auto-loaded on first use in managed modes. |
 | `llmContextLength` | `0` | Managed LM Studio context at the next model load: model default (0), 8192, 16384, or 32768. Larger contexts require more memory. A model already loaded with a smaller context is unloaded and reloaded with this one before the next LLM call. |
-| `disableThinking` | `true` | Sends `enable_thinking: false` so reasoning models skip chain-of-thought where they honor it. |
-| `summaryDetail` | `detailed` | Summary verbosity: `concise` / `standard` / `detailed`. |
-| `sttLanguage` | `en` | Speech language. Native maps `en` to en-US and checks Apple's locale support. Re-prepare assets after changing language. Language changes require idle processing/setup. |
-| `libraryPath` | `~/Documents/MeetingNotes` | Meetings, DB, embeddings. |
-| `audioWatchPath` | `~/Music/MeetingNotes` | Folder watched for new recordings. |
-| `recordingBitrateKbps` | `128` | AAC bitrate (96 / 128 / 192). |
+| `reasoningEffort` | `none` | **Model thinking / reasoning effort**: `none` (sends `enable_thinking: false` and `reasoning_effort: "none"`), `minimal`, `low`, or `default` (no override). |
+| `disableThinking` | `true` | Older form of `reasoningEffort`, kept in step with it: `true` when the effort is `none`, `false` otherwise. |
+| `summaryDetail` | `detailed` | Notes verbosity: `concise` / `standard` / `detailed`. |
+| `sttLanguage` | `en` | Speech language. `en` selects en-US; Apple's API checks locale support. Prepare the assets again after changing it. Changes require idle processing/setup. |
+| `autoProcessRecordings` | `false` | **Process recordings automatically when capture finishes.** Applies only to new built-in recordings with usable finalized audio, not imports or recovery. Queue pause and voice review still apply. |
+| `autoMatchSpeakers` | `false` | **Automatically match known voices.** Applies strong native voiceprint matches on the next identification run; see [Working with meetings](meetings.md#optional-automatic-voice-matching). |
+| `notesFirst` | `false` | **Generate notes before naming every voice.** Processing does not pause for unknown voices; notes use `SPEAKER_00`-style labels that are resolved when you name the voice later. |
+| `libraryPath` | `~/Documents/MeetingNotes` | Recordings, meetings, the Library database, voice profiles. Changing it needs a restart and does not move existing files. |
+| `audioWatchPath` | `""` | Optional extra folder watched for dropped audio. `<library>/recordings` and the legacy `~/Music/MeetingNotes` are always watched. |
 | `theme` | `system` | UI appearance: `system` / `light` / `dark`. |
-| `obsidian` | `null` (off) | Vault, owned subfolder, content options, and sync state. Configure through the preview/confirmation flow, not generic settings writes. |
-| `userName` | `""` | Your name, substituted into transcripts after speaker-ID. |
-| `userSpeakerId` | `null` | The roster speaker that represents you; pins your action items in Weekly. Set via Settings → "You are…". |
-| `autoDetectMeetings` | `{browserTabs:false, nativeApps:false, silenceMs:5000}` | `browserTabs` polls the frontmost browser for meeting URLs; `nativeApps` polls CoreAudio for Zoom/Teams/Webex/FaceTime; `silenceMs` debounces beeps. |
+| `userName` | `""` | Your name, used to label your own voice in transcripts. Blank shows "You". |
+| `userSpeakerId` | `null` | The roster speaker that represents you; pins your action items in Weekly and decides which items are "mine" for exports. Set via Settings → Organization → **You are…**. |
+| `autoDetectMeetings` | `{browserTabs:false, nativeApps:false, silenceMs:5000}` | `browserTabs` polls the frontmost browser for meeting URLs; `nativeApps` polls CoreAudio for Zoom, Teams, FaceTime, Slack, Discord and WhatsApp producing audio; `silenceMs` is the sustained-audio threshold that filters out notification beeps. |
 | `autoRecordZoom` | `false` | When the native detector fires for Zoom, skip the banner and record immediately. |
 | `autoStopOnSilence` | `true` | Ask whether to stop when every audio source has gone silent, and stop if nobody answers. `false` = never ask and never stop a recording for silence. |
 | `silencePromptAfterS` | `120` | Seconds of continuous silence before asking. Whole seconds, 30–1800. Doubles after each **Continue recording**, up to 30 minutes. |
 | `silenceCountdownS` | `60` | Seconds the question waits before the recording is stopped and saved. Whole seconds, 10–600. |
-| `exporterApple` / `exporterMarkdown` / `exporterWebhook` | `true` / `true` / `false` | Enable each exporter. |
+| `showMenuBarIcon` | `true` | Show the macOS menu-bar item with recording time and start/stop controls. |
+| `recordShortcut` | `""` | Global start/stop shortcut, as an Electron accelerator. Empty = none. Recorded under Settings → Recording → **Menu bar and shortcut**; a combination that cannot be registered is refused. |
+| `obsidian` | `null` (off) | Vault, owned subfolder, content options, and sync state. Configure through the preview/confirmation flow, not generic settings writes. |
+| `exporterWebhook` | `false` | Deliver each finished meeting to the webhook. |
 | `webhookUrl` | `""` | Destination (HTTPS, or localhost). |
-| `webhookSecret` | `""` | Optional bearer token; redacted from logs. |
+| `webhookSecret` | `""` | Optional bearer token. Keychain-encrypted; redacted from logs. |
 | `webhookTemplate` | `compact` | `compact` / `full` (JSON), `slack-blocks`, `telegram-markdown`. |
-| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (roster ID or normalized owner name) / `all` / `none`, for both manual and automatic delivery. |
-| `googleClientId` / `googleClientSecret` | `""` | BYO Google OAuth desktop client for Tasks/Docs export. |
+| `webhookOwnerFilter` | `mine` | Which action items to include: `mine` (roster ID or normalized owner name) / `all` / `none`. |
+| `googleClientId` | `""` | Your own Google OAuth desktop client ID for Tasks/Docs export. |
+| `googleClientSecret` | `""` | That client's secret. Keychain-encrypted. |
+| `webhookLastResult` | `null` | Time, HTTP status and error of the last webhook delivery, shown on the Webhook exporter card. |
+| `googleAccountEmail` | `null` | Connected Google account, for display. `null` = not signed in. |
+| `googleRefreshTokenEnc` | `null` | Google refresh token, keychain-encrypted. Never sent to the window. |
+| `modelHealthChecks` | `{}` | Cached result of the model health check, per model id. |
+| `onboardedAt` | `null` | When first-run setup was finished or skipped. `null` shows setup on the next launch. |
+| `windowBounds` | `null` | Last window position and size, restored at launch when it is still on an attached display. |

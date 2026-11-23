@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMyItem, userIsIdentified, TASK_APP_EXPORTERS } from './owner-filter.js';
+import { isMyItem, userIsIdentified } from './owner-filter.js';
 
 const me = { userSpeakerId: 'spk-me', userDisplayName: 'Dan Baskette' };
 
@@ -32,14 +32,5 @@ describe('userIsIdentified', () => {
   it('is true only when a userSpeakerId is set', () => {
     expect(userIsIdentified(me)).toBe(true);
     expect(userIsIdentified({ userSpeakerId: null, userDisplayName: 'Dan' })).toBe(false);
-  });
-});
-
-describe('TASK_APP_EXPORTERS', () => {
-  it('covers the task-manager exporters but not the document ones', () => {
-    expect(TASK_APP_EXPORTERS.has('reminders')).toBe(true);
-    expect(TASK_APP_EXPORTERS.has('google-tasks')).toBe(true);
-    expect(TASK_APP_EXPORTERS.has('markdown')).toBe(false);
-    expect(TASK_APP_EXPORTERS.has('google-doc')).toBe(false);
   });
 });

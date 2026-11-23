@@ -7,10 +7,8 @@ it('accepts only explicit booleans for voice auto-matching', () => {
 });
 it('validates types, enum values and finite bounds at the IPC boundary', () => {
   expect(() => validateSetting('theme', 'purple')).toThrow();
-  expect(() => validateSetting('recordingBitrateKbps', 0)).toThrow();
   expect(() => validateSetting('autoRecordZoom', 'yes')).toThrow();
   expect(() => validateSetting('autoDetectMeetings', {browserTabs: true, nativeApps: false, silenceMs: Infinity})).toThrow();
-  expect(validateSetting('recordingBitrateKbps', 192)).toBe(192);
   expect(validateSetting('audioWatchPath', '')).toBe('');
 });
 it('validates the silence prompt settings: a boolean switch and whole seconds inside their ranges', () => {

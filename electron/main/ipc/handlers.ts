@@ -125,12 +125,6 @@ export interface IpcServices {
   gateNotified: Set<string>;
 }
 
-const ConfirmSpeakerSchema = z.object({
-  meetingId: z.string().min(1),
-  localLabel: z.string().min(1),
-  displayName: z.string().min(1).max(200),
-});
-
 const RerunSchema = z.object({
   id: z.string().min(1),
   fromStage: z.string().refine(isStage, 'invalid stage'),
@@ -290,14 +284,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
 
   ipc.handle(IPC_CHANNELS.googleSignOut, () => {
     s.googleAuth.signOut();
-  });
-
-  ipc.handle(IPC_CHANNELS.meetingsList, () => {
-    // Batch joins/aggregates so this scales O(1) with meetings instead of
-    // O(N) queries — LibraryView polls every 3s.
-    const speakersByMeeting = s.speakers.listForAllMeetings();
-    const counts = s.actionItems.countsByMeeting();
-    return s.meetings.listAll().map((m) => meetingSummary(s, m, speakersByMeeting.get(m.id) ?? [], counts.get(m.id) ?? 0));
   });
 
   ipc.handle(IPC_CHANNELS.meetingsListPage, (_e, input: unknown): MeetingSummaryPage => {
@@ -648,15 +634,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     s.notesHistory.restore(z.string().min(1).max(200).parse(id), z.string().uuid().parse(version), z.string().length(64).parse(revision));
   });
 
-  ipc.handle(IPC_CHANNELS.meetingsStartMany, (_e, ids: unknown) => {
-    if (!Array.isArray(ids)) throw new Error('ids must be an array');
-    let started = 0;
-    for (const id of ids) {
-      if (typeof id === 'string' && startOne(id)) started += 1;
-    }
-    return started;
-  });
-
   ipc.handle(IPC_CHANNELS.meetingsStartManyDetailed, (_e, input: unknown): MeetingStartManyResult => {
     const ids = MeetingIdsSchema.parse(input);
     const result: MeetingStartManyResult = { startedIds: [], failedIds: [] };
@@ -775,18 +752,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (!meeting || meeting.deletedAt) throw new Error('Meeting not found');
     if (meeting.status === 'processing') throw new Error('Wait for this meeting to finish processing before changing its speakers.');
   };
-  ipc.handle(IPC_CHANNELS.speakersConfirm, async (_e, input: unknown) => {
-    const parsed = ConfirmSpeakerSchema.parse(input);
-    requireSpeakerEditable(parsed.meetingId);
-    const meeting = s.meetings.findById(parsed.meetingId);
-    if (!meeting) throw new Error('meeting not found');
-    const file = path.join(meetingFolderPath(s.libraryRoot, meeting.slug), 'diarization.json');
-    const diar = await s.artifactCache.readJson<DiarizationArtifact>(file).catch(() => null);
-    const embedding = diar?.embeddingSpace ? embeddingForLabel(diar, parsed.localLabel) : null;
-    const id = s.roster.confirmSpeaker({ displayName: parsed.displayName, embedding, source: `${meeting.title} · ${parsed.localLabel}` }, diar?.embeddingSpace);
-    s.speakers.linkToMeeting(parsed.meetingId, parsed.localLabel, id, 1.0);
-    return id;
-  });
   // Re-run the merge step for every meeting linked to a roster speaker, so
   // a rename/merge shows up in the transcripts, not just the roster list.
   // Yields between meetings so multi-meeting renames/merges don't freeze IPC.
@@ -945,20 +910,6 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       assigned: labels.length,
       impactedLines: labels.reduce((sum, label) => sum + (metadata.get(label)?.lineCount ?? 0), 0),
     };
-  });
-
-  ipc.handle(IPC_CHANNELS.speakersSuggestions, async (_e, meetingId: unknown, localLabel: unknown) => {
-    if (typeof meetingId !== 'string' || typeof localLabel !== 'string') throw new Error('invalid args');
-    const m = s.meetings.findById(meetingId);
-    if (!m) throw new Error('meeting not found');
-    const folder = meetingFolderPath(s.libraryRoot, m.slug);
-    const diarPath = path.join(folder, 'diarization.json');
-    if (!fs.existsSync(diarPath)) return [];
-    const diar = await s.artifactCache.readJson<DiarizationArtifact>(diarPath);
-    if (!diar) return [];
-    const embedding = embeddingForLabel(diar, localLabel);
-    if (!embedding) return [];
-    return s.roster.suggestionsFor({ label: localLabel, embedding }, 3, diar.embeddingSpace);
   });
 
   ipc.handle(IPC_CHANNELS.speakersReview, async (_e, meetingId: string) => {

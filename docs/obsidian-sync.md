@@ -5,13 +5,13 @@ MeetingNotes can maintain a one-way Markdown copy of completed meetings in an ex
 ## Set up
 
 1. Create/open a vault in Obsidian first. Its root must already contain `.obsidian/`.
-2. In MeetingNotes, open **Settings → Obsidian sync → Configure…** and choose that root folder.
+2. In MeetingNotes, open **Settings → Integrations → Obsidian sync → Configure…** and choose that root folder.
 3. Keep the default `MeetingNotes` subfolder or choose an unused name. An unrelated existing folder is never adopted. Keep the vault separate from the MeetingNotes source library.
 4. Choose content: action items are included by default; transcripts are off. Audio is never copied.
 5. Choose **Preview sync**, check the completed-meeting count and destination, then **Enable and sync**.
 6. Open `MeetingNotes/Meetings.md` in Obsidian. Enable its built-in **Bases** plugin to use the embedded table.
 
-Only the dedicated subfolder is managed. The integration does not change `.obsidian` settings, enable plugins, create a missing vault, or install Obsidian. A missing/replaced/unwritable vault pauses sync; restore it and choose **Sync now / retry**.
+Only the dedicated subfolder is managed. The integration does not change `.obsidian` settings, enable plugins, create a missing vault, or install Obsidian. A missing/replaced/unwritable vault pauses sync; restore it and choose **Sync pending / retry failed**. **Recheck all notes** runs a full scan instead of only the pending and failed notes.
 
 ## One file, several views
 
@@ -56,7 +56,8 @@ Trashing or permanently removing a source meeting retains its exported note and 
 ## Limits and privacy
 
 - Exports/read text are limited to 12 MB per note; turn transcript inclusion off for very large meetings. Automatic rename reconciliation is limited to 5,000 files in `Notes/`.
-- Symbolic links inside the owned sync tree are rejected. The vault and owned-folder identities are checked to detect replaced mounts/folders.
+- Symbolic links inside the owned sync tree are rejected. The vault and owned-folder identities (device and folder IDs) are checked to detect replaced mounts/folders.
+- A reboot or remount can give the same disk a new device number. When the vault and the sync folder both keep their folder IDs, their device number changes consistently, and the folder's ownership marker still names this library, sync treats the vault as the same one and records the new identity at the next sync. A different folder, a different owner or an inconsistent device change still pauses sync with "Vault is unavailable or was replaced".
 - Up to 100 issues are displayed at a time in the bounded Settings dialog. Resolve these and retry to work through a larger backlog.
 - Choosing a vault opts into writing meeting content there. Obsidian Sync, iCloud, Dropbox, Git, or another service attached to that vault may then distribute it externally. MeetingNotes does not control that service.
 - Settings/component fixtures are synthetic; they do not enable sync against your real vault. The installed Obsidian version discovered during development was 1.13.7, but the automation selector could not isolate its second instance from the existing user window. No real vault was modified; live Base rendering/link navigation is not claimed as verified.

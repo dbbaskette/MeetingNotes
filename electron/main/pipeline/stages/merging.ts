@@ -41,7 +41,7 @@ export function remergeTranscript(
   const meeting = deps.meetings.findById(meetingId);
   if (!meeting) throw new Error(`meeting not found: ${meetingId}`);
   const folder = meetingFolderPath(deps.libraryRoot, meeting.slug);
-  const whisper = JSON.parse(
+  const segments = JSON.parse(
     fs.readFileSync(path.join(folder, 'transcript.raw.json'), 'utf8'),
   ).segments;
   // Diarization file may not exist for stem-aware meetings if the user
@@ -52,7 +52,7 @@ export function remergeTranscript(
   const diar = fs.existsSync(diarPath)
     ? JSON.parse(fs.readFileSync(diarPath, 'utf8')).segments
     : [];
-  const merged = mergeTranscriptWithDiarization(whisper, diar);
+  const merged = mergeTranscriptWithDiarization(segments, diar);
   const labelMap: Record<string, string> = {
     [VOICE_SPEAKER_LABEL]: deps.userName?.trim() || 'You',
   };

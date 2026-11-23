@@ -528,7 +528,7 @@ export function MeetingDetailView({
       </div>
 
       {/* Failure banner: when a run failed, surface WHY (the error string the
-          pipeline caught, e.g. "whisper: not ready ...") with a one-click
+          pipeline caught, e.g. "speech engine: not ready ...") with a one-click
           Retry — instead of leaving the user with a bare red X on the
           timeline and no explanation. Returns null when not failed. */}
       <div className="shrink-0">

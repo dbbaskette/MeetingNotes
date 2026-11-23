@@ -90,7 +90,7 @@ export const MeetingSummarySchema = z.object({
   stageStartedAt: z.string().nullable(),
   status: z.string(),
   /** When status === 'failed', the error string from the stage that threw
-   *  (e.g. "whisper: not ready ..."). Null otherwise. Powers the failure
+   *  (e.g. "speech engine: not ready ..."). Null otherwise. Powers the failure
    *  banner + Retry affordance in the detail view. */
   errorMessage: z.string().nullable(),
   unidentifiedCount: z.number(),
@@ -233,7 +233,6 @@ export const IPC_CHANNELS = {
   terminologyPreview: 'terminology:preview',
   terminologyCommit: 'terminology:commit',
   terminologyUndo: 'terminology:undo',
-  meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',
   meetingsListIds: 'meetings:list-ids',
@@ -255,7 +254,6 @@ export const IPC_CHANNELS = {
   trashList: 'trash:list',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
-  meetingsStartMany: 'meetings:start-many',
   meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
@@ -274,9 +272,9 @@ export const IPC_CHANNELS = {
   searchAskCancel: 'search:ask-cancel',
   actionItemsUndoDelete: 'action-items:undo-delete',
   appUndoEdit: 'app:undo-edit',
+  backupStatus: 'backup:status',
   backupPreview: 'backup:preview',
   backupRun: 'backup:run',
-  backupStatus: 'backup:status',
   recordingMeeting: 'recording:meeting',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
@@ -311,7 +309,6 @@ export const IPC_CHANNELS = {
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
   speakersList: 'speakers:list',
-  speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
   /** Merge one roster speaker into another (duplicate cleanup). All meeting
    *  links + action-item ownership move source → target, the source roster
@@ -321,7 +318,6 @@ export const IPC_CHANNELS = {
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
   speakersAssignBulk: 'speakers:assign-bulk',
-  speakersSuggestions: 'speakers:suggestions',
   speakersReview: 'speakers:review',
   speakersProfiles: 'speakers:profiles',
   speakersUndoProfile: 'speakers:undo-profile',
@@ -355,10 +351,8 @@ export const IPC_CHANNELS = {
   meetingDetectorDismiss: 'meeting-detector:dismiss',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
-  weeklyGet: 'weekly:get',
   weeklyGetStructured: 'weekly:get-structured',
   weeklyGetNarrative: 'weekly:get-narrative',
-  weeklyRegenerate: 'weekly:regenerate',
   weeklyExportMarkdown: 'weekly:export-markdown',
   llmDetectProviders: 'llm:detect-providers',
   /** Probe a custom LLM URL for /v1/models. Returns the loaded

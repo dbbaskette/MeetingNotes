@@ -43,19 +43,15 @@ const previewSettings: Settings = {
   obsidian: null,
   lmStudioUrl: 'http://localhost:1234',
   llmModel: 'qwen/qwen3.5-9b',
-  audioHijackSessionName: 'Meeting',
   libraryPath: '~/Documents/MeetingNotes',
   audioWatchPath: '',
   sttLanguage: 'en',
-  exporterApple: true,
-  exporterMarkdown: true,
   exporterWebhook: false,
   webhookUrl: '',
   webhookSecret: '',
   webhookTemplate: 'compact',
   webhookOwnerFilter: 'mine',
   webhookLastResult: null,
-  recordingBitrateKbps: 128,
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoStopOnSilence: true,
   silencePromptAfterS: 120,
@@ -101,7 +97,6 @@ const counts = {
 
 export const overrides: PreviewOverrides = {
   meetings: {
-    list: async () => rows,
     listPage: async (...args: unknown[]) => {
       const query = (args as [{ filter?: string; groupId?: string | null }])[0] ?? {};
       // Sample meetings are all ungrouped; a named group is empty.
@@ -119,7 +114,6 @@ export const overrides: PreviewOverrides = {
     startManyDetailed: async () => ({ startedIds: [], failedIds: [] }),
     get: async () => null,
     undoDelete: async () => false,
-    startMany: async () => 0,
     saveSummary: async () => '',
     importDropped: async () => ({ imported: 0, skipped: [] }),
     exportTranscript: async () => ({ path: null }),
@@ -135,12 +129,11 @@ export const overrides: PreviewOverrides = {
     profiles: async () => [],
     undoProfile: async () => {},
     list: async () => [],
-    confirm: async () => '',
     sample: async () => null,
   },
   onboarding: { openExternal: async () => {} },
   search: {
-    query: async () => [], run: async () => ({ hits: [], status: 'complete' }),
+    run: async () => ({ hits: [], status: 'complete' }),
     ask: async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
       return { found: true, answer: 'Pricing stays at twenty dollars through the year [1]. Bob will send the rollback plan by Friday [2].',
@@ -193,13 +186,11 @@ export const overrides: PreviewOverrides = {
     probe: async () => ({ ok: true, models: [] }),
   },
   weekly: {
-    get: async () => ({}),
     getStructured: async () => ({
       isoYear: 2026, isoWeek: 17, rangeStart: '', rangeEnd: '', totalDurationS: 0, meetings: [],
       openActionGroups: [], openActionCount: 0, inProgress: false, hasFreshCache: false,
     }),
     getNarrative: async () => ({ narrative: '', decisions: [], generatedAt: '', fromCache: false }),
-    regenerate: async () => ({}),
     exportMarkdown: async () => ({ path: null, markdown: '' }),
   },
   app: { getVersion: async () => '0.0.0-dev' },

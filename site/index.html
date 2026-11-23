@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MeetingNotes — local-first meeting notes for macOS</title>
-<meta name="description" content="Record any meeting on your Mac. Transcribe, diarize, summarize, and extract action items — 100% on-device. No cloud, no uploads, no API keys.">
-<meta property="og:title" content="MeetingNotes — your meetings never leave your Mac">
-<meta property="og:description" content="Record any app's audio, then transcribe, diarize, summarize, and extract action items — every step on-device. No cloud, no uploads, no API keys.">
+<meta name="description" content="Record a meeting on your Mac and get a transcript with named speakers, structured notes and action items, using models that run on your own machine.">
+<meta property="og:title" content="MeetingNotes — local-first meeting notes for macOS">
+<meta property="og:description" content="Record any app's audio with your microphone, then get a transcript with named speakers, notes and action items from models that run on your Mac. No account, no telemetry.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://dbbaskette.github.io/MeetingNotes/">
 <meta name="twitter:card" content="summary">
@@ -225,22 +225,22 @@
   <section class="hero">
     <div class="wrap">
       <div>
-        <div class="eyebrow"><span class="pill">● REC · macOS 14.2+ · Apple Silicon</span></div>
-        <h1>Your meetings never<br>leave your <span class="g">Mac</span>.</h1>
-        <p class="sub">Hit record. MeetingNotes captures any app's audio, then <b>transcribes, diarizes, summarizes, and extracts action items</b> — every step on your machine. No cloud, no uploads, no API keys.</p>
+        <div class="eyebrow"><span class="pill">● REC · macOS 26+ · Apple Silicon</span></div>
+        <h1>Your meetings stay<br>on your <span class="g">Mac</span>.</h1>
+        <p class="sub">Click Record. MeetingNotes captures any app's audio with your microphone, then <b>transcribes it, separates the speakers, writes notes and extracts action items</b> using models that run on your machine. No account, no telemetry.</p>
         <div class="cta">
-          <a class="btn primary" href="#start">▶ Quick start</a>
+          <a class="btn primary" href="#start">▶ Install</a>
           <a class="btn line" href="https://github.com/dbbaskette/MeetingNotes">View source</a>
         </div>
         <div class="meta">
-          <span><i></i>100% on-device inference</span>
-          <span><i></i>whisper.cpp · pyannote · your LLM</span>
+          <span><i></i>On-device speech and notes</span>
+          <span><i></i>Apple SpeechTranscriber · SpeakerKit · your LLM</span>
           <span><i></i>MIT licensed</span>
         </div>
       </div>
 
       <!-- recorder instrument -->
-      <div class="rec" aria-label="A recording being transcribed and summarized on-device">
+      <div class="rec" aria-label="A recording with its notes and action items">
         <div class="rec-head">
           <span class="reclab"><span class="d" aria-hidden="true"></span>RECORDING</span>
           <span class="src">SRC · zoom.us</span>
@@ -248,7 +248,7 @@
         </div>
         <canvas id="wave" role="img" aria-label="Live audio waveform"></canvas>
         <div class="rec-foot">
-          <span class="step">▸ Resolved — Summary &amp; action items</span>
+          <span class="step">▸ Done — Notes &amp; action items</span>
           <div class="card">
             <p class="ov"><b>Overview.</b> Q3 roadmap sync — the team locked the migration window and split ownership of the launch checklist.</p>
             <div class="ai">
@@ -266,18 +266,18 @@
     <div class="wrap">
       <div class="head">
         <span class="lab">01 — The thesis</span>
-        <h2>Four local services. Nothing on the wire.</h2>
-        <p>The app is an orchestrator. It spawns each engine on demand, runs it against your audio, and shuts it down when idle to keep memory free. Ports are loopback; the network is never touched at inference time.</p>
+        <h2>Capture, speech and notes, on this Mac.</h2>
+        <p>MeetingNotes is an Electron app with two Swift helpers. One records. The other transcribes and separates the speakers; it runs only for its operation and then exits. Only the LLM that writes the notes runs as a server: MeetingNotes can start LM Studio or Ollama on demand and stop it after ten idle minutes, or use a server you run yourself.</p>
       </div>
       <div class="svc">
-        <div class="s"><span class="bar" style="background:var(--amber)"></span><div class="port" style="color:var(--amber)">CoreAudio Tap</div><h3>Capture</h3><p>A codesigned Swift helper taps any app's audio + your mic into a mixed M4A.</p></div>
-        <div class="s"><span class="bar" style="background:var(--teal)"></span><div class="port" style="color:var(--teal)">:8080</div><h3>whisper.cpp</h3><p>Metal-accelerated speech-to-text with a hallucination filter on the output.</p></div>
-        <div class="s"><span class="bar" style="background:var(--violet)"></span><div class="port" style="color:var(--violet)">:8765</div><h3>pyannote</h3><p>Speaker diarization in a Python sidecar — who spoke when, aligned to the transcript.</p></div>
-        <div class="s"><span class="bar" style="background:#FB923C"></span><div class="port" style="color:#FB923C">:1234 / :11434</div><h3>Your LLM</h3><p>Any chat model in LM Studio or Ollama writes the summary and pulls action items.</p></div>
+        <div class="s"><span class="bar" style="background:var(--amber)"></span><div class="port" style="color:var(--amber)">Core Audio tap</div><h3>Capture</h3><p>A signed Swift helper records any app's audio and your microphone into one mixed M4A, with separate microphone and app-audio stems.</p></div>
+        <div class="s"><span class="bar" style="background:var(--teal)"></span><div class="port" style="color:var(--teal)">Apple SpeechTranscriber</div><h3>Transcribe</h3><p>On-device macOS speech-to-text with word timestamps. macOS manages the language assets.</p></div>
+        <div class="s"><span class="bar" style="background:var(--violet)"></span><div class="port" style="color:var(--violet)">SpeakerKit</div><h3>Separate voices</h3><p>Argmax SpeakerKit OSS works out who spoke when and supplies the voice samples used to suggest names. About 11&nbsp;MB of pinned, verified models.</p></div>
+        <div class="s"><span class="bar" style="background:#FB923C"></span><div class="port" style="color:#FB923C">:1234 / :11434</div><h3>Your LLM</h3><p>Any chat model in LM Studio or Ollama writes the notes and extracts the action items.</p></div>
       </div>
       <div class="boundary">
         <span class="k">◈ Boundary</span>
-        <span class="t">Audio, transcripts, and summaries stay in <span class="num" style="color:var(--ink)">~/Documents/MeetingNotes</span>. The Hugging Face token is needed once — for the model download — then never again.</span>
+        <span class="t">Audio, transcripts and notes stay in <span class="num" style="color:var(--ink)">~/Documents/MeetingNotes</span>. Speech setup downloads Apple language assets and the public speaker models once, with no account or token; meeting audio is not uploaded. Exports, a remote LLM endpoint or a synced vault send data out only if you set them up.</span>
       </div>
     </div>
   </section>
@@ -288,7 +288,7 @@
       <div class="head">
         <span class="lab">02 — Signal chain</span>
         <h2>From waveform to action items.</h2>
-        <p>Transcribe and diarize run in parallel off one 16&nbsp;kHz decode; the rest is sequential. Midway, the pipeline pauses so you can name unknown voices — then bakes real names into the transcript before the LLM ever sees it.</p>
+        <p>Transcription and speaker separation run in parallel on the same recording, or one after the other for a meeting of an hour or more to save memory. If a voice needs review, processing pauses so you can name it, and the names go into the transcript before the LLM sees it.</p>
       </div>
       <div class="chain-scroll">
         <div class="chain">
@@ -296,21 +296,21 @@
             <div>
               <div class="n">01 · PARALLEL</div>
               <h3>Transcribe</h3>
-              <p>whisper.cpp over the mixed audio.</p>
-              <span class="tag" style="color:var(--teal);border-color:rgba(45,212,191,.4)">:8080</span>
+              <p>Apple SpeechTranscriber over the mixed audio.</p>
+              <span class="tag" style="color:var(--teal);border-color:rgba(45,212,191,.4)">on-device</span>
             </div>
             <div style="border-top:1px solid var(--line-soft);padding-top:10px">
-              <h3>Diarize</h3>
-              <p>pyannote speaker turns.</p>
-              <span class="tag" style="color:var(--violet);border-color:rgba(167,139,250,.4)">:8765</span>
+              <h3>Separate voices</h3>
+              <p>SpeakerKit speaker turns.</p>
+              <span class="tag" style="color:var(--violet);border-color:rgba(167,139,250,.4)">on-device</span>
             </div>
           </div>
           <div class="arrow">→</div>
-          <div class="stage"><div class="n">02</div><h3>Merge + Identify</h3><p>Stitch turns to text; match voice embeddings against your roster.</p><span class="tag" style="color:var(--muted)">roster</span></div>
+          <div class="stage"><div class="n">02</div><h3>Merge + Identify</h3><p>Join speaker turns to the text; rank each voice against your roster by similarity.</p><span class="tag" style="color:var(--muted)">roster</span></div>
           <div class="arrow">→</div>
-          <div class="stage gate"><div class="n">03 · GATE</div><h3>Name voices</h3><p>Pause for unknown speakers. Play an 8-second sample, label, continue — or skip.</p><span class="tag" style="color:var(--amber);border-color:rgba(255,178,36,.45)">awaiting</span></div>
+          <div class="stage gate"><div class="n">03 · GATE</div><h3>Name voices</h3><p>Pauses only when a voice needs review. Play a short sample, name it, then continue or skip.</p><span class="tag" style="color:var(--amber);border-color:rgba(255,178,36,.45)">awaiting</span></div>
           <div class="arrow">→</div>
-          <div class="stage"><div class="n">04</div><h3>Summarize + Extract</h3><p>Your LLM writes the structured notes and pulls action items with provenance.</p><span class="tag" style="color:#FB923C;border-color:rgba(251,146,60,.4)">:1234</span></div>
+          <div class="stage"><div class="n">04</div><h3>Summarize + Extract</h3><p>Your LLM writes the structured notes and extracts action items, each linked to its source line.</p><span class="tag" style="color:#FB923C;border-color:rgba(251,146,60,.4)">LM Studio · Ollama</span></div>
           <div class="arrow">→</div>
           <div class="stage" style="border-color:rgba(61,220,151,.4)"><div class="n" style="color:var(--green)">DONE</div><h3>Notes on disk</h3><p>transcript.md · summary.md · action-items.json</p><span class="tag" style="color:var(--green);border-color:rgba(61,220,151,.4)">✓ saved</span></div>
         </div>
@@ -323,15 +323,18 @@
     <div class="wrap">
       <div class="head">
         <span class="lab">03 — In the app</span>
-        <h2>Built for the whole meeting lifecycle.</h2>
+        <h2>From the recording to the follow-up.</h2>
       </div>
       <div class="feat">
-        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">⏺</div><h3>Trigger anywhere</h3><p>Auto-detect meetings in browsers and native apps, or fire a URL scheme from a Shortcut, Stream Deck, or calendar hook.</p><div class="kv">meetingnotes://record?source=zoom.us</div></div>
-        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">◫</div><h3>Speaker memory</h3><p>Name a voice once; it's recognized across every future meeting by its embedding. Confirm, skip, or correct anytime.</p><div class="kv">voice → roster → real names</div></div>
-        <div class="f"><div class="glyph" style="background:rgba(167,139,250,.12);color:var(--violet)">✎</div><h3>Editable summaries</h3><p>Preview / split / edit modes. Fix a hallucination or redact in place — changes write straight to summary.md.</p><div class="kv">overview · decisions · action items</div></div>
-        <div class="f"><div class="glyph" style="background:rgba(61,220,151,.12);color:var(--green)">↦</div><h3>Action-item provenance</h3><p>Click any action item to jump to the exact summary line it came from. Edit the summary, hit re-extract, done in seconds.</p><div class="kv">click → source bullet</div></div>
-        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">▤</div><h3>Weekly rollup</h3><p>A Mon–Sun narrative with cross-meeting themes, decisions, and your open action items — cached so re-opening is instant.</p><div class="kv">themes · owners · export .md</div></div>
-        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">⇥</div><h3>Export & search</h3><p>Push items to Apple Reminders, Google Tasks/Docs, or any webhook. ⌘K searches every title, summary, and transcript.</p><div class="kv">reminders · tasks · webhook</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">⏺</div><h3>Record from anywhere</h3><p>Start from the Record button, the menu bar, a global shortcut, or a URL from Shortcuts or a Stream Deck. Optional detection offers to record when a meeting starts in a browser tab or a meeting app.</p><div class="kv">meetingnotes://record?source=zoom.us</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">◫</div><h3>Named speakers</h3><p>Name a voice, and its confirmed samples rank suggestions in later meetings. Confirm them yourself, or opt into conservative automatic matching.</p><div class="kv">voice → roster → real names</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(167,139,250,.12);color:var(--violet)">✎</div><h3>Notes templates</h3><p>General, 1:1, Standup, Customer call, Interview and Decision review, chosen per group or per meeting. Edit the notes in place; the last 20 versions stay in notes history.</p><div class="kv">overview · decisions · action items</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(61,220,151,.12);color:var(--green)">↦</div><h3>Actions</h3><p>Action items carry an owner and a due date and link back to the line they came from. The Actions view lists open items across every meeting, with filters, snooze and undo.</p><div class="kv">owner · due date · source line</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">▦</div><h3>Groups</h3><p>Organise meetings into groups and pin the ones you use most. Prepare next meeting collects a group's open actions, recent decisions and open questions.</p><div class="kv">ungrouped · pinned · a–z</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(45,212,191,.12);color:var(--teal)">?</div><h3>Ask your meetings</h3><p>⌘K searches every title, note and transcript. Type a question and press Shift+Enter for an answer from your local model, with links to the meetings it came from.</p><div class="kv">⌘K · Shift+Enter</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(167,139,250,.12);color:var(--violet)">▤</div><h3>Weekly</h3><p>A Monday–Sunday report with themes across meetings, decisions and open actions, saved as a snapshot until you regenerate it.</p><div class="kv">themes · decisions · actions</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(61,220,151,.12);color:var(--green)">⇄</div><h3>Obsidian sync</h3><p>Keeps one Markdown note per finished meeting in a folder of your vault, with group and date views. One-way; your own annotations are preserved.</p><div class="kv">one note per meeting</div></div>
+        <div class="f"><div class="glyph" style="background:rgba(255,178,36,.12);color:var(--amber)">⇥</div><h3>Exports</h3><p>Apple Reminders, Google Tasks, Google Docs, PDF, Markdown, or a webhook with JSON, Slack and Telegram templates.</p><div class="kv">reminders · tasks · docs · pdf · webhook</div></div>
       </div>
     </div>
   </section>
@@ -343,13 +346,13 @@
         <div>
           <span class="lab">04 — Bring your own model</span>
           <h2>Reasoning models, handled.</h2>
-          <p>Some local models "think" before they answer — and occasionally spiral, burning their whole budget without writing a word. MeetingNotes flags them, canary-tests your pick, strips the <span class="num" style="color:var(--ink)">&lt;think&gt;</span> blocks, and auto re-samples the rare spiral instead of failing your meeting.</p>
+          <p>Some local models think before they answer, and occasionally spend their whole token budget without writing a word. MeetingNotes labels known reasoning models, runs a quick extraction check on the one you pick, strips the <span class="num" style="color:var(--ink)">&lt;think&gt;</span> blocks, and re-samples when a model returns nothing instead of failing the meeting.</p>
         </div>
         <div class="brain" aria-label="Model resilience checks">
-          <div class="l"><span>🧠 badge in the picker</span><span class="st warn">reasoning</span></div>
+          <div class="l"><span>label in the model picker</span><span class="st warn">(reasoning)</span></div>
           <div class="l"><span>health-check canary</span><span class="st ok">✓ passed</span></div>
           <div class="l"><span>budget-spent-thinking</span><span class="st fix">↻ re-sampled</span></div>
-          <div class="l"><span>default · qwen3.5-9b</span><span class="st ok">fits VRAM</span></div>
+          <div class="l"><span>default model</span><span class="st ok">qwen/qwen3.5-9b</span></div>
         </div>
       </div>
     </div>
@@ -360,8 +363,8 @@
     <div class="wrap">
       <div class="head">
         <span class="lab">05 — Get running</span>
-        <h2>Three commands.</h2>
-        <p>Clone, install the two Homebrew binaries, and run setup. The app spawns everything else on demand — a five-step wizard walks you through permissions, models, and your token on first launch.</p>
+        <h2>Build it from source.</h2>
+        <p>GitHub releases publish source and release notes without binary installers. Build from source as below, or create a local DMG/ZIP with the <a href="https://github.com/dbbaskette/MeetingNotes/blob/main/docs/guide/development.md">packaging instructions</a>. Source builds need Node 22 and Xcode 26+ with the macOS 26 SDK; an installed app needs neither.</p>
       </div>
       <div class="term">
         <div class="tt"><span class="b"></span><span class="b"></span><span class="b"></span><span class="path">~/Projects/MeetingNotes — zsh</span></div>
@@ -369,17 +372,17 @@
 git clone https://github.com/dbbaskette/MeetingNotes.git
 cd MeetingNotes
 
-<span class="cm"># the two native dependencies</span>
-brew install <span class="c">whisper-cpp</span> <span class="c">ffmpeg</span>
+<span class="cm"># media inspection, sample playback and recovery</span>
+brew install <span class="c">ffmpeg</span>
 
-<span class="cm"># one interactive setup, then launch</span>
+<span class="cm"># source setup (requires Xcode 26+ / macOS 26 SDK), then launch</span>
 ./scripts/setup.sh
-./scripts/start.sh</pre>
+npm start</pre>
       </div>
       <div class="steps">
-        <div class="st"><b>Requirements</b>macOS 14.2+ · Apple Silicon · ~16 GB RAM · LM Studio or Ollama</div>
-        <div class="st"><b>First launch</b>Permissions → Whisper model → HF token → LLM → STT. Every step skippable.</div>
-        <div class="st"><b>Then</b>⏺ Record → ▶ Process → name voices → read your notes.</div>
+        <div class="st"><b>Requirements</b>macOS 26+ · Apple Silicon · ~16 GB RAM recommended · LM Studio or Ollama with a chat model · FFmpeg</div>
+        <div class="st"><b>First launch</b>Three-step setup: permissions → Prepare native speech → summary model. Each step can be skipped.</div>
+        <div class="st"><b>Then</b>⏺ Record → Stop → ▶ Process → name voices → read your notes.</div>
       </div>
     </div>
   </section>
@@ -390,27 +393,29 @@ brew install <span class="c">whisper-cpp</span> <span class="c">ffmpeg</span>
       <div class="foot">
         <div class="sig">
           <div class="brand" style="font-family:var(--mono);font-weight:600;display:flex;gap:10px;align-items:center"><span class="dot" aria-hidden="true"></span>MeetingNotes</div>
-          Local-first meeting notes for macOS. You bring the models; it orchestrates the rest.
+          Local-first meeting notes for macOS. Speech runs on Apple and SpeakerKit models on your Mac; you bring the LLM.
         </div>
         <div class="cols">
           <div class="col">
             <span class="lab">Project</span>
             <a href="https://github.com/dbbaskette/MeetingNotes">Source on GitHub</a>
-            <a href="https://github.com/dbbaskette/MeetingNotes#-quick-start">Quick start</a>
+            <a href="https://github.com/dbbaskette/MeetingNotes#install-and-first-recording">Install and first recording</a>
+            <a href="https://github.com/dbbaskette/MeetingNotes/blob/main/docs/README.md">Documentation</a>
             <a href="https://github.com/dbbaskette/MeetingNotes/blob/main/LICENSE">MIT License</a>
           </div>
           <div class="col">
             <span class="lab">Built on</span>
-            <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a>
-            <a href="https://github.com/pyannote/pyannote-audio">pyannote-audio</a>
-            <a href="https://lmstudio.ai">LM Studio · Ollama</a>
+            <a href="https://github.com/argmaxinc/argmax-oss-swift">Argmax SpeakerKit OSS</a>
+            <a href="https://lmstudio.ai">LM Studio</a>
+            <a href="https://ollama.com">Ollama</a>
+            <a href="https://github.com/insidegui/AudioCap">AudioCap</a>
           </div>
         </div>
       </div>
       <div class="rule"></div>
       <div class="legal">
-        <span>v1.8.4 · macOS 14.2+ · Apple Silicon</span>
-        <span>◈ Nothing leaves this Mac</span>
+        <span>v1.22.1 · macOS 26+ · Apple Silicon</span>
+        <span>◈ Local by default</span>
       </div>
     </div>
   </footer>

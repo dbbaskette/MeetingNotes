@@ -5,6 +5,17 @@ directories:
 files:
   - dist/**
   - package.json
+  # The speech-beta comparison app is built into dist/ alongside the real app
+  # (one tsc/vite build serves both) but belongs only in the separate beta
+  # package (electron-builder.beta.yml). Keep its entry point, preload,
+  # renderer page and shared types out of the production MeetingNotes.app
+  # (#302). Nothing in the production code imports these.
+  - "!dist/electron/main/beta/**"
+  - "!dist/electron/shared/speech-beta.*"
+  - "!dist/preload/electron/preload/beta.*"
+  - "!dist/preload/electron/shared/speech-beta.*"
+  - "!dist/renderer/beta.html"
+  - "!dist/renderer/assets/beta-*"
   # Strip better-sqlite3 build artifacts we don't need at runtime. The
   # native module itself (build/Release/better_sqlite3.node, ~1.8 MB) is
   # all that's required; everything below is source code, build-time

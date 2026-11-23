@@ -1,20 +1,20 @@
 # Native speech beta
 
-**As of 1.16.0, the regular app includes the native engines.** Follow the [regular-app upgrade guide](../../README.md#upgrading-to-1160-what-to-do) for recording, notes and exports. This page documents the retained, isolated **MeetingNotes Beta** 1.15.0-beta.1 comparison workspace. Its copied results/profiles are not automatically imported into the regular library.
+**Since 1.16.0 the regular app uses the native engines for all speech.** For recording, notes and exports, use the regular app; see [upgrading from 1.15 or earlier](../../README.md#upgrading-from-115-or-earlier). This page documents the frozen, isolated **MeetingNotes Beta** 1.15.0-beta.1 comparison workspace, which is kept for development. It is a separate app that is not included in the regular MeetingNotes app; build it from source with the commands below. Its copied results/profiles are not imported into the regular library.
 
 The first beta uses English (en-US). It is a speech-comparison workspace, not a replacement for the regular app's recording, summaries, and integrations.
 
 ## Try old meetings safely
 
 1. Build with `npm run dist:beta`, or run the beta from source with `npm run beta` on Apple Silicon/macOS 26+ with a suitable Xcode SDK.
-2. Finish recording/processing in stable MeetingNotes, then close it. Open the beta and choose your existing **library folder** (the folder containing `db.sqlite`). Custom library locations are supported.
-3. Review the source, destination, disk estimate, and missing-file count. Click **Copy library for testing**. This is a one-time snapshot; the beta does not share the stable database or write results back.
-4. Open **Speech setup** to provision Apple assets and the approximately 11 MB pinned SpeakerKit model set. Internet is needed for setup, not inference. No HF token is sent or requested.
+2. Finish recording/processing in the regular MeetingNotes app, then close it. Open the beta and choose your existing **library folder** (the folder containing `db.sqlite`). Custom library locations are supported.
+3. Review the source, destination, disk estimate, and missing-file count. Click **Copy library for testing**. This is a one-time snapshot; the beta does not share the regular app's database or write results back.
+4. Open **Speech setup** to provision Apple assets and the approximately 11 MB pinned SpeakerKit model set. Internet is needed for setup, not inference. No account or token is sent or requested.
 5. Choose an old meeting. **Re-transcribe only** combines new Apple text with the original saved speaker turns/names. **Re-transcribe + identify voices** also runs SpeakerKit and intentionally treats the resulting local speaker IDs as new, even if their numbers resemble the old IDs.
 6. Compare the two transcript columns and play the copied recording at timestamps. Original notes are available in a separate tab and are not regenerated. The latest beta result persists across restarts; repeated runs never replace the original snapshot.
 7. Confirm detected voices using existing saved people. This enrolls model-tagged native voice profiles and enables similarity-ranked suggestions on later meetings. Existing legacy profiles are retained, but cannot be compared directly with a different embedding model. Ambiguous guesses are not auto-applied. Similarity scores are not probabilities.
 
-The beta has no automatic recording, watchers, processing resume, exports, calendar updates, Obsidian sync, or summary generation. This intentionally narrow evaluation workspace is separate from the stable UI bootstrap. It displays groups and meeting titles from the copied library. It does not yet offer incremental re-import, copying results back to stable, or a new default provider in stable.
+The beta has no automatic recording, watchers, processing resume, exports, calendar updates, Obsidian sync, or summary generation. This intentionally narrow evaluation workspace is separate from the regular app's UI. It displays groups and meeting titles from the copied library. It does not offer incremental re-import or copying results back to the regular app.
 
 Beta data lives under `~/Library/Application Support/MeetingNotes Beta/`; installers/builds go under `release/beta/`. The beta has a distinct bundle ID and no `meetingnotes://` registration. A failed/cancelled copy never becomes the active library. Copies require free space and reject active recording/processing. Missing audio remains unavailable rather than silently using an external live path.
 
@@ -38,6 +38,6 @@ Create a local corpus manifest, never committed if it contains private informati
 
 Run `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/compare.mjs /absolute/manifest.json`, optionally adding `--whisper=http://127.0.0.1:PORT` and `--parakeet=/absolute/path/to/parakeet-comparison`. No service is started/adopted and no meeting library is discovered. The endpoint must be loopback. Each engine runs twice and saves raw text, edit counts, reference-word counts, failures and elapsed time. A failure stays visible rather than disappearing from aggregate accuracy.
 
-The comparison workspace remains experimental. The owner accepted their beta meeting evaluation for regular-app integration; synthetic 75-minute coverage is recorded separately. Broad accuracy, memory/overlap measurements and held-out cross-meeting identity calibration remain follow-up work, not completed benchmarks. The regular app is native-only and requires suggestion confirmation; no calibrated automatic identification claim is made. Do not advertise synthetic timing as real-meeting performance. See issue #274 and the native-speech plan for the original evaluation boundaries.
+The comparison workspace remains experimental. The owner accepted their beta meeting evaluation for regular-app integration; synthetic 75-minute coverage is recorded separately. Broad accuracy, memory/overlap measurements and held-out cross-meeting identity calibration remain follow-up work, not completed benchmarks. The regular app is native-only. Its automatic voice matching is opt-in and heuristic (see [Working with meetings](meetings.md#optional-automatic-voice-matching)); no calibrated automatic identification claim is made. Do not advertise synthetic timing as real-meeting performance. See issue #274 and the native-speech plan for the original evaluation boundaries.
 
-See [third-party notices](../speech-beta-notices.md) for the SDK/model terms. This work does not remove summary-runtime or media-tool requirements from stable MeetingNotes.
+See [third-party notices](../speech-beta-notices.md) for the SDK/model terms. Native speech does not remove the summary-LLM or FFmpeg requirements of the regular app.

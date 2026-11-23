@@ -1331,7 +1331,7 @@ function LibraryEmpty({
  *  Three buttons:
  *    Pause       — stop pulling new items off the queue. The currently
  *                  in-flight meeting keeps going (we deliberately don't
- *                  abort mid-stage so long whisper / pyannote calls
+ *                  abort mid-stage so long transcription passes
  *                  aren't wasted).
  *    Resume      — start pulling again. Visible only while paused.
  *    Clear queue — drop everything that hasn't started yet. Cleared

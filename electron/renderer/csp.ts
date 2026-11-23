@@ -10,20 +10,31 @@
 //   img-src      bundled images and data: URIs.
 //   media-src    meeting audio (file:), speaker samples (data:), and the
 //                capture-recovery preview protocol (recovery-audio:).
-//   connect-src  one endpoint: the Hugging Face token check in onboarding.
+//   connect-src  the app's own origin only. The renderer makes no network
+//                requests; model downloads and LLM calls run in the main
+//                process. (The Hugging Face token check that once needed an
+//                exception here was removed in 1.16.)
 export const CSP_DIRECTIVES: Record<string, string[]> = {
   'default-src': ["'none'"],
   'script-src': ["'self'"],
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:'],
   'font-src': ["'self'", 'data:'],
-  'media-src': ["'self'", 'file:', 'data:', 'blob:', 'recovery-audio:', 'beta-audio:'],
-  'connect-src': ["'self'", 'https://huggingface.co'],
+  'media-src': ["'self'", 'file:', 'data:', 'blob:', 'recovery-audio:'],
+  'connect-src': ["'self'"],
   'object-src': ["'none'"],
   'base-uri': ["'none'"],
   'form-action': ["'none'"],
 };
 
-export function contentSecurityPolicy(): string {
-  return Object.entries(CSP_DIRECTIVES).map(([name, sources]) => `${name} ${sources.join(' ')}`).join('; ');
+/** The speech-beta comparison page plays audio through its own protocol. It
+ *  ships only in the separate beta package, so the production page's policy
+ *  does not carry this source. */
+export const BETA_MEDIA_SOURCE = 'beta-audio:';
+
+export function contentSecurityPolicy(page: 'app' | 'beta' = 'app'): string {
+  return Object.entries(CSP_DIRECTIVES).map(([name, sources]) => {
+    const all = page === 'beta' && name === 'media-src' ? [...sources, BETA_MEDIA_SOURCE] : sources;
+    return `${name} ${all.join(' ')}`;
+  }).join('; ');
 }

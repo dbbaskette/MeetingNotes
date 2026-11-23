@@ -27,19 +27,15 @@ import { effectiveLlmUrl as providerUrl, isIdleProbe } from '../../../shared/inf
 interface Settings {
   lmStudioUrl: string;
   llmModel: string;
-  audioHijackSessionName: string;
   libraryPath: string;
   audioWatchPath: string;
   sttLanguage: string;
-  exporterApple: boolean;
-  exporterMarkdown: boolean;
   exporterWebhook: boolean;
   webhookUrl: string;
   webhookSecret: string;
   webhookTemplate: 'compact' | 'full' | 'telegram-markdown' | 'slack-blocks';
   webhookOwnerFilter: 'mine' | 'all' | 'none';
   webhookLastResult: { ts: string; status: number | null; error: string | null } | null;
-  recordingBitrateKbps: number;
   autoDetectMeetings: {
     browserTabs: boolean;
     nativeApps: boolean;
@@ -506,26 +502,7 @@ export function SettingsView({ initialSection,
       </section>
 
       </SettingsSection>
-      <SettingsSection section="Recording" keywords="quality AAC bitrate audio capture meeting auto detect browser native Zoom permissions microphone">
-      <section className="border-t border-surface-border pt-5">
-        <div className="settings-section-title text-ink-muted font-semibold mb-2">Recording quality</div>
-        <label className="block">
-          <div className="text-sm text-ink mb-1">AAC bitrate</div>
-          <select
-            value={s.recordingBitrateKbps}
-            onChange={(e) => update('recordingBitrateKbps', Number(e.target.value))}
-            className="input"
-          >
-            <option value={96}>96 kbps (smallest files)</option>
-            <option value={128}>128 kbps (balanced — default)</option>
-            <option value={192}>192 kbps (highest quality)</option>
-          </select>
-          <div className="text-xs text-ink-muted mt-1">
-            Applies to new recordings. Higher bitrate = bigger files but cleaner playback.
-          </div>
-        </label>
-      </section>
-
+      <SettingsSection section="Recording" keywords="audio capture meeting auto detect browser native Zoom silence stop permissions microphone">
       <section className="border-t border-surface-border pt-5">
         <div className="settings-section-title text-ink-muted font-semibold mb-2">Meeting auto-detect</div>
         <label className="flex items-start gap-3 cursor-pointer">
@@ -874,7 +851,6 @@ const SETTING_LABELS: Record<string, string> = {
   lmStudioUrl: 'LLM server URL', llmModel: 'LLM model', summaryProvider: 'Summary provider', llmContextLength: 'Context length',
   summaryDetail: 'Summary detail', disableThinking: 'Disable model thinking', reasoningEffort: 'Reasoning effort',
   libraryPath: 'Library folder', audioWatchPath: 'Watched audio folder', sttLanguage: 'Transcription language',
-  recordingBitrateKbps: 'Recording quality', autoDetectMeetings: 'Meeting auto-detect', autoRecordZoom: 'Always record Zoom',
   autoStopOnSilence: 'Ask before stopping a silent recording', silencePromptAfterS: 'Silence before asking', silenceCountdownS: 'Countdown before stopping',
   autoProcessRecordings: 'Process recordings automatically', autoMatchSpeakers: 'Match speakers automatically', notesFirst: 'Notes before speaker naming',
   showMenuBarIcon: 'Menu bar icon', recordShortcut: 'Start/stop shortcut', userName: 'Your name', userSpeakerId: 'You are…',

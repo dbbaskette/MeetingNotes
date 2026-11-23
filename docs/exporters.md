@@ -8,15 +8,15 @@ In a meeting's **Export** panel, choose **PDF**. Select the action items to incl
 
 ## Webhook exporter
 
-The webhook exporter POSTs a JSON payload to an HTTPS endpoint when the pipeline finishes a meeting. Use it to forward summaries and action items into Telegram, Slack, Discord, Mattermost, or any custom automation.
+The webhook exporter POSTs a JSON payload to an HTTPS endpoint when the pipeline finishes a meeting. Use it to forward notes and action items into Telegram, Slack, or any custom automation that accepts JSON.
 
-Configured in **Settings → Webhook exporter**:
+Configured in **Settings → Integrations → Webhook exporter**:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
 | `exporterWebhook` | `false` | Master on/off switch. Nothing fires when off. |
 | `webhookUrl` | `""` | HTTPS endpoint. HTTP is rejected unless the host is `localhost` / `127.0.0.1` / `::1`. |
-| `webhookSecret` | `""` | Optional bearer token. Sent as `Authorization: Bearer <secret>` when non-empty. Redacted from logs and the test-payload preview. |
+| `webhookSecret` | `""` | Optional bearer token. Sent as `Authorization: Bearer <secret>` when non-empty. Encrypted with the macOS keychain and redacted from logs. |
 | `webhookTemplate` | `compact` | One of `compact`, `full`, `telegram-markdown`, `slack-blocks`. |
 | `webhookOwnerFilter` | `mine` | `mine` (only your action items), `all`, or `none` (summary only). |
 
@@ -24,7 +24,7 @@ Configured in **Settings → Webhook exporter**:
 
 - **Auto.** Every meeting that reaches `status='done'` is delivered (if the master toggle is on). Auto-fire never blocks meeting completion — a webhook failure logs a line and surfaces in the Settings card, but the meeting still flips to done.
 - **Test.** The **Send test payload** button in Settings POSTs a synthetic meeting against the active config so you can verify the endpoint before a real meeting runs.
-- **Manual.** The webhook also registers as an Exporter on the meeting detail view's export menu, so you can re-deliver a specific meeting.
+- **Manual.** There is no per-meeting webhook button in a meeting's Export panel. To deliver a meeting again, re-run its notes (**Processing → Re-run from… → Notes and action items only**), which fires the webhook when the meeting finishes.
 
 ### Retries
 
@@ -34,12 +34,15 @@ Webhook delivery retries up to 3 times with exponential backoff: **1s → 5s →
 - **429** retries (rate-limited responses are treated as transient).
 - **Other 4xx** fails fast (no retry). 4xx usually means the endpoint or auth is misconfigured — hammering it doesn't help.
 
-After all retries fail, the last result is written to `settings.webhookLastResult` so the Settings card can show it.
+The result of the last delivery, successful or not, is written to the `webhookLastResult` setting so the Settings card can show it.
+
+Every delivery sends an `Idempotency-Key` header; the `compact` and `full` templates carry the same value as `delivery_id`. Retries of one delivery reuse it; a new delivery gets a new one, so a receiver can deduplicate on it.
 
 ### Payload (compact template)
 
 ```json
 {
+  "delivery_id": "6f1c0c0e-4f0b-4c58-9d39-2f1f0c6f8a11",
   "event": "meeting.completed",
   "meeting": {
     "id": "abc123",
@@ -70,14 +73,14 @@ The `full` template adds a `transcript_markdown` field with the full transcript 
 
 ```json
 {
-  "text": "*Team standup*\n_2026-05-27T14:30:00Z · 28 min_\n\n…",
-  "parse_mode": "Markdown"
+  "text": "*Team standup*\n_2026\\-05\\-27T14:30:00Z · 28 min_\n\n…",
+  "parse_mode": "MarkdownV2"
 }
 ```
 
 Wire this to your bot by pointing `webhookUrl` at `https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>` (Telegram accepts the chat_id either as a query param or in the body — query is easiest if you don't control the body).
 
-Markdown specials (`_*[]()`) in user-supplied titles, summaries, and action items are escaped so a colon-tagged name like `Bug_report` doesn't accidentally start italic.
+The body uses Telegram's `MarkdownV2`. Its reserved characters (``_ * [ ] ( ) ~ ` > # + - = | { } . !`` and the backslash) are escaped in titles, notes and action items, so a name like `Bug_report` does not start italic text. The title is cut to 100 characters, the notes to 900, and at most five action items are listed, followed by a count of the rest.
 
 ### Slack template
 
@@ -86,19 +89,22 @@ Markdown specials (`_*[]()`) in user-supplied titles, summaries, and action item
 ```json
 {
   "blocks": [
-    { "type": "header", "text": { "type": "plain_text", "text": "Team standup" } },
-    { "type": "context", "elements": [{ "type": "mrkdwn", "text": "2026-05-27T14:30:00Z · 28 min · with Jamie, Alex" }] },
-    { "type": "section", "text": { "type": "mrkdwn", "text": "Three-sentence overview…" } },
-    { "type": "section", "text": { "type": "mrkdwn", "text": "*Action items*\n• …" } },
+    { "type": "header", "text": { "type": "plain_text", "text": "Team standup", "emoji": true } },
+    { "type": "context", "elements": [{ "type": "mrkdwn", "text": "2026-05-27T14:30:00Z · 28 min · with Jamie, Alex", "verbatim": true }] },
+    { "type": "section", "text": { "type": "mrkdwn", "text": "Three-sentence overview…", "verbatim": true } },
+    { "type": "divider" },
+    { "type": "section", "text": { "type": "mrkdwn", "text": "*Action items*\n• …", "verbatim": true } },
     { "type": "actions", "elements": [{ "type": "button", "text": { "type": "plain_text", "text": "Open in MeetingNotes" }, "url": "meetingnotes://open?id=…" }] }
   ]
 }
 ```
 
+The notes and the action-item list are each cut to 580 characters, and `&`, `<` and `>` are escaped. The divider and action-item section appear only when there are action items.
+
 ### Security
 
 - HTTPS only (with the loopback exception above).
-- The bearer secret is stored in the same SQLite settings table as other configuration. Never logged, never echoed in the test-payload preview, and never returned by `settings:get` to the renderer in plaintext if you'd prefer to wipe it after a session (the field is a `<input type="password">` in Settings, but you have to clear it yourself).
+- The bearer token is encrypted with the macOS keychain (Electron `safeStorage`) before it is written to the settings table; see [`secret-settings.ts`](../electron/main/storage/secret-settings.ts). It is never logged and never sent to the window: Settings shows a mask for a saved token. Clear the field to remove it. A token saved as plaintext by an older version is encrypted on the next launch. If keychain encryption is unavailable, the token is not saved.
 - Markdown and PDF exports are saved locally. Google Tasks and Google Docs send the selected meeting data to Google when you use those buttons. An enabled webhook sends its configured payload to the destination URL.
 
 ### Out of scope (v1)

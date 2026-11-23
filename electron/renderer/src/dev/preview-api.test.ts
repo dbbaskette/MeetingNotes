@@ -63,7 +63,7 @@ describe('browser preview api', () => {
 
   it('returns stable references and is not mistaken for a thenable', () => {
     const api = createPreviewApi();
-    expect(api.meetings.list).toBe(api.meetings.list);
+    expect(api.meetings.listPage).toBe(api.meetings.listPage);
     expect(api.recording).toBe(api.recording);
     expect((api as unknown as { then?: unknown }).then).toBeUndefined();
   });

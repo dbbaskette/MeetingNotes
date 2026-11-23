@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mergeTranscriptWithDiarization, mergedToMarkdown,
   type TranscriptSegment, type DiarSegment } from './merge-transcript.js';
 
-const whisper: TranscriptSegment[] = [
+const segments: TranscriptSegment[] = [
   { start: 0.0, end: 2.0, text: 'Hello there.' },
   { start: 2.0, end: 5.0, text: 'General Kenobi.' },
   { start: 5.0, end: 7.5, text: 'You are a bold one.' },
@@ -14,8 +14,8 @@ const diar: DiarSegment[] = [
 ];
 
 describe('mergeTranscriptWithDiarization', () => {
-  it('assigns each whisper segment to the speaker whose diar segment overlaps most', () => {
-    expect(mergeTranscriptWithDiarization(whisper, diar)).toEqual([
+  it('assigns each transcript segment to the speaker whose diar segment overlaps most', () => {
+    expect(mergeTranscriptWithDiarization(segments, diar)).toEqual([
       { start: 0.0, end: 2.0, speaker: 'SPEAKER_00', text: 'Hello there.' },
       { start: 2.0, end: 5.0, speaker: 'SPEAKER_01', text: 'General Kenobi.' },
       { start: 5.0, end: 7.5, speaker: 'SPEAKER_00', text: 'You are a bold one.' },
@@ -39,7 +39,7 @@ describe('mergeTranscriptWithDiarization', () => {
     expect(out[0]!.speaker).toBe('VOICE_YOU');
   });
 
-  it('keeps original whisper order and picks max overlap among many non-overlapping turns', () => {
+  it('keeps original transcript order and picks max overlap among many non-overlapping turns', () => {
     const many: DiarSegment[] = Array.from({ length: 4_000 }, (_, i) => ({
       start: i * 2, end: i * 2 + 1, speaker: `S${i}`,
     }));
@@ -54,14 +54,14 @@ describe('mergeTranscriptWithDiarization', () => {
   });
 
   it('finishes a 4-hour-scale merge without a nested full scan', () => {
-    const whisper: TranscriptSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
+    const segments: TranscriptSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
       start: i, end: i + 0.9, text: 'x',
     }));
     const many: DiarSegment[] = Array.from({ length: 4_800 }, (_, i) => ({
       start: i * 3, end: i * 3 + 3, speaker: `S${i % 4}`,
     }));
     const started = performance.now();
-    const out = mergeTranscriptWithDiarization(whisper, many);
+    const out = mergeTranscriptWithDiarization(segments, many);
     expect(performance.now() - started).toBeLessThan(20);
     expect(out[0]!.speaker).toBe('S0');
     expect(out[14_399]!.speaker).toBe('S3');
@@ -70,7 +70,7 @@ describe('mergeTranscriptWithDiarization', () => {
 
 describe('mergedToMarkdown', () => {
   it('renders with mm:ss timestamps', () => {
-    const md = mergedToMarkdown(mergeTranscriptWithDiarization(whisper, diar));
+    const md = mergedToMarkdown(mergeTranscriptWithDiarization(segments, diar));
     expect(md).toContain('[SPEAKER_00 00:00] Hello there.');
     expect(md).toContain('[SPEAKER_01 00:02] General Kenobi.');
     expect(md.split('\n')).toHaveLength(3);

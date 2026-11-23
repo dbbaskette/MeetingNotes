@@ -67,7 +67,6 @@ const IPC_CHANNELS = {
   terminologyPreview: 'terminology:preview',
   terminologyCommit: 'terminology:commit',
   terminologyUndo: 'terminology:undo',
-  meetingsList: 'meetings:list',
   meetingsListPage: 'meetings:list-page',
   meetingsGetMany: 'meetings:get-many',
   meetingsListIds: 'meetings:list-ids',
@@ -81,7 +80,6 @@ const IPC_CHANNELS = {
   trashList: 'trash:list',
   meetingsRerun: 'meetings:rerun',
   meetingsStart: 'meetings:start',
-  meetingsStartMany: 'meetings:start-many',
   meetingsStartManyDetailed: 'meetings:start-many-detailed',
   meetingsSetSkipSpeakerId: 'meetings:set-skip-speaker-id',
   meetingsContinueFromSpeakerId: 'meetings:continue-from-speaker-id',
@@ -100,9 +98,9 @@ const IPC_CHANNELS = {
   searchAskCancel: 'search:ask-cancel',
   actionItemsUndoDelete: 'action-items:undo-delete',
   appUndoEdit: 'app:undo-edit',
+  backupStatus: 'backup:status',
   backupPreview: 'backup:preview',
   backupRun: 'backup:run',
-  backupStatus: 'backup:status',
   recordingMeeting: 'recording:meeting',
   recordingListSources: 'recording:list-sources',
   recordingStart: 'recording:start',
@@ -129,13 +127,11 @@ const IPC_CHANNELS = {
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
   speakersList: 'speakers:list',
-  speakersConfirm: 'speakers:confirm',
   speakersRename: 'speakers:rename',
   speakersMerge: 'speakers:merge',
   speakersSample: 'speakers:sample',
   speakersAssign: 'speakers:assign',
   speakersAssignBulk: 'speakers:assign-bulk',
-  speakersSuggestions: 'speakers:suggestions',
   speakersReview: 'speakers:review',
   speakersProfiles: 'speakers:profiles',
   speakersUndoProfile: 'speakers:undo-profile',
@@ -162,8 +158,6 @@ const IPC_CHANNELS = {
   meetingDetectorDismiss: 'meeting-detector:dismiss',
   onboardingOpenExternal: 'onboarding:open-external',
   searchQuery: 'search:query',
-  weeklyGet: 'weekly:get',
-  weeklyRegenerate: 'weekly:regenerate',
   weeklyGetStructured: 'weekly:get-structured',
   weeklyGetNarrative: 'weekly:get-narrative',
   weeklyExportMarkdown: 'weekly:export-markdown',
@@ -218,7 +212,6 @@ const api = {
     undo: (input: {meetingId: string; artifact: TermScope; historyId: string; revision: string}) => ipcRenderer.invoke(IPC_CHANNELS.terminologyUndo, input) as Promise<TermReview>,
   },
   meetings: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.meetingsList),
     /** Live keyset page; restart after changing filters/sorts or refreshing. */
     listPage: (query: MeetingListQuery) =>
       ipcRenderer.invoke(IPC_CHANNELS.meetingsListPage, query) as Promise<MeetingSummaryPage>,
@@ -288,7 +281,6 @@ const api = {
       ipcRenderer.invoke(IPC_CHANNELS.meetingsUndoDelete, id) as Promise<boolean>,
     rerun: (id: string, fromStage: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsRerun, id, fromStage),
     start: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStart, id),
-    startMany: (ids: string[]) => ipcRenderer.invoke(IPC_CHANNELS.meetingsStartMany, ids) as Promise<number>,
     /** Pending-only snapshot operation. At most 1,000 raw IDs per batch;
      * missing, deleted, non-pending, and failed items remain retryable. */
     startManyDetailed: (ids: string[]) =>
@@ -450,8 +442,6 @@ const api = {
     review: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersReview, meetingId) as Promise<{ label: string; reason?: string; suggestions: { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[] }[]>,
     profiles: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersProfiles, id) as Promise<{ space: string; confirmedAt?: string; source?: string; canUndo: boolean }[]>,
     undoProfile: (id: string, space: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersUndoProfile, id, space) as Promise<void>,
-    confirm: (input: { meetingId: string; localLabel: string; displayName: string }) =>
-      ipcRenderer.invoke(IPC_CHANNELS.speakersConfirm, input),
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
     /** Merge the source roster speaker into the target. Meeting links and
      *  action items move to the target, the source is deleted, and every
@@ -481,13 +471,6 @@ const api = {
     }) => ipcRenderer.invoke(IPC_CHANNELS.speakersAssign, input) as Promise<string>,
     assignBulk: (input: { meetingId: string; localLabels: string[]; rosterId: string }) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersAssignBulk, input) as Promise<{ assigned: number; impactedLines: number }>,
-    // Ranked "might be X" guesses for one unidentified speaker, computed
-    // from the same voice embeddings the auto-matcher uses — just without
-    // its MATCH_THRESHOLD gate, since this is for a human to confirm.
-    suggestions: (meetingId: string, localLabel: string) =>
-      ipcRenderer.invoke(IPC_CHANNELS.speakersSuggestions, meetingId, localLabel) as Promise<
-        { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[]
-      >,
     unlink: (meetingId: string, localLabel: string) =>
       ipcRenderer.invoke(IPC_CHANNELS.speakersUnlink, meetingId, localLabel),
   },
@@ -580,32 +563,8 @@ const api = {
      *  question or `cancelAsk` stops the one in flight. */
     ask: (question: string) => ipcRenderer.invoke(IPC_CHANNELS.searchAsk, question) as Promise<AskResult>,
     cancelAsk: () => ipcRenderer.invoke(IPC_CHANNELS.searchAskCancel) as Promise<void>,
-    /** Full-text search across meeting titles + summaries + transcripts.
-     *  Returns at most `limit` results, sorted title > summary >
-     *  transcript. Each result carries the meeting id, the matched
-     *  snippet, and a `seconds` offset when the hit was on a specific
-     *  transcript line (so callers can jump to the timestamp). */
-    query: (q: string, limit?: number, groupId?: string | null) =>
-      ipcRenderer.invoke(IPC_CHANNELS.searchQuery, q, limit ?? 20, groupId) as Promise<{
-        meetingId: string;
-        title: string;
-        source: 'title' | 'summary' | 'transcript';
-        snippet: string;
-        /** For transcript hits, the timestamp seconds so the detail view
-         *  can seek right to the matched line. */
-        seconds?: number;
-      }[]>,
   },
   weekly: {
-    /** Fetch the full data needed to render the weekly view in a
-     *  single call. The first call for a given week (or any call
-     *  after the input meetings change) blocks while the LLM
-     *  regenerates the narrative; subsequent calls return cached
-     *  data instantly. Prefer the {getStructured, getNarrative}
-     *  pair for new code so the renderer can paint the structured
-     *  sections immediately and stream the narrative card in. */
-    get: (year: number, week: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.weeklyGet, year, week) as Promise<unknown>,
     /** Fast path: structured data only (meetings + action items +
      *  range info). No LLM call — returns within tens of ms. Used
      *  by the WeeklyView to paint the page before the narrative
@@ -618,11 +577,6 @@ const api = {
      *  button). */
     getNarrative: (year: number, week: number, force = false) =>
       ipcRenderer.invoke(IPC_CHANNELS.weeklyGetNarrative, year, week, force) as Promise<unknown>,
-    /** Force-clear the cache and regenerate the LLM narrative.
-     *  Equivalent to getNarrative(year, week, true). Kept for the
-     *  legacy callers that still use the single-call IPC. */
-    regenerate: (year: number, week: number) =>
-      ipcRenderer.invoke(IPC_CHANNELS.weeklyRegenerate, year, week) as Promise<unknown>,
     /** Save the rendered Markdown to disk via a Save dialog.
      *  Returns { path: null, markdown } when the user cancels;
      *  the markdown is still useful for clipboard fallbacks. */

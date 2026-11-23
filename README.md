@@ -23,8 +23,8 @@
 open questions and unfinished tasks with links to their source meetings—no extra
 model or account required. Ungrouped stays first, followed by pinned groups.
 
-Speaker review explains why a voice needs confirmation. Settings → Speakers now
-has a searchable, compact roster: expand **Voiceprints** to see confirmation sources
+Speaker review explains why a voice needs confirmation. Settings → Organization →
+Speakers has a searchable, compact roster: expand **Voiceprints** to see confirmation sources
 and undo the last voiceprint change. Merging people preserves native profiles.
 
 In **Settings → Processing**, optionally enable **Generate notes before naming every
@@ -71,7 +71,7 @@ The reusable, stack-neutral [Golden Gate design skill](macos-goldengate-skill/SK
 
 ## What you get
 
-- **Capture without a virtual audio device.** One click records any app's audio (Zoom, Teams, FaceTime, a browser tab) mixed with your microphone, using the macOS 14.2 process tap.
+- **Capture without a virtual audio device.** One click records any app's audio (Zoom, Teams, FaceTime, a browser tab) mixed with your microphone, using a Core Audio process tap.
   Microphone timing accounts for delayed buffers; see the [1.14.9 capture fix and playback check](docs/releases/v1.14.9.md).
 - **Local transcription with simpler setup.** On Apple Silicon/macOS 26+, Apple SpeechTranscriber transcribes and SpeakerKit OSS separates the voices. This is the only speech engine: no Whisper installation, Python environment, Hugging Face account, token or gated-model approval.
 - **A transcript with real names.** Name voices using your existing roster. Confirmed native voice samples power similarity-ranked suggestions in later meetings. Confirm suggestions yourself, or opt into conservative automatic matching in Settings → Processing.
@@ -114,21 +114,23 @@ On first launch, the three-step setup wizard covers capture permissions, **Prepa
 
 More detail: [Recording](docs/guide/recording.md) · [Working with meetings](docs/guide/meetings.md)
 
-### Upgrading to 1.16.0: what to do
+### Upgrading from 1.15 or earlier
 
-1. Finish recording/processing, quit the app and make a [Library backup](docs/library-backup.md). Install the new regular **MeetingNotes** app when ready; building it does not replace or restart your running app.
-2. Open **Settings → Processing** and click **Prepare native speech**. Wait for both language assets and speaker models to be ready. All installations now use Apple + SpeakerKit, regardless of old saved settings.
+Native speech (Apple transcription + SpeakerKit) replaced Whisper and pyannote in 1.16.0 and has been the only speech engine since. If you are coming from 1.15 or earlier:
+
+1. Finish recording/processing, quit the app and make a [Library backup](docs/library-backup.md). Install the new **MeetingNotes** app when ready; building it does not replace or restart your running app.
+2. Open **Settings → Processing** and click **Prepare native speech**. Wait for both language assets and speaker models to be ready. Every installation uses Apple + SpeakerKit, regardless of old saved settings.
 3. Record/process a new meeting, or explicitly reprocess one old meeting to compare. Existing audio, groups, notes, exports, saved weekly reports and dictionary rules remain in the same library. Upgrading does not regenerate your meetings. Reprocessing preserves the previous transcript in the meeting folder and saves existing notes/tasks to history where applicable; it is not a side-by-side comparison UI.
 4. Review the new voices and assign your existing saved people. New diarization labels are run-local: `SPEAKER_00` in a new run is **not** assumed to be the same person as `SPEAKER_00` in an old run. New confirmations teach native profiles; old legacy profiles are retained separately and never mixed with the new model's vectors.
 5. Keep your LLM configured for summaries/action items and keep FFmpeg for media tools. Recording, speaker review, shared transcript/summary terminology corrections, notes history, PDF/Markdown exports, groups, Obsidian sync and the rest of the full app remain available.
 
-**What this buys us:** fewer setup steps and accounts, no local Whisper/Python servers or bundled Python/PyTorch payload, on-device Apple transcription with genuine word timing, compact native speaker centroids, and the same full meeting workflow. The helper runs only for its operation, then exits. Whisper management, HF-token setup, remote STT endpoints and the engine selector are removed, not hidden. There is no in-app fallback. Initial Apple language assets and public SpeakerKit downloads still require internet; LLM setup remains separate.
+**What this buys us:** fewer setup steps and accounts, no local Whisper/Python servers or bundled Python/PyTorch payload, on-device Apple transcription with genuine word timing, compact native speaker centroids, and the same full meeting workflow. The helper runs only for its operation, then exits. Whisper management, Hugging Face token setup, remote STT endpoints and the engine selector are removed, not hidden. There is no in-app fallback. Initial Apple language assets and public SpeakerKit downloads still require internet; LLM setup remains separate.
 
-**Voice matching is preserved, not silently converted.** Different models produce incompatible embedding spaces, even at the same vector length. Native profiles are tagged by SDK/model revision and representation. Suggestions show **similarity**, not a confidence percentage. Automatic matching is off by default; enable **Settings → Processing → Automatically match known voices** for conservative heuristic assignments (similarity ≥ 0.98, margin ≥ 0.05, at least 10 seconds of non-overlapping speech across two turns). Short/ambiguous voices, duplicate identity claims and incompatible profiles stay in review. **Auto-matched** names remain editable, do not train profiles, and are never labeled human-confirmed; **Confirm this voice** explicitly teaches the profile. Enabling/disabling the setting does not rewrite existing meetings. Broader cross-meeting calibration remains follow-up work. Missing/zero vectors leave a voice available for manual naming instead of failing processing.
+**Voice matching is preserved, not silently converted.** Different models produce incompatible embedding spaces, even at the same vector length. Native profiles are tagged by SDK/model revision and representation. Suggestions show **similarity**, not a confidence percentage. Automatic matching is off by default; enable **Settings → Processing → Automatically match known voices** for conservative heuristic assignments (similarity ≥ 0.80, a lead of ≥ 0.05 over the next candidate, at least 10 seconds of non-overlapping speech across two turns). An unnamed voice whose best candidate scores ≥ 0.60 with the same lead is offered for one-click confirmation instead. Short/ambiguous voices, duplicate identity claims and incompatible profiles stay in review. **Auto-matched** names remain editable, do not train profiles, and are never labeled human-confirmed; **Confirm this voice** explicitly teaches the profile. Enabling/disabling the setting does not rewrite existing meetings. Broader cross-meeting calibration remains follow-up work. Missing/zero vectors leave a voice available for manual naming instead of failing processing.
 
-**Beta users:** the separate **MeetingNotes Beta** comparison workspace is retained, with its copied audio, original transcripts and native profiles. It is not the regular app's live library and its changes are not automatically imported. Use the regular app to process/name voices going forward; keep the beta for side-by-side comparisons. See the [comparison guide](docs/guide/speech-beta.md).
+**Beta users:** **MeetingNotes Beta** is a separate comparison app with its own bundle ID and its own copied audio, original transcripts and native profiles under `~/Library/Application Support/MeetingNotes Beta/`. It is not part of the regular app, it is not the regular app's live library, and its changes are not imported. It is built from source with `npm run dist:beta`. Use the regular app to process and name voices; keep the beta only for side-by-side comparisons. See the [comparison guide](docs/guide/speech-beta.md).
 
-**Limits:** your successful beta evaluation supports this promotion, but synthetic timing tests are not proof of accuracy on every accent, microphone, overlap or noisy meeting. Broad accuracy, peak-memory and held-out identity calibration remain follow-up evaluation work. No universal speed/accuracy advantage over Whisper is claimed. For a regression or unsupported language, quit and reinstall [1.15.0](docs/releases/v1.15.0.md). Keep a backup before reprocessing; rollback cannot undo overwritten outputs. Old Whisper caches, HF credentials and legacy voice profiles are left untouched for rollback, but 1.16 neither reads nor uses them. Native inference requires supported Apple assets; it does not fall back silently or download during processing.
+**Limits:** the beta evaluation supported promoting native speech to the regular app, but synthetic timing tests are not proof of accuracy on every accent, microphone, overlap or noisy meeting. Broad accuracy, peak-memory and held-out identity calibration remain follow-up evaluation work. No universal speed/accuracy advantage over Whisper is claimed. For a regression or unsupported language, quit and reinstall [1.15.0](docs/releases/v1.15.0.md). Keep a backup before reprocessing; rollback cannot undo overwritten outputs. Old Whisper caches, Hugging Face credentials and legacy voice profiles are left untouched for rollback, but 1.16 and later neither read nor use them. Native inference requires supported Apple assets; it does not fall back silently or download during processing.
 
 ## How it works
 
@@ -152,7 +154,7 @@ flowchart TD
     ext --> done([Done])
 ```
 
-Transcription and diarization run in parallel. Each meeting is one row in SQLite (`~/Documents/MeetingNotes/db.sqlite`) and one folder of plain files (`transcript.md`, `summary.md`, `action-items.json`) under `meetings/`. If the app quits mid-run, processing resumes on the next launch; a failed meeting waits for **Retry**, which restarts from the last completed stage.
+Transcription and diarization run in parallel; for a meeting of an hour or longer, or when free memory is under 2 GB, they run one after the other to save memory. Each meeting is one row in SQLite (`~/Documents/MeetingNotes/db.sqlite`) and one folder of plain files (`transcript.md`, `summary.md`, `action-items.json`) under `meetings/`. If the app quits mid-run, processing resumes on the next launch; a failed meeting waits for **Retry**, which restarts from the last completed stage.
 
 The native language choice is pinned per processing run and retained for crash recovery. Explicit upstream reprocessing starts a new selection. Native raw output retains real word timestamps; the displayed transcript groups those words into speaker turns so searching, phrase corrections and notes generation remain usable. Speaker samples use that same mixed recording timeline.
 
@@ -181,14 +183,14 @@ Native profiles live at `<library>/voice-profiles/`; legacy profiles stay at `<l
 | Google Tasks or Docs export | The items or notes you export | Google |
 | A webhook | The meeting payload, per the template and owner filter | Your URL |
 | Obsidian sync | Notes written into your vault | Wherever the vault itself syncs |
-| Native speech preparation | Public model/language asset download requests; no meeting content or HF token | Apple's asset service and Hugging Face's public model hosting/CDN |
+| Native speech preparation | Public model/language asset download requests; no meeting content, account or token | Apple's asset service and Hugging Face's public model hosting/CDN |
 
 **How the app is hardened:**
 
 - The window runs sandboxed with context isolation and no Node integration. It can only call a fixed API exposed by the preload.
 - Every IPC call's arguments are checked against a schema before its handler runs ([`channel-schemas.ts`](electron/main/ipc/channel-schemas.ts)); a test fails if a channel has no schema.
 - A Content-Security-Policy denies everything by default and allows only bundled scripts. Links in notes open in your browser and can never navigate the app window.
-- The Google refresh token, Google client secret and webhook bearer token are encrypted with the macOS keychain and are never sent to the window. Old HF credentials are not read or modified.
+- The Google refresh token, Google client secret and webhook bearer token are encrypted with the macOS keychain and are never sent to the window. Hugging Face credentials left by versions before 1.16 are not read or modified.
 - The `meetingnotes://` URL scheme is treated as untrusted input, and capture is limited to a signed helper that stops if the app exits.
 
 ## Documentation
@@ -216,7 +218,7 @@ CI runs locally in a disposable Tart macOS VM: `bash scripts/ci/tart-macos.sh --
 
 ## License
 
-MIT.
+MIT. See [LICENSE](LICENSE).
 
 ## Acknowledgements
 

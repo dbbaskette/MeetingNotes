@@ -51,7 +51,7 @@ In **APIs & Services → Library**, enable both:
 
 ## 5. Sign in from MeetingNotes
 
-1. **Settings → Google account**.
+1. **Settings → Integrations → Google account**.
 2. Paste the Client ID and Client Secret.
 3. Click **Sign in with Google**, approve in the browser that opens, and
    return to the app. You should see your connected email.
@@ -62,11 +62,13 @@ panel are now enabled.
 ## Notes
 
 - **Google Tasks** receives only the action items assigned to **you** (set
-  *Settings → "You are…"* so MeetingNotes knows which items are yours). The
+  *Settings → Organization → You are…* so MeetingNotes knows which items are yours). The
   export panel shows a 🔒 reminder.
 - **Google Doc** exports the full meeting (summary + all action items) into a
   "MeetingNotes" folder in your Drive and returns the Doc link.
-- Your refresh token is stored **encrypted** via the macOS keychain
-  (Electron `safeStorage`). The client secret for a Desktop OAuth client is
-  non-confidential by Google's design.
-- Disconnect any time with **Sign out** in Settings.
+- Your refresh token and your client secret are both stored **encrypted**
+  via the macOS keychain (Electron `safeStorage`) and are never sent to the
+  app window; Settings shows a mask for a saved secret. (Google treats the
+  client secret of a Desktop OAuth client as non-confidential, but it is
+  encrypted here all the same.)
+- Disconnect any time with **Sign out** in Settings → Integrations → Google account.

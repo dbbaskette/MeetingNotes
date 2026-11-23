@@ -6,7 +6,6 @@
 // recovery/trash paths retain these names. Processing intentionally uses
 // the primary mixed timeline for both STT and diarization (#173).
 
-import fs from 'node:fs';
 import path from 'node:path';
 
 export interface StemPaths {
@@ -26,12 +25,6 @@ export function deriveStemPaths(mixedPath: string): StemPaths {
     voice: `${base}.voice${ext}`,
     system: `${base}.system${ext}`,
   };
-}
-
-/** True iff both stem files exist on disk alongside the mixed file. */
-export function hasStems(mixedPath: string): boolean {
-  const { voice, system } = deriveStemPaths(mixedPath);
-  return fs.existsSync(voice) && fs.existsSync(system);
 }
 
 /** Synthetic speaker label assigned to segments coming from the voice

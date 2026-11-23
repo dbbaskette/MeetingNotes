@@ -6,8 +6,8 @@
 // the Vite dev server, and so the existing package-smoke assertions run.
 //
 // This is a fast local check that the app still starts and renders. It is not
-// a substitute for the packaged gate in scripts/ci/package-smoke.sh: helper,
-// sidecar and resource paths resolve differently in a real bundle.
+// a substitute for the packaged gate in scripts/ci/package-smoke.sh: helper
+// and resource paths resolve differently in a real bundle.
 import { app } from 'electron';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';

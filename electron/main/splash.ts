@@ -3,8 +3,8 @@
 // Frameless splash window shown the instant Electron's `whenReady`
 // fires, before the rest of the main-process initialization runs.
 // Cold launch can take a few seconds (db open, repo construction,
-// IPC handler registration, library watcher start, sidecar handle
-// creation) — without the splash the user clicks the dock icon and
+// IPC handler registration, library watcher start, speech helper
+// setup) — without the splash the user clicks the dock icon and
 // stares at the desktop wondering whether anything happened.
 //
 // The HTML is embedded as a data URL so there's nothing to package
