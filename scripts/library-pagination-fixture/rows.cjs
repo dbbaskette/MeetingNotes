@@ -14,6 +14,18 @@ app.whenReady().then(async () => {
   const run = (code) => win.webContents.executeJavaScript(code, true);
   const settle = () => run(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 20))))`);
   const until = async (code) => { for (let i = 0; i < 100; i++) { if (await run(code)) return; await new Promise(resolve => setTimeout(resolve, 30)); } throw new Error(`Not ready: ${code}`); };
+  // Another window can take focus between the request and the check (seen in
+  // the Tart guest and on a developer Mac), so ask again on every poll for up
+  // to ten seconds instead of asking once and waiting three (#256).
+  // The page must behave as focused even when macOS will not hand this
+  // process the foreground (another app is active on a developer Mac, or
+  // something else took focus in the Tart guest). Focus emulation is what
+  // browser test drivers use for this; OS focus is still requested below.
+  const emulateFocus = async () => {
+    if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+  };
+  const focusWindow = async () => { for (let i = 0; i < 200; i++) { win.show(); win.focus(); app.focus({ steal: true }); win.webContents.focus(); if (await run('document.hasFocus()')) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Not ready: document.hasFocus()'); };
   const scroll = async (top) => { await run(`document.querySelector('#viewport > div').scrollTop = ${top}`); await settle(); };
   const count = () => run(`document.querySelectorAll('[data-meeting-id]').length`);
   await win.loadURL(base + '?plain');
@@ -22,9 +34,9 @@ app.whenReady().then(async () => {
   for (const width of [900, 1440]) {
     win.setContentSize(width, 900);
     await win.loadURL(base);
-    win.show(); win.focus(); app.focus({ steal: true }); win.webContents.focus();
     await until(`document.querySelectorAll('[data-meeting-id]').length === 15`);
-    await until('document.hasFocus()');
+    await emulateFocus();
+    await focusWindow();
     const stats = { width, top: await count() };
     const layout = await run(`Array.from(document.querySelectorAll('[data-meeting-id]')).map(row => ({ height: row.firstElementChild.getBoundingClientRect().height, width: row.getBoundingClientRect().width, overflow: row.firstElementChild.scrollWidth > row.firstElementChild.clientWidth }))`);
     assert(layout.every(row => row.height === 64 && !row.overflow), JSON.stringify(layout));
