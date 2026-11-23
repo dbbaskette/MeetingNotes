@@ -9,7 +9,7 @@
 // generateNarrative dependency, and tested separately so prompt
 // regressions surface fast.
 
-import type { LMStudioClient } from '../lm-studio/client.js';
+import type { LMStudioClient, ReasoningEffort } from '../lm-studio/client.js';
 import type { NarrativeInput, NarrativeOutput, WeeklyTheme } from './aggregator.js';
 
 const SYSTEM_PROMPT = `You synthesize a person's week of meeting notes into a detailed summary they can use to catch up on and recall what actually happened.
@@ -256,12 +256,14 @@ export function createNarrativeGenerator(
   lmStudio: LMStudioClient,
   getModelId: () => string,
   getDisableThinking: () => boolean = () => true,
+  getReasoningEffort?: () => ReasoningEffort,
 ): (input: NarrativeInput) => Promise<NarrativeOutput> {
   return async (input) => {
     const raw = await lmStudio.chat({
       model: getModelId(),
       temperature: 0.3,
       disableThinking: getDisableThinking(),
+      ...(getReasoningEffort ? { reasoningEffort: getReasoningEffort() } : {}),
       // Generous cap (NOT the 2000 we shipped in 1.5.0). A reasoning model
       // (Qwen3, gemma-*-a4b, etc.) spends its budget in reasoning_content FIRST
       // and only then emits the answer — a small cap got fully consumed by

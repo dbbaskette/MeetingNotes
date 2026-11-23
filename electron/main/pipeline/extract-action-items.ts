@@ -87,6 +87,7 @@ export async function extractActionItemsFromSummary(
       signal: deps.signal,
       temperature,
       disableThinking: deps.settings.get('disableThinking'),
+      reasoningEffort: deps.settings.get('reasoningEffort'),
       maxTokens: EXTRACT_MAX_TOKENS,
       // Extract spirals too (Gemma's reasoning is intermittent). temperature 0
       // makes a plain retry deterministic — useless — so the client raises the
