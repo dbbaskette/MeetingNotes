@@ -27,7 +27,7 @@ MeetingNotes can use your Mac's calendar to name recordings and suggest who was 
 
 With access granted:
 
-- **Title.** A recording that starts during a calendar event, or up to five minutes before one, is titled after the event. All-day events and events you declined are ignored; if several events overlap, the one that started closest to now is used. A title you type in the source picker, or pass as `title=` in a `meetingnotes://record` URL, always wins.
+- **Title.** A recording that starts during a calendar event, or up to five minutes before one, is titled after the event. All-day events and events you declined are ignored; if several events overlap, the one that started closest to now is used. A title you type in the source picker, or pass as `title=` in a `meetingnotes://record` URL, always wins. Recording never waits for the calendar: it starts at once, and the event title is applied a moment later; a title you give the meeting before then is kept.
 - **Speaker names.** When you name a voice, the event's attendees appear under **From the calendar invite**. Picking one names that voice; an attendee who is already a saved speaker reuses that speaker. Nothing is assigned automatically.
 
 MeetingNotes keeps the event's title, start and end, recurring-series identifier and the attendees' display names with the meeting. It never stores e-mail addresses, never changes your calendar and never sends calendar data anywhere. It reads whatever calendars the macOS Calendar app shows, including Google and Exchange accounts added there; it does not connect to Google or Microsoft itself.

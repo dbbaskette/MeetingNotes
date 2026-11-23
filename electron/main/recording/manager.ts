@@ -21,6 +21,9 @@ export interface StartResult {
   outputPath: string;
 }
 
+/** Reason on the state-change re-sent when a calendar title is applied to a
+ *  live recording (#253). The state itself does not change. */
+export const CALENDAR_TITLE_REASON = 'calendar-title';
 /** A level at or below this peak counts as silence. */
 export const SILENCE_THRESHOLD_DB = -50;
 /** How silence is handled (#305). Read again each time detection is armed or
@@ -136,23 +139,18 @@ export class RecordingManager {
     onFinalized?: (sessionId: string, outputPath: string) => void;
     onDiagnostic?: (sessionId: string, diagnostic: CaptureDiagnostic) => void;
     /** Calendar-aware recording (#253): the event happening at `now`, or
-     *  null. Expected never to throw and to call nothing when the feature
-     *  is off (CalendarService.eventAt). */
+     *  null. Runs alongside capture, never before it; expected to call
+     *  nothing when the feature is off (CalendarService.eventAt). */
     calendarEventAt?: (now: Date) => Promise<CalendarEventSnapshot | null>;
+    /** Called when a late calendar lookup has been stored on the session.
+     *  `title` is the event title when it was applied, else null. The
+     *  session may already be stopped and its meeting cataloged. */
+    onCalendarEvent?: (info: { sessionId: string; outputPath: string; event: CalendarEventSnapshot; title: string | null }) => void;
   }) {}
 
   async start(input: StartInput, internal: { outputDir?: string; disposable?: boolean; expectedRevision?: number } = {}): Promise<StartResult> {
     assertBackupIdle();
     input = { ...input, title: captureTitle(input.title) };
-    // Calendar-aware recording (#253). Looked up before the slot is claimed:
-    // the check-and-claim below stays synchronous. An explicit title (from
-    // the UI or the URL scheme's `title=`) always wins over the event title.
-    // Capture tests are disposable and never consult the calendar.
-    let calendarEvent: CalendarEventSnapshot | null = null;
-    if (!internal.disposable && this.deps.calendarEventAt && this.sessions.size === 0) {
-      calendarEvent = await this.deps.calendarEventAt(this.deps.clock?.() ?? new Date()).catch(() => null);
-      if (!input.title && calendarEvent?.title) input = { ...input, title: calendarEvent.title };
-    }
     // All entry points converge here, AFTER any asynchronous enumeration.
     // Claim synchronously before spawning; a starting/stopping capture also
     // owns the slot. Persisted orphan detection must finish before a new start.
@@ -187,7 +185,6 @@ export class RecordingManager {
       outputPath,
       groupId: input.groupId ?? null,
       title: input.title,
-      calendarEvent,
     });
     const spawnFn = this.deps.spawn ?? nodeSpawn;
     let proc!: ChildProcessWithoutNullStreams;
@@ -197,6 +194,9 @@ export class RecordingManager {
       if (!internal.disposable) this.deps.repo.markError(sessionId);
       throw error;
     }
+    // Calendar-aware recording (#253): looked up alongside capture, never
+    // before it. Capture tests are disposable and never consult the calendar.
+    if (!internal.disposable && this.deps.calendarEventAt) this.lookupCalendarEvent(sessionId, outputPath, now, !!input.title);
     const entry: SessionEntry = {
       proc,
       outputPath,
@@ -418,6 +418,38 @@ export class RecordingManager {
     entry.silence.continues++;
     this.clearSilencePrompt(sessionId, entry, 'continued');
     this.watchForSilence(sessionId, entry);
+  }
+
+  /** Runs the calendar lookup without holding up capture. When an event
+   *  comes back it is kept with the session; its title is applied only when
+   *  the recording had no explicit title (picker or URL `title=`) and the
+   *  session still has none. A lookup that fails, times out or outlives the
+   *  database (app quitting) changes nothing and never rejects. */
+  private lookupCalendarEvent(sessionId: string, outputPath: string, now: Date, explicitTitle: boolean): void {
+    const lookup = this.deps.calendarEventAt!;
+    void (async () => {
+      let event: CalendarEventSnapshot | null;
+      try { event = await lookup(now); } catch { return; }
+      if (!event) return;
+      try {
+        this.deps.repo.setCalendarEvent(sessionId, event);
+        let title: string | null = null;
+        if (!explicitTitle) {
+          try { title = captureTitle(event.title) ?? null; } catch { title = null; }
+          if (title && !this.deps.repo.setTitleIfUnset(sessionId, title)) title = null;
+        }
+        const live = this.sessions.get(sessionId);
+        if (title && live) {
+          live.input = { ...live.input, title };
+          // Re-announce the current state so windows refresh the live row
+          // (recording.active() now reports the title). Same state, no change.
+          if (live.state === 'starting' || live.state === 'recording' || live.state === 'stopping') {
+            for (const cb of this.listeners.stateChange) cb(sessionId, live.state, CALENDAR_TITLE_REASON);
+          }
+        }
+        this.deps.onCalendarEvent?.({ sessionId, outputPath, event, title });
+      } catch { /* database closed (quitting) or a listener failed: nothing more to do */ }
+    })();
   }
 
   private transition(sessionId: string, state: RecordingState, reason?: string): void {

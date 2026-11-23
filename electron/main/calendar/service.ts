@@ -51,7 +51,8 @@ export type CalendarRunner = (args: string[], opts: { timeoutMs: number }) => Pr
 /** A recording that starts this long before an event still counts as that
  *  event: people often press Record a minute or two early. */
 export const EVENT_LEAD_MS = 5 * 60_000;
-// Kept short: a recording waits for the lookup before it starts.
+// The lookup runs alongside capture (never delaying it); these only bound
+// how long a stuck helper lingers.
 const STATUS_TIMEOUT_MS = 2_000;
 const EVENTS_TIMEOUT_MS = 3_000;
 /** The permission dialog waits for the user. */

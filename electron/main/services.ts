@@ -27,6 +27,7 @@ import { probeAudio } from './library/ffprobe.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
 import { CalendarService } from './calendar/service.js';
+import { attachLateCalendarEvent } from './calendar/late-event.js';
 import { recoverOrphans } from './recording/orphan-recovery.js';
 import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
@@ -180,6 +181,13 @@ export async function createServices(smokeRoot: string | null) {
   const calendar = new CalendarService({ helperPath, enabled: () => settings.get('calendarAware'), logger });
   const recordingManager = new RecordingManager({
     calendarEventAt: (now) => calendar.eventAt(now),
+    // A late lookup still reaches a meeting cataloged before it finished.
+    onCalendarEvent: (info) => {
+      attachLateCalendarEvent(meetings, info);
+      // Windows already showing that meeting reload it (existing per-meeting push).
+      const cataloged = info.title ? meetings.findByAudioPath(info.outputPath) : null;
+      if (cataloged) BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(IPC_CHANNELS.meetingStageEvent, cataloged.id));
+    },
     helperPath,
     recordingsDir,
     repo: recordingSessionsRepo,

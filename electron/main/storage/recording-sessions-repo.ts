@@ -9,8 +9,6 @@ export interface RecordingSessionInsert {
   outputPath: string;
   groupId?: string | null;
   title?: string;
-  /** The calendar event overlapping the start (#253); null/absent = none. */
-  calendarEvent?: CalendarEventSnapshot | null;
 }
 
 export interface RecordingSessionRow {
@@ -42,10 +40,17 @@ export class RecordingSessionsRepo {
         (id, helper_pid, target_pid, target_label, output_path, group_id, title, started_at, status)
       VALUES (?, ?, ?, ?, ?, (SELECT id FROM groups WHERE id = ?), ?, ?, 'recording')
     `).run(s.id, s.helperPid, s.targetPid, s.targetLabel, s.outputPath, s.groupId ?? null, s.title ?? null, new Date().toISOString());
-    if (s.calendarEvent) {
-      this.db.prepare('INSERT OR REPLACE INTO recording_session_calendar_events (session_id, event_json) VALUES (?, ?)')
-        .run(s.id, JSON.stringify(s.calendarEvent));
-    }
+  }
+
+  /** Keeps the calendar event found for this session (#253). */
+  setCalendarEvent(id: string, event: CalendarEventSnapshot): void {
+    this.db.prepare('INSERT OR REPLACE INTO recording_session_calendar_events (session_id, event_json) SELECT id, ? FROM recording_sessions WHERE id = ?')
+      .run(JSON.stringify(event), id);
+  }
+
+  /** Sets the title only when the session has none. True when it was set. */
+  setTitleIfUnset(id: string, title: string): boolean {
+    return this.db.prepare("UPDATE recording_sessions SET title = ? WHERE id = ? AND (title IS NULL OR title = '')").run(title, id).changes > 0;
   }
 
   updateHelperPid(id: string, helperPid: number): void {
