@@ -47,8 +47,14 @@ export function registerSpeakerHandlers(ipc: IpcMain, s: IpcServices): void {
               if (s.terminology) s.terminology.saveSummary(meetingId, updated);
               else { fs.writeFileSync(file, updated); s.artifactCache.invalidate(file); }
             }
-            s.actionItems.resolveLabels(meetingId, names);
+            // The notes were written with unresolved labels: the meeting page
+            // offers to regenerate them with the names (#252). Cleared when
+            // the notes are regenerated (meetings:rerun).
+            s.meetings.markNamesChangedSinceNotes(meetingId);
           }
+          // Always run: besides rewriting labels it links task owners to the
+          // roster speaker their name now maps to, which "mine" relies on.
+          s.actionItems.resolveLabels(meetingId, names);
         }
       } catch { /* see note above */ }
     }
@@ -171,7 +177,9 @@ export function registerSpeakerHandlers(ipc: IpcMain, s: IpcServices): void {
       if (embedding) s.roster.confirmSpeakerFor(parsed.rosterId, embedding, diarFile?.embeddingSpace, `${meeting.title} · ${localLabel}`);
       s.speakers.linkToMeeting(parsed.meetingId, localLabel, parsed.rosterId, 1);
     }
-    remergeMeetings([parsed.meetingId]);
+    // Awaited so the reload that follows sees the rewritten notes and the
+    // regenerate prompt (#252).
+    await remergeMeetings([parsed.meetingId]);
     return {
       assigned: labels.length,
       impactedLines: labels.reduce((sum, label) => sum + (metadata.get(label)?.lineCount ?? 0), 0),

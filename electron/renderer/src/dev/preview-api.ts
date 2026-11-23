@@ -86,6 +86,7 @@ type Row = typeof rows[number];
 const inFilter = (m: Row, filter: string): boolean =>
   filter === 'all' ? true
   : filter === 'processing' ? m.status === 'processing' || m.status === 'awaiting_user'
+  : filter === 'unnamedVoices' ? m.status === 'done' && m.unidentifiedCount > 0
   : m.status === filter;
 
 const counts = {

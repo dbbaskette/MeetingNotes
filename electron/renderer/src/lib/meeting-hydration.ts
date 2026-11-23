@@ -25,16 +25,22 @@ export function pipelineMeetingIds(status: Pick<PipelineStatusSnapshot, 'current
   return [...new Set([...(status.currentId ? [status.currentId] : []), ...status.queueIds])];
 }
 
+/** Snapshots Needs Attention reads. `processing` includes awaiting_user
+ *  speaker gates; `unnamedVoices` is only the finished meetings that still
+ *  have voices to name (#252), never every completed meeting. */
+export const ATTENTION_FILTERS = ['pending', 'failed', 'processing', 'unnamedVoices'] as const;
+export type AttentionFilter = typeof ATTENTION_FILTERS[number];
+
 /** Preserve global Needs Attention coverage without materializing completed
- * meetings. The processing snapshot includes awaiting_user speaker gates. */
+ * meetings that need nothing. */
 export async function hydrateAttentionMeetings<T extends { id: string }>(api: {
-  listIds: (filter: 'pending' | 'failed' | 'processing') => Promise<string[]>;
+  listIds: (filter: AttentionFilter) => Promise<string[]>;
   getMany: (ids: string[]) => Promise<T[]>;
 }, isCurrent: () => boolean = () => true): Promise<T[]> {
   if (!isCurrent()) return [];
   // Await every outstanding ID call even on error before a trailing refresh
   // starts. A rejected sibling must not leave an orphan snapshot in flight.
-  const snapshots = await Promise.allSettled((['pending', 'failed', 'processing'] as const).map(async (filter) => api.listIds(filter)));
+  const snapshots = await Promise.allSettled(ATTENTION_FILTERS.map(async (filter) => api.listIds(filter)));
   if (!isCurrent()) return [];
   const ids = snapshots.flatMap((snapshot) => {
     if (snapshot.status === 'rejected') throw snapshot.reason;

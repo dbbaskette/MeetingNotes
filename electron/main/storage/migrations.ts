@@ -405,6 +405,15 @@ export const MIGRATIONS: Migration[] = [
     CREATE INDEX IF NOT EXISTS idx_meeting_speakers_roster ON meeting_speakers(roster_speaker_id, meeting_id);
     CREATE INDEX IF NOT EXISTS idx_action_items_owner ON action_items(owner_speaker_id);
   ` },
+  // Notes-first (#252): a row means voices were named after this meeting's
+  // notes were written with SPEAKER_00-style labels, so the meeting page
+  // offers to regenerate them. Removed when the notes are regenerated.
+  { version: 28, up: `
+    CREATE TABLE IF NOT EXISTS notes_names_changed (
+      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL
+    );
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

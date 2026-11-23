@@ -28,6 +28,8 @@ interface AttentionMeeting {
   status: string;
   pipelineStage: string;
   startedAt: string | null;
+  /** Finished meetings with voices left to name list under "Voices to name". */
+  unidentifiedCount?: number;
 }
 
 export function NeedsAttentionPanel({

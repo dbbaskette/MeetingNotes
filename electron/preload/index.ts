@@ -26,6 +26,8 @@ type SilenceCleared = { sessionId: string; reason: 'audio-resumed' | 'continued'
 // Keep these structural types local: importing main contracts makes the CJS
 // compiler emit main-process modules again.
 type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+/** listIds only: `unnamedVoices` = finished meetings with voices to name (#252). */
+type MeetingIdsFilter = MeetingListFilter | 'unnamedVoices';
 type MeetingListQuery = {
   filter: MeetingListFilter;
   sort: 'newest' | 'oldest' | 'longest' | 'title';
@@ -226,7 +228,7 @@ const api = {
       opts?.shell
         ? ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids, opts) as Promise<MeetingSummary[]>
         : ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
-    listIds: (filter: MeetingListFilter, groupId?: string | null) =>
+    listIds: (filter: MeetingIdsFilter, groupId?: string | null) =>
       (groupId === undefined
         ? ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter)
         : ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter, groupId)) as Promise<string[]>,

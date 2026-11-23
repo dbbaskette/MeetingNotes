@@ -65,7 +65,8 @@ export function SummaryPanel({
   const dismissedTerms = useRef(new Set<string>());
   const saveGeneration = useRef(0);
   useEffect(() => () => { saveGeneration.current++; }, []);
-  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  // Why the regenerate dialog is open: corrected transcript or new names.
+  const [confirmRegenerate, setConfirmRegenerate] = useState<'terms' | 'names' | null>(null);
 
   const dirty = draft !== savedValue;
   // Edit mode: the textarea updates at once, the parsed preview follows when
@@ -114,10 +115,14 @@ export function SummaryPanel({
       {meeting.summaryStale && <details className="text-xs text-ink-muted">
         <summary className="cursor-pointer">Notes may need refreshing</summary>
         The transcript was corrected after these notes were generated. Regenerating replaces the notes and action items.
-        <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty || meeting.status === 'processing'} onClick={() => setConfirmRegenerate(true)}>Regenerate notes…</button>
+        <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty || meeting.status === 'processing'} onClick={() => setConfirmRegenerate('terms')}>Regenerate notes…</button>
       </details>}
-      <ConfirmDialog open={confirmRegenerate} title="Regenerate notes from the corrected transcript?" body="The current notes and action items will be saved in history before being replaced. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(false)} onConfirm={() => {
-        setConfirmRegenerate(false);
+      {meeting.namesChangedSinceNotes && meeting.status === 'done' && <p className="text-xs text-ink-muted">
+        Names changed. Regenerate notes to rewrite them with the new names?
+        <button className="ml-2 underline font-semibold disabled:opacity-40" disabled={dirty} onClick={() => setConfirmRegenerate('names')}>Regenerate notes…</button>
+      </p>}
+      <ConfirmDialog open={confirmRegenerate !== null} title={confirmRegenerate === 'names' ? 'Regenerate notes with the new names?' : 'Regenerate notes from the corrected transcript?'} body="The current notes and action items will be saved in history before being replaced. The transcript and remembered terminology are preserved." confirmLabel="Regenerate notes" onCancel={() => setConfirmRegenerate(null)} onConfirm={() => {
+        setConfirmRegenerate(null);
         void api.meetings.rerun(meeting.id, 'summarizing').then(onReload).catch(e => setError((e as Error).message));
       }}/>
       {termCandidates.length > 0 && <RememberTerms key={termCandidates.map(c => c.source+c.replacement).join('|')} candidates={termCandidates}

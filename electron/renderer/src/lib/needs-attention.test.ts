@@ -18,6 +18,26 @@ describe('buildNeedsAttention', () => {
     expect(result.find((group) => group.kind === 'failed')?.items[0]?.actionLabel).toBe('Review failure');
   });
 
+  it('lists finished meetings with voices to name last, below ready to process (#252)', () => {
+    const result = buildNeedsAttention({
+      nowMs: Date.parse('2026-08-12T16:00:00Z'),
+      recovery: [],
+      meetings: [
+        { id: 'v2', title: 'Newer voices', status: 'done', pipelineStage: 'done', startedAt: '2026-08-12T10:00:00Z', unidentifiedCount: 1 },
+        { id: 'named', title: 'All named', status: 'done', pipelineStage: 'done', startedAt: '2026-08-12T09:00:00Z', unidentifiedCount: 0 },
+        { id: 'p1', title: 'Pending', status: 'pending', pipelineStage: 'discovered', startedAt: '2026-08-12T15:00:00Z' },
+        { id: 'v1', title: 'Older voices', status: 'done', pipelineStage: 'done', startedAt: '2026-08-11T10:00:00Z', unidentifiedCount: 3 },
+        { id: 'f1', title: 'Failed with voices', status: 'failed', pipelineStage: 'summarizing', startedAt: '2026-08-09T15:00:00Z', unidentifiedCount: 2 },
+        { id: 'shell', title: 'No count', status: 'done', pipelineStage: 'done', startedAt: null },
+      ],
+    });
+    expect(result.map((group) => group.kind)).toEqual(['failed', 'pending', 'voices']);
+    const voices = result.at(-1)!;
+    expect(voices.label).toBe('Voices to name');
+    expect(voices.items.map((item) => item.id)).toEqual(['v1', 'v2']);
+    expect(voices.items[0]!.actionLabel).toBe('Name voices');
+  });
+
   it('returns no groups when nothing needs intervention', () => {
     expect(buildNeedsAttention({
       nowMs: Date.now(), recovery: [],

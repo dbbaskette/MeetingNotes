@@ -58,20 +58,27 @@ export class ActionItemsRepo {
     const owners = (this.db.prepare(`SELECT DISTINCT ${owner} AS name ${baseJoin} WHERE a.status!='done' AND m.deleted_at IS NULL AND ${owner} IS NOT NULL ORDER BY name COLLATE NOCASE`).all() as { name: string }[]).map(row => row.name);
     return { items: rows.map(row => ({ ...row, processing: !!row.processing })), total, owners, identified: !!(me.id || me.name) };
   }
+  /** Notes-first: rewrite `SPEAKER_00`-style labels once voices are named,
+   *  and link each owner to the roster speaker its (resolved) name now maps
+   *  to, by the same rule as replaceForMeeting. An existing owner link is
+   *  never overwritten. */
   resolveLabels(meetingId: string, names: Record<string, string>): void {
-    const update = this.db.prepare('UPDATE action_items SET text=?,owner_name=?,source_quote=? WHERE id=?');
+    const update = this.db.prepare('UPDATE action_items SET text=?,owner_name=?,source_quote=?,owner_speaker_id=? WHERE id=?');
     this.db.transaction(() => {
+      const speakerByName = this.linkedSpeakersByName(meetingId);
       for (const item of this.listByMeeting(meetingId)) {
         const text = resolveSpeakerLabels(item.text, names), owner = item.ownerName ? resolveSpeakerLabels(item.ownerName, names) : null;
         const quote = item.sourceQuote ? resolveSpeakerLabels(item.sourceQuote, names) : null;
-        if (text !== item.text || owner !== item.ownerName || quote !== item.sourceQuote) update.run(text, owner, quote, item.id);
+        const ownerSpeakerId = item.ownerSpeakerId ?? (owner ? (speakerByName.get(owner.trim().toLowerCase()) ?? null) : null);
+        if (text !== item.text || owner !== item.ownerName || quote !== item.sourceQuote || ownerSpeakerId !== item.ownerSpeakerId) {
+          update.run(text, owner, quote, ownerSpeakerId, item.id);
+        }
       }
     })();
   }
-  findById(id:string):ActionItemRow|null{const found=this.db.prepare('SELECT * FROM action_items WHERE id=?').get(id) as Record<string,unknown>|undefined;return found?row(found):null;}
-
-  replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {
-    const del = this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?');
+  /** Roster speakers linked to this meeting, keyed by lower-cased display
+   *  name (first link wins). */
+  private linkedSpeakersByName(meetingId: string): Map<string, string> {
     const linkedSpeakers = this.db.prepare(`
       SELECT sp.id, sp.display_name
       FROM meeting_speakers ms
@@ -83,6 +90,13 @@ export class ActionItemsRepo {
       const key = sp.display_name.trim().toLowerCase();
       if (key && !speakerByName.has(key)) speakerByName.set(key, sp.id);
     }
+    return speakerByName;
+  }
+  findById(id:string):ActionItemRow|null{const found=this.db.prepare('SELECT * FROM action_items WHERE id=?').get(id) as Record<string,unknown>|undefined;return found?row(found):null;}
+
+  replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {
+    const del = this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?');
+    const speakerByName = this.linkedSpeakersByName(meetingId);
     const ins = this.db.prepare(`
       INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, owner_name, due_date, source_quote, status, exported_to, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'open', '[]', ?)

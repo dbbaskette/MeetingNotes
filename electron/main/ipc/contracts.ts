@@ -109,6 +109,9 @@ export const MeetingSummarySchema = z.object({
 export type MeetingSummary = z.infer<typeof MeetingSummarySchema>;
 
 export const MeetingListFilterSchema = z.enum(['all', 'pending', 'processing', 'done', 'failed']);
+/** meetings:list-ids also accepts `unnamedVoices` (finished meetings with
+ *  voices left to name), which feeds Needs attention (#252). */
+export const MeetingIdsFilterSchema = z.enum([...MeetingListFilterSchema.options, 'unnamedVoices']);
 export const MeetingListSortSchema = z.enum(['newest', 'oldest', 'longest', 'title']);
 export const GroupIdSchema = z.string().uuid();
 export const OptionalGroupScopeSchema = GroupIdSchema.nullable().optional();
@@ -119,6 +122,7 @@ export const AssignGroupSchema = z.object({
   expectedGroupId: GroupIdSchema.nullable().optional(),
 });
 export type MeetingListFilter = z.infer<typeof MeetingListFilterSchema>;
+export type MeetingIdsFilter = z.infer<typeof MeetingIdsFilterSchema>;
 export type MeetingListSort = z.infer<typeof MeetingListSortSchema>;
 
 const MeetingCursorSchema = z.object({

@@ -14,13 +14,14 @@ describe('bounded meeting hydration', () => {
     const rows = await hydrateAttentionMeetings({
       listIds: async (filter) => {
         filters.push(filter);
-        return filter === 'pending' ? ['pending', 'duplicate'] : filter === 'failed' ? ['failed', 'duplicate'] : ['awaiting', 'running'];
+        return filter === 'pending' ? ['pending', 'duplicate'] : filter === 'failed' ? ['failed', 'duplicate']
+          : filter === 'unnamedVoices' ? ['voices'] : ['awaiting', 'running'];
       },
       getMany: async (ids) => { batches.push(ids); return ids.map((id) => ({ id })); },
     });
-    expect(filters).toEqual(['pending', 'failed', 'processing']);
-    expect(batches).toEqual([['pending', 'duplicate', 'failed', 'awaiting', 'running']]);
-    expect(rows.map((row) => row.id)).toEqual(['pending', 'duplicate', 'failed', 'awaiting', 'running']);
+    expect(filters).toEqual(['pending', 'failed', 'processing', 'unnamedVoices']);
+    expect(batches).toEqual([['pending', 'duplicate', 'failed', 'awaiting', 'running', 'voices']]);
+    expect(rows.map((row) => row.id)).toEqual(['pending', 'duplicate', 'failed', 'awaiting', 'running', 'voices']);
   });
 
   it('hydrates current plus all queued IDs once, with each raw request at most 1,000', async () => {
@@ -58,7 +59,7 @@ describe('attention refresh lifecycle', () => {
     for (let i = 0; i < 100; i++) expect(controller.refresh()).toBe(request);
     blocked.resolve(['pending']);
     await request;
-    expect(snapshots).toBe(3);
+    expect(snapshots).toBe(4);
     expect(batches).toBe(1);
     expect(publications).toEqual([[{ id: 'pending' }]]);
     controller.stop();
@@ -84,11 +85,11 @@ describe('attention refresh lifecycle', () => {
     controller.invalidate();
     await Promise.resolve();
     await Promise.resolve();
-    expect(snapshots).toBe(3);
+    expect(snapshots).toBe(4);
     expect(batches).toBe(0);
     blocked.resolve(['obsolete']);
     await request;
-    expect(snapshots).toBe(6);
+    expect(snapshots).toBe(8);
     expect(publications).toEqual([[{ id: 'latest' }]]);
     controller.stop();
   });
@@ -122,11 +123,11 @@ describe('attention refresh lifecycle', () => {
     expect(controller.refresh()).toBe(refresh); // Manual refresh only deduplicates.
     for (version = 1; version <= 100; version++) expect(controller.invalidate()).toBe(refresh);
     version = 100;
-    expect(snapshots).toBe(3);
+    expect(snapshots).toBe(4);
     expect(batches).toEqual([1000]);
     blocked.resolve();
     await refresh;
-    expect(snapshots).toBe(6); // Original plus exactly one latest snapshot.
+    expect(snapshots).toBe(8); // Original plus exactly one latest snapshot.
     expect(batches).toEqual([1000, 1000, 1000]); // No second obsolete batch.
     expect(maxConcurrency).toBe(1);
     expect(publications).toHaveLength(1);
@@ -151,7 +152,7 @@ describe('attention refresh lifecycle', () => {
     controller.invalidate();
     blocked.resolve(['obsolete']);
     await request;
-    expect(snapshots).toBe(6);
+    expect(snapshots).toBe(8);
     expect(batches).toEqual([['latest']]);
     expect(publications).toEqual([[{ id: 'latest' }]]);
     controller.stop();
