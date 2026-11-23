@@ -57,14 +57,13 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.logsTail]: z.tuple([z.number().optional()]),
   [C.logsReveal]: none,
   [C.logsRendererError]: z.tuple([handlerValidated]),
+  [C.backupStatus]: none,
   [C.backupPreview]: none,
   [C.backupRun]: z.tuple([z.string().min(1).max(4000)]),
-  [C.backupStatus]: none,
   [C.setupHealth]: none,
   [C.dialogSave]: z.tuple([DialogSaveOptions]),
 
   // Meetings
-  [C.meetingsList]: none,
   [C.meetingsListPage]: z.tuple([handlerValidated]),
   [C.meetingsGetMany]: z.tuple([handlerValidated, z.object({ shell: z.boolean().optional() }).optional()]),
   [C.meetingsListIds]: z.tuple([handlerValidated, Id.nullable().optional()]),
@@ -77,7 +76,6 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.meetingsUndoDelete]: z.tuple([Id]),
   [C.meetingsRerun]: z.tuple([Id, z.string().min(1).max(100)]),
   [C.meetingsStart]: z.tuple([Id]),
-  [C.meetingsStartMany]: z.tuple([handlerValidated]),
   [C.meetingsStartManyDetailed]: z.tuple([handlerValidated]),
   [C.meetingsSetSkipSpeakerId]: z.tuple([Id, z.boolean()]),
   [C.meetingsContinueFromSpeakerId]: z.tuple([Id]),
@@ -124,13 +122,11 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
 
   // Speakers and action items
   [C.speakersList]: none,
-  [C.speakersConfirm]: z.tuple([handlerValidated]),
   [C.speakersRename]: z.tuple([Id, Label]),
   [C.speakersMerge]: z.tuple([Id, Id]),
   [C.speakersSample]: z.tuple([Id, Label]),
   [C.speakersAssign]: z.tuple([handlerValidated]),
   [C.speakersAssignBulk]: z.tuple([handlerValidated]),
-  [C.speakersSuggestions]: z.tuple([Id, Label]),
   [C.speakersReview]: z.tuple([Id]),
   [C.speakersProfiles]: z.tuple([Id]),
   [C.speakersUndoProfile]: z.tuple([Id, z.string().min(1).max(500)]),
@@ -182,10 +178,8 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.summaryTemplatesSetGroup]: z.tuple([Id, z.string().min(1).max(100).nullable()]),
 
   // Weekly
-  [C.weeklyGet]: z.tuple([...WeekArgs]),
   [C.weeklyGetStructured]: z.tuple([...WeekArgs]),
   [C.weeklyGetNarrative]: z.tuple([...WeekArgs, z.boolean().optional()]),
-  [C.weeklyRegenerate]: z.tuple([...WeekArgs]),
   [C.weeklyExportMarkdown]: z.tuple([...WeekArgs]),
 
   // Settings, onboarding, terminology

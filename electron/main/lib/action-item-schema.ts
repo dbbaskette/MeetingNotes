@@ -7,8 +7,6 @@ export const ActionItemSchema = z.object({
 });
 export type ActionItem = z.infer<typeof ActionItemSchema>;
 
-export const ActionItemsArraySchema = z.array(ActionItemSchema);
-
 // Find the first balanced JSON array in `raw`, scanning past stray brackets in
 // any preamble the LLM may have emitted. Returns null if none parses.
 function extractFirstJsonArray(raw: string): unknown[] | null {

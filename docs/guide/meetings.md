@@ -1,12 +1,14 @@
 # Working with meetings
 
-Speaker review, notes and action items, the Weekly view, and search and playback.
+Speaker review, notes and action items, the Actions and Weekly views, and search and playback. The app has four top-level views: **Library**, **Actions**, **Weekly** and **Settings**. A meeting page has three tabs: **Notes**, **Transcript** and **Actions**.
 
 ## The speaker-ID gate
 
 *Name unknown voices once.*
 
-After diarize + identify, meetings continue automatically when no voices need review, including recordings with no detected voices. The pipeline uses the same **Needs review** rules as the Speakers panel: an unknown voice, a match below 80% confidence, or fewer than two diarization segments pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>** (legacy), **Auto-matched · similarity …**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds; automatic continuation also re-merges names before summarizing. Don't care for this meeting? Toggle **Skip speaker ID** and it runs straight through.
+After diarize + identify, meetings continue automatically when no voices need review, including recordings with no detected voices. The pipeline uses the same **Needs review** rules as the Speakers panel: an unknown voice, a match below 80% confidence, or fewer than two diarization segments pauses at `awaiting_speaker_id`. The library row turns amber with a `NAME VOICES` chip and (if the app isn't focused) a native notification. In the detail view each voice shows **Unknown**, **Probably <name>** (legacy), **Auto-matched · similarity …**, or **Confirmed**, plus confidence, speaking duration, impacted transcript lines, and a short playable sample. Ranked suggestions can be confirmed in one click; select multiple voices to assign them to one roster entry in a single operation, with an impact preview before transcript lines change. **Continue** re-merges the transcript with real names and proceeds; automatic continuation also re-merges names before summarizing. Don't care for this meeting? Tick **Skip speaker ID step** and it runs straight through.
+
+Expanding an unnamed voice shows why it needs review. To stop the meeting instead, use **Cancel processing**; its audio is kept.
 
 ### Optional automatic voice matching
 
@@ -30,29 +32,54 @@ Confirmed assignments survive identification retries on the same diarization.
 Changing the setting does not process old meetings, alter saved assignments or
 undo prior matches. New diarization still resets run-local numeric labels.
 
-## Summary + action items
+### Notes before names
+
+Enable **Settings → Processing → Generate notes before naming every voice** to
+skip the pause. Processing carries on with speaker labels, and the notes and
+action items refer to an unnamed voice by its exact `SPEAKER_00`-style label.
+When you name that voice later, those labels are replaced in the notes, the
+action-item text, owners and source quotes without regenerating anything, and
+the previous notes are saved to notes history first. Names that are already in
+the notes are never substituted. Saved weekly reports do not change.
+
+### Voiceprints
+
+Only your own confirmations teach a voiceprint. **Settings → Organization →
+Speakers** lists the roster; expand **Voiceprints** on a person to see when
+their native voiceprint was last confirmed and from which source, and use
+**Undo last voiceprint change** to revert the most recent one. Undo changes
+future matching only; names already assigned in meetings stay as they are.
+Merging two people keeps their native profiles.
+
+## Notes and action items
 
 *Editable, with provenance.*
 
-Summaries are structured into **Overview · Key Discussion Points · Decisions · Action Items · Follow-ups · Open Questions**, skipping empty sections. Opening/closing small talk is moved (not duplicated) into an **Off-topic Conversation** section at the end. Verbosity is a one-time **detail level** (concise / standard / detailed) that pins the target length in the prompt so different models don't drift.
+Notes are structured into **Overview · Key Discussion Points · Decisions · Action Items · Follow-ups · Open Questions**, skipping empty sections. Opening/closing small talk is moved (not duplicated) into an **Off-topic Conversation** section at the end. Verbosity is a one-time **detail level** (concise / standard / detailed) that pins the target length in the prompt so different models don't drift.
 
-The **Summary editor** has View and Edit modes, with a live preview while editing — fix a hallucination or redact in place and Save (writes to `summary.md`).
+The **Notes** tab has **View** and **Edit** modes, with a live preview while editing — fix a hallucination or redact in place and Save (writes to `summary.md`).
 
-**Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. **Settings → Dictionary** shows a compact count and learning-offers toggle. Choose **Manage dictionary…** to search, filter by group, and add/edit/disable/delete rules in a dedicated scrollable dialog. The dictionary no longer pushes other settings down as it grows. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
+**Remembered terminology:** after a short correction such as **Salsa → SLSA**, an inline offer lets you remember the preferred spelling for the current group or all meetings. Rules suggest changes by default; automatic replacement in future generated text is opt-in. **Settings → Organization → Dictionary** shows a compact count and learning-offers toggle. Choose **Manage dictionary…** to search, filter by group, and add/edit/disable/delete rules in a dedicated scrollable dialog. The dictionary no longer pushes other settings down as it grows. This local dictionary and its correction history live in the library's existing `db.sqlite`; include that database with the meeting files when backing up the library.
 
 Use **Correct terminology…** above either the transcript or summary. Define a replacement once, preview labeled matches and separate counts for both documents, then **Apply to both** in one operation. You can deselect individual occurrences; the Apply label reflects the selected document(s). **Review terminology** uses the same shared dictionary. One **Undo** reverses a combined correction while preserving unrelated edits. Existing notes are corrected directly, not regenerated; action items are unchanged. Raw transcription, speaker labels, and audio timing are preserved, and corrections survive speaker renaming. Unsaved summary edits block corrections in either tab. Overlapping later edits make Undo refuse rather than overwrite them. Updating all matching wording in both documents does not introduce a refresh warning; an existing warning remains, and leaving summary matches unchanged marks notes as potentially stale. Saving or changing a dictionary rule does not rewrite historical meetings.
 
-**Action items** are extracted from the summary and carry **provenance**: click one to jump to the exact summary bullet it came from. Edited the summary? Hit **↻ Re-extract** to regenerate the items in seconds without re-running the whole pipeline.
+**Action items** are extracted from the notes and carry **provenance**: click one to jump to the exact line it came from. Edited the notes? Use **Re-extract from summary** on the meeting's **Actions** tab to regenerate the items without re-running the whole pipeline. It reads the saved notes, so save your edits first.
 
 Deleting an individual task offers immediate **Undo**, preserving its identity, source, owner, due date, completion, and export metadata. Undo refuses to overwrite newer task changes.
+
+## Actions view
+
+*Every open action item, in one list.*
+
+**Actions** (<kbd>⌘3</kbd>) lists the open action items from all meeting dates. Filter by owner (**My actions** or **Everyone**), by group (including **Ungrouped**) and by date (**Overdue**, **Next 7 days**, **No due date**). **My actions** needs **Settings → Organization → You are…** to be set. Checking an item off removes it from the list and offers **Undo**; **Snooze** moves its due date a week out; **Edit** changes its text, owner and due date. Items from a meeting that is being processed cannot be edited until it finishes. The list is live: saved weekly reports are not changed by it.
 
 ## Weekly view
 
 *A Mon–Sun narrative.*
 
-The **Week** tab rolls up every meeting in the week: an LLM narrative (past weeks only), a **Themes** section synthesizing 3–6 topic threads that run *across* meetings (with clickable chips back to sources), open action items grouped by owner, and key decisions. Once generated, the **Saved report** is a permanent SQLite snapshot of all those sections. New weeks, meeting edits, task completion and speaker-name changes do not alter or regenerate it. Reopening and **Export to Markdown** use the saved report, even when the model is offline or source meetings have been removed. Only **Regenerate** replaces it with the latest inputs; a failed regeneration keeps the previous report.
+The **Weekly** view (<kbd>⌘2</kbd>) rolls up every meeting in the week: an LLM narrative (past weeks only), a **Themes** section synthesizing 3–6 topic threads that run *across* meetings (with clickable chips back to sources), open action items grouped by owner, and key decisions. Once generated, the **Saved report** is a permanent SQLite snapshot of all those sections. New weeks, meeting edits, task completion and speaker-name changes do not alter or regenerate it. Reopening and **Export to Markdown** use the saved report, even when the model is offline or source meetings have been removed. Only **Regenerate** replaces it with the latest inputs; a failed regeneration keeps the previous report.
 
-Set **Settings → "You are…"** to pin *your* open action items to a "You" group at the top. The current week is intentionally narrative-free (it would go stale within hours); the structured rollup still updates live.
+Set **Settings → Organization → You are…** to pin *your* open action items to a "You" group at the top. The current week is intentionally narrative-free (it would go stale within hours); the structured rollup still updates live.
 
 Weeks use your Mac's local Monday–Sunday calendar, including DST boundaries. Current-week tasks support checkboxes, owner/due-date edits and **Snooze 1 week**; failed saves roll back and offer Retry. Saved reports show historical, read-only actions: use their source-meeting links to manage current tasks. Mine/Overdue/Due this week filters in saved reports use the snapshot date rather than changing as time passes. Concurrent generation requests share one owner, and source changes during generation are rejected without overwriting the previous report.
 
@@ -62,14 +89,15 @@ Reports generated by older versions retain their original overview, themes, deci
 
 - **Process without a blocking popup** — select recordings and choose **Process** to queue only the selected meetings that are still pending. Progress stays inline; unsuccessful starts remain selected for retry. Processing and speaker-review rows open their detail view even when other meetings are selected; use their checkboxes for explicit selection.
 - The Library and **Needs attention** inbox share one scroll area, including at smaller window sizes and higher zoom. Stage refreshes preserve the scroll position, and active capture controls remain above the scrolling area. Routine queue messages disappear automatically. Delete and re-run confirmations still protect operations that replace or remove results.
+- **Separate speech progress** — transcription and voice analysis each report their own progress. They run in parallel; for a meeting of an hour or longer, or when free memory is under 2 GB, they run one after the other to save memory.
 - **Learned ETAs** — the app records how long each stage takes on *your* machine, bucketed by transcript size, and shows "elapsed · ~estimate" with a "running long" cue. A rough estimate appears after a single run.
 - **Permanent status bar** at the bottom shows the in-flight run from any view (`Summarizing "…" — 17s · ~3m · 2 queued`), or `Ready` when idle.
-- <kbd>⌘K</kbd> opens a global search across titles, summaries, and transcript text.
+- <kbd>⌘K</kbd> opens a global search across titles, notes, and transcript text. Type a question and press <kbd>Shift</kbd>+<kbd>Enter</kbd> (or click **Ask**) for an answer from the local model, with links to the meetings it came from.
 - **Keyboard** — <kbd>j</kbd> / <kbd>k</kbd> move between meetings in both Library views and <kbd>Enter</kbd> opens the highlighted one. <kbd>⌘1</kbd> Library, <kbd>⌘2</kbd> Weekly, <kbd>⌘3</kbd> Actions. In the notes editor <kbd>⌘S</kbd> saves; <kbd>Tab</kbd> indents, and <kbd>Esc</kbd> then <kbd>Tab</kbd> leaves the editor.
-- **Cancel a run** from the meeting page (**Cancel processing**) or the status bar at the bottom of any view. Only that meeting stops; its audio is kept.
+- **Cancel a run** from the meeting page (**Cancel processing**), the status bar at the bottom of any view (**Cancel**), or the Library queue banner (**Cancel current**). Only that meeting stops; its audio is kept and queued meetings are unaffected.
 - **Find in transcript** marks every match inside the lines. <kbd>Esc</kbd> or the clear button empties the search.
-- **Actions** — checking off a task offers **Undo**. **Snooze** moves the due date a week, **Edit** changes text, owner and due date, overdue tasks are flagged, and the Group filter includes **Ungrouped**.
-- **Prepare next meeting** (a group's menu) lists open actions with check-off, the decisions and open questions from recent notes, and template sections such as *Topics for Next Time* and *Blockers*. **Copy Markdown** copies the brief; **Open in Actions** shows the group's full task list.
+- **Actions** — see [Actions view](#actions-view). Overdue tasks are flagged.
+- **Prepare next meeting** (a group's **⋯** menu in the Library) lists open actions with check-off, the decisions and open questions from recent notes, and template sections such as *Topics for Next Time* and *Blockers*. **Copy Markdown** copies the brief; **Open in Actions** shows the group's full task list.
 - **Obsidian sync** problems (vault unavailable, notes paused by an edit in Obsidian) appear in **Needs attention**. Notes history and the Obsidian conflict review show a line-by-line diff.
 - Both Library and global search share date/week, speaker, task ownership, status, source, recovery-warning, and notes/transcript filters. Filters apply before result limits; chips remove them individually. Named filters explicitly save their query locally. Cancelled, incomplete, limited, and failed searches do not masquerade as complete results.
 - **Click-to-play transcript** — timestamps seek the sticky audio player, which survives tab switches so you can listen while editing.

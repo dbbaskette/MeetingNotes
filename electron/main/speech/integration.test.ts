@@ -51,12 +51,11 @@ it('uses native processing, human review, shared terminology, notes, tasks and e
   const legacyId = roster.confirmSpeaker({ displayName: 'Keith', embedding: [0, 1] });
   const nativeSpeech = { transcribe: vi.fn(async () => ({ text: 'Keith will review Salsa compliance.', segments: words, provider: 'apple' })),
     diarize: vi.fn(async () => ({ segments: [{ start: 0, end: 12, speaker: 'SPEAKER_00' }], centroids: { SPEAKER_00: [1, 0] }, embeddingSpace: space, num_speakers: 1 })) };
-  const forbidden = vi.fn(async () => { throw new Error('Legacy server must not start'); });
   const terminology = new TerminologyService(new TerminologyRepo(db), { libraryRoot: root, meetings, speakers, artifactCache: new ArtifactCache(), userName: () => '' });
   terminology.repo.save({ source: 'Salsa compliance', replacement: 'SLSA compliance', groupId: null, enabled: true, mode: 'automatic', caseSensitive: false });
   const ctx = { libraryRoot: root, meetings, speakers, roster, settings, nativeSpeech, terminology,
     artifactCache: new ArtifactCache(), actionItems: new ActionItemsRepo(db), stageDurations: new StageDurationsRepo(db),
-    whisperSupervisor: { ensureReady: forbidden }, diarSupervisor: { ensureReady: forbidden }, llmSupervisor: { ensureReady: async () => {} },
+    llmSupervisor: { ensureReady: async () => {} },
     lmStudio: { chat: vi.fn().mockResolvedValueOnce('## Overview\nSLSA compliance review.\n\n## Action Items\n- Keith will review SLSA compliance.')
       .mockResolvedValueOnce('[{"text":"Review SLSA compliance","owner":"Keith","due_date":null}]') },
     logger: { info() {}, warn() {}, error() {} },
@@ -68,7 +67,6 @@ it('uses native processing, human review, shared terminology, notes, tasks and e
   await pipeline.run('m');
   expect(meetings.findById('m')?.status).toBe('awaiting_user');
   expect(speakers.listForMeeting('m')[0]?.rosterSpeakerId).toBeNull();
-  expect(forbidden).not.toHaveBeenCalled();
   expect(fs.readFileSync(file('transcript.md'), 'utf8')).toContain('SLSA compliance');
   expect(fs.readFileSync(file('transcript.md'), 'utf8').split('\n')).toHaveLength(1);
   expect(fs.readFileSync(file('transcript.raw.json'), 'utf8')).toContain('Salsa');

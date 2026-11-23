@@ -176,13 +176,14 @@ describe('paginated meeting summaries', () => {
     actionItems.create('a', { text: 'One' });
     actionItems.create('a', { text: 'Two' });
     actionItems.create('outside', { text: 'Excluded' });
-    const legacy = invoke('meetings:list');
+    // The summary every list surface must agree on, hydrated once up front.
+    const reference = invoke('meetings:get-many', ['a'])[0];
     const allSpeakers = vi.spyOn(speakers, 'listForAllMeetings');
     const allCounts = vi.spyOn(actionItems, 'countsByMeeting');
     const scopedSpeakers = vi.spyOn(speakers, 'listForMeetings');
     const scopedCounts = vi.spyOn(actionItems, 'countsForMeetings');
     const page = invoke('meetings:list-page', { filter: 'all', sort: 'newest', pageSize: 1 });
-    expect(page.items).toEqual([legacy.find((m: { id: string }) => m.id === 'a')]);
+    expect(page.items).toEqual([reference]);
     expect(page.items[0]).toMatchObject({ unidentifiedCount: 1, actionItemsCount: 2, stageEtaMs: null, stageEtaRough: false });
     expect(scopedSpeakers).toHaveBeenLastCalledWith(['a']);
     expect(scopedCounts).toHaveBeenLastCalledWith(['a']);
@@ -235,7 +236,7 @@ describe('paginated meeting summaries', () => {
     expect(meetings.findById('done')?.status).toBe('done');
   });
 
-  it('validates detailed batch IDs before any status mutation and preserves numeric legacy startMany', () => {
+  it('validates detailed batch IDs before any status mutation', () => {
     insert('pending', 'pending');
     const update = vi.spyOn(meetings, 'updateStatus');
     for (const input of [null, 'pending', [''], [1], ['pending', 1], Array(1001).fill('pending')]) {
@@ -243,7 +244,7 @@ describe('paginated meeting summaries', () => {
     }
     expect(update).not.toHaveBeenCalled();
     expect(invoke('meetings:start-many-detailed', [])).toEqual({ startedIds: [], failedIds: [] });
-    expect(invoke('meetings:start-many', ['pending', 'missing'])).toBe(1);
+    expect(invoke('meetings:start-many-detailed', ['pending', 'missing']).startedIds).toEqual(['pending']);
   });
 
   it('keeps an enqueue failure pending and retryable while starting subsequent IDs', () => {
@@ -508,7 +509,9 @@ describe('registerIpcHandlers', () => {
     const fakeIpc = { handle } as unknown as IpcMain;
     registerIpcHandlers(fakeIpc, baseServices());
     const channels = handle.mock.calls.map((c) => c[0]);
-    expect(channels).toContain('meetings:list');
+    expect(channels).toContain('meetings:list-page');
+    // Removed in #302: superseded channels must not come back unnoticed.
+    for (const gone of ['meetings:list', 'meetings:start-many', 'speakers:confirm', 'speakers:suggestions', 'weekly:get', 'weekly:regenerate']) expect(channels).not.toContain(gone);
     expect(channels).toContain('meetings:get');
     expect(channels).toContain('meetings:get-transcript');
     expect(channels).toContain('meetings:get-speaker-review');

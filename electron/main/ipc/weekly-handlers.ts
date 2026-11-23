@@ -3,7 +3,6 @@ import { dialog } from 'electron';
 import fs from 'node:fs';
 import { IPC_CHANNELS } from './contracts.js';
 import type { IpcServices } from './handlers.js';
-import type { WeeklyData } from '../weekly/aggregator.js';
 import { renderWeeklyMarkdown } from '../weekly/markdown.js';
 
 export function registerWeeklyHandlers(ipc: IpcMain, s: IpcServices): void {
@@ -16,12 +15,6 @@ export function registerWeeklyHandlers(ipc: IpcMain, s: IpcServices): void {
     if (w < 1 || w > 53) return null;
     return { year: y, week: w };
   };
-
-  ipc.handle(IPC_CHANNELS.weeklyGet, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.getWeek(w.year, w.week);
-  });
 
   // Fast path: structured data only (meetings + actions + decisions
   // groups), no LLM call. Used by the WeeklyView's parallel-fetch
@@ -41,12 +34,6 @@ export function registerWeeklyHandlers(ipc: IpcMain, s: IpcServices): void {
     return s.weeklyAggregator.getOrGenerateNarrative(w.year, w.week, {
       force: force === true,
     });
-  });
-
-  ipc.handle(IPC_CHANNELS.weeklyRegenerate, async (_e, year: unknown, week: unknown): Promise<WeeklyData> => {
-    const w = validWeek(year, week);
-    if (!w) throw new Error('invalid year/week');
-    return s.weeklyAggregator.regenerateWeek(w.year, w.week);
   });
 
   ipc.handle(IPC_CHANNELS.weeklyExportMarkdown, async (_e, year: unknown, week: unknown): Promise<{ path: string | null; markdown: string }> => {

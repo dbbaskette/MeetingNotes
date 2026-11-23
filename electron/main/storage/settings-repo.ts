@@ -8,7 +8,6 @@ export interface Settings {
   obsidian: ObsidianConfig | null;
   lmStudioUrl: string;
   llmModel: string;
-  audioHijackSessionName: string;
   libraryPath: string;
   /** OPTIONAL extra folder watched for dropped audio. Empty by default.
    *  The library's recordings dir (`<libraryPath>/recordings`) and the legacy
@@ -17,8 +16,6 @@ export interface Settings {
    *  drop location for users who want one. See libraryWatchPaths(). */
   audioWatchPath: string;
   sttLanguage: string;
-  exporterApple: boolean;
-  exporterMarkdown: boolean;
   /** Push a meeting.completed JSON payload to a user-configured endpoint
    *  when the pipeline finishes a meeting (#79). All fields below are
    *  ignored unless this is true. */
@@ -44,8 +41,6 @@ export interface Settings {
     status: number | null;
     error: string | null;
   } | null;
-  /** AAC bitrate the built-in helper records at, in kbps. UI offers 96/128/192. */
-  recordingBitrateKbps: number;
   /** Meeting auto-detect configuration. `browserTabs` polls the frontmost
    *  browser tab for known meeting URLs; `nativeApps` polls CoreAudio for
    *  Zoom / Teams / FaceTime / Slack / Discord / WhatsApp producing audio.
@@ -163,19 +158,15 @@ export const DEFAULT_SETTINGS: Settings = {
   // does the same summarization job in a fraction of the memory and time.
   // Users can override in Settings if they've got the VRAM for a bigger one.
   llmModel: 'qwen/qwen3.5-9b',
-  audioHijackSessionName: 'Meeting',
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),
   audioWatchPath: '',
   sttLanguage: 'en',
-  exporterApple: true,
-  exporterMarkdown: true,
   exporterWebhook: false,
   webhookUrl: '',
   webhookSecret: '',
   webhookTemplate: 'compact',
   webhookOwnerFilter: 'mine',
   webhookLastResult: null,
-  recordingBitrateKbps: 128,
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
   autoProcessRecordings: false,

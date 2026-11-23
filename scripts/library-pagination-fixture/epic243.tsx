@@ -93,8 +93,6 @@ window.api.weekly = {
     }
     return structuredClone(weeklyReport);
   },
-  get: async () => { throw Error('Unused'); },
-  regenerate: async () => { throw Error('Unused'); },
   exportMarkdown: async () => {
     fixture.weeklyExports.push(weeklyReport.snapshot!.meetings[0]!.title);
     return { markdown: weeklyReport.narrative, path: '/synthetic/weekly.md' };

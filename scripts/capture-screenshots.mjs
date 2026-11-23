@@ -59,7 +59,7 @@ const summary = [
 const base = {
   groupId: null, groupName: null, errorMessage: null, processingHistory: [], stageStartedAt: null,
   stageEtaMs: null, stageEtaRough: false, skipSpeakerId: false, rawTranscriptText: null,
-  audioPath: '/tmp/meetingnotes-screenshot.m4a', userIdentified: true, models: { stt: 'large-v3-turbo', llm: 'qwen/qwen3.5-9b' },
+  audioPath: '/tmp/meetingnotes-screenshot.m4a', userIdentified: true, models: { stt: 'Apple speech (en-US)', llm: 'qwen/qwen3.5-9b' },
 };
 
 const DONE = {
@@ -109,7 +109,6 @@ function installFixtures(serialized) {
   api.speakers.list = async () => [
     { id: 'r1', displayName: 'Alice' }, { id: 'r2', displayName: 'Bob' }, { id: 'r3', displayName: 'Priya' },
   ];
-  api.speakers.suggestions = async () => [];
   api.recording.listSources = async () => [];
   return true;
 }

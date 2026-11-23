@@ -64,7 +64,6 @@ window.api.speakers.assign = async () => {
 (window as any).setAutomaticVoice = () => { meeting.speakers[0]!.assignmentSource = 'automatic'; };
 window.api.meetings.getStatus = async () => meeting as any;
 window.api.speakers.list = async () => [{ id: 'alice', displayName: 'Alice' }, { id: 'bob', displayName: 'Bob' }] as any;
-window.api.speakers.suggestions = async () => [];
 window.api.recording.start = async () => { fixture.captures++; throw Error('Capture forbidden in appearance fixture'); };
 window.api.nativeSpeech.status = async () => ({ supported: true, appleReady: true, speakerReady: true, busy: false, phase: 'Ready', progress: 1, error: null }) as any;
 window.api.nativeSpeech.prepare = async () => { fixture.preparations++; throw Error('Preparation forbidden in appearance fixture'); };

@@ -12,9 +12,10 @@ export default defineConfig({
       // Production builds only; see electron/renderer/csp.ts.
       name: 'meetingnotes-csp',
       apply: 'build',
-      transformIndexHtml: () => [{
+      // Each page gets its own policy: only beta.html may play beta-audio:.
+      transformIndexHtml: (_html, ctx) => [{
         tag: 'meta',
-        attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy() },
+        attrs: { 'http-equiv': 'Content-Security-Policy', content: contentSecurityPolicy(ctx.filename.endsWith('beta.html') ? 'beta' : 'app') },
         injectTo: 'head-prepend',
       }],
     },

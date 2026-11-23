@@ -10,13 +10,6 @@
 // the user typed (owner_name). We match on either so "mine" works whether
 // Extract linked the roster entry or the user just typed their own name.
 
-/** The exporter ids that should be restricted to the user's own items. */
-import { EXPORT_TARGETS } from '../ipc/export-targets.js';
-
-export const TASK_APP_EXPORTERS: ReadonlySet<string> = new Set(
-  Object.entries(EXPORT_TARGETS).filter(([, target]) => target.ownOpenItemsOnly).map(([id]) => id),
-);
-
 export interface OwnerIdentity {
   /** settings.userSpeakerId — the roster id the user picked as "You are…". */
   userSpeakerId: string | null;

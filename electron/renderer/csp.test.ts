@@ -12,9 +12,17 @@ describe('renderer Content-Security-Policy', () => {
     expect(CSP_DIRECTIVES['base-uri']).toEqual(["'none'"]);
   });
 
-  it('allows network access to the Hugging Face token check only', () => {
+  it('allows no network access from the renderer at all', () => {
     const remote = Object.values(CSP_DIRECTIVES).flat().filter((source) => /^https?:|^wss?:|^\*/.test(source));
-    expect(remote).toEqual(['https://huggingface.co']);
+    expect(remote).toEqual([]);
+    expect(CSP_DIRECTIVES['connect-src']).toEqual(["'self'"]);
+    expect(contentSecurityPolicy()).not.toMatch(/huggingface/);
+  });
+
+  it('gives the beta audio protocol to the beta page only', () => {
+    expect(contentSecurityPolicy()).not.toMatch(/beta-audio:/);
+    expect(contentSecurityPolicy('app')).not.toMatch(/beta-audio:/);
+    expect(contentSecurityPolicy('beta')).toMatch(/media-src [^;]*beta-audio:/);
   });
 
   it('covers every audio source the app plays', () => {

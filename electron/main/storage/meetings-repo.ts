@@ -9,7 +9,7 @@ export interface MeetingRow {
   audioPath: string; status: string; pipelineStage: string;
   stageStartedAt: string | null;
   /** Set when `status === 'failed'`: the error string from the stage that
-   *  threw (e.g. "whisper: not ready ..."). NULL otherwise. Cleared on any
+   *  threw (e.g. "speech engine: not ready ..."). NULL otherwise. Cleared on any
    *  transition back to a non-failed status. */
   errorMessage: string | null;
   skipSpeakerId: boolean;

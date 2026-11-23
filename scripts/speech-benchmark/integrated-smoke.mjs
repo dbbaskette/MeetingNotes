@@ -44,10 +44,9 @@ try {
   meetings.insert({ id, slug: id, title: 'Native integration check', startedAt: null, durationS: 8, audioPath: audio, status: 'processing', pipelineStage: 'discovered' });
   const artifactCache = new ArtifactCache(), actionItems = new ActionItemsRepo(db);
   const terminology = new TerminologyService(new TerminologyRepo(db), { libraryRoot: root, meetings, speakers, artifactCache, userName: () => '' });
-  let legacyStarts = 0, chats = 0;
-  const forbidden = async () => { legacyStarts++; throw new Error('Legacy service used on native path'); };
+  let chats = 0;
   const ctx = { libraryRoot: root, meetings, speakers, roster, settings, nativeSpeech, artifactCache, terminology, actionItems,
-    stageDurations: new StageDurationsRepo(db), whisperSupervisor: { ensureReady: forbidden }, diarSupervisor: { ensureReady: forbidden },
+    stageDurations: new StageDurationsRepo(db),
     llmSupervisor: { ensureReady: async () => {} },
     lmStudio: { chat: async () => ++chats === 1 ? '## Overview\nRelease approved; keep the backup.\n\n## Action Items\n- Keith will review the security report on Friday.'
       : '[{"text":"Review the security report","owner":"Keith","due_date":null}]' },
@@ -64,7 +63,7 @@ try {
   await runMerging({ meetingId: id }, ctx);
   meetings.updateStage(id, 'summarizing'); meetings.updateStatus(id, 'processing');
   await pipeline.run(id);
-  assert.equal(meetings.findById(id).status, 'done'); assert.equal(legacyStarts, 0);
+  assert.equal(meetings.findById(id).status, 'done');
   const transcript = fs.readFileSync(path.join(folder, 'transcript.md'), 'utf8');
   assert.match(transcript, /backup/i); assert.match(transcript, /Synthetic speaker/);
   const suggestions = roster.suggestionsFor({ label: 'future', embedding }, 3, diar.embeddingSpace);
@@ -74,7 +73,7 @@ try {
     summaryMd: fs.readFileSync(path.join(folder, 'summary.md'), 'utf8'), items });
   assert.match(fs.readFileSync(exported, 'utf8'), /Review the security report/);
   const result = { testedAt: new Date().toISOString(), helper, platform: process.platform, arch: process.arch, osRelease: os.release(),
-    elapsedMs: Math.round(performance.now() - started), status: 'done', legacyStarts, transcriptLines: transcript.split('\n').length,
+    elapsedMs: Math.round(performance.now() - started), status: 'done', transcriptLines: transcript.split('\n').length,
     trainedProfiles: 1, speakerCount: diar.num_speakers, items: items.length, export: 'Markdown',
     limitations: 'Synthetic AAC audio; real Apple and SpeakerKit inference and full stable pipeline. Summary responses are deterministic fixtures, not real LLM inference. No live capture, private meetings, signed-in exports or PDF runtime acceptance.' };
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(result, null, 2));

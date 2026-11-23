@@ -6,9 +6,9 @@
 // Bare `spawn('ffmpeg', …)` works in `npm run dev` (shell PATH)
 // but fails with ENOENT in the packaged .dmg.
 //
-// We search the same well-known locations the whisper and LLM
-// supervisors already use, cache the result, and export a pair of
-// strings the rest of the codebase can pass to spawn / execFile.
+// We search the well-known install locations (Homebrew, system paths),
+// cache the result, and export a pair of strings the rest of the codebase
+// can pass to spawn / execFile.
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';

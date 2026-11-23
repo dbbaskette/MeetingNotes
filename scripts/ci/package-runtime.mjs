@@ -13,6 +13,11 @@ const moduleUrl = file => pathToFileURL(path.join(resources, 'app.asar/dist/elec
 const { LMStudioClient } = await import(moduleUrl('lm-studio/client.js'));
 const { AppEnumerator } = await import(moduleUrl('recording/app-enumerator.js'));
 assert(!fs.existsSync(path.join(resources, 'sidecar')), 'Legacy Python payload must not ship');
+// The speech-beta comparison app is built next to the real one but must not
+// be packaged into it (#302).
+for (const beta of ['dist/electron/main/beta/index.js', 'dist/preload/electron/preload/beta.js', 'dist/renderer/beta.html'])
+  assert(!fs.existsSync(path.join(resources, 'app.asar', beta)), `Beta artifact must not ship in the production app: ${beta}`);
+assert(fs.existsSync(path.join(resources, 'app.asar/dist/renderer/index.html')), 'Packaged renderer must ship');
 assert(fs.existsSync(path.join(resources, 'bin/meeting-notes-speech')), 'Native helper must ship');
 assert.equal(typeof LMStudioClient.prototype.transcribe, 'undefined', 'Remote/legacy STT transport must not ship');
 const sourceList = await new AppEnumerator({ helperPath: path.join(resources, 'bin/meeting-notes-tap') }).list();

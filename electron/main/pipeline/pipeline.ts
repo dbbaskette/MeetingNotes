@@ -92,7 +92,7 @@ export class Pipeline {
   /** Tell the runner to stop pulling new items off the queue. The
    *  currently in-flight meeting keeps going to completion (or failure)
    *  — we deliberately don't try to abort mid-stage so that long
-   *  whisper / pyannote calls aren't wasted. */
+   *  transcription and speaker-detection passes aren't wasted. */
   pause(): void {
     if (this.paused) return;
     this.paused = true;

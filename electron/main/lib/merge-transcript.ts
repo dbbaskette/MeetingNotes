@@ -19,23 +19,23 @@ function overlap(a: { start: number; end: number }, b: { start: number; end: num
 }
 
 export function mergeTranscriptWithDiarization(
-  whisper: readonly TranscriptSegment[],
+  segments: readonly TranscriptSegment[],
   diar: readonly DiarSegment[],
 ): MergedSegment[] {
-  if (whisper.length === 0) return [];
-  // Sort once, then walk both sequences by start time so each whisper only
+  if (segments.length === 0) return [];
+  // Sort once, then walk both sequences by start time so each segment only
   // inspects overlapping diar turns. Equal overlap keeps the earlier original
   // diar index, matching the previous nested-scan tie-break.
   const sorted = diar.map((segment, index) => ({ segment, index }))
     .sort((a, b) => a.segment.start - b.segment.start || a.index - b.index);
-  const order = whisper.map((_, index) => index)
-    .sort((a, b) => whisper[a]!.start - whisper[b]!.start);
-  const out: MergedSegment[] = new Array(whisper.length);
+  const order = segments.map((_, index) => index)
+    .sort((a, b) => segments[a]!.start - segments[b]!.start);
+  const out: MergedSegment[] = new Array(segments.length);
   let cursor = 0;
-  for (const whisperIndex of order) {
-    const w = whisper[whisperIndex]!;
+  for (const segmentIndex of order) {
+    const w = segments[segmentIndex]!;
     if (w.source === 'voice') {
-      out[whisperIndex] = { ...w, speaker: VOICE_SPEAKER_LABEL };
+      out[segmentIndex] = { ...w, speaker: VOICE_SPEAKER_LABEL };
       continue;
     }
     while (cursor < sorted.length && sorted[cursor]!.segment.end <= w.start) cursor++;
@@ -51,9 +51,9 @@ export function mergeTranscriptWithDiarization(
         bestIndex = candidate.index;
       }
     }
-    out[whisperIndex] = { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
+    out[segmentIndex] = { ...w, speaker: best ? best.speaker : 'UNKNOWN' };
   }
-  return whisper.every(s => s.wordTiming) ? readableTurns(out) : out;
+  return segments.every(s => s.wordTiming) ? readableTurns(out) : out;
 }
 
 export function readableTurns(segments: readonly MergedSegment[]): MergedSegment[] {

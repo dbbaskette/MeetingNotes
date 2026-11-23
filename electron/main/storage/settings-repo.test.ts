@@ -32,6 +32,19 @@ describe('SettingsRepo', () => {
     expect(all.llmModel).toBe('x');
     expect(all.lmStudioUrl).toBe(DEFAULT_SETTINGS.lmStudioUrl);
   });
+  it('ignores rows left behind by settings that no longer exist', () => {
+    // Removed in #302. A database written by an older version still holds
+    // them; reading must neither fail nor resurface them.
+    const insert = (repo as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => void } } })
+      .db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
+    for (const [key, value] of [['audioHijackSessionName', '"Meeting"'], ['exporterApple', 'true'], ['exporterMarkdown', 'false'], ['recordingBitrateKbps', '192']]) insert.run(key, value);
+    const all = repo.getAll() as unknown as Record<string, unknown>;
+    for (const key of ['audioHijackSessionName', 'exporterApple', 'exporterMarkdown', 'recordingBitrateKbps']) {
+      expect(all).not.toHaveProperty(key);
+      expect(DEFAULT_SETTINGS).not.toHaveProperty(key);
+    }
+    expect(all.lmStudioUrl).toBe(DEFAULT_SETTINGS.lmStudioUrl);
+  });
   it('reads a legacy autoDetectMeetings boolean as the new object shape', () => {
     // Simulate the pre-#78 row shape (a boolean in JSON).
     (repo as unknown as { db: { prepare: (s: string) => { run: (...a: unknown[]) => void } } })
