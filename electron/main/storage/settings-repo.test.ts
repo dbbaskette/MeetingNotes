@@ -59,6 +59,17 @@ describe('SettingsRepo', () => {
     repo.set('windowBounds', { x: -100, y: 50, width: 1280, height: 860 });
     expect(repo.get('windowBounds')).toEqual({ x: -100, y: 50, width: 1280, height: 860 });
   });
+  it('reasoningEffort defaults to none and stays in sync with legacy disableThinking', () => {
+    expect(repo.get('reasoningEffort')).toBe('none');
+    repo.set('disableThinking', false);
+    expect(repo.get('reasoningEffort')).toBe('default');
+    expect(repo.getAll().reasoningEffort).toBe('default');
+    repo.set('reasoningEffort', 'minimal');
+    expect(repo.get('reasoningEffort')).toBe('minimal');
+    expect(repo.get('disableThinking')).toBe(false);
+    repo.set('reasoningEffort', 'none');
+    expect(repo.get('disableThinking')).toBe(true);
+  });
 });
 
 describe('normalizeAutoDetectMeetings', () => {

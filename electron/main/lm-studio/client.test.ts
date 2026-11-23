@@ -48,7 +48,7 @@ describe('LMStudioClient.chat', () => {
     expect(result).toBe('Summary text');
   });
 
-  it('sends chat_template_kwargs.enable_thinking=false when disableThinking is set', async () => {
+  it('sends reasoning_effort=none and chat_template_kwargs when disableThinking is set', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
@@ -57,18 +57,42 @@ describe('LMStudioClient.chat', () => {
     );
     const c = new LMStudioClient('http://localhost:1234');
     await c.chat({
-      model: 'google/gemma-4-12b',
+      model: 'thinkingmachines/inkling-2-mini',
       messages: [{ role: 'user', content: 'hi' }],
       disableThinking: true,
     });
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse((init as RequestInit).body as string) as {
-      chat_template_kwargs?: { enable_thinking?: boolean };
+      reasoning_effort?: string;
+      chat_template_kwargs?: { enable_thinking?: boolean; reasoning_effort?: string };
     };
-    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(body.reasoning_effort).toBe('none');
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false, reasoning_effort: 'none' });
   });
 
-  it('omits chat_template_kwargs entirely when disableThinking is not set', async () => {
+  it('sends reasoning_effort cap (minimal/low) without enable_thinking=false', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
+        { status: 200 },
+      ),
+    );
+    const c = new LMStudioClient('http://localhost:1234');
+    await c.chat({
+      model: 'thinkingmachines/inkling-2-mini',
+      messages: [{ role: 'user', content: 'hi' }],
+      reasoningEffort: 'minimal',
+    });
+    const [, init] = fetchMock.mock.calls[0]!;
+    const body = JSON.parse((init as RequestInit).body as string) as {
+      reasoning_effort?: string;
+      chat_template_kwargs?: { enable_thinking?: boolean; reasoning_effort?: string };
+    };
+    expect(body.reasoning_effort).toBe('minimal');
+    expect(body.chat_template_kwargs).toEqual({ reasoning_effort: 'minimal' });
+  });
+
+  it('omits reasoning_effort and chat_template_kwargs entirely when default/unset', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] }),
@@ -79,6 +103,7 @@ describe('LMStudioClient.chat', () => {
     await c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
     const [, init] = fetchMock.mock.calls[0]!;
     const body = JSON.parse((init as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).not.toHaveProperty('reasoning_effort');
     expect(body).not.toHaveProperty('chat_template_kwargs');
   });
 

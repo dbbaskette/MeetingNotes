@@ -70,21 +70,28 @@ export interface ChatMessage {
   content: string;
 }
 
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'default';
+
 export interface ChatInput {
   signal?: AbortSignal;
   model: string;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  /** Turn the model's "thinking" / chain-of-thought OFF. Reasoning-capable
-   *  local models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss, …) otherwise burn
-   *  their whole token budget in `reasoning_content` and return empty
-   *  `content` — looking like an out-of-memory failure when it isn't. When
-   *  true we pass `chat_template_kwargs: { enable_thinking: false }`, which
-   *  LM Studio's OpenAI-compatible API forwards to the model's chat template
-   *  (the only reliable lever — Gemma 4 has no LM Studio UI toggle). Models
-   *  whose template doesn't reference the kwarg simply ignore it. */
+  /** Turn the model's "thinking" / chain-of-thought OFF. Legacy boolean alias
+   *  for `reasoningEffort: 'none'`. When `reasoningEffort` is set, it takes
+   *  precedence. */
   disableThinking?: boolean;
+  /** Desired reasoning/thinking effort cap for reasoning-capable local models
+   *  (Qwen3, Gemma 4, DeepSeek-R1, gpt-oss, Inkling-2-Mini, …).
+   *   - 'none': emits `reasoning_effort: 'none'` AND
+   *     `chat_template_kwargs: { enable_thinking: false, reasoning_effort: 'none' }`
+   *     so both `enable_thinking`-based and `reasoning_effort`-based Jinja
+   *     templates suppress chain-of-thought.
+   *   - 'minimal' | 'low': emits `reasoning_effort` + `chat_template_kwargs.reasoning_effort`
+   *     to cap thinking length without turning it off completely.
+   *   - 'default': omits both keys so non-reasoning models stay unchanged. */
+  reasoningEffort?: ReasoningEffort;
   /** How many times to RE-ISSUE the request when the model returns an
    *  intermittent "reasoning runaway" (empty content because it spent the
    *  whole budget thinking). Gemma 4 can't be told to stop thinking (it
@@ -210,10 +217,10 @@ export class LMStudioClient {
           throw new LMStudioError(
             `${label} produced no answer — the model ${REASONING_LOOP_MARKER} ` +
               `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
-              `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
-              `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +
-              `to skip its chain-of-thought, then retry. (If it's already on, this model ` +
-              `ignores the thinking toggle — switch to a non-reasoning model in ${label}.)` +
+              `This reasoning model (e.g. Gemma 4, Qwen3, Inkling-2-Mini) is looping on this transcript. ` +
+              `Set "Model thinking / reasoning effort" to Off (none) or Minimal in Settings and retry. ` +
+              `(If it's already Off, this model or server ignores API thinking overrides — set ` +
+              `\`{%- set reasoning_effort = "none" %}\` in ${label}'s Prompt Template or switch to a non-reasoning model.)` +
               (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
           );
         }
@@ -255,6 +262,20 @@ export class LMStudioClient {
     // connections between pipeline stages (the socket recovers within a
     // second or two). We don't retry aborts / 4xx / 5xx, only true network
     // failures, so we're not masking legit server errors.
+    const effort: ReasoningEffort =
+      input.reasoningEffort ?? (input.disableThinking ? 'none' : 'default');
+    const reasoningExtras =
+      effort === 'none'
+        ? {
+            reasoning_effort: 'none' as const,
+            chat_template_kwargs: { enable_thinking: false, reasoning_effort: 'none' as const },
+          }
+        : effort === 'minimal' || effort === 'low'
+          ? {
+              reasoning_effort: effort,
+              chat_template_kwargs: { reasoning_effort: effort },
+            }
+          : {};
     const attempt = async (): Promise<Response> => fetchWithDispatcher(
       `${this.baseUrl}/v1/chat/completions`,
       {
@@ -265,11 +286,9 @@ export class LMStudioClient {
           messages: input.messages,
           temperature: temperature ?? input.temperature ?? 0.2,
           max_tokens: input.maxTokens,
-          // Only emit the key when we actually want thinking off, so a
-          // request to a non-reasoning model stays byte-for-byte unchanged.
-          ...(input.disableThinking
-            ? { chat_template_kwargs: { enable_thinking: false } }
-            : {}),
+          // Only emit thinking keys when suppressing or capping reasoning, so
+          // a request with 'default' stays byte-for-byte unchanged.
+          ...reasoningExtras,
         }),
         signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]) : AbortSignal.timeout(10 * 60 * 1000),
         dispatcher: getSlowLLMAgent(),

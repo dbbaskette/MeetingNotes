@@ -1238,6 +1238,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         model: modelId,
         temperature: 0,
         disableThinking: true,
+        reasoningEffort: 'none',
         maxTokens: 1500,
         messages: [
           { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },

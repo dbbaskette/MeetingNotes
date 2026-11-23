@@ -823,6 +823,7 @@ app.whenReady().then(async () => {
       lmStudio,
       () => settings.get('llmModel'),
       () => settings.get('disableThinking'),
+      () => settings.get('reasoningEffort'),
     ),
     ensureLLMReady: () => llmSupervisor.ensureReady(),
   });

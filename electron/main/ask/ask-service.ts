@@ -1,4 +1,4 @@
-import type { ChatInput } from '../lm-studio/client.js';
+import type { ChatInput, ReasoningEffort } from '../lm-studio/client.js';
 import type { AskIndex, PassageHit } from './ask-index.js';
 import { ftsQuery, questionTerms } from './passages.js';
 import type { AskResult, AskSource } from '../../shared/ask.js';
@@ -9,9 +9,10 @@ export interface AskDeps {
   index: Pick<AskIndex, 'sync' | 'search'>;
   meetings: () => { id: string; slug: string; title: string; startedAt: string | null }[];
   chat: (input: ChatInput) => Promise<string>;
-  ensureReady: () => Promise<void>;
+  ensureReady: (signal?: AbortSignal) => Promise<void>;
   model: () => string;
   disableThinking: () => boolean;
+  reasoningEffort?: () => ReasoningEffort;
 }
 
 const MAX_PASSAGES = 10;
@@ -68,10 +69,11 @@ export async function askMeetings(deps: AskDeps, question: string, signal?: Abor
   }
   if (!sources.length) return { answer: NOTHING_FOUND, sources: [], found: false };
 
-  await deps.ensureReady();
+  await deps.ensureReady(signal);
   signal?.throwIfAborted();
   const answer = (await deps.chat({
     signal, model: deps.model(), temperature: 0.2, disableThinking: deps.disableThinking(),
+    ...(deps.reasoningEffort ? { reasoningEffort: deps.reasoningEffort() } : {}),
     // Room for a reasoning model's thinking plus a short answer.
     maxTokens: 4000, resampleRetries: 1,
     messages: [
