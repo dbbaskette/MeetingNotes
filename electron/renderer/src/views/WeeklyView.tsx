@@ -13,6 +13,7 @@ import { useToast } from '../components/Toasts';
 import { AppNav, type NavTarget } from '../components/AppNav';
 import { WeeklyTaskRow } from '../components/WeeklyTaskRow';
 import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
+import { isContextOverflowError } from '../lib/context-overflow';
 import logoUrl from '../assets/logo.png';
 import { getIsoWeek as currentIsoWeek, addWeeks as shiftWeek } from '../../../shared/local-week';
 import type { WeeklyStructured, WeeklyNarrative as WeeklyNarrativeResult } from '../../../main/ipc/contracts';
@@ -150,7 +151,10 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
       // If structured already succeeded but narrative threw, the
       // structured layout stays visible and the narrative card
       // surfaces the error inline.
-      const msg = e instanceof Error ? e.message : String(e);
+      // Drop Electron's "Error invoking remote method '…': Error:" wrapper so
+      // the card shows LM Studio's actual explanation.
+      const msg = (e instanceof Error ? e.message : String(e))
+        .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
       if (!structuredOk) {
         setStructState('error');
         setErrorMsg(msg);
@@ -664,9 +668,11 @@ function NarrativeCard({
           <div className="text-xs">{narrError ?? 'unknown error'}</div>
           <div className="text-xs mt-2 text-ink-muted">
             {narrative && 'Your saved report has not been changed. '}
-            Common causes: LM Studio isn&apos;t running, no model is loaded, or the
-            chosen model can&apos;t fit the prompt. The structured rollup below still
-            works — only the Overview card needs the LLM.
+            {isContextOverflowError(narrError)
+              ? 'The structured rollup below still works — only the Overview card needs the LLM.'
+              : <>Common causes: LM Studio isn&apos;t running, no model is loaded, or the
+                chosen model can&apos;t fit the prompt. The structured rollup below still
+                works — only the Overview card needs the LLM.</>}
           </div>
         </div>
       )}

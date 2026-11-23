@@ -239,6 +239,106 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  describe('reloads a model loaded with too small a context', () => {
+    function makeSup(opts: {
+      ctx: number;
+      loadedCtx: number | null | (() => Promise<number | null>);
+      unload?: () => Promise<void>;
+    }) {
+      const calls: string[] = [];
+      const lmsLoadModel = vi.fn(async (_b: string, id: string, c?: number) => { calls.push(`load ${id} ${c}`); });
+      const lmsUnloadModel = vi.fn(opts.unload ?? (async (_b: string, id: string) => { calls.push(`unload ${id}`); }));
+      const lmsLoadedContextLength = vi.fn(
+        typeof opts.loadedCtx === 'function' ? opts.loadedCtx : async () => opts.loadedCtx as number | null,
+      );
+      const sup = new LLMSupervisor({
+        getProvider: () => 'lm-studio',
+        getModelId: () => 'thinkingmachines/inkling-2-mini',
+        getContextLength: () => opts.ctx,
+        spawn: vi.fn(() => fakeProc() as unknown as ChildProcess),
+        findLmsBinary: () => '/fake/lms',
+        findOllamaBinary: () => '/fake/ollama',
+        lmStudioProbe: async () => ({ ok: true }),
+        ollamaProbe: async () => ({ ok: false }),
+        lmsListLoadedModels: vi.fn(async () => ['thinkingmachines/inkling-2-mini']),
+        lmsLoadedContextLength,
+        lmsUnloadModel,
+        lmsLoadModel,
+      });
+      return { sup, calls, lmsLoadModel, lmsUnloadModel, lmsLoadedContextLength };
+    }
+
+    it('unloads then reloads with the configured context when the loaded one is smaller', async () => {
+      const { sup, calls, lmsLoadedContextLength } = makeSup({ ctx: 32768, loadedCtx: 16384 });
+      await sup.ensureReady();
+      expect(lmsLoadedContextLength).toHaveBeenCalledWith('127.0.0.1', 1234, 'thinkingmachines/inkling-2-mini');
+      expect(calls).toEqual([
+        'unload thinkingmachines/inkling-2-mini',
+        'load thinkingmachines/inkling-2-mini 32768',
+      ]);
+      await sup.stop();
+    });
+
+    it('keeps the model when it is loaded with at least the configured context', async () => {
+      const { sup, lmsLoadModel, lmsUnloadModel } = makeSup({ ctx: 16384, loadedCtx: 32768 });
+      await sup.ensureReady();
+      expect(lmsUnloadModel).not.toHaveBeenCalled();
+      expect(lmsLoadModel).not.toHaveBeenCalled();
+      await sup.stop();
+    });
+
+    it('does not check or reload when context length is "model default" (0)', async () => {
+      const { sup, lmsLoadModel, lmsUnloadModel, lmsLoadedContextLength } = makeSup({ ctx: 0, loadedCtx: 4096 });
+      await sup.ensureReady();
+      expect(lmsLoadedContextLength).not.toHaveBeenCalled();
+      expect(lmsUnloadModel).not.toHaveBeenCalled();
+      expect(lmsLoadModel).not.toHaveBeenCalled();
+      await sup.stop();
+    });
+
+    it('does not reload when the loaded context is unknown or the probe fails', async () => {
+      const unknown = makeSup({ ctx: 32768, loadedCtx: null });
+      await unknown.sup.ensureReady();
+      expect(unknown.lmsUnloadModel).not.toHaveBeenCalled();
+      expect(unknown.lmsLoadModel).not.toHaveBeenCalled();
+      await unknown.sup.stop();
+
+      const failing = makeSup({ ctx: 32768, loadedCtx: async () => { throw new Error('404'); } });
+      await expect(failing.sup.ensureReady()).resolves.toBeUndefined();
+      expect(failing.lmsUnloadModel).not.toHaveBeenCalled();
+      await failing.sup.stop();
+    });
+
+    it('tolerates an unload failure without throwing', async () => {
+      const { sup, lmsLoadModel } = makeSup({
+        ctx: 32768,
+        loadedCtx: 16384,
+        unload: async () => { throw new Error('lms exit 1'); },
+      });
+      await expect(sup.ensureReady()).resolves.toBeUndefined();
+      expect(lmsLoadModel).not.toHaveBeenCalled();
+      await sup.stop();
+    });
+
+    it('runs one reload for concurrent ensureReady() callers', async () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const { sup, lmsUnloadModel, lmsLoadModel } = makeSup({
+        ctx: 32768,
+        loadedCtx: 16384,
+        unload: () => gate,
+      });
+      const a = sup.ensureReady();
+      const b = sup.ensureReady();
+      await new Promise((r) => setTimeout(r, 10));
+      release();
+      await Promise.all([a, b]);
+      expect(lmsUnloadModel).toHaveBeenCalledTimes(1);
+      expect(lmsLoadModel).toHaveBeenCalledTimes(1);
+      await sup.stop();
+    });
+  });
+
   it('lm-studio mode tolerates auto-load failures without throwing', async () => {
     const probe = async (): Promise<{ ok: boolean }> => ({ ok: true });
     const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);

@@ -326,7 +326,8 @@ export function SettingsView({
           <div className="text-xs text-ink-muted mt-1">
             Passed as <code>--context-length</code> when MeetingNotes auto-loads the model.
             Too-small contexts silently truncate long transcripts; too-large ones can
-            exhaust memory on smaller Macs. Applies at the next model load.
+            exhaust memory on smaller Macs. If the model is already loaded with a smaller
+            context, MeetingNotes reloads it with this one before the next LLM call.
           </div>
         </Field>
       )}
