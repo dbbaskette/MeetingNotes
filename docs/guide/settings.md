@@ -25,7 +25,7 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `summaryProvider` | `external` | LLM runtime: `lm-studio`, `ollama`, or `external`. Managed modes spawn the runtime, auto-load `llmModel`, and idle-shut-down. `external` = you run the server at `lmStudioUrl`. A healthy externally-started server is adopted (never killed) in any mode. |
 | `lmStudioUrl` | `http://localhost:1234` | Chat/LLM endpoint (used only in `external` mode; managed modes hardcode 1234 / 11434). |
 | `llmModel` | `qwen/qwen3.5-9b` | Model id for summarize/extract. Auto-loaded on first use. |
-| `llmContextLength` | `0` | Managed LM Studio context at the next model load: model default (0), 8192, 16384, or 32768. Larger contexts require more memory; already-loaded models are not reloaded automatically. |
+| `llmContextLength` | `0` | Managed LM Studio context at the next model load: model default (0), 8192, 16384, or 32768. Larger contexts require more memory. A model already loaded with a smaller context is unloaded and reloaded with this one before the next LLM call. |
 | `disableThinking` | `true` | Sends `enable_thinking: false` so reasoning models skip chain-of-thought where they honor it. |
 | `summaryDetail` | `detailed` | Summary verbosity: `concise` / `standard` / `detailed`. |
 | `sttLanguage` | `en` | Speech language. Native maps `en` to en-US and checks Apple's locale support. Re-prepare assets after changing language. Language changes require idle processing/setup. |

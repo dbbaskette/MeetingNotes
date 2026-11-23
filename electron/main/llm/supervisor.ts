@@ -66,6 +66,13 @@ export interface LLMSupervisorOpts {
   /** Test seam for the loaded-models check. Returns ids that LM
    *  Studio's /v1/models endpoint reports as currently loaded. */
   lmsListLoadedModels?: (host: string, port: number) => Promise<string[]>;
+  /** Test seam: the context window (tokens) the given model is currently
+   *  loaded with, or null when unknown (model not loaded, endpoint missing on
+   *  an older LM Studio). Default reads `loaded_context_length` from LM
+   *  Studio's /api/v0/models. */
+  lmsLoadedContextLength?: (host: string, port: number, modelId: string) => Promise<number | null>;
+  /** Test seam for `lms unload <model>`. */
+  lmsUnloadModel?: (binary: string, modelId: string) => Promise<void>;
   onLog?: (line: string) => void;
 }
 
@@ -133,6 +140,33 @@ async function defaultLmsListLoaded(host: string, port: number): Promise<string[
   return data.map((m) => m.id ?? '').filter((id) => id.length > 0);
 }
 
+/** Default "what context is it loaded with" — LM Studio's REST API
+ *  (/api/v0/models) reports `loaded_context_length` for each loaded model;
+ *  the OpenAI-compat /v1/models does not. Returns null when the model isn't
+ *  listed as loaded or the endpoint doesn't exist (older LM Studio), so the
+ *  caller can skip the check rather than guess. */
+export async function defaultLmsLoadedContextLength(
+  host: string,
+  port: number,
+  modelId: string,
+): Promise<number | null> {
+  const resp = await fetch(`http://${host}:${port}/api/v0/models`, {
+    signal: AbortSignal.timeout(2000),
+  });
+  if (!resp.ok) return null;
+  const body = (await resp.json().catch(() => null)) as
+    | { data?: Array<{ id?: string; state?: string; loaded_context_length?: unknown }> }
+    | null;
+  const entry = body?.data?.find((m) => m.id === modelId && m.state === 'loaded');
+  const ctx = entry?.loaded_context_length;
+  return typeof ctx === 'number' && Number.isFinite(ctx) && ctx > 0 ? ctx : null;
+}
+
+/** Default unload implementation — `lms unload <model>`. */
+async function defaultLmsUnloadModel(binary: string, modelId: string): Promise<void> {
+  await execFileAsync(binary, ['unload', modelId], { timeout: 30_000 });
+}
+
 /** Default model-load implementation — shells out to `lms load`.
  *  60s timeout matches the worst-case Q5 load time for a 7B-class
  *  model on Apple Silicon. */
@@ -170,6 +204,10 @@ export async function detectProviders(): Promise<ProviderAvailability> {
 export class LLMSupervisor {
   private readonly lmStudio: ManagedService;
   private readonly ollama: ManagedService;
+  /** Single-flight for the model load/reload step, so concurrent
+   *  ensureReady() callers (a summary and the weekly report, say) don't each
+   *  run `lms unload`/`lms load` against the same model. */
+  private modelLoadInFlight: Promise<void> | null = null;
 
   constructor(private readonly opts: LLMSupervisorOpts) {
     const findLms = opts.findLmsBinary ?? findLmsBinary;
@@ -237,7 +275,12 @@ export class LLMSupervisor {
         return;
       case 'lm-studio':
         await this.lmStudio.ensureReady();
-        await this.ensureLmStudioModelLoaded();
+        if (!this.modelLoadInFlight) {
+          this.modelLoadInFlight = this.ensureLmStudioModelLoaded().finally(() => {
+            this.modelLoadInFlight = null;
+          });
+        }
+        await this.modelLoadInFlight;
         return;
       case 'ollama':
         // Ollama lazy-loads models on first inference — no equivalent
@@ -248,11 +291,12 @@ export class LLMSupervisor {
   }
 
   /** Best-effort: load the configured model into VRAM if it isn't
-   *  already. Failure is non-fatal — the user might be deliberately
-   *  using a different model than `settings.llmModel`, or the model
-   *  id might be misspelled. We log and continue; the subsequent
-   *  chat() call will surface a clearer error if the model truly
-   *  isn't available. */
+   *  already, or reload it when it's loaded with a smaller context window
+   *  than Settings asks for. Failure is non-fatal — the user might be
+   *  deliberately using a different model than `settings.llmModel`, or the
+   *  model id might be misspelled. We log and continue; the subsequent
+   *  chat() call will surface a clearer error if the model truly isn't
+   *  available. */
   private async ensureLmStudioModelLoaded(): Promise<void> {
     const wanted = this.opts.getModelId?.()?.trim();
     if (!wanted) return;
@@ -266,7 +310,9 @@ export class LLMSupervisor {
       this.opts.onLog?.(`lm-studio: list-loaded-models failed: ${String(e)}`);
       // Fall through and try to load — worst case the load is a no-op.
     }
-    if (loaded.includes(wanted)) return;
+    const ctx = this.opts.getContextLength?.() ?? 0;
+    const isLoaded = loaded.includes(wanted);
+    if (isLoaded && !(await this.loadedContextTooSmall(host, port, wanted, ctx))) return;
 
     const findLms = this.opts.findLmsBinary ?? findLmsBinary;
     let binary: string;
@@ -278,7 +324,14 @@ export class LLMSupervisor {
     }
     const loader = this.opts.lmsLoadModel ?? defaultLmsLoadModel;
     try {
-      const ctx = this.opts.getContextLength?.() ?? 0;
+      if (isLoaded) {
+        // Loaded with too small a window (e.g. from the LM Studio GUI with its
+        // default). `lms load` on an already-loaded model adds a second
+        // instance rather than resizing it, so unload first.
+        const unloader = this.opts.lmsUnloadModel ?? defaultLmsUnloadModel;
+        this.opts.onLog?.(`lm-studio: unloading ${wanted} to reload it with context ${ctx}…`);
+        await unloader(binary, wanted);
+      }
       this.opts.onLog?.(`lm-studio: loading ${wanted}${ctx > 0 ? ` (context ${ctx})` : ''}…`);
       await loader(binary, wanted, ctx);
       this.opts.onLog?.(`lm-studio: ${wanted} loaded`);
@@ -289,6 +342,31 @@ export class LLMSupervisor {
         'load it manually via `lms load <model>` or the GUI.',
       );
     }
+  }
+
+  /** True when Settings asks for a specific context window and the model is
+   *  loaded with a smaller one. Unknown loaded context (older LM Studio,
+   *  probe failure) counts as "fine" — we never reload on a guess. */
+  private async loadedContextTooSmall(
+    host: string,
+    port: number,
+    modelId: string,
+    wantedCtx: number,
+  ): Promise<boolean> {
+    if (!(wantedCtx > 0)) return false;
+    const probe = this.opts.lmsLoadedContextLength ?? defaultLmsLoadedContextLength;
+    let loadedCtx: number | null = null;
+    try {
+      loadedCtx = await probe(host, port, modelId);
+    } catch (e) {
+      this.opts.onLog?.(`lm-studio: loaded-context check failed: ${String(e)}`);
+      return false;
+    }
+    if (loadedCtx == null || loadedCtx >= wantedCtx) return false;
+    this.opts.onLog?.(
+      `lm-studio: ${modelId} is loaded with context ${loadedCtx}, below the configured ${wantedCtx}`,
+    );
+    return true;
   }
 
   /** Stop both managed providers. Called on app shutdown. */

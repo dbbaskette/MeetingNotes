@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { LMStudioClient, stripThinking, looksDegenerate } from './client.js';
+import { LMStudioClient, stripThinking, looksDegenerate, parseChatErrorBody, CONTEXT_OVERFLOW_MARKER } from './client.js';
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -259,6 +259,70 @@ describe('LMStudioClient.chat — timeout & runaway handling', () => {
     await expect(
       c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
     ).rejects.toThrow(/repetit|looping/i);
+  });
+});
+
+describe('LMStudioClient.chat — HTTP errors', () => {
+  const chat = () =>
+    new LMStudioClient('http://localhost:1234').chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+
+  it('explains a context-size 400 with the prompt and loaded-context sizes', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 400,
+            message: 'request (17447 tokens) exceeds the available context size (16384 tokens), try increasing it',
+            type: 'exceed_context_size_error',
+            n_prompt_tokens: 17447,
+            n_ctx: 16384,
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+    const err = await chat().catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    const msg = (err as Error).message;
+    expect(msg).toContain('The prompt is 17,447 tokens but the model is loaded with 16,384 tokens of context');
+    expect(msg).toContain(CONTEXT_OVERFLOW_MARKER);
+    expect(msg).toContain('Settings → Advanced');
+    expect(msg).toContain('LM Studio 400 on /v1/chat/completions');
+    expect(fetchMock).toHaveBeenCalledTimes(1); // a 400 is never retried
+  });
+
+  it('recognises the overflow from the message text when only a string error is sent', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ error: 'request (20000 tokens) exceeds the available context size (8192 tokens), try increasing it' }),
+        { status: 400 },
+      ),
+    );
+    await expect(chat()).rejects.toThrow(/20,000 tokens but the model is loaded with 8,192 tokens of context/);
+  });
+
+  it('keeps LM Studio\'s message for other 4xx/5xx errors', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'Model "m" not found' } }), { status: 404 }),
+    );
+    await expect(chat()).rejects.toThrow('LM Studio 404 on /v1/chat/completions: Model "m" not found');
+  });
+
+  it('falls back to the bare status when the body is empty', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 500 }));
+    await expect(chat()).rejects.toThrow(/^LM Studio 500 on \/v1\/chat\/completions$/);
+  });
+});
+
+describe('parseChatErrorBody', () => {
+  it('reads structured llama.cpp fields', () => {
+    expect(
+      parseChatErrorBody(JSON.stringify({ error: { message: 'x', type: 'exceed_context_size_error', n_prompt_tokens: 5, n_ctx: 4 } })),
+    ).toEqual({ message: 'x', type: 'exceed_context_size_error', promptTokens: 5, contextTokens: 4 });
+  });
+
+  it('keeps a non-JSON body as the message', () => {
+    expect(parseChatErrorBody('upstream exploded').message).toBe('upstream exploded');
   });
 });
 

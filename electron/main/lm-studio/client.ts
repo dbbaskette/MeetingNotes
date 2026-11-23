@@ -38,6 +38,13 @@ function fetchWithDispatcher(url: string, init: FetchInit): Promise<Response> {
  *  banner's recovery controls. A parity test keeps the copies in sync. */
 export const REASONING_LOOP_MARKER = 'spent its entire token budget';
 
+/** Substring of the context-overflow error thrown by chat() below. The
+ *  renderer keeps a hand-copied twin (electron/renderer/src/lib/
+ *  context-overflow.ts) so the Weekly report card can drop its generic
+ *  "common causes" list when the real cause is already known. A parity test
+ *  keeps the copies in sync. */
+export const CONTEXT_OVERFLOW_MARKER = 'tokens of context';
+
 /** Minimum temperature for a RE-SAMPLE attempt. A temperature-0 caller's
  *  request is deterministic, so re-issuing it verbatim reproduces the exact
  *  same reasoning spiral (measured: 4/4 identical 1157-word spirals on a real
@@ -147,7 +154,7 @@ export class LMStudioClient {
         ? input.temperature
         : Math.max(input.temperature ?? 0.2, RESAMPLE_MIN_TEMPERATURE);
       const resp = await this.requestChatCompletion(input, temperature);
-      if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/chat/completions`);
+      if (!resp.ok) throw await chatHttpError(resp);
       const body = (await resp.json()) as {
         choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
       };
@@ -278,6 +285,75 @@ export class LMStudioClient {
     }
     return resp;
   }
+}
+
+/** Pull the error out of a non-2xx chat-completion body. LM Studio (llama.cpp
+ *  engine) answers an over-long prompt with 400 and
+ *  `{"error":{"message":"request (17447 tokens) exceeds the available context
+ *  size (16384 tokens), try increasing it","type":"exceed_context_size_error",
+ *  "n_prompt_tokens":17447,"n_ctx":16384}}`; other errors arrive as
+ *  `{"error":{"message":…}}` or `{"error":"…"}`. */
+export interface ChatErrorBody {
+  message: string | null;
+  type: string | null;
+  promptTokens: number | null;
+  contextTokens: number | null;
+}
+
+export function parseChatErrorBody(text: string): ChatErrorBody {
+  const out: ChatErrorBody = { message: null, type: null, promptTokens: null, contextTokens: null };
+  let parsed: unknown = null;
+  try { parsed = JSON.parse(text); } catch { /* not JSON — use raw text */ }
+  const err = parsed && typeof parsed === 'object' ? (parsed as { error?: unknown }).error : undefined;
+  if (typeof err === 'string') {
+    out.message = err;
+  } else if (err && typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    if (typeof e.message === 'string') out.message = e.message;
+    if (typeof e.type === 'string') out.type = e.type;
+    else if (typeof e.code === 'string') out.type = e.code;
+    if (typeof e.n_prompt_tokens === 'number') out.promptTokens = e.n_prompt_tokens;
+    if (typeof e.n_ctx === 'number') out.contextTokens = e.n_ctx;
+  } else if (parsed == null && text.trim()) {
+    out.message = text.trim().slice(0, 500);
+  }
+  // Fall back to the message text for the token counts — LM Studio doesn't
+  // always forward llama.cpp's structured fields.
+  const m = out.message?.match(/\((\d+) tokens\)[^(]*context size \((\d+) tokens\)/i);
+  if (m) {
+    out.promptTokens ??= Number(m[1]);
+    out.contextTokens ??= Number(m[2]);
+  }
+  return out;
+}
+
+function isContextOverflow(b: ChatErrorBody): boolean {
+  return (
+    b.type === 'exceed_context_size_error' ||
+    /exceeds the available context size/i.test(b.message ?? '')
+  );
+}
+
+const fmtTokens = (n: number): string => n.toLocaleString('en-US');
+
+/** Build the LMStudioError for a non-2xx chat-completion response, keeping
+ *  LM Studio's own explanation instead of only the status code. */
+async function chatHttpError(resp: Response): Promise<LMStudioError> {
+  const base = `LM Studio ${resp.status} on /v1/chat/completions`;
+  const text = await resp.text().catch(() => '');
+  const body = parseChatErrorBody(text);
+  if (isContextOverflow(body)) {
+    const sizes =
+      body.promptTokens != null && body.contextTokens != null
+        ? `The prompt is ${fmtTokens(body.promptTokens)} tokens but the model is loaded with ` +
+          `${fmtTokens(body.contextTokens)} ${CONTEXT_OVERFLOW_MARKER}.`
+        : `The prompt is longer than the model's loaded window of ${CONTEXT_OVERFLOW_MARKER}.`;
+    return new LMStudioError(
+      `${sizes} Raise "Context length" in Settings → Advanced (MeetingNotes reloads the ` +
+        `model with it), or reload the model in LM Studio with a larger context. (${base})`,
+    );
+  }
+  return new LMStudioError(body.message ? `${base}: ${body.message}` : base);
 }
 
 // Detect degenerate "stuck in a loop" model output — the same short phrase
