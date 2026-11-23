@@ -8,7 +8,7 @@
 
 [![Platform](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT201260)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-333333?logo=apple&logoColor=white)](https://support.apple.com/en-us/HT211814)
-[![Version](https://img.shields.io/badge/version-1.22.1-brightgreen)](docs/releases/v1.22.1.md)
+[![Version](https://img.shields.io/badge/version-1.23.0-brightgreen)](docs/releases/v1.23.0.md)
 [![Electron](https://img.shields.io/badge/Electron-44-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![Website](https://img.shields.io/badge/website-dbbaskette.github.io%2FMeetingNotes-FFB224)](https://dbbaskette.github.io/MeetingNotes/)
 
@@ -58,6 +58,13 @@ screen. See the [1.22 release notes](docs/releases/v1.22.0.md).
 1.22.1 keeps app audio when a Bluetooth headset switches between its music and
 call modes at the start of a recording; see the
 [1.22.1 release notes](docs/releases/v1.22.1.md).
+
+**1.23** adds an optional **WhisperKit** transcription engine for harder audio,
+titles a recording from your calendar when you opt in, and lets you **ask a
+question inside one meeting** with answers that jump to the quoted moment. A
+silent recording now asks before it stops, tasks keep their owners, and
+Library-wide Ask follows your search filters. See the
+[1.23 release notes](docs/releases/v1.23.0.md).
 
 ## Optional automatic voice matching
 
