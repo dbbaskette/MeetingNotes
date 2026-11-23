@@ -72,7 +72,7 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   const terminology = ctx.terminology?.snapshotSummary(meetingId);
   // Wake the LLM provider on demand (managed mode) or no-op
   // (external mode). See ctx.llmSupervisor docs.
-  await ctx.llmSupervisor.ensureReady();
+  await ctx.llmSupervisor.ensureReady(ctx.signal);
   // Anchor off-topic detection on the meeting's real title. A still-default
   // `recording-…` filename tells us nothing, so fall back to letting the model
   // infer the purpose from the transcript.

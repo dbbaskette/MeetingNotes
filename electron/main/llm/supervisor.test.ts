@@ -280,4 +280,28 @@ describe('LLMSupervisor', () => {
     expect(spawn.mock.calls[1][0]).toBe('/fake/ollama');
     await sup.stop();
   });
+
+  it('aborts ensureReady promptly during model loading when signal fires', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Processing cancelled by you.');
+    const lmsLoadModel = vi.fn(
+      (_bin: string, _id: string, _ctx?: number, signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen3.5-9b',
+      findLmsBinary: () => '/fake/lms',
+      lmStudioProbe: async () => ({ ok: true }),
+      lmsListLoadedModels: async () => [],
+      lmsLoadModel,
+      idleShutdownMs: 0,
+    });
+    const pending = sup.ensureReady(controller.signal);
+    setTimeout(() => controller.abort(reason), 10);
+    await expect(pending).rejects.toThrow('Processing cancelled by you.');
+    await sup.stop();
+  });
 });

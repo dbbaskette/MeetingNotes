@@ -93,7 +93,7 @@ export interface IpcServices {
   /** Lazy-spawn supervisor for the summary LLM. reextract calls
    *  ensureReady() before its chat() call, exactly as the extract stage
    *  does — a no-op when provider='external' (user-managed LM Studio). */
-  llmSupervisor: { ensureReady: () => Promise<void> };
+  llmSupervisor: { ensureReady: (signal?: AbortSignal) => Promise<void> };
   recordingManager: RecordingManager;
   recordingRecovery: RecordingRecoveryService;
   appEnumerator: AppEnumerator;
@@ -467,6 +467,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
     if (!m || m.deletedAt) return false; // idempotent no-op, not a new deletion
+    const pipelineStatus = s.pipeline.getStatus?.();
+    if (pipelineStatus ? pipelineStatus.currentId === id : m.status === 'processing') {
+      throw new Error('Wait for processing to finish or cancel it before deleting this meeting.');
+    }
+    if (pipelineStatus?.queueIds.includes(id)) {
+      s.pipeline.removeQueued?.(id);
+    }
     // Soft-delete: move files to the per-meeting trash dir, stamp
     // deleted_at on the row. The undo path (meetingsUndoDelete) moves
     // everything back. Purge expired entries on startup + on a timer.

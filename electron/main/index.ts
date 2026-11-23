@@ -275,12 +275,20 @@ app.whenReady().then(async () => {
   // hits the right port even after the user switches provider in
   // Settings without restarting the app. 'external' falls back to the
   // user-configured lmStudioUrl.
-  const lmStudio = new LMStudioClient(() => {
-    const provider = settings.get('summaryProvider');
-    if (provider === 'lm-studio') return 'http://127.0.0.1:1234';
-    if (provider === 'ollama') return 'http://127.0.0.1:11434';
-    return settings.get('lmStudioUrl');
-  });
+  const lmStudio = new LMStudioClient(
+    () => {
+      const provider = settings.get('summaryProvider');
+      if (provider === 'lm-studio') return 'http://127.0.0.1:1234';
+      if (provider === 'ollama') return 'http://127.0.0.1:11434';
+      return settings.get('lmStudioUrl');
+    },
+    () => {
+      const provider = settings.get('summaryProvider');
+      if (provider === 'lm-studio') return 'LM Studio';
+      if (provider === 'ollama') return 'Ollama';
+      return 'LLM server';
+    },
+  );
   // Phase 3 LLM-provider lifecycle. When summaryProvider='external'
   // (the default), this is a no-op and behavior matches today's
   // user-managed LM Studio / Ollama. Switching to 'lm-studio' or

@@ -13,6 +13,7 @@ import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
+import { toFileUrl } from '../lib/file-url';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -604,7 +605,7 @@ export function MeetingDetailView({
         <audio
           ref={audioRef}
           controls
-          src={`file://${m.audioPath}`}
+          src={toFileUrl(m.audioPath)}
           onTimeUpdate={onTimeUpdate}
           onLoadedMetadata={applyRate}
           className="flex-1 min-w-0"
