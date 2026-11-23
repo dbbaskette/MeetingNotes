@@ -13,7 +13,7 @@
 
 import type { IpcMain } from 'electron';
 import { z } from 'zod';
-import { IPC_CHANNELS } from './contracts.js';
+import { AskScopeSchema, IPC_CHANNELS } from './contracts.js';
 
 const C = IPC_CHANNELS;
 
@@ -141,7 +141,7 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   // Search, pipeline, models
   [C.searchQuery]: z.tuple([Text, z.number().optional(), Id.nullable().optional(), handlerValidated]),
   [C.searchCancel]: z.tuple([handlerValidated]),
-  [C.searchAsk]: z.tuple([z.string().min(1).max(2000)]),
+  [C.searchAsk]: z.tuple([z.string().min(1).max(2000), AskScopeSchema.optional()]),
   [C.searchAskCancel]: none,
   [C.pipelineStatus]: none,
   [C.pipelineCancel]: z.tuple([Id]),

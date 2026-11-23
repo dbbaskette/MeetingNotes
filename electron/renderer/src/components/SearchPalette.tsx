@@ -160,7 +160,8 @@ export function SearchPalette({
           </kbd>
         </div>
         <div className="px-4 py-2"><SearchFilters facets={facets} onChange={setFacets} query={q} onQuery={setQ}/>{completion&&<p role="status" className="text-xs text-status-warnText">{completion}</p>}</div>
-        {asking !== null && <AskAnswer question={asking} onBack={() => { setAsking(null); inputRef.current?.focus(); }}
+        {/* Ask honours the same filters as the results list (#254). */}
+        {asking !== null && <AskAnswer question={asking} {...(Object.keys(facets).length ? { scope: { facets } } : {})} onBack={() => { setAsking(null); inputRef.current?.focus(); }}
           onOpen={(source) => { onOpenMeeting({ meetingId: source.meetingId, title: source.title, ...(source.startS !== null ? { seekSeconds: source.startS } : {}) }); onClose(); }} />}
         {/* Announce result counts: the listbox updates silently for screen readers. */}
         <p role="status" aria-live="polite" className="sr-only">
@@ -177,7 +178,7 @@ export function SearchPalette({
                   {' '}<kbd className="font-mono">{shortcutMod()}+Enter</kbd> jumps to the
                   matched timestamp. Or type a question and press
                   {' '}<kbd className="font-mono">Shift+Enter</kbd> to get an answer drawn
-                  from all your meetings.
+                  from your meetings (only the filtered ones when filters are set).
                 </div>
               );
             }

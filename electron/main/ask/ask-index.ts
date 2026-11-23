@@ -6,6 +6,8 @@ import { chunkSummary, chunkTranscript, type Passage } from './passages.js';
 
 export interface IndexedMeeting { id: string; slug: string }
 export interface PassageHit extends Passage { meetingId: string; rank: number }
+/** Narrows a search: only these meetings, only notes or only transcript. */
+export interface PassageFilter { meetingIds?: readonly string[]; kind?: Passage['kind'] }
 
 /** Full-text index over every meeting's notes and transcript, kept in the
  *  library database. It is a cache of files on disk: `sync` rebuilds only the
@@ -62,11 +64,21 @@ export class AskIndex {
 
   /** Best passages for an FTS5 MATCH expression, best first, with at most
    *  `perMeeting` from any one meeting so one long meeting cannot crowd out
-   *  the rest. */
-  search(match: string, limit = 10, perMeeting = 3): PassageHit[] {
+   *  the rest. `filter.meetingIds` keeps only those meetings' passages (an
+   *  empty list matches nothing) and `filter.kind` only notes or only
+   *  transcript passages; both apply before the limit. */
+  search(match: string, limit = 10, perMeeting = 3, filter: PassageFilter = {}): PassageHit[] {
+    if (filter.meetingIds && filter.meetingIds.length === 0) return [];
+    const where = ['ask_passages MATCH @match'];
+    const params: Record<string, string | number> = { match, take: limit * 6 };
+    if (filter.meetingIds) {
+      where.push('meeting_id IN (SELECT value FROM json_each(@ids))');
+      params.ids = JSON.stringify(filter.meetingIds);
+    }
+    if (filter.kind) { where.push('kind = @kind'); params.kind = filter.kind; }
     const rows = this.db.prepare(`
       SELECT body AS text, meeting_id AS meetingId, kind, start_s AS startS, heading, bm25(ask_passages) AS rank
-      FROM ask_passages WHERE ask_passages MATCH ? ORDER BY rank LIMIT ?`).all(match, limit * 6) as PassageHit[];
+      FROM ask_passages WHERE ${where.join(' AND ')} ORDER BY rank LIMIT @take`).all(params) as PassageHit[];
     const taken = new Map<string, number>(), hits: PassageHit[] = [];
     for (const row of rows) {
       const count = taken.get(row.meetingId) ?? 0;

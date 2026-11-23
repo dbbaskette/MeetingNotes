@@ -16,6 +16,8 @@ import { StageTimeline } from './meeting-detail/StageTimeline';
 import { ProcessingMenu } from './meeting-detail/ProcessingMenu';
 import { CenterPane } from './meeting-detail/CenterPane';
 import { RightRail } from './meeting-detail/RightRail';
+import { MeetingAsk } from './meeting-detail/MeetingAsk';
+import { canAskMeeting } from './meeting-detail/meeting-ask';
 
 // Existing importers reach these through this module.
 export type { MeetingDetail } from './meeting-detail/types';
@@ -169,6 +171,10 @@ export function MeetingDetailView({
               scrollbars on narrow widths. */}
       <div className={`grid grid-cols-1 ${railOpen ? 'lg:grid-cols-[minmax(0,1fr)_260px]' : ''} flex-1 min-h-0 overflow-y-auto lg:overflow-hidden`}>
         <div className="order-1 lg:order-none min-w-0 lg:overflow-y-auto">
+          {/* Ask about this meeting (#254): above the tabs, in the notes
+              column, so it scrolls away with the content instead of taking
+              pinned height; a transcript source seeks the footer player. */}
+          {canAskMeeting(m) && <MeetingAsk meetingId={m.id} onSeek={seekTo} onTab={setTab} />}
           <CenterPane
             meeting={m}
             tab={tab}

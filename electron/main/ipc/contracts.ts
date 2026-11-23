@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FacetsSchema } from '../../shared/search-facets.js';
 
 /** Weekly payloads cross the main/renderer boundary unchanged. Keep their
  * shape here instead of maintaining copies in both processes. */
@@ -115,6 +116,12 @@ export const MeetingIdsFilterSchema = z.enum([...MeetingListFilterSchema.options
 export const MeetingListSortSchema = z.enum(['newest', 'oldest', 'longest', 'title']);
 export const GroupIdSchema = z.string().uuid();
 export const OptionalGroupScopeSchema = GroupIdSchema.nullable().optional();
+/** What `search:ask` answers over (#254): one meeting, or the library
+ *  narrowed by the same facets `search:query` accepts. */
+export const AskScopeSchema = z.object({
+  meetingId: z.string().min(1).max(200).optional(),
+  facets: FacetsSchema.optional(),
+}).strict().refine((scope) => !(scope.meetingId && scope.facets), 'Ask inside one meeting or across filtered meetings, not both');
 export const GroupNameSchema = z.string().trim().min(1).max(80);
 export const AssignGroupSchema = z.object({
   ids: z.array(z.string().min(1)).max(1000).transform((ids) => [...new Set(ids)]),
