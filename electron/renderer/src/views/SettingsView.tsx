@@ -51,6 +51,7 @@ interface Settings {
   llmContextLength: number;
   summaryDetail: 'concise' | 'standard' | 'detailed';
   disableThinking: boolean;
+  reasoningEffort: 'none' | 'minimal' | 'low' | 'default';
   theme: 'system' | 'light' | 'dark';
   googleClientId: string;
   googleClientSecret: string;
@@ -347,25 +348,31 @@ export function SettingsView({
           stays consistent across different local models. Applies to the next summary.
         </div>
       </Field>
-      <Field label="Disable model &lsquo;thinking&rsquo;">
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={s.disableThinking}
-            onChange={(e) => update('disableThinking', e.target.checked)}
-            className="mt-0.5"
-          />
-          <div className="flex-1">
-            <div className="text-sm text-ink">Tell the model to skip its chain-of-thought (recommended)</div>
-            <div className="text-xs text-ink-muted mt-1">
-              Reasoning-capable models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss) can burn
-              their whole token budget &ldquo;thinking&rdquo; and return no summary — which
-              looks like an out-of-memory error but isn&rsquo;t. Leaving this on sends
-              <code className="mx-1">enable_thinking: false</code> so even small models
-              answer directly. Turn off only if a model misbehaves with it.
-            </div>
-          </div>
-        </label>
+      <Field label="Model thinking / reasoning effort">
+        <select
+          aria-label="Model thinking / reasoning effort"
+          value={s.reasoningEffort ?? (s.disableThinking ? 'none' : 'default')}
+          onChange={(e) => {
+            const effort = e.target.value as Settings['reasoningEffort'];
+            void update('reasoningEffort', effort);
+          }}
+          className="input"
+        >
+          <option value="none">Off (recommended) — skip chain-of-thought</option>
+          <option value="minimal">Minimal — brief reasoning cap</option>
+          <option value="low">Low — light reasoning cap</option>
+          <option value="default">Model default — no thinking override</option>
+        </select>
+        <div className="text-xs text-ink-muted mt-1">
+          Reasoning-capable models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss, Inkling-2-Mini)
+          can burn their token budget &ldquo;thinking&rdquo; and return no summary.
+          <strong> Off</strong> sends <code className="mx-0.5">enable_thinking: false</code> and{' '}
+          <code className="mx-0.5">reasoning_effort: &quot;none&quot;</code>; <strong>Minimal</strong> /{' '}
+          <strong>Low</strong> cap effort via <code className="mx-0.5">reasoning_effort</code>.
+          If LM Studio ignores API overrides for a model, add{' '}
+          <code className="mx-0.5">{'{%- set reasoning_effort = "none" %}'}</code> at the top of
+          its Jinja prompt template in LM Studio.
+        </div>
       </Field>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="appearance theme light dark system">

@@ -77,6 +77,43 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  it('ensureServerUp starts the LM Studio server without loading a model', async () => {
+    let probeCalls = 0;
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
+    const lmsLoadModel = vi.fn(async () => {});
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.8-27b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: async () => ({ ok: ++probeCalls >= 2 }),
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels: async () => [],
+      idleShutdownMs: 0,
+    });
+    await sup.ensureServerUp();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0][1]).toEqual(['server', 'start', '--port', '1234']);
+    expect(lmsLoadModel).not.toHaveBeenCalled();
+    await sup.stop();
+  });
+
+  it('ensureServerUp is a no-op when provider is "external"', async () => {
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'external',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: async () => ({ ok: false }),
+      ollamaProbe: async () => ({ ok: false }),
+    });
+    await sup.ensureServerUp();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('ollama mode spawns `ollama serve` with OLLAMA_HOST env', async () => {
     let probeCalls = 0;
     const probe = async (): Promise<{ ok: boolean }> => {
@@ -378,6 +415,30 @@ describe('LLMSupervisor', () => {
     probeCalls = { lms: 0, ollama: 0 };
     await sup.ensureReady();
     expect(spawn.mock.calls[1][0]).toBe('/fake/ollama');
+    await sup.stop();
+  });
+
+  it('aborts ensureReady promptly during model loading when signal fires', async () => {
+    const controller = new AbortController();
+    const reason = new Error('Processing cancelled by you.');
+    const lmsLoadModel = vi.fn(
+      (_bin: string, _id: string, _ctx?: number, signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen3.5-9b',
+      findLmsBinary: () => '/fake/lms',
+      lmStudioProbe: async () => ({ ok: true }),
+      lmsListLoadedModels: async () => [],
+      lmsLoadModel,
+      idleShutdownMs: 0,
+    });
+    const pending = sup.ensureReady(controller.signal);
+    setTimeout(() => controller.abort(reason), 10);
+    await expect(pending).rejects.toThrow('Processing cancelled by you.');
     await sup.stop();
   });
 });

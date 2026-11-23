@@ -70,6 +70,7 @@ const previewSettings: Settings = {
   llmContextLength: 0,
   summaryDetail: 'detailed',
   disableThinking: true,
+  reasoningEffort: 'none',
   modelHealthChecks: {},
   theme: 'system',
   googleClientId: '',

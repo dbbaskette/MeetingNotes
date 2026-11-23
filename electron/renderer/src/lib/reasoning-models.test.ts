@@ -19,6 +19,11 @@ describe('isKnownReasoningModel', () => {
     expect(isKnownReasoningModel('gpt-oss-20b')).toBe(true);
   });
 
+  it('flags Inkling-2-Mini and QwQ', () => {
+    expect(isKnownReasoningModel('thinkingmachines/inkling-2-mini')).toBe(true);
+    expect(isKnownReasoningModel('qwq-32b')).toBe(true);
+  });
+
   it('is case-insensitive', () => {
     expect(isKnownReasoningModel('GEMMA-4-12B')).toBe(true);
   });

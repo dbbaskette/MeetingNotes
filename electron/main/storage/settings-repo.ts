@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
 import type { ObsidianConfig } from '../../shared/obsidian.js';
+import type { ReasoningEffort } from '../lm-studio/client.js';
 
 export interface Settings {
   obsidian: ObsidianConfig | null;
@@ -112,6 +113,10 @@ export interface Settings {
    *  off only if a particular model misbehaves with the kwarg or you actually
    *  want its reasoning. See LMStudioClient.chat / ChatInput.disableThinking. */
   disableThinking: boolean;
+  /** Reasoning effort cap sent to reasoning-capable local models (Qwen3,
+   *  Gemma 4, DeepSeek-R1, gpt-oss, Inkling-2-Mini). Kept in sync with
+   *  legacy `disableThinking` for backwards compatibility. */
+  reasoningEffort: ReasoningEffort;
   /** Cache of on-demand model health-check verdicts, keyed by model id, so
    *  a model already confirmed "ok" or "loops" isn't re-checked every time
    *  Settings re-renders. Populated by the llm:health-check-model IPC
@@ -175,6 +180,7 @@ export const DEFAULT_SETTINGS: Settings = {
   llmContextLength: 0,
   summaryDetail: 'detailed',
   disableThinking: true,
+  reasoningEffort: 'none',
   modelHealthChecks: {},
   theme: 'system',
   googleClientId: '',
@@ -208,7 +214,13 @@ export class SettingsRepo {
 
   get<K extends Key>(key: K): Settings[K] {
     const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
-    if (!r) return DEFAULT_SETTINGS[key];
+    if (!r) {
+      if (key === 'reasoningEffort') {
+        const legacy = this.db.prepare("SELECT value FROM settings WHERE key = 'disableThinking'").get() as { value: string } | undefined;
+        if (legacy && JSON.parse(legacy.value) === false) return 'default' as Settings[K];
+      }
+      return DEFAULT_SETTINGS[key];
+    }
     const parsed = JSON.parse(r.value) as unknown;
     if (key === 'autoDetectMeetings') {
       return normalizeAutoDetectMeetings(parsed) as Settings[K];
@@ -220,23 +232,32 @@ export class SettingsRepo {
     const toStore = key === 'autoDetectMeetings'
       ? normalizeAutoDetectMeetings(value)
       : value;
-    this.db.prepare(`
+    const upsert = this.db.prepare(`
       INSERT INTO settings (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(key, JSON.stringify(toStore));
+    `);
+    upsert.run(key, JSON.stringify(toStore));
+    if (key === 'reasoningEffort') {
+      upsert.run('disableThinking', JSON.stringify(toStore === 'none'));
+    } else if (key === 'disableThinking') {
+      upsert.run('reasoningEffort', JSON.stringify(toStore ? 'none' : 'default'));
+    }
   }
 
   getAll(): Settings {
     const out = { ...DEFAULT_SETTINGS };
     const rows = this.db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+    let hasReasoningEffort = false;
     for (const { key, value } of rows) {
       if (key in DEFAULT_SETTINGS) {
+        if (key === 'reasoningEffort') hasReasoningEffort = true;
         const parsed = JSON.parse(value) as unknown;
         (out as Record<string, unknown>)[key] = key === 'autoDetectMeetings'
           ? normalizeAutoDetectMeetings(parsed)
           : parsed;
       }
     }
+    if (!hasReasoningEffort && !out.disableThinking) out.reasoningEffort = 'default';
     return out;
   }
 }

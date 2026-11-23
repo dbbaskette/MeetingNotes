@@ -77,21 +77,28 @@ export interface ChatMessage {
   content: string;
 }
 
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'default';
+
 export interface ChatInput {
   signal?: AbortSignal;
   model: string;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  /** Turn the model's "thinking" / chain-of-thought OFF. Reasoning-capable
-   *  local models (Gemma 4, Qwen3, DeepSeek-R1, gpt-oss, …) otherwise burn
-   *  their whole token budget in `reasoning_content` and return empty
-   *  `content` — looking like an out-of-memory failure when it isn't. When
-   *  true we pass `chat_template_kwargs: { enable_thinking: false }`, which
-   *  LM Studio's OpenAI-compatible API forwards to the model's chat template
-   *  (the only reliable lever — Gemma 4 has no LM Studio UI toggle). Models
-   *  whose template doesn't reference the kwarg simply ignore it. */
+  /** Turn the model's "thinking" / chain-of-thought OFF. Legacy boolean alias
+   *  for `reasoningEffort: 'none'`. When `reasoningEffort` is set, it takes
+   *  precedence. */
   disableThinking?: boolean;
+  /** Desired reasoning/thinking effort cap for reasoning-capable local models
+   *  (Qwen3, Gemma 4, DeepSeek-R1, gpt-oss, Inkling-2-Mini, …).
+   *   - 'none': emits `reasoning_effort: 'none'` AND
+   *     `chat_template_kwargs: { enable_thinking: false, reasoning_effort: 'none' }`
+   *     so both `enable_thinking`-based and `reasoning_effort`-based Jinja
+   *     templates suppress chain-of-thought.
+   *   - 'minimal' | 'low': emits `reasoning_effort` + `chat_template_kwargs.reasoning_effort`
+   *     to cap thinking length without turning it off completely.
+   *   - 'default': omits both keys so non-reasoning models stay unchanged. */
+  reasoningEffort?: ReasoningEffort;
   /** How many times to RE-ISSUE the request when the model returns an
    *  intermittent "reasoning runaway" (empty content because it spent the
    *  whole budget thinking). Gemma 4 can't be told to stop thinking (it
@@ -109,12 +116,36 @@ export interface ChatInput {
   onResample?: (retry: number, reasoningWords: number) => void;
 }
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(typeof signal.reason === 'string' && signal.reason ? signal.reason : 'Request cancelled');
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(abortError(signal!));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export class LMStudioClient {
   /** Either a fixed URL string or a resolver function (for the
    *  Phase 3 managed-LLM-provider path, where the URL switches
    *  between LM Studio's :1234 and Ollama's :11434 based on the
    *  user's summaryProvider setting). */
-  constructor(private readonly urlOrResolver: string | (() => string)) {}
+  constructor(
+    private readonly urlOrResolver: string | (() => string),
+    private readonly providerLabelOrResolver: string | (() => string) = 'LM Studio',
+  ) {}
 
   /** Live-resolved base URL. Existing code reads `this.baseUrl` so
    *  this getter keeps the call sites unchanged. */
@@ -124,27 +155,36 @@ export class LMStudioClient {
       : this.urlOrResolver();
   }
 
+  private get providerLabel(): string {
+    return typeof this.providerLabelOrResolver === 'string'
+      ? this.providerLabelOrResolver
+      : this.providerLabelOrResolver();
+  }
+
   async listModels(): Promise<string[]> {
+    const label = this.providerLabel;
     let resp: Response;
     try {
       resp = await fetch(`${this.baseUrl}/v1/models`, {
         signal: AbortSignal.timeout(5000),
       });
     } catch (e) {
-      throw new LMStudioError(`LM Studio unreachable at ${this.baseUrl}`, e);
+      throw new LMStudioError(`${label} unreachable at ${this.baseUrl}`, e);
     }
-    if (!resp.ok) throw new LMStudioError(`LM Studio ${resp.status} on /v1/models`);
+    if (!resp.ok) throw new LMStudioError(`${label} ${resp.status} on /v1/models`);
     const body = (await resp.json()) as { data?: { id: string }[] };
     return (body.data ?? []).map((m) => m.id);
   }
 
   async chat(input: ChatInput): Promise<string> {
+    const label = this.providerLabel;
     // Outer loop re-samples the intermittent reasoning runaway (see
     // resampleRetries). Each pass is a fresh request; callers that re-sample
     // use temperature > 0, so the retry gets a different generation and the
     // spiral (a sampling tail event) almost always clears.
     const maxResample = Math.max(0, input.resampleRetries ?? 0);
     for (let attemptNo = 0; ; attemptNo++) {
+      if (input.signal?.aborted) throw abortError(input.signal);
       // On a re-sample, force enough temperature that the retry actually
       // diverges. Extract runs at temperature 0 (deterministic), so a plain
       // re-issue reproduces the identical spiral — measured 4/4 identical
@@ -154,7 +194,7 @@ export class LMStudioClient {
         ? input.temperature
         : Math.max(input.temperature ?? 0.2, RESAMPLE_MIN_TEMPERATURE);
       const resp = await this.requestChatCompletion(input, temperature);
-      if (!resp.ok) throw await chatHttpError(resp);
+      if (!resp.ok) throw await chatHttpError(resp, label);
       const body = (await resp.json()) as {
         choices: { finish_reason?: string; message: { content: string; reasoning_content?: string } }[];
       };
@@ -182,17 +222,17 @@ export class LMStudioClient {
             continue; // re-sample the spiral
           }
           throw new LMStudioError(
-            `LM Studio produced no answer — the model ${REASONING_LOOP_MARKER} ` +
+            `${label} produced no answer — the model ${REASONING_LOOP_MARKER} ` +
               `"thinking" (~${reasoningWords} reasoning words) without writing any output. ` +
-              `This reasoning model (e.g. Gemma 4, Qwen3) is looping on this transcript. ` +
-              `Turn ON "Disable model thinking" in Settings so MeetingNotes tells the model ` +
-              `to skip its chain-of-thought, then retry. (If it's already on, this model ` +
-              `ignores the thinking toggle — switch to a non-reasoning model in LM Studio.)` +
+              `This reasoning model (e.g. Gemma 4, Qwen3, Inkling-2-Mini) is looping on this transcript. ` +
+              `Set "Model thinking / reasoning effort" to Off (none) or Minimal in Settings and retry. ` +
+              `(If it's already Off, this model or server ignores API thinking overrides — set ` +
+              `\`{%- set reasoning_effort = "none" %}\` in ${label}'s Prompt Template or switch to a non-reasoning model.)` +
               (reasoning ? ` Reasoning began: "${reasoning.slice(0, 80)}…"` : ''),
           );
         }
         throw new LMStudioError(
-          `LM Studio returned empty content — the model likely ran out of GPU memory ` +
+          `${label} returned empty content — the model likely ran out of GPU memory ` +
             `mid-generation. Try a smaller model in Settings (e.g. qwen3.5-9b).`,
         );
       }
@@ -206,7 +246,7 @@ export class LMStudioClient {
       if (looksDegenerate(cleaned)) {
         const words = cleaned.trim().split(/\s+/).length;
         throw new LMStudioError(
-          `LM Studio returned repetitive, looping output (${words} words, almost no ` +
+          `${label} returned repetitive, looping output (${words} words, almost no ` +
             `lexical variety) — the model degenerated mid-generation. This is usually ` +
             `memory pressure or too-long a context. Free memory, lower the model's ` +
             `context length, or switch to a smaller model in Settings.`,
@@ -221,12 +261,28 @@ export class LMStudioClient {
    *  failure that survives the retry. Separated from {@link chat} so the
    *  re-sample loop can re-issue it cleanly. */
   private async requestChatCompletion(input: ChatInput, temperature?: number): Promise<Response> {
+    if (input.signal?.aborted) throw abortError(input.signal);
+    const label = this.providerLabel;
     // 10-minute ceiling per attempt. Summarizing / extracting on a local model
     // routinely runs several minutes for long transcripts. One retry on
     // transient network failure — LM Studio occasionally drops mid-stream
     // connections between pipeline stages (the socket recovers within a
     // second or two). We don't retry aborts / 4xx / 5xx, only true network
     // failures, so we're not masking legit server errors.
+    const effort: ReasoningEffort =
+      input.reasoningEffort ?? (input.disableThinking ? 'none' : 'default');
+    const reasoningExtras =
+      effort === 'none'
+        ? {
+            reasoning_effort: 'none' as const,
+            chat_template_kwargs: { enable_thinking: false, reasoning_effort: 'none' as const },
+          }
+        : effort === 'minimal' || effort === 'low'
+          ? {
+              reasoning_effort: effort,
+              chat_template_kwargs: { reasoning_effort: effort },
+            }
+          : {};
     const attempt = async (): Promise<Response> => fetchWithDispatcher(
       `${this.baseUrl}/v1/chat/completions`,
       {
@@ -237,11 +293,9 @@ export class LMStudioClient {
           messages: input.messages,
           temperature: temperature ?? input.temperature ?? 0.2,
           max_tokens: input.maxTokens,
-          // Only emit the key when we actually want thinking off, so a
-          // request to a non-reasoning model stays byte-for-byte unchanged.
-          ...(input.disableThinking
-            ? { chat_template_kwargs: { enable_thinking: false } }
-            : {}),
+          // Only emit thinking keys when suppressing or capping reasoning, so
+          // a request with 'default' stays byte-for-byte unchanged.
+          ...reasoningExtras,
         }),
         signal: input.signal ? AbortSignal.any([input.signal, AbortSignal.timeout(10 * 60 * 1000)]) : AbortSignal.timeout(10 * 60 * 1000),
         dispatcher: getSlowLLMAgent(),
@@ -252,6 +306,7 @@ export class LMStudioClient {
     try {
       resp = await attempt();
     } catch (e) {
+      if (input.signal?.aborted) throw abortError(input.signal);
       // `AbortSignal.timeout()` rejects with a DOMException named "TimeoutError"
       // (NOT "AbortError"), so checking only AbortError let a genuine 10-minute
       // timeout fall through to the network-retry branch below — doubling the
@@ -261,24 +316,25 @@ export class LMStudioClient {
         e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError');
       if (isTimeout) {
         throw new LMStudioError(
-          'LM Studio chat timed out after 10 minutes. The model stalled or ran away ' +
-            '(repetitive/looping output) — usually a sign of memory pressure or too-long ' +
-            "a context. Free memory, lower the model's context length, or pick a smaller " +
-            'model in Settings.',
+          `${label} chat timed out after 10 minutes. The model stalled or ran away ` +
+            `(repetitive/looping output) — usually a sign of memory pressure or too-long ` +
+            `a context. Free memory, lower the model's context length, or pick a smaller ` +
+            `model in Settings.`,
           e,
         );
       }
       // Network hiccup — pause and retry once. If the second attempt still
       // blows up, surface the underlying error cause in the message so the
       // user isn't staring at a generic "network".
-      await new Promise((r) => setTimeout(r, 2000));
+      await sleepAbortable(2000, input.signal);
       try {
         resp = await attempt();
       } catch (e2) {
+        if (input.signal?.aborted) throw abortError(input.signal);
         const cause = describeFetchError(e2);
         throw new LMStudioError(
-          `LM Studio chat failed after retry (${cause}). ` +
-            `Check LM Studio is running, a model is loaded, and the server tab is enabled.`,
+          `${label} chat failed after retry (${cause}). ` +
+            `Check ${label} is running, a model is loaded, and the server is enabled.`,
           e2,
         );
       }
@@ -338,8 +394,8 @@ const fmtTokens = (n: number): string => n.toLocaleString('en-US');
 
 /** Build the LMStudioError for a non-2xx chat-completion response, keeping
  *  LM Studio's own explanation instead of only the status code. */
-async function chatHttpError(resp: Response): Promise<LMStudioError> {
-  const base = `LM Studio ${resp.status} on /v1/chat/completions`;
+async function chatHttpError(resp: Response, label = 'LM Studio'): Promise<LMStudioError> {
+  const base = `${label} ${resp.status} on /v1/chat/completions`;
   const text = await resp.text().catch(() => '');
   const body = parseChatErrorBody(text);
   if (isContextOverflow(body)) {

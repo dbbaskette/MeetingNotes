@@ -13,6 +13,7 @@ import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
+import { toFileUrl } from '../lib/file-url';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -604,7 +605,7 @@ export function MeetingDetailView({
         <audio
           ref={audioRef}
           controls
-          src={`file://${m.audioPath}`}
+          src={toFileUrl(m.audioPath)}
           onTimeUpdate={onTimeUpdate}
           onLoadedMetadata={applyRate}
           className="flex-1 min-w-0"
@@ -1083,7 +1084,7 @@ export function FailureBanner({
 function ReasoningRecoveryControls(): JSX.Element {
   const [models, setModels] = useState<string[]>([]);
   const [llmModel, setLlmModel] = useState('');
-  const [disableThinking, setDisableThinking] = useState(true);
+  const [reasoningEffort, setReasoningEffort] = useState<'none' | 'minimal' | 'low' | 'default'>('none');
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -1091,10 +1092,14 @@ function ReasoningRecoveryControls(): JSX.Element {
     void Promise.all([api.models.list(), api.settings.getAll()]).then(([m, settings]) => {
       if (!alive) return;
       const modelList = m as string[];
-      const current = settings as { llmModel: string; disableThinking: boolean };
+      const current = settings as {
+        llmModel: string;
+        disableThinking: boolean;
+        reasoningEffort?: 'none' | 'minimal' | 'low' | 'default';
+      };
       setModels(modelList);
       setLlmModel(current.llmModel);
-      setDisableThinking(current.disableThinking);
+      setReasoningEffort(current.reasoningEffort ?? (current.disableThinking ? 'none' : 'default'));
       setLoaded(true);
     });
     return () => { alive = false; };
@@ -1105,9 +1110,9 @@ function ReasoningRecoveryControls(): JSX.Element {
     await api.settings.set('llmModel', next);
   }
 
-  async function changeDisableThinking(next: boolean): Promise<void> {
-    setDisableThinking(next);
-    await api.settings.set('disableThinking', next);
+  async function changeReasoningEffort(next: 'none' | 'minimal' | 'low' | 'default'): Promise<void> {
+    setReasoningEffort(next);
+    await api.settings.set('reasoningEffort', next);
   }
 
   if (!loaded) {
@@ -1120,6 +1125,7 @@ function ReasoningRecoveryControls(): JSX.Element {
         This looks like a reasoning-model loop. Fix it here, then hit Retry:
       </div>
       <select
+        aria-label="Summary LLM model"
         value={llmModel}
         onChange={(e) => void changeModel(e.target.value)}
         className="input text-xs"
@@ -1129,13 +1135,19 @@ function ReasoningRecoveryControls(): JSX.Element {
           <option key={m} value={m}>{isKnownReasoningModel(m) ? `${m} (reasoning)` : m}</option>
         ))}
       </select>
-      <label className="flex items-center gap-2 text-xs text-danger-text cursor-pointer">
-        <input
-          type="checkbox"
-          checked={disableThinking}
-          onChange={(e) => void changeDisableThinking(e.target.checked)}
-        />
-        Disable model thinking
+      <label className="flex items-center gap-2 text-xs text-danger-text">
+        <span>Reasoning effort</span>
+        <select
+          aria-label="Reasoning effort"
+          value={reasoningEffort}
+          onChange={(e) => void changeReasoningEffort(e.target.value as 'none' | 'minimal' | 'low' | 'default')}
+          className="input text-xs flex-1"
+        >
+          <option value="none">Off (none)</option>
+          <option value="minimal">Minimal</option>
+          <option value="low">Low</option>
+          <option value="default">Model default</option>
+        </select>
       </label>
     </div>
   );

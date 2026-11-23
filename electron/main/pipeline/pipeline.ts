@@ -121,6 +121,17 @@ export class Pipeline {
     return dropped;
   }
 
+  /** Remove a single queued (not-yet-running) meeting from the queue. */
+  removeQueued(meetingId: string): boolean {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((id) => id !== meetingId);
+    if (this.queue.length !== before) {
+      this.notify();
+      return true;
+    }
+    return false;
+  }
+
   cancelCurrent(meetingId: string): void {
     if (this.currentId !== meetingId || !this.controller) throw new Error('That meeting is no longer processing.');
     this.controller.abort(new Error('Processing cancelled by you. Original audio is retained; retry when ready.'));

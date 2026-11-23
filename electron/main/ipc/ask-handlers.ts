@@ -24,9 +24,10 @@ export function registerAskHandlers(ipc: IpcMain, s: IpcServices): void {
         index: s.askIndex,
         meetings: () => s.meetings.listAll(),
         chat: (input) => s.lmStudio.chat(input),
-        ensureReady: () => s.llmSupervisor.ensureReady(),
+        ensureReady: (sig) => s.llmSupervisor.ensureReady(sig),
         model: () => s.settings.get('llmModel'),
         disableThinking: () => s.settings.get('disableThinking'),
+        reasoningEffort: () => s.settings.get('reasoningEffort'),
       }, question, controller.signal);
       // Never log the question or the answer: they are meeting content.
       s.logger.info('ask:done', { found: result.found, sources: result.sources.length, ms: Date.now() - started });
