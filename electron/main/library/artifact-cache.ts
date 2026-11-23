@@ -29,6 +29,7 @@ interface CacheEntry {
   fingerprint: string | null;
   generation: string;
   source: string | null;
+  parsedJson?: { value: unknown };
   bytes: number;
   lastUsed: number;
   inFlight?: Promise<string | null>;
@@ -62,8 +63,14 @@ export class ArtifactCache {
     const key = path.resolve(filePath);
     const source = await this.readSource(key);
     if (source === null) return null;
+    const entry = this.entries.get(key);
+    if (entry && entry.source === source && entry.parsedJson) {
+      return entry.parsedJson.value as T;
+    }
     try {
-      return JSON.parse(source) as T;
+      const value = JSON.parse(source) as T;
+      if (entry && entry.source === source) entry.parsedJson = { value };
+      return value;
     } catch (error) {
       // Drop the malformed source without evicting a newer, different read.
       if (this.entries.get(key)?.source === source) this.removeEntry(key);
@@ -171,11 +178,16 @@ export class ArtifactCache {
   }
 
   private generationFor(filePath: string): string {
-    const folders = [...this.folderGenerations.entries()]
-      .filter(([folder]) => isWithin(filePath, folder))
-      .sort(([left], [right]) => left.localeCompare(right));
+    const pathGen = this.pathGenerations.get(filePath) ?? 0;
+    if (this.folderGenerations.size === 0) return `${pathGen}|`;
+    const folders: [string, number][] = [];
+    for (const pair of this.folderGenerations) {
+      if (isWithin(filePath, pair[0])) folders.push(pair);
+    }
+    if (folders.length === 0) return `${pathGen}|`;
+    if (folders.length > 1) folders.sort(([left], [right]) => left.localeCompare(right));
     const folderGeneration = folders.map(([folder, generation]) => `${folder}:${generation}`).join('|');
-    return `${this.pathGenerations.get(filePath) ?? 0}|${folderGeneration}`;
+    return `${pathGen}|${folderGeneration}`;
   }
 
   private removeEntry(filePath: string): void {

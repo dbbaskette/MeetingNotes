@@ -380,7 +380,7 @@ describe('registerIpcHandlers', () => {
       expect(fsSync.readFileSync(summary, 'utf8')).toBe('## Notes\nDana follows up. Dan keeps his name. My manual edit.');
       expect(actionItems.listByMeeting('m')[0]).toMatchObject({ ownerName: 'Dana', text: 'Dana will call Dan' });
       meetings.updateStatus('m', 'processing');
-      expect(() => assign(ipcEvent, { meetingId: 'm', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: person })).toThrow(/finish processing/);
+      await expect(assign(ipcEvent, { meetingId: 'm', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: person })).rejects.toThrow(/finish processing/);
     } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
   });
   it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
@@ -773,7 +773,7 @@ describe('registerIpcHandlers', () => {
     expect(result.assigned).toBe(2);
   });
 
-  it('speakers:rename updates the roster row and re-merges every affected transcript', () => {
+  it('speakers:rename updates the roster row and re-merges every affected transcript', async () => {
     const rename = vi.fn();
     const handle = vi.fn();
     const fakeIpc = { handle } as unknown as IpcMain;
@@ -788,18 +788,18 @@ describe('registerIpcHandlers', () => {
     registerIpcHandlers(fakeIpc, services);
     const call = handle.mock.calls.find((c) => c[0] === 'speakers:rename');
     expect(call).toBeDefined();
-    const handler = call![1] as (e: unknown, id: unknown, name: unknown) => void;
+    const handler = call![1] as (e: unknown, id: unknown, name: unknown) => Promise<void>;
 
-    handler(null, 'spk_1', 'Dan Baskette');
+    await handler(null, 'spk_1', 'Dan Baskette');
 
     expect(rename).toHaveBeenCalledWith('spk_1', 'Dan Baskette');
     // Both linked meetings get their transcript.md rewritten with the new name.
     expect(vi.mocked(remergeTranscript).mock.calls.map((c) => c[0])).toEqual(['m1', 'm2']);
 
-    expect(() => handler(null, 42 as unknown, 'x')).toThrow(/invalid args/);
+    await expect(handler(null, 42 as unknown, 'x')).rejects.toThrow(/invalid args/);
   });
 
-  it('speakers:merge validates ids, merges via the repo, and re-merges affected transcripts', () => {
+  it('speakers:merge validates ids, merges via the repo, and re-merges affected transcripts', async () => {
     const mergeSpeakers = vi.fn(() => ['m1', 'm3']);
     const known = new Set(['spk_a', 'spk_b']);
     const stored: Record<string, unknown> = { userSpeakerId: 'spk_a' };
@@ -822,17 +822,17 @@ describe('registerIpcHandlers', () => {
     registerIpcHandlers(fakeIpc, services);
     const call = handle.mock.calls.find((c) => c[0] === 'speakers:merge');
     expect(call).toBeDefined();
-    const handler = call![1] as (e: unknown, src: unknown, tgt: unknown) => { affectedMeetingIds: string[] };
+    const handler = call![1] as (e: unknown, src: unknown, tgt: unknown) => Promise<{ affectedMeetingIds: string[] }>;
 
     // Bad inputs never reach the repo.
-    expect(() => handler(null, '', 'spk_b')).toThrow(/invalid args/);
-    expect(() => handler(null, 'spk_a', 42)).toThrow(/invalid args/);
-    expect(() => handler(null, 'spk_a', 'spk_a')).toThrow(/cannot merge a speaker into itself/);
-    expect(() => handler(null, 'spk_nope', 'spk_b')).toThrow(/source speaker not found/);
-    expect(() => handler(null, 'spk_a', 'spk_nope')).toThrow(/target speaker not found/);
+    await expect(handler(null, '', 'spk_b')).rejects.toThrow(/invalid args/);
+    await expect(handler(null, 'spk_a', 42)).rejects.toThrow(/invalid args/);
+    await expect(handler(null, 'spk_a', 'spk_a')).rejects.toThrow(/cannot merge a speaker into itself/);
+    await expect(handler(null, 'spk_nope', 'spk_b')).rejects.toThrow(/source speaker not found/);
+    await expect(handler(null, 'spk_a', 'spk_nope')).rejects.toThrow(/target speaker not found/);
     expect(mergeSpeakers).not.toHaveBeenCalled();
 
-    const result = handler(null, 'spk_a', 'spk_b');
+    const result = await handler(null, 'spk_a', 'spk_b');
 
     expect(mergeSpeakers).toHaveBeenCalledWith('spk_a', 'spk_b');
     expect(result.affectedMeetingIds).toEqual(['m1', 'm3']);

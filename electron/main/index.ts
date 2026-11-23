@@ -207,7 +207,8 @@ app.whenReady().then(async () => {
   // bridge and routes them to local state changes.
   installAppMenu();
 
-  const settingsDb = openDb(path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite'));
+  const settingsDbPath = path.join(smokeRoot ?? path.join(os.homedir(), 'Documents', 'MeetingNotes'), 'db.sqlite');
+  const settingsDb = openDb(settingsDbPath);
   const settings = new SettingsRepo(settingsDb);
   // Secrets are encrypted with the keychain and never sent to the renderer.
   // Values saved as plaintext by earlier versions are converted here (#249).
@@ -229,7 +230,10 @@ app.whenReady().then(async () => {
   };
 
   const libraryRoot = s.libraryPath;
-  const db = openDb(path.join(libraryRoot, 'db.sqlite'));
+  const libraryDbPath = path.join(libraryRoot, 'db.sqlite');
+  const db = path.resolve(libraryDbPath) === path.resolve(settingsDbPath)
+    ? settingsDb
+    : openDb(libraryDbPath);
   const meetings = new MeetingsRepo(db);
   const summaryTemplates = new SummaryTemplateStore(db);
   if (smokeRoot) seedPackageSmoke(smokeRoot, settings, meetings);
@@ -253,7 +257,6 @@ app.whenReady().then(async () => {
   // held back while a Library backup is copying.
   const guardedIpc=validateIpc(guardLibraryIpc(ipcMain));
   registerObsidianHandlers(guardedIpc, obsidian);
-  obsidian.start();
 
   // Collapse roster entries with matching display names (case + whitespace
   // insensitive) that accumulated before confirmSpeaker started deduping.
@@ -359,7 +362,10 @@ app.whenReady().then(async () => {
     BrowserWindow.getAllWindows().forEach((w) =>
       w.webContents.send(IPC_CHANNELS.recordingStateEvent, { sessionId, state, reason }));
     if (state === 'starting' || state === 'recording' || state === 'stopping') activeRecordings.add(sessionId);
-    else activeRecordings.delete(sessionId);
+    else {
+      activeRecordings.delete(sessionId);
+      levelThrottle.clearPrefix(`${sessionId}:`);
+    }
     app.dock?.setBadge(activeRecordings.size > 0 ? 'REC' : '');
   });
 
@@ -482,7 +488,6 @@ app.whenReady().then(async () => {
       }
     }
   });
-  await watcher.start();
 
   const recordingRecovery = new RecordingRecoveryService({
     sessions: recordingSessionsRepo,
@@ -525,7 +530,6 @@ app.whenReady().then(async () => {
       logger.info('trash:purged', { meetingId: m.id });
     }
   };
-  purgeExpiredTrash();
   const trashPurgeTimer = setInterval(purgeExpiredTrash, 60 * 60_000);
 
   // Meeting auto-detect (#12 browser tabs, #78 native apps). Two detectors,
@@ -869,6 +873,11 @@ app.whenReady().then(async () => {
   nativeTheme.themeSource = themeChoice;
   const winBg = nativeTheme.shouldUseDarkColors ? '#171615' : '#fafaf9';
   const mainWin = await createWindow(winBg);
+  // Start background filesystem services after window creation so startup
+  // paints immediately without waiting on folder scans or trash purges.
+  void watcher.start().catch((e) => logger.error('watcher:start-failed', { error: String(e) }));
+  obsidian.start();
+  setImmediate(purgeExpiredTrash);
   // Hand off from splash → main as soon as the renderer has painted.
   // ready-to-show fires AFTER the first paint, so the user never sees
   // a blank window. If the renderer fails to load, fall back to a

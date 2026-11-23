@@ -401,6 +401,10 @@ export const MIGRATIONS: Migration[] = [
     ALTER TABLE groups ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1));
     CREATE INDEX IF NOT EXISTS action_items_status_due ON action_items(status, due_date);
   ` },
+  { version: 27, up: `
+    CREATE INDEX IF NOT EXISTS idx_meeting_speakers_roster ON meeting_speakers(roster_speaker_id, meeting_id);
+    CREATE INDEX IF NOT EXISTS idx_action_items_owner ON action_items(owner_speaker_id);
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

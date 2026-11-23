@@ -175,7 +175,7 @@ describe('Obsidian sync', () => {
     );
     runMigrations(db);
     expect(meetings.findById('one')).toEqual(original);
-    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 26 });
+    expect(db.prepare('SELECT version FROM schema_version').get()).toEqual({ version: 27 });
     expect(db.prepare('SELECT * FROM obsidian_revisions').get()).toEqual({
       meeting_id: 'one',
       revision: 1,

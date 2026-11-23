@@ -10,6 +10,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { matchMeeting } from './patterns.js';
 
 const pExecFile = promisify(execFile);
 
@@ -136,7 +137,7 @@ export async function queryAllBrowsers(
   const kinds: BrowserKind[] = ['arc', 'chrome', 'safari', 'edge', 'brave'];
   const tabs = await Promise.all(kinds.map(async (k) => {
     const tab = await queryBrowserTab(k, deps);
-    if (!tab) return null;
+    if (!tab || !matchMeeting(tab.url)) return null;
     const pid = await resolveBrowserPid(k, deps);
     if (pid == null) return null;
     return { ...tab, pid } satisfies ActiveTab;

@@ -88,4 +88,17 @@ describe('ActionItemsRepo', () => {
     expect(created.sourceQuote).toBeNull();
     expect(repo.listByMeeting(meetingId)[0]!.sourceQuote).toBeNull();
   });
+
+  it('countByMeeting and listForMeetings batch accurately', () => {
+    meetings.insert({ id: 'm2', slug: 's2', title: 't2', startedAt: null, durationS: null, audioPath: '/a2', status: 'done', pipelineStage: 'done' });
+    repo.create(meetingId, { text: 'one' });
+    repo.create(meetingId, { text: 'two' });
+    repo.create('m2', { text: 'three' });
+    expect(repo.countByMeeting(meetingId)).toBe(2);
+    expect(repo.countByMeeting('missing')).toBe(0);
+    const grouped = repo.listForMeetings([meetingId, 'm2', 'missing']);
+    expect(grouped.get(meetingId)?.map((r) => r.text)).toEqual(['one', 'two']);
+    expect(grouped.get('m2')?.map((r) => r.text)).toEqual(['three']);
+    expect(grouped.has('missing')).toBe(false);
+  });
 });

@@ -17,6 +17,8 @@ export interface PeakThrottle {
    *  already elapsed since the last emit for that key; otherwise tracks
    *  the running max and emits it when the window closes. */
   push(key: string, value: number): void;
+  /** Cancel pending timers and release entries whose key starts with `prefix`. */
+  clearPrefix(prefix: string): void;
 }
 
 interface Entry {
@@ -62,6 +64,13 @@ export function createPeakThrottle(
         }, delay);
         // Don't hold the process open for a meter flush.
         entry.timer.unref?.();
+      }
+    },
+    clearPrefix(prefix: string): void {
+      for (const [key, entry] of entries) {
+        if (!key.startsWith(prefix)) continue;
+        if (entry.timer !== null) clearTimeout(entry.timer);
+        entries.delete(key);
       }
     },
   };
