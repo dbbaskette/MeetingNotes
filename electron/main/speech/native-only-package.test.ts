@@ -21,8 +21,12 @@ it('packages only capture/native speech helpers and no Python sidecar', () => {
 it('has no legacy download, HF-token or remote STT bridge', () => {
   for (const file of ['electron/preload/index.ts', 'electron/main/ipc/contracts.ts', 'electron/main/ipc/settings-handlers.ts'])
     expect(read(file)).not.toMatch(/onboardingWhisper|onboardingHfToken|sttProbe|downloadWhisperModel/);
-  for (const file of ['electron/renderer/src/views/OnboardingView.tsx', 'electron/renderer/src/views/SettingsView.tsx'])
-    expect(read(file)).not.toMatch(/WhisperStep|HfTokenStep|speechProvider|sttModel|sttUrl|installWhisperModel/);
+  // Settings is split into per-section files (#256); the guard covers all of them.
+  const settingsFiles = fs.readdirSync(path.resolve('electron/renderer/src/views/settings'))
+    .filter(name => /\.tsx?$/.test(name)).map(name => `electron/renderer/src/views/settings/${name}`);
+  expect(settingsFiles.length).toBeGreaterThan(0);
+  for (const file of ['electron/renderer/src/views/OnboardingView.tsx', 'electron/renderer/src/views/SettingsView.tsx', ...settingsFiles])
+    expect(read(file), file).not.toMatch(/WhisperStep|HfTokenStep|speechProvider|sttModel|sttUrl|installWhisperModel/);
 });
 it('keeps the speech-beta comparison app out of the production package', () => {
   const files: string[] = parse(read('electron-builder.yml')).files;
@@ -34,6 +38,7 @@ it('keeps the speech-beta comparison app out of the production package', () => {
   expect(beta.files).toContain('dist/**');
   expect(beta.files.filter((entry: string) => entry.startsWith('!') && /beta/.test(entry))).toEqual([]);
   // Nothing the production app loads may reach into the beta sources.
-  const prodEntry = read('electron/main/index.ts') + read('electron/preload/index.ts') + read('electron/renderer/src/main.tsx');
+  const prodEntry = ['index.ts', 'services.ts', 'app-surfaces.ts', 'app-ipc.ts', 'app-window.ts', 'scheme-urls.ts']
+    .map((file) => read(`electron/main/${file}`)).join('') + read('electron/preload/index.ts') + read('electron/renderer/src/main.tsx');
   expect(prodEntry).not.toMatch(/from ['"][^'"]*\/beta\//);
 });

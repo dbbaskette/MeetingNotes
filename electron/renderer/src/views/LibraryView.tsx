@@ -7,53 +7,52 @@
 // makes the whole catalog searchable and removes the conceptual split
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+//
+// Hooks and presentational pieces live in ./library/ (#256). Each extracted
+// hook is called at the position its code used to occupy, so hook order,
+// effect order and dependency arrays are unchanged.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
-import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
-import { LibraryRow } from '../components/LibraryRow';
-import { VirtualMeetingList } from '../components/VirtualMeetingList';
+import { useMeetingsStore } from '../store/meetings';
 import { RecordButton } from '../components/RecordButton';
-import { OrganizedLibrary } from '../components/OrganizedLibrary';
 import { GroupBrief } from '../components/GroupBrief';
 import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
-import { ModalShell } from '../components/ModalShell';
 import { LiveRecordingRow } from '../components/LiveRecordingRow';
 import { MeetingDetectedBanner } from '../components/MeetingDetectedBanner';
-import { NeedsAttentionPanel, type RecoveryInboxItem } from '../components/NeedsAttentionPanel';
-import { SearchMatches, type SearchHit } from '../components/SearchMatches';
+import { NeedsAttentionPanel } from '../components/NeedsAttentionPanel';
 import { useToast } from '../components/Toasts';
 import { useGroupsStore } from '../store/groups';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { NavTarget } from '../components/AppNav';
 import { AppHeader } from '../components/AppHeader';
 import { useMenuKeyboard } from '../lib/menu-keyboard';
-import { obsidianAttention, type ObsidianAttention } from '../lib/obsidian-attention';
-import { SegmentedControl } from '../components/SegmentedControl';
-import { Icon, IconLabel } from '../components/icons';
 import { api } from '../ipc/client';
-import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
-import {
-  librarySelection, hydrateSelection, runBulkDelete, runBulkProcess,
-  selectionConfirmation, selectionScope,
-} from '../lib/selection';
-import {
-  LIBRARY_SORT_OPTIONS, sanitizeSortKey, type LibrarySortKey,
-} from '../lib/library-sort';
-import { groupLibrarySearch, hydrateLibrarySearch, LIBRARY_SEARCH_LIMIT, startLibrarySearchHydration } from '../lib/library-search';
-import { createAttentionController } from '../lib/meeting-hydration';
-import { retainInboxOnFailure } from '../lib/needs-attention';
-import { recycleMeetings } from '../lib/meetings-recycle';
+import { librarySelection, selectionScope } from '../lib/selection';
+import { sanitizeSortKey, type LibrarySortKey } from '../lib/library-sort';
+import { groupLibrarySearch, LIBRARY_SEARCH_LIMIT } from '../lib/library-search';
 import { SearchFilters } from '../components/SearchFilters';
 import type { SearchFacets } from '../../../shared/search';
-import { arrivalBaseline, acknowledgeArrivals } from '../lib/new-arrivals';
+import { arrivalBaseline } from '../lib/new-arrivals';
 import {readBrowsePreferences,saveBrowsePreferences} from '../lib/library-browse-preferences';
 import { organizedSections } from '../lib/organized-sections';
-import type { MeetingSummary, PagedMeetingsState } from '../lib/paged-meetings';
-import { pipelineQueueKey, type PipelineStatusSnapshot } from '../lib/status-bar';
-import { shouldPollLibrary } from '../lib/poll-gate';
-import { shortcutMod } from '../lib/shortcut';
+import type { MeetingSummary } from '../lib/paged-meetings';
 import type { LiveRecording } from '../App';
+import {
+  selectLibraryPage, SORT_STORAGE_KEY, VIEW_STORAGE_KEY,
+  type GroupDialogMode, type LibFilter, type LibraryOpen,
+} from './library/types';
+import { GroupNameDialog, LibraryRetryRow, TrashSection } from './library/LibraryWidgets';
+import { QueueBanner } from './library/QueueBanner';
+import { SelectionBar } from './library/SelectionBar';
+import { LibraryFilterBar, LibraryHeaderRow } from './library/LibraryToolbar';
+import { LibraryResults } from './library/LibraryResults';
+import {
+  useAttentionController, useEscapeClearsSelection, useLibraryRefreshTriggers, useObsidianSyncAttention,
+  usePipelineStatus, useRecoveryInbox, useTrash,
+} from './library/useLibraryFeeds';
+import { useLibrarySearch } from './library/useLibrarySearch';
+import { useBulkSelectionActions, useSelectionPending } from './library/useLibrarySelection';
 
 interface Props {
   active?: boolean;
@@ -62,11 +61,7 @@ interface Props {
    *  before the full meetings:get IPC resolves. The optional
    *  `seekSeconds` is set when the user clicked a transcript snippet
    *  in the search results — the detail view should jump there. */
-  onOpen: (
-    id: string,
-    hint: { title?: string; pipelineStage?: string; status?: string },
-    opts?: { seekSeconds?: number },
-  ) => void;
+  onOpen: LibraryOpen;
   /** Shared nav tabs (Library / Weekly / Settings) — routes through App's
    *  history-aware navigate(). 'library' never arrives (already active). */
   onNav: (target: NavTarget) => void;
@@ -79,30 +74,6 @@ interface Props {
   liveRecording: LiveRecording | null;
   onStartRecording: (r: LiveRecording) => void;
   onRecordingStopped: (summary: string) => void;
-}
-
-type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
-
-/** localStorage key for the browse-sort choice. Renderer-only preference —
- *  not worth an IPC round-trip to the settings repo. */
-const SORT_STORAGE_KEY = 'librarySortKey';
-const VIEW_STORAGE_KEY = 'libraryViewMode';
-
-function selectLibraryPage(state: PagedMeetingsState) {
-  return {
-    items: state.items, counts: state.counts, total: state.total, hasMore: state.hasMore,
-    loadingInitial: state.loadingInitial, loadingMore: state.loadingMore, error: state.error,
-    query: state.query, setQuery: state.setQuery, refresh: state.refresh, invalidate: state.invalidate,
-    loadMore: state.loadMore, retry: state.retry,
-  };
-}
-
-/** The flat list is the only consumer of the store's `refreshing` flag (it
- *  gates auto load-more), so the subscription lives here instead of at the
- *  Library root. */
-function FlatMeetingList(props: Omit<ComponentProps<typeof VirtualMeetingList>, 'refreshing'>): JSX.Element {
-  const refreshing = useMeetingsStore(state => state.refreshing);
-  return <VirtualMeetingList {...props} refreshing={refreshing} />;
 }
 
 export function LibraryView({
@@ -122,18 +93,7 @@ export function LibraryView({
   const [searchCompletion,setSearchCompletion]=useState<string|null>(null);
   const [newBaseline, setNewBaseline] = useState(arrivalBaseline);
   const [query, setQuery] = useState('');
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"],[role="menu"]')) return;
-      if ((event.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"]')) return;
-      const state = librarySelection.getState();
-      if (state.busy) return;
-      state.clear();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [active]);
+  useEscapeClearsSelection(active);
   const [searchRevision, setSearchRevision] = useState(0);
   const { selected, resolving: resolvingSelection, busy: bulkBusy, mode: selectionMode } = useStore(librarySelection);
   const [browsePreferences]=useState(readBrowsePreferences);
@@ -146,7 +106,7 @@ export function LibraryView({
   });
   const { groups, ungroupedCount, ungroupedStatus, loaded: groupsLoaded, error: groupsError,
     refresh: refreshGroups, create: createGroup, rename: renameGroup, delete: deleteGroup } = useGroupsStore();
-  const [groupDialog, setGroupDialog] = useState<'create' | 'rename' | 'delete' | null>(null);
+  const [groupDialog, setGroupDialog] = useState<GroupDialogMode | null>(null);
   const [targetGroupId, setTargetGroupId] = useState<string | null>(null);
   const [revealGroupId, setRevealGroupId] = useState<string | null>(null);
   const [organizedSnapshot, setOrganizedSnapshot] = useState<{ key: string; rows: MeetingSummary[] } | null>(null);
@@ -205,19 +165,7 @@ export function LibraryView({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- depends on the stable `toast.show`, not the toast object
   }, [groupsLoaded, groupsError, groupId, activeGroup, changeGroup, toast.show]);
-  // Needs Attention remains global even when browse is filtered or only its
-  // first page is loaded. Only actionable status IDs are hydrated, in capped
-  // batches; buildNeedsAttention distinguishes speaker gates from processing.
-  const [attentionMeetings, setAttentionMeetings] = useState<MeetingSummary[]>([]);
-  const [attentionError, setAttentionError] = useState<string | null>(null);
-  const [attention] = useState(() => createAttentionController(
-    {
-      listIds: api.meetings.listIds,
-      getMany: (ids) => api.meetings.getMany(ids, { shell: true }),
-    },
-    (rows) => setAttentionMeetings((prev) => recycleMeetings(prev, rows)),
-    setAttentionError,
-  ));
+  const { attentionMeetings, attentionError, attention } = useAttentionController();
   const refresh = useCallback(async () => {
     await Promise.all([refreshPages(), attention.refresh(), refreshGroups()]);
     setSearchRevision((revision) => revision + 1);
@@ -230,216 +178,18 @@ export function LibraryView({
     void attention.start();
     return () => attention.stop();
   }, [attention]);
-  // Obsidian sync trouble (vault unavailable, notes paused by an external
-  // edit) shows in Needs attention. Read when the Library becomes active and
-  // once a minute while it stays so; a fake bridge without `obsidian` (UI
-  // fixtures) simply reports nothing.
-  const [syncAttention, setSyncAttention] = useState<ObsidianAttention | null>(null);
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-    const read = (): void => {
-      const status = (api as Partial<typeof api>).obsidian?.status?.();
-      void status?.then((value) => { if (alive) setSyncAttention(obsidianAttention(value)); }).catch(() => { /* not a Library error */ });
-    };
-    read();
-    const timer = window.setInterval(() => { if (!document.hidden) read(); }, 60_000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [active]);
-  const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
-  const recoveryGeneration = useRef(0);
-  const refreshRecovery = useCallback(async () => {
-    const generation = ++recoveryGeneration.current;
-    const update = (items: RecoveryInboxItem[]): void => {
-      if (generation === recoveryGeneration.current) {
-        setRecoveryItems(items);
-        setRecoveryError(null);
-      }
-    };
-    try { update(await api.recovery.list(update)); }
-    catch (error) {
-      if (generation !== recoveryGeneration.current) return;
-      setRecoveryError(retainInboxOnFailure([], error).error);
-    }
-  }, []);
-  useEffect(() => {
-    void refreshRecovery();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
-    return () => { recoveryGeneration.current++; };
-  }, [refreshRecovery]);
-  useEffect(() => {
-    let timer: number | undefined;
-    const off = api.recording.onStateChange(({ state }) => {
-      if (state === 'idle' || state === 'error') {
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => { void refreshRecovery(); }, 800);
-      }
-    });
-    return () => { off(); window.clearTimeout(timer); };
-  }, [refreshRecovery]);
-
-  // Recently deleted (trash). Fetched on mount and re-fetched after any
-  // row mutation (delete / restore) — the main process purges expired
-  // entries inside trash:list, so this list is always restorable.
-  const [trash, setTrash] = useState<TrashedMeeting[]>([]);
-  const refreshTrash = useCallback(async () => {
-    try {
-      setTrash(await api.trash.list());
-    } catch { /* non-fatal — the section just stays hidden */ }
-  }, []);
-  useEffect(() => { void refreshTrash(); }, [refreshTrash]);
-
-  // Pipeline queue state. Pushed from main on every change, plus an
-  // initial pull on mount so the banner appears even if no events have
-  // fired this session.
-  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatusSnapshot>({
-    paused: false, currentId: null, queueLength: 0, queueIds: [],
+  const syncAttention = useObsidianSyncAttention(active);
+  const { recoveryItems, recoveryError, refreshRecovery } = useRecoveryInbox();
+  const { trash, refreshTrash } = useTrash();
+  const pipelineStatus = usePipelineStatus(active, invalidate);
+  const hasMotion = useLibraryRefreshTriggers({
+    active, liveRecording, pipelineStatus, organizedFull, libFilter, sortKey, groupId,
+    setPageQuery, invalidate, refresh, refreshRecovery,
   });
-  const lastQueueKey = useRef('');
-  const activeRef = useRef(active);
-  activeRef.current = active;
-  useEffect(() => {
-    let cancelled = false;
-    let receivedEvent = false;
-    void api.pipeline.status().then((snapshot) => {
-      if (!cancelled && !receivedEvent) setPipelineStatus(snapshot);
-    }).catch(() => { /* the next pushed status can recover */ });
-    const off = api.pipeline.onStatusChange((s) => {
-      receivedEvent = true;
-      setPipelineStatus(s);
-      // Queue motion is itself a reason to refresh — current meeting
-      // moved, etc. Progress ticks arrive on the same channel about a
-      // hundred times per meeting and are not: the poll covers those. A
-      // hidden Library skips the refresh too; it invalidates on return.
-      const key = pipelineQueueKey(s);
-      if (key === lastQueueKey.current) return;
-      lastQueueKey.current = key;
-      if (activeRef.current) void invalidate();
-    });
-    return () => { cancelled = true; off(); };
-  }, [invalidate]);
-
-  // Push-refresh when main catalogs a freshly arrived recording. Stop()
-  // resolves before chokidar's stability debounce fires, so the post-stop
-  // refresh in LiveRecordingRow happens too early to see the new row.
-  // Without this subscription the Library stayed stale until the user
-  // navigated into a meeting and back (which remounted the view and
-  // refreshed the first page). Now main pings us the instant the row exists.
-  useEffect(() => {
-    const off = api.meetings.onAdded(() => { void invalidate(); void refreshRecovery(); });
-    return () => { off(); };
-  }, [invalidate, refreshRecovery]);
-
-  // Conditional polling. Gate on ACTUAL pipeline activity — the same
-  // signal the bottom status bar shows (currentId / queueLength) — not on
-  // the presence of pending/awaiting rows. A `pending` recording just sits
-  // in the catalog until the user processes it, and an `awaiting_user`
-  // meeting sits parked at the speaker-ID gate; neither changes on its own,
-  // and both already surface via push (meetings:added, pipeline:status).
-  // The previous gate counted those static rows as "motion", so a single
-  // pending recording kept the 3s poll — and its speakers JOIN + per-meeting
-  // action_items aggregate — running forever while the status bar read
-  // "Ready". Now we poll only while something is truly in flight or a live
-  // recording is running; everything else is push-driven or refreshed on
-  // window-visibility regain.
-  const hasMotion = useMemo(
-    () => shouldPollLibrary(pipelineStatus, !!liveRecording),
-    [pipelineStatus, liveRecording],
-  );
-  useEffect(() => {
-    void setPageQuery({ filter: libFilter, sort: sortKey, groupId });
-  }, [libFilter, sortKey, groupId, setPageQuery]);
-  // App retains the Library while details are open. Refresh every projection
-  // on return, including expanded group pages, search and Needs attention.
-  // Invalidation also fences any request that began before the detail edit.
-  // The mount itself already issues one fetch per source (setPageQuery,
-  // attention.start, refreshGroups), so the first active run must not
-  // invalidate and double them all (#301).
-  const firstActiveRun = useRef(true);
-  useEffect(() => {
-    const first = firstActiveRun.current;
-    firstActiveRun.current = false;
-    if (active && !first) void invalidate();
-  }, [active, invalidate]);
-  // The organized overview never renders the flat list; its group sections
-  // refresh on queue changes via `invalidate`. Polling flat pages there only
-  // refreshed chip counts, which those same pushes already cover (#301).
-  useMeetingsPoll(active && hasMotion && !organizedFull);
-  // When a recording ends, from any view or by itself (the pill on other
-  // views, an auto-stop), refresh the list and the recovery inbox. Stopping
-  // from outside the Library used to leave both stale (#297). The delay lets
-  // the watcher catalog the finished file.
-  const wasRecording = useRef(false);
-  useEffect(() => {
-    const ended = wasRecording.current && !liveRecording;
-    wasRecording.current = !!liveRecording;
-    if (!ended) return;
-    void invalidate();
-    const timer = window.setTimeout(() => { void refreshRecovery(); void invalidate(); }, 800);
-    return () => window.clearTimeout(timer);
-  }, [liveRecording, invalidate, refreshRecovery]);
-  useEffect(() => {
-    const onVisible = (): void => {
-      if (document.visibilityState === 'visible') void refresh();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [refresh]);
-
-  // Full-content search. At 2+ chars we hit the same global IPC the
-  // Cmd+K palette uses, which ripgreps summary.md + transcript.md across
-  // the library. Debounced so a fast typist doesn't fire one IPC per
-  // keystroke.
-  const isSearching = query.trim().length >= 2 || Object.keys(facets).length > 0;
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const [searchMeetings, setSearchMeetings] = useState<MeetingSummary[]>([]);
-  const [searchPending, setSearchPending] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const previousSearchQuery = useRef('');
-  useEffect(() => {
-    const searchKey = `${groupId ?? (groupId === null ? 'ungrouped' : 'all')}:${query.trim()}`;
-    if (!isSearching || previousSearchQuery.current !== searchKey) {
-      setHits([]);
-      setSearchMeetings([]);
-    }
-    previousSearchQuery.current = searchKey;
-    setSearchError(null);
-    if (!isSearching) { setSearchPending(false); return; }
-    let cancelled = false, dispatched=false;
-    const requestId=++searchRequestId.current;
-    setSearchCompletion(null);
-    setSearchPending(true);
-    const t = window.setTimeout(async () => {
-      try {
-        dispatched=true;
-        const response=await api.search.run(query,100,groupId,{clientId:searchClientId.current,requestId,facets:{...facets,...!facets.status&&libFilter!=='all'?{status:libFilter}:{}}});
-        if(response.status==='failed')throw new Error(response.message??'Search failed');
-        const result = await hydrateLibrarySearch(query, { query: async()=>response.hits, getMany: api.meetings.getMany }, groupId);
-        if(!cancelled)setSearchCompletion(response.status==='complete'?null:response.message??response.status);
-        if (!cancelled) {
-          setHits(result.hits);
-          setSearchMeetings(result.meetings);
-        }
-      } catch (error) {
-        if (!cancelled) setSearchError(error instanceof Error ? error.message : 'Unable to search meetings.');
-      } finally {
-        if (!cancelled) setSearchPending(false);
-      }
-    }, 150);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the ref is a request counter; cleanup must read its latest value
-    return () => { cancelled = true; window.clearTimeout(t); if(dispatched)void api.search.cancel(searchClientId.current,requestId); };
-  }, [query, isSearching, searchRevision, groupId, facets,libFilter]);
-
-  // Browse polling cannot update these detached, globally hydrated rows.
-  // Hold a summary-only poll on the same active cadence, including off-page
-  // hits; suspend it while a replacement search result is being hydrated.
-  useEffect(() => {
-    if (!active || !isSearching || !hasMotion || searchPending || hits.length === 0) return;
-    return startLibrarySearchHydration(hits, api.meetings.getMany, (rows) => {
-      setSearchMeetings((previous) => recycleMeetings(previous, rows));
-    });
-  }, [active, hits, isSearching, hasMotion, searchPending, query, searchRevision]);
+  const { isSearching, hits, searchMeetings, searchPending, searchError, previousSearchQuery } = useLibrarySearch({
+    query, facets, groupId, libFilter, searchRevision, active, hasMotion,
+    searchClientId, searchRequestId, setSearchCompletion,
+  });
 
   // Sort order for the Content section. Reset to 'recent' whenever the
   // query changes so a stale "Most matches" choice doesn't carry over
@@ -481,41 +231,9 @@ export function LibraryView({
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => { listRef.current?.scrollTo({ top: 0 }); }, [libFilter, sortKey, groupId, isSearching]);
 
-  // Loaded pages never prune selection. Hydrate its exact IDs for status-only
-  // partitioning, including off-page rows while the pipeline is moving.
-  const [pendingSnapshot, setPendingSnapshot] = useState<{ selection: Set<string>; ids: string[] } | null>(null);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
-  useEffect(() => {
-    if (selected.size === 0) {
-      // Nothing to hydrate: no IPC and no fresh snapshot object per poll tick.
-      setPendingSnapshot(previous => previous?.selection === selected && previous.ids.length === 0
-        ? previous : { selection: selected, ids: [] });
-      setSelectionError(null);
-      return;
-    }
-    let cancelled = false;
-    let inflight = false;
-    const hydrate = async (): Promise<void> => {
-      if (inflight) return;
-      inflight = true;
-      try {
-        const result = await hydrateSelection(selected, api.meetings.getMany);
-        if (!cancelled) {
-          setPendingSnapshot({ selection: selected, ids: result.pendingIds });
-          setSelectionError(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setPendingSnapshot(null);
-          setSelectionError('Unable to check selected meetings. Retry Process to check again.');
-        }
-      } finally { inflight = false; }
-    };
-    void hydrate();
-    const timer = hasMotion && selected.size > 0 ? window.setInterval(() => void hydrate(), 3000) : undefined;
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [selected, meetings, searchMeetings, searchRevision, hasMotion]);
-  const selectedPendingCount = pendingSnapshot?.selection === selected ? pendingSnapshot.ids.length : null;
+  const { setPendingSnapshot, selectionError, setSelectionError, selectedPendingCount } = useSelectionPending({
+    selected, meetings, searchMeetings, searchRevision, hasMotion,
+  });
 
   // Row callbacks are hoisted + stable (useCallback) so the memoized
   // LibraryRow doesn't see a fresh closure on every render — per-row
@@ -533,87 +251,11 @@ export function LibraryView({
     void refreshTrash();
   }, [invalidate, refreshTrash]);
 
-  const [confirmation, setConfirmation] = useState<ReturnType<typeof selectionConfirmation> | null>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => { mounted.current = false; };
-  }, []);
-
-  async function selectMatching(): Promise<void> {
-    try {
-      await librarySelection.getState().selectMatching(selectionUniverse, () => scope.resolveIds(api.meetings.listIds));
-    } catch {
-      toast.show({ message: 'Unable to select matching meetings. Your previous selection is unchanged.', variant: 'error' });
-    }
-  }
-
-  async function requestProcessSelected(): Promise<void> {
-    const state = librarySelection.getState();
-    if (state.selected.size === 0 || !state.beginOperation()) return;
-    const snapshot = state.selected;
-    try {
-      // Refresh off-page statuses immediately before freezing the queue IDs.
-      const { pendingIds } = await hydrateSelection(snapshot, api.meetings.getMany);
-      if (!mounted.current) return;
-      setPendingSnapshot({ selection: snapshot, ids: pendingIds });
-      setSelectionError(null);
-      if (pendingIds.length === 0) {
-        toast.show({ message: 'No selected recordings are pending.', durationMs: 4000 });
-        return;
-      }
-      const result = await runBulkProcess(pendingIds, api.meetings.startManyDetailed);
-      // Keep failures and non-pending selections for retry; progress rows
-      // remain navigable even when those selections are still present.
-      librarySelection.getState().removeSucceeded(result.succeededIds);
-      if (result.failedIds.length > 0) toast.show({
-        message: `${result.failedIds.length} recording${result.failedIds.length === 1 ? '' : 's'} not queued; still selected for retry.`,
-        variant: 'error', durationMs: 4000,
-      });
-    } catch {
-      toast.show({ message: 'Unable to queue selected recordings. Check their status and retry Process.', variant: 'error', durationMs: 4000 });
-    } finally {
-      librarySelection.getState().endOperation();
-      void invalidate();
-    }
-  }
-
-  function requestDeleteSelected(): void {
-    const state = librarySelection.getState();
-    if (!state.busy && state.selected.size > 0) setConfirmation(selectionConfirmation('delete', [...state.selected]));
-  }
-
-  async function applyConfirmation(): Promise<void> {
-    if (!confirmation || !librarySelection.getState().beginOperation()) return;
-    const { ids } = confirmation;
-    setConfirmation(null);
-    try {
-      const result = await runBulkDelete(ids, api.meetings.delete);
-      librarySelection.getState().removeSucceeded(result.succeededIds);
-      const n = result.succeededIds.length;
-      const failed = result.failedIds.length;
-      const message = `${n} meeting${n === 1 ? '' : 's'} moved to Recently deleted`;
-      toast.show({
-        message: message + (failed > 0 ? ` ${failed} not deleted; still selected for retry.` : ''),
-        variant: failed > 0 ? 'error' : 'default',
-        durationMs: 10_000,
-        action: n > 0 ? {
-          label: 'Undo',
-          onClick: async () => {
-            // Only successful deletions are undoable — never touch failed IDs.
-            const restored = (await Promise.all(result.succeededIds.map((id) => api.meetings.undoDelete(id).catch(() => false)))).filter(Boolean).length;
-            if (restored < n) toast.show({ message: `Restored ${restored} of ${n} — the rest were already purged.`, variant: 'error' });
-            void invalidate();
-            void refreshTrash();
-          },
-        } : undefined,
-      });
-    } finally {
-      librarySelection.getState().endOperation();
-      void invalidate();
-      void refreshTrash();
-    }
-  }
+  const {
+    confirmation, setConfirmation, selectMatching, requestProcessSelected, requestDeleteSelected, applyConfirmation,
+  } = useBulkSelectionActions({
+    toast, invalidate, refreshTrash, scope, selectionUniverse, setPendingSnapshot, setSelectionError,
+  });
 
   return (
     // pt-8 (32px) at every width: the frameless window's drag strip covers the
@@ -697,38 +339,14 @@ export function LibraryView({
       {/* Keep the toolbar in the same flow as the inbox and rows so even a
           short / zoomed window can reach every control without nested scrolling. */}
       <section className="library-content flex flex-col">
-        <div className="shrink-0 flex flex-wrap items-center gap-3 mb-3">
-          <h2 className="library-heading text-ink-muted">
-            Library
-          </h2>
-          {newCount > 0 && <button type="button" className="text-xs text-ink-muted hover:text-brand-indigo"
-            onClick={() => { setNewBaseline(acknowledgeArrivals()); toast.show({ message: `${newCount} new ${newCount === 1 ? 'meeting' : 'meetings'} marked as seen`, durationMs: 3000 }); }}>
-            Mark {newCount} new as seen</button>}
-          {groupId !== undefined ? <>
-            <button type="button" onClick={() => changeGroup(undefined)}
-              className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 inline-flex items-center gap-0.5"><Icon name="chevron-left" className="w-3.5 h-3.5" />All groups</button>
-            <span className="min-w-0 truncate text-sm font-semibold" title={scopeName}>{scopeName}</span>
-          </> : <SegmentedControl label="Library view" value={viewMode} onChange={changeViewMode}
-            options={[{ value: 'organized', label: 'Organized' }, { value: 'flat', label: 'All meetings' }]} />}
-          <span className="text-[11px] text-ink-muted">
-            {libCounts.all} {libCounts.all === 1 ? 'meeting' : 'meetings'}
-          </span>
-          {groupId === undefined && <button type="button" onClick={() => { setGroupDialog('create'); setGroupError(null); }}
-            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"><IconLabel icon="plus">New group</IconLabel></button>}
-          {activeGroup && <div ref={groupOptionsRef} className="ml-auto relative">
-            <button ref={groupOptionsButtonRef} type="button" aria-label={`Options for ${activeGroup.name}`} aria-haspopup="menu" aria-expanded={groupOptionsOpen}
-              onClick={() => setGroupOptionsOpen((open) => !open)}
-              className="w-8 h-8 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 inline-flex items-center justify-center"><Icon name="more-horizontal" /></button>
-            {groupOptionsOpen && <div ref={groupOptionsMenuRef} role="menu" aria-label={`Options for ${activeGroup.name}`} className="material-popover absolute right-0 top-full mt-1 z-50 w-40 bg-surface rounded-lg border border-surface-border shadow-pop p-1">
-              <button type="button" role="menuitem" className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken" onClick={() => { setGroupOptionsOpen(false); setPrepareGroupId(activeGroup.id); }}>Prepare next meeting</button>
-              <button role="menuitem" className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken" onClick={() => { setGroupOptionsOpen(false); void api.groups.pin(activeGroup.id, !activeGroup.pinned).then(refreshGroups).catch(error => toast.show({ message: String(error), variant: 'error' })); }}>{activeGroup.pinned ? 'Unpin group' : 'Pin group'}</button>
-              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('rename'); setGroupError(null); }}
-                className="w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-surface-sunken">Rename group…</button>
-              <button type="button" role="menuitem" onClick={() => { setGroupOptionsOpen(false); setTargetGroupId(activeGroup.id); setGroupDialog('delete'); setGroupError(null); }}
-                className="w-full text-left px-2 py-1.5 rounded-md text-sm text-danger hover:bg-danger-bg">Delete group…</button>
-            </div>}
-          </div>}
-        </div>
+        <LibraryHeaderRow
+          newCount={newCount} setNewBaseline={setNewBaseline} toast={toast} groupId={groupId} changeGroup={changeGroup}
+          scopeName={scopeName} viewMode={viewMode} changeViewMode={changeViewMode} libCounts={libCounts}
+          setGroupDialog={setGroupDialog} setGroupError={setGroupError} activeGroup={activeGroup}
+          groupOptionsRef={groupOptionsRef} groupOptionsButtonRef={groupOptionsButtonRef} groupOptionsMenuRef={groupOptionsMenuRef}
+          groupOptionsOpen={groupOptionsOpen} setGroupOptionsOpen={setGroupOptionsOpen} setPrepareGroupId={setPrepareGroupId}
+          refreshGroups={refreshGroups} setTargetGroupId={setTargetGroupId}
+        />
 
         {organizedFull && groupsError && <div role="alert" className="shrink-0 mb-3 rounded-lg border border-danger/20 bg-danger-bg px-3 py-2 text-xs text-danger-text">
           Could not refresh groups: {groupsError}{' '}
@@ -737,106 +355,11 @@ export function LibraryView({
 
         <SearchFilters facets={facets} onChange={setFacets} query={query} onQuery={setQuery}/>
         {isSearching&&searchCompletion&&<p role="status" className="shrink-0 text-xs text-status-warnText mb-2">{searchCompletion}</p>}
-        {/* Filter chips — always rendered so the surface is discoverable
-            even on a fresh install; chips with a zero count are disabled
-            (greyed + non-clickable) rather than hidden, which keeps the
-            row visually stable as state evolves. Search yields width
-            first on narrow via flex-1. */}
-        <div className="shrink-0 flex items-center flex-wrap gap-2 mb-3">
-          <FilterChip
-            active={libFilter === 'all'}
-            onClick={() => setLibFilter('all')}
-            label="All"
-            n={libCounts.all}
-          />
-          <FilterChip
-            active={libFilter === 'pending'}
-            onClick={() => setLibFilter('pending')}
-            label="Pending"
-            n={libCounts.pending}
-            dotClass="bg-ink-muted"
-          />
-          <FilterChip
-            active={libFilter === 'processing'}
-            onClick={() => setLibFilter('processing')}
-            label="Processing"
-            n={libCounts.processing}
-            dotClass={libCounts.processing > 0 ? 'bg-brand-solid animate-pulse' : 'bg-brand-solid'}
-          />
-          <FilterChip
-            active={libFilter === 'done'}
-            onClick={() => setLibFilter('done')}
-            label="Processed"
-            n={libCounts.done}
-            dotClass="bg-status-ok"
-          />
-          <FilterChip
-            active={libFilter === 'failed'}
-            onClick={() => setLibFilter('failed')}
-            label="Failed"
-            n={libCounts.failed}
-            dotClass="bg-danger-solid"
-          />
-          {/* Browse-order dropdown. Chip-shaped so it reads as part of the
-              filter row. Disabled while a search is active — search results
-              have their own ordering (score / the Content section's own
-              Recent-vs-Most-matches toggle). */}
-          <select
-            value={sortKey}
-            onChange={(e) => changeSort(sanitizeSortKey(e.target.value))}
-            disabled={isSearching}
-            aria-label="Sort meetings"
-            title={isSearching ? 'Search results use match ordering' : 'Sort order for the list'}
-            className="text-xs font-semibold px-2.5 py-1.5 rounded-full border border-surface-border
-                       bg-surface text-ink-muted hover:text-ink hover:border-ink/30 transition
-                       focus:outline-none focus:border-brand-indigo cursor-pointer
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {LIBRARY_SORT_OPTIONS.map((o) => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </select>
-          <div className="relative flex-1 sm:flex-none sm:w-72 sm:ml-auto min-w-[8rem]">
-            <input
-              type="search"
-              aria-label={groupId === undefined ? 'Search meetings' : `Search in ${scopeName}`}
-              placeholder={groupId === undefined ? 'Search titles, summaries, transcripts…' : `Search in ${scopeName}…`}
-              value={query}
-              maxLength={500}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Escape' && query !== '') { e.preventDefault(); e.stopPropagation(); setQuery(''); } }}
-              className="library-search w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
-                         focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
-            />
-            {isSearching && searchPending ? (
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-muted pointer-events-none">
-                searching…
-              </span>
-            ) : query !== '' ? (
-              <button type="button" aria-label="Clear search" title="Clear search (Esc)"
-                onClick={(event) => { setQuery(''); (event.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">
-                <Icon name="x" className="w-3.5 h-3.5" />
-              </button>
-            ) : query.trim() === '' ? (
-              // Only surface the palette hint while the box is idle — once the
-              // user is typing/reading inline results, a shortcut to a separate
-              // search overlay is noise, not help.
-              <button
-                type="button"
-                onClick={onOpenSearch}
-                aria-label="Open quick search"
-                title="Open quick search (jump to any meeting, keyboard-navigable)"
-                className="group absolute right-2 top-1/2 -translate-y-1/2"
-              >
-                <kbd className="text-[10px] font-mono text-ink-muted border border-surface-border rounded px-1.5 py-0.5
-                               group-hover:border-brand-indigo group-hover:text-brand-indigo transition">
-                  {shortcutMod()}K
-                </kbd>
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <LibraryFilterBar
+          libFilter={libFilter} setLibFilter={setLibFilter} libCounts={libCounts} sortKey={sortKey} changeSort={changeSort}
+          isSearching={isSearching} searchPending={searchPending} groupId={groupId} scopeName={scopeName}
+          query={query} setQuery={setQuery} onOpenSearch={onOpenSearch}
+        />
 
         {isSearching && (
           <p className="shrink-0 mb-2 text-[11px] text-ink-muted">
@@ -873,128 +396,23 @@ export function LibraryView({
         </div>
         {selected.size > 0 && selectionError && <p role="status" className="shrink-0 mb-2 text-xs text-danger-text">{selectionError}</p>}
 
-        {(() => {
-          const totalShown = isSearching
-            ? titleMatches.length + contentMatches.length
-            : organizedFull ? (groupsLoaded ? sections.length : 0) : browseList.length;
-          if (totalShown === 0) {
-            if (isSearching ? searchPending : loadingInitial || (organizedFull && !groupsLoaded)) {
-              return <div role="status" className="py-10 text-center text-sm text-ink-muted">{isSearching ? 'Searching…' : 'Loading meetings…'}</div>;
-            }
-            const failure = isSearching ? searchError : organizedFull ? groupsError ?? error : error;
-            if (failure) return <LibraryRetryRow message={failure} onRetry={isSearching ? () => setSearchRevision((revision) => revision + 1) : () => void retry()} />;
-            if (isSearching && searchCompletion) return (
-              <div role="status" className="py-10 text-center text-sm text-ink-muted">
-                <p>No matches found so far. {searchCompletion}</p>
-                <button type="button" className="mt-3 text-brand-indigo underline" onClick={() => setSearchRevision((revision) => revision + 1)}>Retry search</button>
-              </div>
-            );
-            return (
-              <LibraryEmpty
-                filter={libFilter}
-                query={query}
-                scopeName={scopeName}
-                scoped={groupId !== undefined}
-                onShowAll={() => changeGroup(undefined)}
-                onClearSearch={() => setQuery('')}
-                onClearFilter={() => setLibFilter('all')}
-              />
-            );
-          }
-          const renderRow = (m: typeof meetings[number], withMatches: boolean): JSX.Element => {
-            const hint = {
-              title: m.title,
-              pipelineStage: m.pipelineStage,
-              status: m.status,
-            };
-            const meetingHits = withMatches ? hitsByMeeting.get(m.id) ?? [] : [];
-            return (
-              <div key={m.id}>
-                <LibraryRow
-                  meeting={m}
-                  isNew={m.groupId === null && !!m.createdAt && m.createdAt > newBaseline}
-                  onMove={m.groupId === null ? moveUngrouped : undefined}
-                  onOpen={onOpen}
-                  onChanged={rowChanged}
-                  checked={selected.has(m.id)}
-                  onToggle={toggleSelect}
-                  selectionActive={selected.size > 0}
-                  showGroup={groupId === undefined && !organizedFull}
-                />
-                {meetingHits.length > 0 && (
-                  <SearchMatches
-                    hits={meetingHits}
-                    query={query}
-                    onOpen={() => onOpen(m.id, hint)}
-                    onJump={(seconds) => onOpen(m.id, hint, { seekSeconds: seconds })}
-                  />
-                )}
-              </div>
-            );
-          };
-          // Refreshes and appended pages preserve the shared viewport and
-          // focused row; only explicit filter/sort changes reset scroll.
-          if (organizedFull) return <OrganizedLibrary
-            scrollRef={listRef}
-            sections={sections} filter={libFilter} sort={sortKey}
-            searching={isSearching} searchPending={searchPending} searchQuery={query}
-            searchResults={organizedSearchResults} refreshRevision={searchRevision}
-            revealGroupId={revealGroupId} renderRow={renderRow} onLoadedChange={onOrganizedLoadedChange}
-            onFilterGroup={(id, filter) => { changeGroup(id); setLibFilter(filter); }}
-            onFocusGroup={changeGroup}
-            onRenameGroup={(id) => { setTargetGroupId(id); setGroupDialog('rename'); setGroupError(null); }}
-            onPrepareGroup={setPrepareGroupId}
-            onPinGroup={(id, pinned) => { void api.groups.pin(id, pinned).then(refreshGroups).catch(error => toast.show({ message: String(error), variant: 'error' })); }}
-            onDeleteGroup={(id) => { setTargetGroupId(id); setGroupDialog('delete'); setGroupError(null); }}
-          />;
-          if (!isSearching) return (
-            <FlatMeetingList
-              scrollRef={listRef}
-              key={`${scopeToken}:${libFilter}:${sortKey}`}
-              items={browseList}
-              renderRow={(m) => renderRow(m, false)}
-              hasMore={hasMore}
-              loadingMore={loadingMore}
-              error={error}
-              loadMore={loadMore}
-              className={selected.size > 0 ? 'pb-28' : 'pb-8'}
-              footer={error ? (
-                <LibraryRetryRow message={error} onRetry={() => void retry()} />
-              ) : (
-                <div className="py-3 text-center text-xs text-ink-muted">
-                  {loadingMore ? <span role="status">Loading more meetings…</span> : hasMore ? (
-                    <button type="button" className="px-3 py-1.5 rounded-lg border border-surface-border hover:text-ink" onClick={() => void loadMore()}>
-                      Load more ({meetings.length} of {total})
-                    </button>
-                  ) : <span>{meetings.length} of {total} meetings</span>}
-                </div>
-              )}
-            />
-          );
-          return (
-            <div
-              className="space-y-2"
-            >
-              {titleMatches.length > 0 && (
-                <SearchSectionHeader
-                  label="Title matches"
-                  count={titleMatches.length}
-                />
-              )}
-              {titleMatches.map((m) => renderRow(m, false))}
-              {contentMatches.length > 0 && (
-                <SearchSectionHeader
-                  label="Mentioned in"
-                  count={contentMatches.length}
-                  sort={contentSort}
-                  onSortChange={setContentSort}
-                />
-              )}
-              {contentMatches.map((m) => renderRow(m, true))}
-              {searchError && <LibraryRetryRow message={searchError} onRetry={() => setSearchRevision((revision) => revision + 1)} />}
-            </div>
-          );
-        })()}
+        <LibraryResults
+          libFilter={libFilter} setLibFilter={setLibFilter} sortKey={sortKey} groupId={groupId} scopeName={scopeName}
+          scopeToken={scopeToken} changeGroup={changeGroup} organizedFull={organizedFull} listRef={listRef}
+          meetings={meetings} browseList={browseList} total={total} hasMore={hasMore} loadingInitial={loadingInitial}
+          loadingMore={loadingMore} error={error} loadMore={loadMore} retry={retry}
+          sections={sections} groupsLoaded={groupsLoaded} groupsError={groupsError} refreshGroups={refreshGroups}
+          revealGroupId={revealGroupId} onOrganizedLoadedChange={onOrganizedLoadedChange}
+          setTargetGroupId={setTargetGroupId} setGroupDialog={setGroupDialog} setGroupError={setGroupError}
+          setPrepareGroupId={setPrepareGroupId}
+          query={query} setQuery={setQuery} isSearching={isSearching} searchPending={searchPending}
+          searchError={searchError} searchCompletion={searchCompletion} searchRevision={searchRevision}
+          setSearchRevision={setSearchRevision} titleMatches={titleMatches} contentMatches={contentMatches}
+          hitsByMeeting={hitsByMeeting} organizedSearchResults={organizedSearchResults}
+          contentSort={contentSort} setContentSort={setContentSort}
+          selected={selected} newBaseline={newBaseline} onOpen={onOpen} moveUngrouped={moveUngrouped}
+          rowChanged={rowChanged} toggleSelect={toggleSelect} toast={toast}
+        />
 
         {/* Recently deleted — muted, collapsed by default, only when the
             trash is non-empty. Restore is the recovery path once the undo
@@ -1098,418 +516,6 @@ export function LibraryView({
         onConfirm={() => void applyConfirmation()}
         onCancel={() => setConfirmation(null)}
       />
-    </div>
-  );
-}
-
-// ─── Supporting pieces ─────────────────────────────────────────────────────
-
-function GroupNameDialog({ mode, name, error, busy, onClose, onSave }: {
-  mode: 'create' | 'rename';
-  name: string;
-  error: string | null;
-  busy: boolean;
-  onClose: () => void;
-  onSave: (name: string) => Promise<void>;
-}): JSX.Element {
-  const [value, setValue] = useState(name);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  return <ModalShell title={mode === 'create' ? 'Create group' : 'Rename group'} busy={busy} onClose={onClose}>
-    <form onSubmit={(event) => { event.preventDefault(); void onSave(value); }}>
-      <label htmlFor="group-name" className="block text-sm font-semibold mb-2">{mode === 'create' ? 'New group' : 'Rename group'}</label>
-      <input id="group-name" ref={input} maxLength={80} value={value} onChange={(event) => setValue(event.target.value)}
-        className="w-full rounded-lg border border-surface-border bg-surface text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo" />
-      {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
-      <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-ink-muted">Cancel</button>
-        <button disabled={busy || !value.trim()} className="rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">
-          {busy ? 'Saving…' : mode === 'create' ? 'Create group' : 'Save name'}
-        </button>
-      </div>
-    </form>
-  </ModalShell>;
-}
-
-function LibraryRetryRow({ message, onRetry }: { message: string; onRetry: () => void }): JSX.Element {
-  return (
-    <div role="alert" className="py-4 text-center text-sm text-ink-muted">
-      <span>{message}</span>{' '}
-      <button type="button" className="font-semibold text-brand-indigo underline" onClick={onRetry}>Retry</button>
-    </div>
-  );
-}
-
-/** Muted "Recently deleted (N)" affordance at the bottom of the Library.
- *  Collapsed by default; expanding lists the trashed meetings with a
- *  Restore button each. Renders nothing when the trash is empty — no
- *  permanent chrome for a state most sessions never enter. */
-function TrashSection({
-  trash, onRestore,
-}: {
-  trash: TrashedMeeting[];
-  onRestore: (m: TrashedMeeting) => Promise<void>;
-}): JSX.Element | null {
-  const [open, setOpen] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  if (trash.length === 0) return null;
-  return (
-    <div className="shrink-0 border-t border-surface-border pt-2 pb-3">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-[11px] text-ink-muted hover:text-ink transition px-1 py-1"
-      >
-        <svg
-          viewBox="0 0 16 16"
-          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
-          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        >
-          <path d="M6 4l4 4-4 4" />
-        </svg>
-        Recently deleted ({trash.length})
-      </button>
-      {open && (
-        <div className="mt-1 space-y-1">
-          {trash.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-sunken/40 border border-surface-border/60"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-ink-muted truncate">{m.title}</div>
-                <div className="text-[11px] text-ink-muted/70">
-                  Deleted {fmtDeletedAgo(m.deletedAt)}
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busyId === m.id}
-                onClick={() => {
-                  setBusyId(m.id);
-                  void onRestore(m).finally(() => setBusyId(null));
-                }}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-ink-muted hover:text-ink hover:border-ink/40 transition disabled:opacity-50 shrink-0"
-              >
-                {busyId === m.id ? 'Restoring…' : 'Restore'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SearchSectionHeader({
-  label, count, sort, onSortChange,
-}: {
-  label: string;
-  count: number;
-  /** Optional — only the Content section gets a sort toggle. */
-  sort?: 'recent' | 'count';
-  onSortChange?: (s: 'recent' | 'count') => void;
-}): JSX.Element {
-  return (
-    <div className="flex items-center gap-3 pt-2 first:pt-0 pb-1">
-      <h3 className="font-mono text-[10px] tracking-[0.2em] uppercase text-ink-muted">
-        {label}
-      </h3>
-      <span className="text-[11px] text-ink-muted/80 tabular-nums">{count}</span>
-      <div className="flex-1 border-b border-surface-border" />
-      {sort && onSortChange && (
-        <div className="flex items-center gap-1 text-[10px] font-mono tracking-wider uppercase">
-          <button
-            type="button" aria-pressed={sort === 'recent'}
-            onClick={() => onSortChange('recent')}
-            className={`px-1.5 py-0.5 rounded ${sort === 'recent' ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink'}`}
-          >
-            Recent
-          </button>
-          <button
-            type="button" aria-pressed={sort === 'count'}
-            onClick={() => onSortChange('count')}
-            className={`px-1.5 py-0.5 rounded ${sort === 'count' ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink'}`}
-          >
-            Most matches
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FilterChip({
-  active, onClick, label, n, dotClass,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  n: number;
-  dotClass?: string;
-}): JSX.Element {
-  const disabled = n === 0 && !active;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      className={`
-        inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full
-        transition border
-        ${active
-          ? 'bg-ink text-surface border-ink'
-          : disabled
-            ? 'bg-surface text-ink-muted/60 border-surface-border opacity-50 cursor-not-allowed'
-            : 'bg-surface text-ink-muted border-surface-border hover:text-ink hover:border-ink/30'}
-      `}
-    >
-      {dotClass && <span className={`w-1.5 h-1.5 rounded-full ${dotClass} ${disabled ? 'opacity-50' : ''}`} />}
-      <span>{label}</span>
-      <span className={`tabular-nums ${active ? 'opacity-80' : 'opacity-60'}`}>{n}</span>
-    </button>
-  );
-}
-
-function LibraryEmpty({
-  filter, query, scopeName, scoped, onShowAll, onClearSearch, onClearFilter,
-}: {
-  filter: LibFilter;
-  query: string;
-  scopeName: string;
-  scoped: boolean;
-  onShowAll: () => void;
-  onClearSearch: () => void;
-  onClearFilter: () => void;
-}): JSX.Element {
-  if (query.trim().length >= 2) {
-    return (
-      <div className="text-center py-10 text-sm text-ink-muted">
-        <p>No meetings match <span className="font-semibold text-ink">“{query}”</span> in {scopeName}.</p>
-        <button type="button" onClick={onClearSearch} className="mt-2 text-brand-indigo font-semibold hover:underline">Clear search</button>
-      </div>
-    );
-  }
-  if (filter !== 'all') {
-    return (
-      <div className="text-center py-10 text-sm text-ink-muted">
-        <p>No {filter} meetings in {scopeName}.</p>
-        <button type="button" onClick={onClearFilter} className="mt-2 text-brand-indigo font-semibold hover:underline">Show all statuses</button>
-      </div>
-    );
-  }
-  if (scoped) return <div className="text-center py-14 text-sm text-ink-muted">
-    <p>No meetings in {scopeName} yet.</p>
-    <button type="button" onClick={onShowAll} className="mt-2 text-brand-indigo font-semibold hover:underline">Show all meetings</button>
-  </div>;
-  return (
-    <div className="text-center py-16">
-      <div className="flex justify-center mb-4 opacity-40">
-        <Icon name="mic" className="w-10 h-10" />
-      </div>
-      <div className="text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
-        Hit <span className="font-semibold text-ink">Record</span>{' '}
-        <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">{shortcutMod()}R</kbd>{' '}
-        to start a new session,
-        or drag an audio file (.m4a or .mp3) onto this window.
-      </div>
-    </div>
-  );
-}
-
-/** Live status of the pipeline queue. Renders only when there's
- *  actual activity (current meeting in flight, or queued items) — no
- *  permanent chrome on a quiet library.
- *
- *  Three buttons:
- *    Pause       — stop pulling new items off the queue. The currently
- *                  in-flight meeting keeps going (we deliberately don't
- *                  abort mid-stage so long transcription passes
- *                  aren't wasted).
- *    Resume      — start pulling again. Visible only while paused.
- *    Clear queue — drop everything that hasn't started yet. Cleared
- *                  meetings flip back to 'pending' so the user can see
- *                  them and decide whether to re-process. The current
- *                  in-flight meeting is NOT touched.
- */
-function QueueBanner({
-  status, meetings, onChanged, toast,
-}: {
-  status: PipelineStatusSnapshot;
-  meetings: { id: string; title: string }[];
-  onChanged: () => void;
-  toast: ReturnType<typeof useToast>;
-}): JSX.Element | null {
-  const titleById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const x of meetings) m.set(x.id, x.title);
-    return m;
-  }, [meetings]);
-
-  // Hide entirely when nothing is in flight or waiting. Avoids
-  // permanent chrome — the banner only appears when the user actually
-  // needs to make a decision.
-  if (!status.currentId && status.queueLength === 0) return null;
-
-  const currentTitle = status.currentId ? (titleById.get(status.currentId) ?? '…') : null;
-
-  async function pause(): Promise<void> {
-    await api.pipeline.pause();
-    toast.show({ message: 'Queue paused — current meeting will finish, then stop.', durationMs: 3500 });
-  }
-  async function resume(): Promise<void> {
-    await api.pipeline.resume();
-  }
-  async function clear(): Promise<void> {
-    const r = await api.pipeline.clear();
-    toast.show({
-      message: r.cleared.length > 0
-        ? `Cleared ${r.cleared.length} from queue. Current meeting still finishing.`
-        : 'Queue was already empty.',
-      durationMs: 4000,
-    });
-    onChanged();
-  }
-
-  const queuedCount = status.queueLength;
-  const tone = status.paused
-    ? 'bg-status-warnBg border-status-warn text-status-warnText'
-    : 'bg-brand-indigo/5 border-brand-indigo/30 text-ink';
-  const dotTone = status.paused
-    ? 'bg-status-warn'
-    : 'bg-brand-solid animate-pulse';
-
-  return (
-    <div className={`mb-4 rounded-xl border px-4 py-3 flex items-center gap-3 ${tone}`}>
-      <span className={`w-2 h-2 rounded-full shrink-0 ${dotTone}`} />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold truncate">
-          {status.paused
-            ? (status.currentId
-              ? <>Paused — finishing <span className="opacity-80">&quot;{currentTitle}&quot;</span></>
-              : <>Paused</>
-            )
-            : (status.currentId
-              ? <>Processing <span className="opacity-80">&quot;{currentTitle}&quot;</span></>
-              : <>Queue holding</>
-            )}
-        </div>
-        {queuedCount > 0 && (
-          <div className="text-[11px] text-ink-muted mt-0.5">
-            {queuedCount} more {queuedCount === 1 ? 'meeting' : 'meetings'} queued{status.paused ? ' — won’t start until you resume' : ''}.
-          </div>
-        )}
-      </div>
-      {status.currentId && <button type="button" className="text-xs font-semibold px-3 py-1.5 rounded-lg text-danger-text hover:bg-danger-bg transition shrink-0 disabled:opacity-50" disabled={status.cancelling} onClick={() => {
-        void api.pipeline.cancel(status.currentId!).then(() => toast.show({ message: 'Stopping this meeting only. Original audio is retained.', durationMs: 4000 }))
-          .catch(error => toast.show({ message: String(error), variant: 'error' }));
-      }}>{status.cancelling ? 'Cancelling…' : 'Cancel current'}</button>}
-      {status.paused ? (
-        <button
-          type="button"
-          onClick={() => void resume()}
-          className="btn-primary text-xs px-3 py-1.5 shrink-0"
-        >
-          Resume
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => void pause()}
-          className="btn-secondary !px-3 !py-1.5 shrink-0"
-        >
-          Pause
-        </button>
-      )}
-      {queuedCount > 0 && (
-        <button
-          onClick={() => void clear()}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg text-ink-muted hover:text-danger-text hover:bg-danger-bg transition shrink-0"
-          title="Drop queued meetings (current one keeps running)"
-        >
-          Clear queue
-        </button>
-      )}
-    </div>
-  );
-}
-
-function SelectionBar({
-  count, pendingCount, busy, onProcess, onDelete, onMove, onCancel,
-}: {
-  count: number;
-  /** How many of the selected rows are pending — the Process target.
-   *  Process is hidden when it's zero (nothing to start). */
-  pendingCount: number | null;
-  busy: boolean;
-  onProcess: () => void;
-  onDelete: () => void;
-  onMove: () => void;
-  onCancel: () => void;
-}): JSX.Element {
-  const visible = count > 0;
-  if(!visible)return <></>;
-  // Anchored `absolute` to the LibraryView root (which fills the shell's
-  // flex-1 slot), NOT `fixed` to the viewport — the app-wide status bar
-  // occupies the bottom of the viewport and would paint over the pill's
-  // bottom edge. The slot ends where the status bar begins, so bottom-0
-  // here docks the pill just above it, whatever the status bar's height.
-  return (
-    <div
-      aria-hidden={!visible}
-      className={`
-        absolute bottom-0 left-0 right-0 z-10 pointer-events-none
-        transition-[transform,opacity] duration-200 ease-out
-        ${visible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0'}
-      `}
-    >
-      <div className="px-4 sm:px-6 lg:px-8 pb-4">
-        <div className="pointer-events-auto bg-ink text-surface rounded-xl shadow-pop flex flex-wrap items-center gap-2 sm:gap-3 px-4 py-3">
-          <span className="text-sm font-semibold tabular-nums">
-            {count} selected · Esc to clear
-          </span>
-          <div className="flex-1" />
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            className="text-sm text-surface/70 hover:text-surface px-3 py-1.5 rounded-lg hover:bg-surface/10 transition"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onMove}
-            disabled={busy}
-            className="text-sm font-semibold text-surface px-3 py-1.5 rounded-lg hover:bg-surface/10 transition disabled:opacity-50"
-          >
-            Move to group…
-          </button>
-          <button
-            onClick={onDelete}
-            disabled={busy}
-            className="text-sm font-semibold bg-danger-solid text-white px-4 py-1.5 rounded-lg hover:opacity-90 transition"
-          >
-            Delete ({count})
-          </button>
-          {(pendingCount === null || pendingCount > 0) && (
-            <button
-              onClick={onProcess}
-              disabled={busy}
-              title="Starts processing the pending recordings in the selection"
-              className="text-sm font-semibold bg-brand-solid text-white px-4 py-1.5 rounded-lg hover:bg-brand-solid/90 transition inline-flex items-center gap-1.5"
-            >
-              <Icon name="play" className="w-3.5 h-3.5" />
-              {pendingCount === null ? 'Check & process' : `Process (${pendingCount})`}
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

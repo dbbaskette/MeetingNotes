@@ -1,3 +1,6 @@
+// Kept as one file on purpose (#256): TerminologyService is a single class
+// whose private helpers share the document, revision and batch-persistence
+// invariants; splitting it would scatter those invariants across modules.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
