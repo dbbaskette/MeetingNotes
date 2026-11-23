@@ -8,15 +8,19 @@ const result = { provider: 'apple', text: 'Hello', segments: [{ start: 0, end: 1
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-native-transcribe-')); folder = path.join(root, 'meetings', 'slug'); fs.mkdirSync(folder, { recursive: true });
   ctx = { libraryRoot: root, nativeSpeech: { transcribe: vi.fn(async () => result) },
-    settings: { get: () => 'en' }, speechSelection: { provider: 'native', language: 'fr' },
+    settings: { get: (key: string) => key === 'userName' ? 'Dana' : 'en' }, speechSelection: { provider: 'native', language: 'fr' },
+    speakers: { list: () => [{ displayName: 'Priya' }] },
     meetings: { findById: () => ({ slug: 'slug', audioPath: '/mixed.m4a' }) },
-    artifactCache: { invalidate: vi.fn() }, logger: { info: vi.fn() } };
+    artifactCache: { invalidate: vi.fn() }, logger: { info: vi.fn(), warn: vi.fn() } };
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 it('uses the native helper with mixed audio and pinned locale, preserving word timing', async () => {
   ctx.signal = new AbortController().signal; ctx.onTranscriptionProgress = vi.fn();
   await runTranscribing({ meetingId: 'm' }, ctx);
-  expect(ctx.nativeSpeech.transcribe).toHaveBeenCalledWith('/mixed.m4a', 'fr', { signal: ctx.signal, progress: ctx.onTranscriptionProgress });
+  // A run pinned before the engine choice existed uses Apple speech.
+  expect(ctx.nativeSpeech.transcribe).toHaveBeenCalledWith('/mixed.m4a', 'fr',
+    { signal: ctx.signal, progress: ctx.onTranscriptionProgress, engine: 'apple', vocabulary: ['Dana', 'Priya'] });
+  expect(ctx.logger.warn).not.toHaveBeenCalled();
   const file = path.join(folder, 'transcript.raw.json');
   expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ ...result, segments: [{ ...result.segments[0], wordTiming: true }] });
   expect(ctx.artifactCache.invalidate).toHaveBeenCalledWith(file);

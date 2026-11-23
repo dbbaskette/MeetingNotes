@@ -43,7 +43,7 @@ const words = ['Keith', 'will', 'review', 'Salsa', 'compliance.'].map((text, i) 
 it('ignores obsolete settings without deleting rollback configuration', () => {
   for (const [key, value] of Object.entries({ speechProvider: 'legacy', sttUrl: 'http://localhost:9090', sttModel: 'medium.en' }))
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
-  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en' });
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en', engine: 'apple' });
   for (const key of ['speechProvider', 'sttUrl', 'sttModel']) expect(settings.getAll()).not.toHaveProperty(key);
   expect(db.prepare("SELECT value FROM settings WHERE key = 'speechProvider'").get()).toEqual({ value: '"legacy"' });
 });
@@ -117,9 +117,49 @@ it('pins the native locale across recovery until explicit upstream reprocessing'
   clearArtifactsFromStage(folder, 'transcribing', new ArtifactCache());
   expect(selectSpeech(folder, settings)).toMatchObject({ provider: 'native', language: 'fr' });
 });
+it('pins the transcription engine and model for the run, and re-reads the setting on reprocess', () => {
+  settings.set('transcriptionEngine', 'whisperkit');
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en', engine: 'whisperkit', model: 'openai_whisper-large-v3-v20240930_626MB' });
+  // Recovery after a crash keeps the engine the run started with.
+  settings.set('transcriptionEngine', 'apple');
+  expect(selectSpeech(folder, settings).engine).toBe('whisperkit');
+  // Reprocessing from transcription clears the pin and records the new choice.
+  clearArtifactsFromStage(folder, 'transcribing', new ArtifactCache());
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en', engine: 'apple' });
+  expect(JSON.parse(fs.readFileSync(file('processing-speech.json'), 'utf8'))).toEqual({ provider: 'native', language: 'en', engine: 'apple' });
+});
+it('reads a run pinned before the engine choice existed as Apple speech', () => {
+  fs.writeFileSync(file('processing-speech.json'), JSON.stringify({ provider: 'native', language: 'de' }));
+  settings.set('transcriptionEngine', 'whisperkit');
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'de', engine: 'apple' });
+});
+it('transcribes with the pinned engine and offers dictionary spellings and roster names as vocabulary', async () => {
+  roster.confirmSpeaker({ displayName: 'Priya Raghunathan', embedding: [0, 1] });
+  settings.set('userName', 'Dana');
+  const transcribe = vi.fn(async () => ({ text: 'Priya will review.', segments: words, provider: 'whisperkit', model: 'fixture' }));
+  const terminology = new TerminologyService(new TerminologyRepo(db), { libraryRoot: root, meetings, speakers, artifactCache: new ArtifactCache(), userName: () => '' });
+  terminology.repo.save({ source: 'Salsa', replacement: 'SLSA', groupId: null, enabled: true, mode: 'automatic', caseSensitive: false });
+  terminology.repo.save({ source: 'cube', replacement: 'Kubernetes', groupId: null, enabled: false, mode: 'automatic', caseSensitive: false });
+  const ctx = { libraryRoot: root, meetings, speakers, settings, terminology, nativeSpeech: { transcribe }, artifactCache: new ArtifactCache(),
+    speechSelection: { provider: 'native', language: 'de', engine: 'whisperkit' }, logger: { info() {}, warn() {}, error() {} } } as unknown as PipelineContext;
+  await runTranscribing({ meetingId: 'm' }, ctx);
+  expect(transcribe).toHaveBeenCalledWith('/synthetic.m4a', 'de', expect.objectContaining({ engine: 'whisperkit', vocabulary: ['SLSA', 'Dana', 'Priya Raghunathan'] }));
+  const raw = JSON.parse(fs.readFileSync(file('transcript.raw.json'), 'utf8'));
+  expect(raw.provider).toBe('whisperkit');
+  expect(raw.segments.every((segment: { wordTiming: boolean }) => segment.wordTiming)).toBe(true);
+});
+it('still transcribes when the vocabulary cannot be read', async () => {
+  const transcribe = vi.fn(async () => ({ text: 'x', segments: words, provider: 'apple' }));
+  const warn = vi.fn();
+  const ctx = { libraryRoot: root, meetings, settings, nativeSpeech: { transcribe }, artifactCache: new ArtifactCache(),
+    speakers: { list: () => { throw new Error('database is locked'); } }, logger: { info() {}, warn, error() {} } } as unknown as PipelineContext;
+  await runTranscribing({ meetingId: 'm' }, ctx);
+  expect(transcribe).toHaveBeenCalledWith('/synthetic.m4a', 'en', expect.objectContaining({ engine: 'apple', vocabulary: [] }));
+  expect(warn).toHaveBeenCalledWith('transcribe:vocabulary-unavailable', expect.anything());
+});
 it('replaces a recovered legacy engine manifest with native processing', () => {
   fs.writeFileSync(file('processing-speech.json'), JSON.stringify({ provider: 'legacy', language: 'en', model: 'medium.en' }));
-  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en' });
+  expect(selectSpeech(folder, settings)).toEqual({ provider: 'native', language: 'en', engine: 'apple' });
   expect(JSON.parse(fs.readFileSync(file('processing-speech.json'), 'utf8')).provider).toBe('native');
 });
 it('only offers native speech on supported Apple silicon systems', () => {

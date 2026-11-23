@@ -8,7 +8,8 @@ let package = Package(
     dependencies: [.package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1")],
     targets: [
         .executableTarget(name: "MeetingNotesSpeech", dependencies: [
-            .product(name: "SpeakerKit", package: "argmax-oss-swift")
+            .product(name: "SpeakerKit", package: "argmax-oss-swift"),
+            .product(name: "WhisperKit", package: "argmax-oss-swift")
         ], path: "Sources"),
         .testTarget(name: "MeetingNotesSpeechTests", dependencies: ["MeetingNotesSpeech"], path: "Tests")
     ]

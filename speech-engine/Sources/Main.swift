@@ -37,7 +37,13 @@ enum SpeechMain {
             id = request.id
             guard request.version == 1, !id.isEmpty, id.count < 201 else { throw SpeechFailure("Unsupported speech protocol.") }
             let begin = Date()
-            if request.operation == "transcribe" {
+            if request.operation == "transcribe", request.engine == "whisperkit" {
+                let typed = try await WhisperKitTranscription.transcribe(request) { fraction in
+                    emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
+                }
+                try emitEncodable(ResultEnvelope(version: 1, id: id, kind: "result", elapsedMs: Date().timeIntervalSince(begin) * 1000, result: typed))
+            } else if request.operation == "transcribe" {
+                guard request.engine == nil || request.engine == "apple" else { throw SpeechFailure("Unknown transcription engine.") }
                 guard #available(macOS 26, *) else { throw SpeechFailure("Apple transcription requires macOS 26 or later.") }
                 let typed = try await AppleTranscription.transcribe(request) { fraction in
                     emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
@@ -56,6 +62,7 @@ enum SpeechMain {
                     }
                     result = ["installed": true]
                 case "provision-speakers": result = try await SpeakerProcessing.provision(request)
+                case "prepare-whisperkit": result = try await WhisperKitTranscription.prepare(request)
                 case "diarize": result = try await SpeakerProcessing.diarize(request)
                 default: throw SpeechFailure("Unknown speech operation.")
                 }

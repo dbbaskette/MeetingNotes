@@ -6,6 +6,7 @@ import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { Icon, IconLabel } from '../components/icons';
 import logoUrl from '../assets/logo.png';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
+import type { TranscriptionEngine } from '../../../shared/native-speech';
 
 interface Props {
   onFinished: () => void;
@@ -30,7 +31,10 @@ function StatusPip({ status, step }: { status: StepStatus; step?: string }): JSX
 export function OnboardingView({ onFinished }: Props): JSX.Element {
   const [idx, setIdx] = useState(0);
   const [language, setLanguage] = useState('en');
-  useEffect(() => { void api.settings.getAll().then(s => { setLanguage(s.sttLanguage); }); }, []);
+  // Setup keeps the built-in engine by default; someone who already chose
+  // WhisperKit in Settings sees that engine's readiness here.
+  const [engine, setEngine] = useState<TranscriptionEngine>('apple');
+  useEffect(() => { void api.settings.getAll().then(s => { setLanguage(s.sttLanguage); setEngine(s.transcriptionEngine ?? 'apple'); }); }, []);
   const step = STEPS[idx]!;
   const [stepStatus, setStepStatus] = useState<Record<StepKey, StepStatus>>({
     permissions: 'pending', native: 'pending', llm: 'pending',
@@ -56,7 +60,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
       </div>
 
       <div className="p-6 min-h-[260px]">
-        {step === 'native' && <NativeSpeechPanel language={language} onReady={ready => setStatus('native', ready ? 'ok' : 'warn')} />}
+        {step === 'native' && <NativeSpeechPanel language={language} engine={engine} onReady={ready => setStatus('native', ready ? 'ok' : 'warn')} />}
         {step === 'permissions' && <PermissionsStep onStatus={(s) => setStatus('permissions', s)} />}
         {step === 'llm' && <LlmStep onStatus={(s) => setStatus('llm', s)} />}
       </div>

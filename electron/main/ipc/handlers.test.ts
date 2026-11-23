@@ -634,6 +634,37 @@ describe('registerIpcHandlers', () => {
     expect(readJson).not.toHaveBeenCalledWith(diarizationPath);
   });
 
+  it('names the transcription engine that was pinned for the meeting, not the current setting', async () => {
+    const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-engine-label-'));
+    const folder = path.join(libraryRoot, 'meetings', 'design-sync');
+    await fs.mkdir(folder, { recursive: true });
+    const handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      libraryRoot,
+      artifactCache: {
+        readText: async () => null,
+        readJson: async (filePath: string) => JSON.parse(await fs.readFile(filePath, 'utf8')),
+      },
+      meetings: {
+        listAll: () => [], processingHistory: () => [],
+        findById: (id: string) => ({ id, slug: 'design-sync', title: 'Design sync', startedAt: null, durationS: null,
+          pipelineStage: 'done', status: 'done', errorMessage: null, stageStartedAt: null, skipSpeakerId: false, audioPath: '/audio/x.m4a' }),
+      },
+      speakers: { list: () => [], listForMeeting: () => [] },
+    }));
+    const get = handle.mock.calls.find((call) => call[0] === 'meetings:get')![1] as (
+      event: unknown, id: unknown) => Promise<{ models: { stt?: string } } | null>;
+    const pinned = path.join(folder, 'processing-speech.json');
+    // No provenance: an old meeting is not relabelled.
+    expect((await get(null, 'm1'))?.models.stt).toBeUndefined();
+    await fs.writeFile(pinned, JSON.stringify({ provider: 'native', language: 'en' }));
+    expect((await get(null, 'm1'))?.models.stt).toBe('Apple SpeechTranscriber');
+    await fs.writeFile(pinned, JSON.stringify({ provider: 'native', language: 'en', engine: 'apple' }));
+    expect((await get(null, 'm1'))?.models.stt).toBe('Apple SpeechTranscriber');
+    await fs.writeFile(pinned, JSON.stringify({ provider: 'native', language: 'de', engine: 'whisperkit', model: 'openai_whisper-large-v3-v20240930_626MB' }));
+    expect((await get(null, 'm1'))?.models.stt).toBe('WhisperKit large-v3-turbo');
+  });
+
   it('loads transcript markdown and early raw preview through the transcript artifact handler', async () => {
     const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-transcript-artifact-'));
     const folder = path.join(libraryRoot, 'meetings', 'design-sync');

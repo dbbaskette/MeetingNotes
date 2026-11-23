@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import os from 'node:os';
 import path from 'node:path';
 import type { ObsidianConfig } from '../../shared/obsidian.js';
+import type { TranscriptionEngine } from '../../shared/native-speech.js';
 import type { ReasoningEffort } from '../lm-studio/client.js';
 
 export interface Settings {
@@ -16,6 +17,8 @@ export interface Settings {
    *  drop location for users who want one. See libraryWatchPaths(). */
   audioWatchPath: string;
   sttLanguage: string;
+  /** 'apple' (built in, default) or the optional downloaded 'whisperkit' model (#306). */
+  transcriptionEngine: TranscriptionEngine;
   /** Push a meeting.completed JSON payload to a user-configured endpoint
    *  when the pipeline finishes a meeting (#79). All fields below are
    *  ignored unless this is true. */
@@ -161,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   libraryPath: path.join(os.homedir(), 'Documents', 'MeetingNotes'),
   audioWatchPath: '',
   sttLanguage: 'en',
+  transcriptionEngine: 'apple',
   exporterWebhook: false,
   webhookUrl: '',
   webhookSecret: '',

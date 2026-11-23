@@ -81,6 +81,8 @@ and Actions repository, and CI launches the built app against a disposable libra
 
 Native physical-device checks: `npm run speech:smoke`, then `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/integrated-smoke.mjs`. Prepare Apple assets explicitly first. The integrated check generates AAC speech in a disposable library, uses actual native inference through the full stable pipeline, confirms/trains a voice, saves notes/tasks with fixture LLM responses, and exports Markdown. It never opens private meetings. Synthetic results do not establish real-meeting accuracy or microphone capture quality.
 
+Optional WhisperKit engine: `npm run build && npm run build:speech`, then `ELECTRON_RUN_AS_NODE=1 node_modules/.bin/electron scripts/speech-benchmark/whisperkit-smoke.mjs /absolute/folder`. It downloads the pinned 627 MB model into the folder you pass (never the app's own model folder), verifies every hash, loads the model, transcribes generated speech with and without a vocabulary, and merges the words with SpeakerKit turns. It needs the network and is not part of CI. `swift test --package-path speech-engine` covers the helper's word-timing, language and prompt logic without a model.
+
 The app icon uses a bright tile and bold indigo waveform/chat mark for visibility on dark backgrounds. `npm run build:icons` regenerates its macOS icon family and matching in-app logo from `build/icon-1024.png`.
 
 Electron apps launched from Finder inherit a minimal PATH that excludes Homebrew, so the app resolves `ffmpeg`, `ffprobe`, `lms`, and `ollama` by searching well-known Homebrew paths — the `.dmg` behaves exactly like `npm run dev`. If a binary is missing, the error names the exact `brew install` to run.

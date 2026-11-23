@@ -58,6 +58,15 @@ enum AppleTranscription {
         let audio = try AVAudioFile(forReading: url)
         let duration = Double(audio.length) / audio.processingFormat.sampleRate
         let analyzer = SpeechAnalyzer(modules: [module])
+        // Offer the user's own names and terms as context (#306). On macOS 27.0
+        // SpeechTranscriber accepts these but its output did not change in our
+        // tests; they are passed so a release that honours them benefits.
+        let terms = vocabulary(request.contextualStrings)
+        if !terms.isEmpty {
+            let context = AnalysisContext()
+            context.contextualStrings[.general] = terms
+            try await analyzer.setContext(context)
+        }
         let reader = Task { () throws -> [TimedText] in
             var segments: [TimedText] = []
             for try await result in module.results {

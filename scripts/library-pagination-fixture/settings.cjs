@@ -67,8 +67,23 @@ app.whenReady().then(async () => {
   await run(`${matching}.click()`); await settle();
   assert.equal(await run('window.fixture.saves.at(-1).value'), false);
   assert.equal(await run('Array.from(document.querySelectorAll("select")).some(s => s.getAttribute("aria-label") === "Transcription and speaker engine")'),false,'No legacy selector even with saved legacy settings');
-  assert.equal(await run('/Whisper|Hugging Face|token input/.test(document.body.innerText)'),false);
+  assert.equal(await run('/Whisper(?!Kit)|whisper-server|Hugging Face|token input/i.test(document.body.innerText)'),false,'No legacy Whisper server, model manager or token controls');
   assert.equal(await run('window.fixture.preparations'),0,'Opening settings never provisions assets');
+  // Optional WhisperKit engine (#306): an explicit choice, off by default,
+  // saved like any other setting, and never a download by itself.
+  const pressed = `Array.from(document.querySelectorAll('[aria-label="Transcription engine"] button')).find(b => b.getAttribute('aria-pressed') === 'true')?.textContent`;
+  assert.equal(await run(pressed),'Apple Speech (Built-in)','Apple speech is the default engine');
+  assert(await run('document.body.innerText.includes("Apple assets: not ready")'));
+  await click('WhisperKit Large-v3-Turbo (High accuracy)'); await until(`${pressed} === 'WhisperKit Large-v3-Turbo (High accuracy)'`);
+  assert.deepEqual(await run('window.fixture.saves.at(-1)'),{key:'transcriptionEngine',value:'whisperkit'});
+  assert(await run('document.body.innerText.includes("WhisperKit model: not downloaded")'),'The selected engine reports its own readiness');
+  assert(await run('document.body.innerText.includes("627 MB")'),'The download size is stated before anything is downloaded');
+  assert.equal(await run('window.fixture.preparations'),0,'Choosing an engine never downloads a model');
+  // A refused change (processing is running) must not leave the control on an engine that was not saved.
+  await run('window.fixture.fail = true'); await click('Apple Speech (Built-in)'); await until('document.body.innerText.includes("Transcription engine: Couldn")');
+  await until(`${pressed} === 'WhisperKit Large-v3-Turbo (High accuracy)'`);
+  await run('window.fixture.fail = false'); await click('Apple Speech (Built-in)'); await until(`${pressed} === 'Apple Speech (Built-in)'`);
+  assert.deepEqual(await run('window.fixture.saves.at(-1)'),{key:'transcriptionEngine',value:'apple'});
   await click('Prepare native speech'); await until('!!document.querySelector("progress")');
   await click('Cancel setup'); await until('document.body.innerText.includes("Setup cancelled")');
   assert.equal(await run('window.fixture.downloads.length'),0,'Native setup never downloads Whisper');
