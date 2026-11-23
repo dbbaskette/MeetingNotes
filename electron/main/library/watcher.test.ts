@@ -18,18 +18,53 @@ async function waitFor(check: () => boolean, timeoutMs = 15_000): Promise<void> 
   }
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// chokidar's 'ready' fires after its initial readdir, but the polling
+// baseline for the directory is an fs.watchFile stat queued on the libuv
+// threadpool afterwards. Under full-suite load that stat can run after a file
+// the test creates "right after start", so the file is part of the baseline
+// and no add event ever fires. Create probe files until the watcher delivers
+// one: from then on the baseline exists and any new file is a real change.
+async function awaitDirectoryBaseline(dir: string, seen: readonly string[]): Promise<void> {
+  const delivered = (): boolean => seen.some((p) => path.basename(p).startsWith('baseline-probe-'));
+  for (let i = 0; !delivered(); i++) {
+    fs.writeFileSync(path.join(dir, `baseline-probe-${i}.m4a`), Buffer.alloc(1));
+    for (let waited = 0; waited < 500 &&!delivered(); waited += 10) await sleep(10);
+  }
+}
+
 describe('LibraryWatcher', () => {
   it('emits a stable-file event once the file size stops changing', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-watch-')); dirs.push(dir);
-    const w = new LibraryWatcher({ path: dir, stabilityMs: 100, pollMs: 40, usePolling: true });
+    const stabilityMs = 300;
+    const pollMs = 40;
+    const w = new LibraryWatcher({ path: dir, stabilityMs, pollMs, usePolling: true });
     const seen: string[] = [];
-    w.onStableFile((p) => seen.push(p));
-    await w.start();
-    const file = path.join(dir, 'new.mp3');
-    fs.writeFileSync(file, Buffer.alloc(100));
-    await waitFor(() => seen.includes(file));
-    await w.stop();
-    expect(seen).toContain(file);
+    const emittedAt = new Map<string, number>();
+    w.onStableFile((p) => { seen.push(p); emittedAt.set(p, Date.now()); });
+    const file = path.join(dir, 'growing.mp3');
+    try {
+      await w.start();
+      await awaitDirectoryBaseline(dir, seen);
+
+      // Keep the file growing for 2.5 stability windows. The 5 ms step timer
+      // is always due before chokidar's next pollMs (40 ms) size check, so
+      // every check sees a new size no matter how slowly the loop runs: the
+      // write never looks stable while it is still growing.
+      const createdAt = Date.now();
+      fs.writeFileSync(file, Buffer.alloc(100));
+      while (Date.now() - createdAt < 2.5 * stabilityMs) {
+        await sleep(5);
+        fs.appendFileSync(file, Buffer.alloc(10));
+      }
+      expect(seen).not.toContain(file);
+
+      await waitFor(() => seen.includes(file));
+      // Load can only delay delivery, so this lower bound cannot flake.
+      expect(emittedAt.get(file)! - createdAt).toBeGreaterThanOrEqual(stabilityMs);
+      expect(seen.filter((p) => p === file)).toHaveLength(1);
+    } finally { await w.stop(); }
   });
 
   it('emits already-existing .mp3 files on start (initial scan)', async () => {
@@ -131,6 +166,7 @@ describe('LibraryWatcher', () => {
     const seen: string[] = [];
     w.onStableFile((p) => seen.push(p));
     await w.start();
+    await awaitDirectoryBaseline(dir, seen);
     const newFile = path.join(dir, 'new.m4a');
     fs.writeFileSync(newFile, Buffer.alloc(50));
     await waitFor(() => seen.includes(newFile));

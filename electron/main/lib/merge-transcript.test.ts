@@ -54,15 +54,28 @@ describe('mergeTranscriptWithDiarization', () => {
   });
 
   it('finishes a 4-hour-scale merge without a nested full scan', () => {
-    const segments: TranscriptSegment[] = Array.from({ length: 14_400 }, (_, i) => ({
+    // Count every read of a start/end time instead of timing the call: a
+    // wall-clock limit flakes on a slow machine, a read count does not. The
+    // sort-and-sweep merge makes about 0.22M reads here (O((n + m) log m));
+    // a nested segment-by-turn scan makes about 276M (four per n * m pair).
+    let timeReads = 0;
+    const counted = <T extends { start: number; end: number }>(row: T): T => {
+      const { start, end } = row;
+      return Object.defineProperties(row, {
+        start: { get: () => { timeReads++; return start; }, enumerable: true },
+        end: { get: () => { timeReads++; return end; }, enumerable: true },
+      });
+    };
+    const n = 14_400;
+    const m = 4_800;
+    const segments: TranscriptSegment[] = Array.from({ length: n }, (_, i) => counted({
       start: i, end: i + 0.9, text: 'x',
     }));
-    const many: DiarSegment[] = Array.from({ length: 4_800 }, (_, i) => ({
+    const many: DiarSegment[] = Array.from({ length: m }, (_, i) => counted({
       start: i * 3, end: i * 3 + 3, speaker: `S${i % 4}`,
     }));
-    const started = performance.now();
     const out = mergeTranscriptWithDiarization(segments, many);
-    expect(performance.now() - started).toBeLessThan(20);
+    expect(timeReads).toBeLessThan(30 * (n + m));
     expect(out[0]!.speaker).toBe('S0');
     expect(out[14_399]!.speaker).toBe('S3');
   });
