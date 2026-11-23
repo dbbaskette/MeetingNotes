@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { ModalShell } from './ModalShell';
+import { LineDiff } from './LineDiff';
 import { api } from '../ipc/client';
 import type { NotesVersion, NotesComparison } from '../../../shared/notes-history';
 const button = 'rounded-md border border-surface-border px-3 py-1.5 text-xs font-semibold hover:bg-surface-sunken disabled:opacity-40';
@@ -26,13 +27,16 @@ export function NotesHistory({ meetingId, disabled, onRestored }: {meetingId: st
         {!versions.length && <p role="status" className="text-sm text-ink-muted">{busy ? 'Loading…' : 'No previous versions yet.'}</p>}
         {versions.map(version => <button key={version.id} disabled={busy} className={`${button} w-full text-left`} onClick={() => void perform(async () => setComparison(await api.notesHistory.compare(meetingId, version.id)))}>{new Date(version.createdAt).toLocaleString()} — {version.reason}</button>)}
       </div> : <>
-        <div className="grid md:grid-cols-2 gap-4">
+        {/* What restoring would change: lines only in the current notes are
+            removed by a restore, lines only in the selected version come back. */}
+        <h3 className="font-semibold mb-2 text-sm">Notes</h3>
+        <LineDiff before={comparison.current.summary} after={comparison.previous.summary} beforeLabel="the current version" afterLabel="the selected version" />
+        <div className="grid md:grid-cols-2 gap-4 mt-4">
           {[comparison.current, comparison.previous].map((version,index) => <section key={index} className="min-w-0">
-            <h3 className="font-semibold mb-2">{index ? 'Selected previous version' : 'Current version'}</h3>
-            <div className="max-h-[45vh] overflow-auto rounded-md border border-surface-border p-3 text-sm">
-              <pre className="whitespace-pre-wrap font-sans break-words">{version.summary || '(No notes)'}</pre>
-              <h4 className="font-semibold mt-4">Action items ({version.items.length})</h4>
-              <ul className="list-disc pl-4 space-y-2 mt-2">{version.items.map(item => <li key={item.id}>{item.text}<div className="text-xs text-ink-muted">{item.status} · {item.ownerName ?? 'Unassigned'}{item.dueDate ? ` · ${item.dueDate}` : ''}</div></li>)}</ul>
+            <h3 className="font-semibold mb-2 text-sm">{index ? 'Selected version' : 'Current version'} · action items ({version.items.length})</h3>
+            <div className="max-h-[22vh] overflow-auto rounded-md border border-surface-border p-3 text-sm">
+              {version.items.length === 0 ? <p className="text-xs text-ink-muted">No action items.</p>
+                : <ul className="list-disc pl-4 space-y-2">{version.items.map(item => <li key={item.id}>{item.text}<div className="text-xs text-ink-muted">{item.status} · {item.ownerName ?? 'Unassigned'}{item.dueDate ? ` · ${item.dueDate}` : ''}</div></li>)}</ul>}
             </div>
           </section>)}
         </div>

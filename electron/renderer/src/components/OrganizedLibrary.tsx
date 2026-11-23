@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useMenuKeyboard } from '../lib/menu-keyboard';
+import { useRowKeyboardNav } from '../lib/row-keyboard-nav';
 import { Icon } from './icons';
 import { VirtualGroupRows } from './VirtualGroupRows';
 import { createPortal } from 'react-dom';
@@ -49,6 +50,9 @@ export function OrganizedLibrary({
   const [loadedBySection, setLoadedBySection] = useState<Record<string, MeetingSummary[]>>({});
   const ownScrollRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentScrollRef ?? ownScrollRef;
+  // j / k move between meeting rows across every expanded group; Enter opens
+  // the focused one (#298).
+  useRowKeyboardNav(scrollRef, true);
   const searchBuckets = useMemo(() => groupSearchMeetings(sections, searchResults), [sections, searchResults]);
 
   useEffect(() => { setSearchCollapsed(new Set()); }, [searchQuery]);

@@ -17,6 +17,10 @@ import { resolveDark, type ThemeChoice } from './lib/theme';
 import { firstRunStatus } from './lib/setup-wizard';
 import { requestLeave } from './lib/unsaved-guard';
 import { createNavHistory, viewsEqual, type NavHistory } from './lib/nav-history';
+import { liveCapture } from './lib/live-capture';
+import { SILENCE_AUTO_STOP_REASON, useSilencePrompt } from './lib/silence-prompt';
+import { onNavigationRequest, type SettingsSectionName } from './lib/deep-link';
+import { MeetingDetectedBanner } from './components/MeetingDetectedBanner';
 import { recordingStartFeedback, RECORDING_ACTIVE_MESSAGE } from './lib/recording-start-feedback';
 
 const MeetingDetailView = lazy(() => import('./views/MeetingDetailView').then((m) => ({ default: m.MeetingDetailView })));
@@ -38,8 +42,8 @@ type View =
        *  hints the user stares at "Loading…" twice over a blank page. */
       hint?: { title?: string; pipelineStage?: string; status?: string };
     }
-  | { kind: 'settings' }
-  | { kind: 'actions' }
+  | { kind: 'settings'; section?: SettingsSectionName }
+  | { kind: 'actions'; groupId?: string | null }
   | { kind: 'weekly' };
 
 /** The exact arguments a recording was started with. Kept on the live-
@@ -113,6 +117,17 @@ function AppInner(): JSX.Element {
     liveRecordingRef.current = r;
     setLiveRecordingState(r);
   }, []);
+  // One live-capture history for the whole recording, whichever view is
+  // showing. Holding it here means the Library row and the pill on other
+  // views read the same "what have we heard" instead of each starting over.
+  const liveSessionId = liveRecording?.sessionId ?? null;
+  useEffect(() => (liveSessionId ? liveCapture.attach(liveSessionId) : undefined), [liveSessionId]);
+  // Same for the "all audio stopped" prompt: one subscription for the whole
+  // recording, so moving between the Library row and the pill never drops it.
+  useSilencePrompt(liveSessionId);
+  // Deep links requested by components (hints that point at Settings, a
+  // group's open actions, a meeting).
+  useEffect(() => onNavigationRequest((link) => { void navigate(link); }), [navigate]);
   // Cmd+K global search palette state (#45). Opens over any view.
   const [searchOpen, setSearchOpen] = useState(false);
   // Drag-and-drop import state (#1 from the UX review). Tracks whether
@@ -293,6 +308,12 @@ function AppInner(): JSX.Element {
         if (token !== revision) return;
         if (authoritative !== 'idle' && authoritative !== 'error') return;
         if (liveRecordingRef.current?.sessionId === sessionId) setLiveRecording(null);
+      // An automatic stop after silence (#305) is expected, not a failure:
+      // the user was warned with a countdown and the recording is complete.
+      if (state === 'idle' && reason === SILENCE_AUTO_STOP_REASON) {
+        toast.show({ message: 'Recording stopped automatically after all audio went silent. It was saved to the Library.', durationMs: 12_000 });
+        return;
+      }
       const why = state === 'error'
         ? reason ?? 'the recorder hit an error'
         : reason ?? 'the capture process exited';
@@ -351,6 +372,9 @@ function AppInner(): JSX.Element {
           break;
         case 'view-weekly':
           void navigate({ kind: 'weekly' });
+          break;
+        case 'view-actions':
+          void navigate({ kind: 'actions' });
           break;
         case 'view-settings':
           void navigate({ kind: 'settings' });
@@ -511,7 +535,7 @@ function AppInner(): JSX.Element {
   ) : !permsOk ? (
     <PermissionsModal onAllGranted={() => setPermsOk(true)} />
   ) : view.kind === 'library' || view.kind === 'weekly' ? null : view.kind === 'actions' ? (
-    <ActionsView onNav={target => void navigate({ kind: target })} onOpen={id => void navigate({ kind: 'detail', id })} />
+    <ActionsView key={view.groupId ?? 'all'} initialGroupId={view.groupId} onNav={target => void navigate({ kind: target })} onOpen={id => void navigate({ kind: 'detail', id })} />
   ) : view.kind === 'detail' ? (
     <MeetingDetailView
       id={view.id}
@@ -521,6 +545,7 @@ function AppInner(): JSX.Element {
     />
   ) : (
     <SettingsView
+      initialSection={view.section}
       onNav={(target) => { if (target !== 'settings') void navigate({ kind: target }); }}
       onRunSetupAgain={() => { void navigate({ kind: 'library' }); setForceOpenSetup(true); }}
     />
@@ -550,6 +575,15 @@ function AppInner(): JSX.Element {
           anymore, which is what lets Library / Detail keep their
           headers and filter chips pinned in place. */}
       <div className="h-full flex flex-col">
+        {/* Meeting detection on every view (#297). The Library shows the same
+            banner inline; elsewhere it floats under the title bar. */}
+        {readyForViews && !liveRecording && view.kind !== 'library' && (
+          <div className="fixed left-1/2 top-9 z-[940] w-[min(44rem,calc(100vw-2rem))] -translate-x-1/2">
+            <MeetingDetectedBanner className="material-dialog bg-surface shadow-pop" onStartRecording={({ sessionId, label, startInput }) => setLiveRecording({
+              sessionId, label, startInput, startedAt: new Date().toISOString(),
+            })} />
+          </div>
+        )}
         {showTopBanner && (
           <RecordingPill
             sessionId={liveRecording!.sessionId}

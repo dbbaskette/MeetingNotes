@@ -9,8 +9,44 @@ export interface PickedSource { title?: string; targetPid: number | 'system'; ta
 
 
 export function SourcePicker({
-  onPick, onCancel, initialGroupId, showGroupPicker = true,
-}: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null; showGroupPicker?: boolean }): JSX.Element {
+  onPick, onCancel, initialGroupId, showGroupPicker = true, align = 'right',
+}: { onPick: (src: PickedSource) => void; onCancel: () => void; initialGroupId?: string | null; showGroupPicker?: boolean;
+  /** Which edge of the trigger's container the popover lines up with. */
+  align?: 'left' | 'right' }): JSX.Element {
+  // Dismissal and focus (#297): Escape and a click outside close the picker,
+  // focus moves into it on open and returns to where it was on close.
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = useRef(onCancel);
+  cancel.current = onCancel;
+  useEffect(() => {
+    const el = root.current;
+    const previous = document.activeElement as HTMLElement | null;
+    // The title field when it is shown; otherwise the first enabled control
+    // (Refresh is disabled while the list loads, and cannot take focus).
+    (el?.querySelector<HTMLElement>('input:not([type=checkbox]):not(:disabled)') ?? el?.querySelector<HTMLElement>('button:not(:disabled)'))?.focus();
+    // A confirm dialog opened from the picker owns Escape and its own backdrop.
+    const modalOpen = (): boolean => document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+    const onDown = (event: MouseEvent): void => {
+      const target = event.target as Node;
+      // The trigger shares our positioning container; its own click handles toggling.
+      if (modalOpen() || el?.parentElement?.contains(target)) return;
+      // Menus the picker opens (group list) may render outside it.
+      if ((target as Element).closest?.('[role="listbox"],[role="menu"],[role="dialog"]')) return;
+      cancel.current();
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || modalOpen() || event.defaultPrevented) return;
+      event.stopPropagation();
+      cancel.current();
+    };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+      if (el?.contains(document.activeElement) || document.activeElement === document.body) previous?.focus?.();
+    };
+  }, []);
   const [title, setTitle] = useState('');
   const [groupId, setGroupId] = useState<string | null>(initialGroupId ?? null);
   const [sources, setSources] = useState<SourceItem[]>([]);
@@ -69,7 +105,8 @@ export function SourcePicker({
   }
 
   return (
-    <div className="material-popover absolute right-0 top-full mt-2 z-30 w-80 bg-surface border border-surface-border rounded-xl shadow-pop p-2">
+    <div ref={root} role="dialog" aria-label="Choose what to record" tabIndex={-1}
+      className={`material-popover absolute ${align === 'left' ? 'left-0' : 'right-0'} top-full mt-2 z-30 w-80 max-w-[calc(100vw-2rem)] bg-surface border border-surface-border rounded-xl shadow-pop p-2`}>
       <div className="flex items-center justify-between text-xs text-ink-muted px-2 py-1">
         <span>Recording from</span>
         <button type="button" disabled={loading} onClick={() => void refresh()}

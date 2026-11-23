@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { Icon, IconLabel } from '../components/icons';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { shortcutMod } from '../lib/shortcut';
 import type { MeetingDetail } from './MeetingDetailView';
 
@@ -16,14 +17,32 @@ export function ActionItemsPanel({
   const [adding, setAdding] = useState(false);
   const [reextracting, setReextracting] = useState(false);
   const [reextractError, setReextractError] = useState<string | null>(null);
-  const items = meeting.actionItems;
+  const all = meeting.actionItems;
+  // Open / Done / Mine filter (#298). "Open" is the working view once a
+  // meeting has a long list; the choice is per visit, not persisted.
+  const [show, setShow] = useState<'all' | 'open' | 'done' | 'mine'>('all');
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const openCount = all.filter((it) => it.status !== 'done').length;
+  const mineCount = all.filter((it) => it.isMine).length;
+  const items = show === 'open' ? all.filter((it) => it.status !== 'done')
+    : show === 'done' ? all.filter((it) => it.status === 'done')
+    : show === 'mine' ? all.filter((it) => it.isMine) : all;
 
   // Flip a single item between open ⇄ done. Same reload path add/delete
   // use: the setStatus IPC persists, then onReload() re-fetches the meeting
   // so the row re-renders with the DONE badge / strikethrough.
   async function toggleStatus(it: MeetingDetail['actionItems'][number]): Promise<void> {
-    await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
-    await onReload();
+    if (toggling) return;
+    setToggling(it.id); setStatusError(null);
+    try {
+      await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
+      await onReload();
+    } catch (e) {
+      // This used to be an unhandled rejection: the circle simply did not
+      // change and nothing said why.
+      setStatusError(`Could not update “${it.text.slice(0, 60)}”: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`);
+    } finally { setToggling(null); }
   }
 
   // Re-run ONLY the extract step over the current SAVED summary.md and swap in
@@ -49,10 +68,23 @@ export function ActionItemsPanel({
       <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-3 flex items-center gap-2">
         <span>Action items</span>
         <span className="font-normal opacity-70">
-          {items.length > 0 ? `· ${items.length}` : ''}
+          {all.length > 0 ? `· ${openCount} open of ${all.length}` : ''}
         </span>
       </div>
-      {items.length === 0 && !adding && (
+      {all.length > 0 && (
+        <SegmentedControl label="Show action items" className="mb-3" value={show} onChange={setShow}
+          options={[
+            { value: 'all', label: `All ${all.length}` },
+            { value: 'open', label: `Open ${openCount}` },
+            { value: 'done', label: `Done ${all.length - openCount}` },
+            { value: 'mine', label: `Mine ${mineCount}` },
+          ]} />
+      )}
+      {statusError && <p role="alert" className="mb-3 rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger-text">{statusError}</p>}
+      {all.length > 0 && items.length === 0 && !adding && (
+        <div className="text-sm text-ink-muted mb-3">No {show === 'mine' ? 'action items assigned to you' : `${show} action items`} in this meeting.</div>
+      )}
+      {all.length === 0 && !adding && (
         <div className="text-sm text-ink-muted italic mb-3">
           No action items yet. Run Summarize + Extract to get some, or click
           &ldquo;Add item&rdquo; below to write one by hand.
@@ -94,7 +126,7 @@ export function ActionItemsPanel({
               onClick={() => setAdding(true)}
               className="text-xs font-semibold text-brand-indigo hover:underline"
             >
-              + Add item
+              <IconLabel icon="plus">Add item</IconLabel>
             </button>
             <button
               onClick={() => void reextract()}

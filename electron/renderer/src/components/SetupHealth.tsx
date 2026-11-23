@@ -39,7 +39,7 @@ export function SetupHealth(): JSX.Element {
       <div className="relative mt-3 flex gap-3">
         <button type="button" className="btn-secondary" onClick={() => void refresh()}>Recheck setup</button>
         <button type="button" className="btn-secondary" disabled={busy} onClick={() => setPicking(true)}>{busy ? 'Testing capture for 8 seconds…' : 'Test recording…'}</button>
-        {picking && <SourcePicker showGroupPicker={false} onCancel={() => setPicking(false)} onPick={source => { setPicking(false); setInput({ targetPid: source.targetPid, targetLabel: source.targetLabel, mic: withMic }); }} />}
+        {picking && <SourcePicker align="left" showGroupPicker={false} onCancel={() => setPicking(false)} onPick={source => { setPicking(false); setInput({ targetPid: source.targetPid, targetLabel: source.targetLabel, mic: withMic }); }} />}
       </div>
       <label className="flex gap-2 mt-2"><input type="checkbox" className="accent-brand-solid" checked={withMic} disabled={busy} onChange={e => setWithMic(e.target.checked)} />Include microphone in test</label>
       <p className="text-ink-muted mt-2">The test is disposable: no Library meeting, processing, or export. Speak a short phrase after starting; play app audio only if you want to test both sources.</p>

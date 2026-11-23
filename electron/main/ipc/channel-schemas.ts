@@ -106,6 +106,8 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.recordingStop]: z.tuple([Id]),
   [C.recordingState]: z.tuple([Id]),
   [C.recordingActive]: none,
+  [C.recordingContinueSilence]: z.tuple([Id]),
+  [C.recordingSilenceState]: none,
   [C.recordingMeeting]: z.tuple([Id]),
   [C.recordingTest]: z.tuple([handlerValidated]),
   [C.recoveryList]: z.tuple([z.string().max(100).optional()]),

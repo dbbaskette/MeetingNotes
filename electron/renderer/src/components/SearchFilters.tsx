@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from './icons';
 import { api } from '../ipc/client';
 import type { SearchFacets } from '../../../shared/search';
 import { FacetsSchema } from '../../../shared/search-facets';
@@ -105,7 +106,8 @@ export function SearchFilters({
               : key === 'warning' ? 'Capture recovery warning'
               : key === 'source' ? value === 'capture' ? 'Built-in recording' : 'Imported'
               : key === 'content' ? value === 'summary' ? 'Notes only' : 'Transcript only'
-              : `${key === 'from' ? 'From' : key === 'to' ? 'Through' : 'Week'}: ${String(value)}`} ×
+              : `${key === 'from' ? 'From' : key === 'to' ? 'Through' : 'Week'}: ${String(value)}`}
+            <Icon name="x" className="inline w-3 h-3 ml-1 align-[-1px]" />
           </button>
         ))}
         {Object.keys(facets).length > 0 && (

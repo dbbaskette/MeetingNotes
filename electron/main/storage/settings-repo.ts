@@ -65,6 +65,16 @@ export interface Settings {
    *  the banner. */
   autoRecordZoom: boolean;
   autoProcessRecordings: boolean;
+  /** Ask whether to stop when every audio source has gone silent, and stop
+   *  automatically if nobody answers (#305). False = never prompt and never
+   *  stop a recording for silence. */
+  autoStopOnSilence: boolean;
+  /** Seconds of continuous silence before the stop-or-continue prompt.
+   *  Whole seconds, SILENCE_LIMITS.silencePromptAfterS. */
+  silencePromptAfterS: number;
+  /** Seconds the prompt waits for an answer before the recording is stopped.
+   *  Whole seconds, SILENCE_LIMITS.silenceCountdownS. */
+  silenceCountdownS: number;
   /** Explicit opt-in to conservative native voiceprint auto-assignment. */
   autoMatchSpeakers: boolean;
   notesFirst: boolean;
@@ -169,6 +179,9 @@ export const DEFAULT_SETTINGS: Settings = {
   autoDetectMeetings: { browserTabs: false, nativeApps: false, silenceMs: 5000 },
   autoRecordZoom: false,
   autoProcessRecordings: false,
+  autoStopOnSilence: true,
+  silencePromptAfterS: 120,
+  silenceCountdownS: 60,
   autoMatchSpeakers: false,
   notesFirst: false,
   showMenuBarIcon: true,
@@ -209,6 +222,28 @@ export function normalizeAutoDetectMeetings(value: unknown): Settings['autoDetec
   };
 }
 
+/** Allowed whole-second ranges for the silence prompt settings (#305). */
+export const SILENCE_LIMITS = {
+  silencePromptAfterS: { min: 30, max: 1800 },
+  silenceCountdownS: { min: 10, max: 600 },
+} as const;
+
+/** A stored silence duration, rounded and held inside its allowed range. A
+ *  value that is not a finite number reads as the default. */
+export function normalizeSilenceSeconds(key: keyof typeof SILENCE_LIMITS, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SETTINGS[key];
+  const { min, max } = SILENCE_LIMITS[key];
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/** Readers always get a usable value, whatever an older or hand-edited row holds. */
+function normalizeStored(key: string, parsed: unknown): unknown {
+  if (key === 'autoDetectMeetings') return normalizeAutoDetectMeetings(parsed);
+  if (key === 'silencePromptAfterS' || key === 'silenceCountdownS') return normalizeSilenceSeconds(key, parsed);
+  if (key === 'autoStopOnSilence') return typeof parsed === 'boolean' ? parsed : DEFAULT_SETTINGS.autoStopOnSilence;
+  return parsed;
+}
+
 export class SettingsRepo {
   constructor(private readonly db: Database.Database) {}
 
@@ -221,11 +256,7 @@ export class SettingsRepo {
       }
       return DEFAULT_SETTINGS[key];
     }
-    const parsed = JSON.parse(r.value) as unknown;
-    if (key === 'autoDetectMeetings') {
-      return normalizeAutoDetectMeetings(parsed) as Settings[K];
-    }
-    return parsed as Settings[K];
+    return normalizeStored(key, JSON.parse(r.value) as unknown) as Settings[K];
   }
 
   set<K extends Key>(key: K, value: Settings[K]): void {
@@ -251,10 +282,7 @@ export class SettingsRepo {
     for (const { key, value } of rows) {
       if (key in DEFAULT_SETTINGS) {
         if (key === 'reasoningEffort') hasReasoningEffort = true;
-        const parsed = JSON.parse(value) as unknown;
-        (out as Record<string, unknown>)[key] = key === 'autoDetectMeetings'
-          ? normalizeAutoDetectMeetings(parsed)
-          : parsed;
+        (out as Record<string, unknown>)[key] = normalizeStored(key, JSON.parse(value) as unknown);
       }
     }
     if (!hasReasoningEffort && !out.disableThinking) out.reasoningEffort = 'default';

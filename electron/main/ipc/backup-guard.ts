@@ -21,6 +21,7 @@ const reads = new Set([
   'recording:list-sources',
   'recording:state',
   'recording:active',
+  'recording:silence-state',
   'recording:meeting',
   'setup:health',
   'recovery:item',

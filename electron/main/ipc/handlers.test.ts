@@ -1036,3 +1036,19 @@ describe('registerIpcHandlers', () => {
     expect(chat).not.toHaveBeenCalled();
   });
 });
+
+describe('recording silence prompt handlers', () => {
+  it('reports the pending prompt and answers Continue for the named session', () => {
+    const prompt = { sessionId: 'a1b2c3d4', silentForMs: 120_000, autoStopAtMs: 1_800_000_060_000 };
+    const continueSilence = vi.fn(), handle = vi.fn();
+    registerIpcHandlers({ handle } as unknown as IpcMain, baseServices({
+      recordingManager: { on: () => {}, continueSilence, silenceState: () => prompt },
+    }));
+    const handler = (channel: string): TestHandler => handle.mock.calls.find(call => call[0] === channel)![1] as TestHandler;
+    expect(handler('recording:silence-state')(ipcEvent)).toEqual(prompt);
+    expect(handler('recording:continue-silence')(ipcEvent, 'a1b2c3d4')).toBeUndefined();
+    expect(continueSilence.mock.calls).toEqual([['a1b2c3d4']]);
+    expect(() => handler('recording:continue-silence')(ipcEvent, 7)).toThrow(/sessionId required/);
+    expect(continueSilence).toHaveBeenCalledOnce();
+  });
+});

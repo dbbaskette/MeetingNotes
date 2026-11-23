@@ -1,6 +1,6 @@
 # Recording a meeting
 
-1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call).
+1. Click **⏺ Record** — or fire `meetingnotes://record?source=zoom.us` from a Shortcut / `osascript` / Stream Deck — or let auto-detect catch it (an in-library banner appears when a known meeting URL opens in your browser, or when Zoom / Teams / Webex / FaceTime starts a call; if no MeetingNotes window has focus, a **Meeting detected** notification appears as well, and clicking it brings the window forward).
 2. The **source picker** lists every app currently making sound; recognized meeting apps float to the top with a `MEETING` badge. **Refresh** retains the group and optional **Meeting title**. Choose **Save to group**, optionally enter a title, then pick an app or **All system audio**. Choosing the source starts recording. Titles also work in `meetingnotes://record?...&title=Platform%20planning` and remain separate from the audio-source label.
 3. A **live recording row** appears with elapsed time, a VU meter, and Stop.
 4. Click **Stop**, then confirm — finalized audio is cataloged in Library. If exit cannot be confirmed, keep the controls open and retry Stop.
@@ -10,6 +10,17 @@ Each recording writes up to three AAC files to the Library's `recordings/` direc
 
 If a capture is interrupted, finalized incompletely, or never indexed, open **Needs attention → Capture recovery**. The inbox shows the source, duration, size, and reason, then offers **Recover**, **Trim and recover**, **Show in Finder**, **Delete…**, or **Dismiss**. Recovery creates a new cataloged copy and leaves the original capture untouched. **Delete…** lists the capture's files (combined recording, your microphone, app audio) with their sizes and names, then moves them to the macOS Trash so you can still put them back from Finder. Nothing is deleted if a Library meeting uses one of the files.
 
+## When the audio goes silent
+
+If every source (microphone and app audio) stays silent for two minutes, MeetingNotes asks whether to stop. Recording carries on while it asks. The question appears in the live recording row, in the menu-bar item, and, when no MeetingNotes window has focus, as a notification.
+
+- **Continue recording** keeps going. If it stays silent, the next question waits twice as long (up to 30 minutes), so a quiet meeting is not interrupted every two minutes.
+- **Stop now** stops and saves the recording as usual.
+- If sound comes back, the question goes away by itself.
+- If nobody answers within a minute, the recording is stopped and saved, and a notification says "Stopped automatically after audio went silent".
+
+Change the two-minute wait and the one-minute countdown, or turn the whole thing off, under **Settings → Recording → When audio goes silent** (the `autoStopOnSilence`, `silencePromptAfterS` and `silenceCountdownS` settings; [reference](settings.md#full-settings-reference)). A change applies to a recording that is already running. With it turned off, MeetingNotes never asks and never stops a recording for silence.
+
 ## From the menu bar or a shortcut
 
 MeetingNotes shows an item in the macOS menu bar. While recording it displays the elapsed time. Click it to:
@@ -18,9 +29,11 @@ MeetingNotes shows an item in the macOS menu bar. While recording it displays th
 - **Choose What to Record…** — brings the window forward and opens the source picker.
 - **Stop Recording**, **Pause/Resume Processing**, **Open MeetingNotes**, **Quit**.
 
+While MeetingNotes is asking whether to stop a silent recording, the item counts down beside the elapsed time ("12:05 · stops in 0:45") and its menu starts with **Continue recording** and **Stop now**.
+
 MeetingNotes keeps running in the menu bar when its window is closed, so a recording or processing run continues. Turn the item off in **Settings → Recording → Menu bar and shortcut**.
 
-In the same place you can set a **start/stop shortcut** that works from any app, for example `Control+Shift+R`. It starts recording all system audio, or stops the current recording. There is no shortcut by default, and a combination that macOS or another app already uses is refused with a message.
+In the same place you can set a **start/stop shortcut** that works from any app: choose **Record shortcut** and press the combination, for example Control+Shift+R. **Clear** removes it. It starts recording all system audio, or stops the current recording. There is no shortcut by default, and a combination that macOS or another app already uses is refused with a message.
 
 Menu-bar and shortcut actions use the same recorder as the Record button and the `meetingnotes://` URL scheme, so starting while a recording is active is refused the same way.
 

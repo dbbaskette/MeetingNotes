@@ -41,9 +41,9 @@ app.whenReady().then(async () => {
         await run(`Array.from(document.querySelectorAll('.detail-inspector button[aria-expanded]')).find(b=>b.textContent.includes('Alice')).click()`);
         await click('Confirm this voice');
         await until('!document.body.innerText.includes("Auto-matched") && document.body.innerText.includes("Confirmed")');
-        await click('transcript'); await until('document.body.innerText.includes("prototype is ready")');
-        await click('actions'); await until('document.body.innerText.includes("Share the revised design")');
-        await click('summary');
+        await run(`document.getElementById('detail-tab-transcript').click()`); await settle(); await until('document.body.innerText.includes("prototype is ready")');
+        await run(`document.getElementById('detail-tab-actions').click()`); await settle(); await until('document.body.innerText.includes("Share the revised design")');
+        await run(`document.getElementById('detail-tab-summary').click()`); await settle();
       }
       if (view === 'settings') { await click('Processing'); await until(`!!document.querySelector('[aria-label="Speech engine"]')`); }
       if (view === 'weekly') await until('document.body.innerText.includes("Saved report") && document.body.innerText.includes("Product quality")');
@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
   const group = 'document.querySelector("button[aria-controls=group-rows-00000000-0000-4000-8000-000000000001]")';
   await run(`${group}.click()`); await settle(); assert.equal(await run(`${group}.getAttribute('aria-expanded')`), 'false');
   await run(`${group}.click()`); await until('document.querySelectorAll(".meeting-row").length === 8');
-  await click('+ New group'); await until('!!document.querySelector(".material-dialog")');
+  await click('New group'); await until('!!document.querySelector(".material-dialog")');
   assert(await run('!!document.querySelector("[role=dialog]").contains(document.activeElement)'));
   await screenshot('dialog-dark'); win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
   await until('!document.querySelector(".material-dialog")');

@@ -3,6 +3,7 @@ import { useDialogSurface } from '../lib/dialog-surface';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
 import { Icon, IconLabel } from '../components/icons';
+import { requestNavigation, type SettingsSectionName } from '../lib/deep-link';
 import { exportTarget } from '../../../main/ipc/export-targets';
 import type { MeetingDetail } from './MeetingDetailView';
 
@@ -50,7 +51,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
   const myOpenItemCount = meeting.actionItems.filter((it) => it.isMine && it.status !== 'done').length;
   const canTaskExport = meeting.userIdentified && myOpenItemCount > 0;
   const taskDisabledReason = !meeting.userIdentified
-    ? 'Set who you are in Settings → "You are…" to export your action items'
+    ? 'Set who you are in Settings → Organization → "You are…" to export your action items'
     : myOpenItemCount === 0
       ? 'No open action items are assigned to you'
       : undefined;
@@ -111,7 +112,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             <IconLabel icon="arrow-right">Apple Reminders</IconLabel>
           </button>
           {!canTaskExport && (
-            <DisabledHint text={taskDisabledReason ?? 'Needs action items — run Extract first'} />
+            <DisabledHint text={taskDisabledReason ?? 'Needs action items — run Extract first'} settings={!meeting.userIdentified ? 'Organization' : undefined} />
           )}
         </div>
         <div className="space-y-2">
@@ -164,7 +165,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
           </button>
           {!googleSignedIn && <DisabledHint text={googleError ? 'Connection status unavailable — retry above' : 'Connect a Google account in Settings'} />}
           {googleSignedIn && !canTaskExport && taskDisabledReason && (
-            <DisabledHint text={taskDisabledReason} />
+            <DisabledHint text={taskDisabledReason} settings={!meeting.userIdentified ? 'Organization' : undefined} />
           )}
         </div>
         <div className="space-y-2">
@@ -214,7 +215,13 @@ export function MeetingExportPanel({ meeting, onReload }: {
 /** Inline reason line under a disabled export button (#202). Replaces the
  *  hover-only `title` tooltip, which trackpad and keyboard users could
  *  never see. */
-function DisabledHint({ text }: { text: string }): JSX.Element {
+/** Why a control is disabled. When the fix is in Settings, `settings` makes
+ *  the hint a link to the right section instead of plain text (#298). */
+function DisabledHint({ text, settings }: { text: string; settings?: SettingsSectionName }): JSX.Element {
+  if (settings) return (
+    <button type="button" onClick={() => requestNavigation({ kind: 'settings', section: settings })}
+      className="block text-left text-[11px] text-brand-indigo underline leading-snug -mt-1 hover:no-underline">{text}</button>
+  );
   return (
     <div className="text-[11px] text-ink-muted italic leading-snug -mt-1">{text}</div>
   );

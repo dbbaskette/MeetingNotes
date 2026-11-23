@@ -240,7 +240,10 @@ function ResultRow({
   return (
     <div
       ref={rowRef} id={id} role="option" aria-selected={active}
-      onMouseMove={onHover}
+      // Scrolling the list under a resting cursor also fires mousemove (with
+      // zero movement); only a real pointer move may take the selection from
+      // the arrow keys (#298).
+      onMouseMove={(event) => { if (event.movementX !== 0 || event.movementY !== 0) onHover(); }}
       onClick={onClick}
       className={`px-4 py-3 cursor-pointer border-b border-surface-border/50 last:border-0
         ${active ? 'bg-brand-indigo/5' : 'hover:bg-surface-sunken'}`}

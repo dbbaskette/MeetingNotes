@@ -28,8 +28,9 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { NavTarget } from '../components/AppNav';
 import { AppHeader } from '../components/AppHeader';
 import { useMenuKeyboard } from '../lib/menu-keyboard';
+import { obsidianAttention, type ObsidianAttention } from '../lib/obsidian-attention';
 import { SegmentedControl } from '../components/SegmentedControl';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { api } from '../ipc/client';
 import { fmtDeletedAgo, type TrashedMeeting } from '../lib/trash-view';
 import {
@@ -229,6 +230,22 @@ export function LibraryView({
     void attention.start();
     return () => attention.stop();
   }, [attention]);
+  // Obsidian sync trouble (vault unavailable, notes paused by an external
+  // edit) shows in Needs attention. Read when the Library becomes active and
+  // once a minute while it stays so; a fake bridge without `obsidian` (UI
+  // fixtures) simply reports nothing.
+  const [syncAttention, setSyncAttention] = useState<ObsidianAttention | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+    const read = (): void => {
+      const status = (api as Partial<typeof api>).obsidian?.status?.();
+      void status?.then((value) => { if (alive) setSyncAttention(obsidianAttention(value)); }).catch(() => { /* not a Library error */ });
+    };
+    read();
+    const timer = window.setInterval(() => { if (!document.hidden) read(); }, 60_000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [active]);
   const [recoveryItems, setRecoveryItems] = useState<RecoveryInboxItem[]>([]);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const recoveryGeneration = useRef(0);
@@ -349,6 +366,19 @@ export function LibraryView({
   // refresh on queue changes via `invalidate`. Polling flat pages there only
   // refreshed chip counts, which those same pushes already cover (#301).
   useMeetingsPoll(active && hasMotion && !organizedFull);
+  // When a recording ends, from any view or by itself (the pill on other
+  // views, an auto-stop), refresh the list and the recovery inbox. Stopping
+  // from outside the Library used to leave both stale (#297). The delay lets
+  // the watcher catalog the finished file.
+  const wasRecording = useRef(false);
+  useEffect(() => {
+    const ended = wasRecording.current && !liveRecording;
+    wasRecording.current = !!liveRecording;
+    if (!ended) return;
+    void invalidate();
+    const timer = window.setTimeout(() => { void refreshRecovery(); void invalidate(); }, 800);
+    return () => window.clearTimeout(timer);
+  }, [liveRecording, invalidate, refreshRecovery]);
   useEffect(() => {
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') void refresh();
@@ -427,7 +457,7 @@ export function LibraryView({
   const organizedSearchResults = useMemo(() => [...titleMatches, ...contentMatches], [titleMatches, contentMatches]);
   const libCounts = isSearching ? searchCounts : counts;
   const organizedSnapshotKey = `${libFilter}:${sortKey}`;
-  const organizedLoaded = organizedSnapshot?.key === organizedSnapshotKey ? organizedSnapshot.rows : [];
+  const organizedLoaded = useMemo(() => (organizedSnapshot?.key === organizedSnapshotKey ? organizedSnapshot.rows : []), [organizedSnapshot, organizedSnapshotKey]);
   const onOrganizedLoadedChange = useCallback((rows: MeetingSummary[]): void => {
     setOrganizedSnapshot((previous) => previous?.key === organizedSnapshotKey && previous.rows === rows
       ? previous : { key: organizedSnapshotKey, rows });
@@ -436,6 +466,11 @@ export function LibraryView({
     isSearching, filter: libFilter, groupId, loaded: organizedFull ? organizedLoaded : meetings,
     searchResults: organizedSearchResults, total,
   });
+  // "New" is an ungrouped meeting that arrived after the last acknowledgement.
+  // Counted over what is loaded, which is where the New badges are visible.
+  const newCount = useMemo(
+    () => (organizedFull ? organizedLoaded : meetings).filter(m => m.groupId === null && !!m.createdAt && m.createdAt > newBaseline).length,
+    [organizedFull, organizedLoaded, meetings, newBaseline]);
   const scopeToken = groupId === undefined ? 'all' : groupId === null ? 'ungrouped' : groupId;
   const selectionUniverse = isSearching ? `search:${scopeToken}:${query.trim()}:${libFilter}:${JSON.stringify(facets)}` : `browse:${scopeToken}:${libFilter}`;
   const scopeReady = isSearching
@@ -643,6 +678,7 @@ export function LibraryView({
       </div>
 
       <NeedsAttentionPanel
+        sync={syncAttention}
         meetings={attentionMeetings}
         recovery={recoveryItems}
         error={recoveryError ?? attentionError}
@@ -665,7 +701,9 @@ export function LibraryView({
           <h2 className="library-heading text-ink-muted">
             Library
           </h2>
-          <button type="button" onClick={() => setNewBaseline(acknowledgeArrivals())} className="text-xs text-ink-muted hover:text-brand-indigo">Mark new as seen</button>
+          {newCount > 0 && <button type="button" className="text-xs text-ink-muted hover:text-brand-indigo"
+            onClick={() => { setNewBaseline(acknowledgeArrivals()); toast.show({ message: `${newCount} new ${newCount === 1 ? 'meeting' : 'meetings'} marked as seen`, durationMs: 3000 }); }}>
+            Mark {newCount} new as seen</button>}
           {groupId !== undefined ? <>
             <button type="button" onClick={() => changeGroup(undefined)}
               className="rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40 inline-flex items-center gap-0.5"><Icon name="chevron-left" className="w-3.5 h-3.5" />All groups</button>
@@ -676,7 +714,7 @@ export function LibraryView({
             {libCounts.all} {libCounts.all === 1 ? 'meeting' : 'meetings'}
           </span>
           {groupId === undefined && <button type="button" onClick={() => { setGroupDialog('create'); setGroupError(null); }}
-            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">+ New group</button>}
+            className="ml-auto rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"><IconLabel icon="plus">New group</IconLabel></button>}
           {activeGroup && <div ref={groupOptionsRef} className="ml-auto relative">
             <button ref={groupOptionsButtonRef} type="button" aria-label={`Options for ${activeGroup.name}`} aria-haspopup="menu" aria-expanded={groupOptionsOpen}
               onClick={() => setGroupOptionsOpen((open) => !open)}
@@ -766,6 +804,7 @@ export function LibraryView({
               value={query}
               maxLength={500}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape' && query !== '') { e.preventDefault(); e.stopPropagation(); setQuery(''); } }}
               className="library-search w-full py-1.5 px-3 pr-16 border border-surface-border rounded-lg text-sm bg-surface placeholder:text-ink-muted
                          focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]"
             />
@@ -773,6 +812,12 @@ export function LibraryView({
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-muted pointer-events-none">
                 searching…
               </span>
+            ) : query !== '' ? (
+              <button type="button" aria-label="Clear search" title="Clear search (Esc)"
+                onClick={(event) => { setQuery(''); (event.currentTarget.previousElementSibling as HTMLElement | null)?.focus(); }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-muted hover:text-ink hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">
+                <Icon name="x" className="w-3.5 h-3.5" />
+              </button>
             ) : query.trim() === '' ? (
               // Only surface the palette hint while the box is idle — once the
               // user is typing/reading inline results, a shortcut to a separate
@@ -988,7 +1033,12 @@ export function LibraryView({
 
       {moveSelection && <MoveToGroupDialog ids={moveSelection.ids} hiddenCount={moveSelection.hiddenCount} meeting={moveSelection.meeting}
         onClose={() => setMoveSelection(null)} onChanged={() => void invalidate()} />}
-      {prepareGroupId && <GroupBrief id={prepareGroupId} name={groups.find(group => group.id === prepareGroupId)?.name ?? 'this group'} onClose={() => setPrepareGroupId(null)} onOpen={id => onOpen(id, {})} />}
+      {prepareGroupId && <GroupBrief id={prepareGroupId} name={groups.find(group => group.id === prepareGroupId)?.name ?? 'this group'} onClose={() => setPrepareGroupId(null)} onOpen={id => onOpen(id, {})}
+        onRecord={liveRecording ? undefined : () => {
+          // Scope the Library to the group so the Record picker saves there, then open it.
+          const target = prepareGroupId; changeGroup(target);
+          requestAnimationFrame(() => requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('mn:toggle-record'))));
+        }} />}
 
       {groupDialog === 'create' && <GroupNameDialog
         mode="create" name="" error={groupError} busy={groupBusy}
@@ -1266,7 +1316,7 @@ function LibraryEmpty({
       </div>
       <div className="text-sm text-ink-muted max-w-sm mx-auto leading-relaxed">
         Hit <span className="font-semibold text-ink">Record</span>{' '}
-        <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">⌘R</kbd>{' '}
+        <kbd className="font-mono text-[10px] px-1 py-0.5 border border-surface-border rounded text-ink-muted">{shortcutMod()}R</kbd>{' '}
         to start a new session,
         or drag an audio file (.m4a or .mp3) onto this window.
       </div>
@@ -1357,21 +1407,23 @@ function QueueBanner({
           </div>
         )}
       </div>
-      {status.currentId && <button className="text-xs text-danger shrink-0" disabled={status.cancelling} onClick={() => {
+      {status.currentId && <button type="button" className="text-xs font-semibold px-3 py-1.5 rounded-lg text-danger-text hover:bg-danger-bg transition shrink-0 disabled:opacity-50" disabled={status.cancelling} onClick={() => {
         void api.pipeline.cancel(status.currentId!).then(() => toast.show({ message: 'Stopping this meeting only. Original audio is retained.', durationMs: 4000 }))
           .catch(error => toast.show({ message: String(error), variant: 'error' }));
       }}>{status.cancelling ? 'Cancelling…' : 'Cancel current'}</button>}
       {status.paused ? (
         <button
+          type="button"
           onClick={() => void resume()}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-ink text-surface hover:opacity-90 transition shrink-0"
+          className="btn-primary text-xs px-3 py-1.5 shrink-0"
         >
           Resume
         </button>
       ) : (
         <button
+          type="button"
           onClick={() => void pause()}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-ink hover:border-ink/40 transition shrink-0"
+          className="btn-secondary !px-3 !py-1.5 shrink-0"
         >
           Pause
         </button>

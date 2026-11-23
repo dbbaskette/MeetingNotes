@@ -92,13 +92,22 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
     const onKey = (event: KeyboardEvent): void => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key.toLowerCase();
-      if (key !== 'j' && key !== 'k') return;
+      if (key !== 'j' && key !== 'k' && key !== 'enter') return;
       const target = event.target as HTMLElement | null;
       // Retained Library views can be hidden while detail/Weekly is active.
       // Their global shortcuts must not move the background list or leak
       // through an open portal dialog.
       if (!scrollRef.current?.getClientRects().length || document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (key === 'enter') {
+        // Open the row j/k highlighted (#298). A focused control keeps its own Enter.
+        if (focusedId === null || target?.closest('button, a, [role="button"], [role="menuitem"], [role="checkbox"]')) return;
+        const control = rowsRef.current?.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(focusedId)}"] [role="button"]`);
+        if (!control) return;
+        event.preventDefault();
+        control.click();
+        return;
+      }
       event.preventDefault();
       const currentIndex = focusedId === null ? null : items.findIndex((item) => item.id === focusedId);
       const next = stepMeetingIndex(items.length, currentIndex === -1 ? null : currentIndex, key === 'j' ? 1 : -1);
@@ -133,6 +142,7 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
             return (
               <div
                 key={meeting.id}
+                data-row-id={meeting.id}
                 className={`absolute left-0 right-0 ${focusedId === meeting.id ? 'ring-1 ring-brand-indigo/40 rounded-lg z-[1]' : ''}`}
                 style={{ top: index * ROW_HEIGHT, height: ROW_HEIGHT, paddingBottom: 8 }}
                 onFocusCapture={() => { focusRevision.current++; setFocusedId(meeting.id); }}

@@ -23,7 +23,7 @@ export class MenuBarController {
     if (visible) this.show(); else this.hide();
   }
 
-  /** Call whenever recording or processing state changes. */
+  /** Call whenever recording, silence-prompt or processing state changes. */
   refresh(): void {
     if (!this.tray) return;
     const state = this.deps.getState();

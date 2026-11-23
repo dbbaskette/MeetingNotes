@@ -42,7 +42,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
     ]);
     setMic(micState); setAudioCapture(audioPerms.audioCapture);
     if (micState !== 'granted') {
-      window.open('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+      void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
     } else if (audioPerms.audioCapture !== 'denied') {
       onAllGranted();
     }
@@ -85,8 +85,8 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
                 ? <IconLabel icon="x" className="items-start">Denied — open System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</IconLabel>
                 : (
                   <>
-                    macOS will prompt the first time you click &#9210; Record. If you missed
-                    the prompt, click here to open System Settings → Privacy &amp; Security
+                    macOS will prompt the first time you click Record. If you missed
+                    the prompt, open System Settings → Privacy &amp; Security
                     → Screen &amp; System Audio Recording.
                   </>
                 )}
@@ -95,11 +95,11 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
           {audioCapture !== 'granted' && (
             <button
               onClick={() =>
-                window.open('x-apple.systempreferences:com.apple.preference.security?Privacy')
+                void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
               }
               className="text-xs font-semibold bg-brand-solid text-white px-3 py-1.5 rounded-md whitespace-nowrap"
             >
-              {audioCapture === 'denied' ? 'Open Settings' : 'Grant via Record'}
+              Open System Settings
             </button>
           )}
         </div>

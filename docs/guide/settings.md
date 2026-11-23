@@ -38,6 +38,9 @@ Settings live in SQLite (`~/Documents/MeetingNotes/db.sqlite`, table `settings`)
 | `userSpeakerId` | `null` | The roster speaker that represents you; pins your action items in Weekly. Set via Settings → "You are…". |
 | `autoDetectMeetings` | `{browserTabs:false, nativeApps:false, silenceMs:5000}` | `browserTabs` polls the frontmost browser for meeting URLs; `nativeApps` polls CoreAudio for Zoom/Teams/Webex/FaceTime; `silenceMs` debounces beeps. |
 | `autoRecordZoom` | `false` | When the native detector fires for Zoom, skip the banner and record immediately. |
+| `autoStopOnSilence` | `true` | Ask whether to stop when every audio source has gone silent, and stop if nobody answers. `false` = never ask and never stop a recording for silence. |
+| `silencePromptAfterS` | `120` | Seconds of continuous silence before asking. Whole seconds, 30–1800. Doubles after each **Continue recording**, up to 30 minutes. |
+| `silenceCountdownS` | `60` | Seconds the question waits before the recording is stopped and saved. Whole seconds, 10–600. |
 | `exporterApple` / `exporterMarkdown` / `exporterWebhook` | `true` / `true` / `false` | Enable each exporter. |
 | `webhookUrl` | `""` | Destination (HTTPS, or localhost). |
 | `webhookSecret` | `""` | Optional bearer token; redacted from logs. |

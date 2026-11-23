@@ -93,3 +93,21 @@ export function summaryTemplate(id: string | null | undefined): SummaryTemplate 
 export function templateSections(template: SummaryTemplate): string[] {
   return ['Overview', ...template.before, 'Decisions', 'Action Items', ...template.after, 'Off-topic Conversation'];
 }
+
+/** Every section heading any template can produce. */
+export function allSummaryHeadings(): string[] {
+  return [...new Set(SUMMARY_TEMPLATES.flatMap(templateSections))];
+}
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Demote an accidental "# Section" to "## Section" for every heading a
+ *  template defines. The prompt asks for H2, smaller models sometimes emit
+ *  H1, and an H1 inside the app reads as a page title. This used to list the
+ *  General template's headings by hand, so the five newer templates' sections
+ *  ("Updates", "Blockers", "Next Steps", …) were never demoted (#298). */
+export function demoteSummaryHeadings(markdown: string): string {
+  // Longest first, so "Blockers and Support Needed" is not cut short at "Blockers".
+  const names = allSummaryHeadings().sort((a, b) => b.length - a.length).map(escapeRegExp).join('|');
+  return markdown.replace(new RegExp(`^# (${names})\\b`, 'gm'), '## $1');
+}

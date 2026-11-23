@@ -49,6 +49,13 @@ describe('Golden Gate appearance tokens', () => {
     it(`${theme}: the "running long" label is readable on the active stage chip`, () => {
       expect(contrast(color('status-warn-on-solid'), color('brand-solid'))).toBeGreaterThanOrEqual(4.5);
     });
+    // Tinted status blocks: the line diff (added / removed lines), warning
+    // banners and the silence prompt put status text on its own tint.
+    for (const [text, tint] of [['status-ok', 'status-ok-bg'], ['danger-text', 'danger-bg'], ['status-warn-text', 'status-warn-bg']] as const) {
+      it(`${theme}: ${text} is readable on ${tint}`, () => {
+        expect(contrast(color(text), color(tint))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
     for (let n = 1; n <= SPEAKER_COLOR_COUNT; n++) {
       it(`${theme}: speaker ${n} avatar keeps white initials readable`, () => {
         expect(contrast(WHITE, color(`speaker-${n}`))).toBeGreaterThanOrEqual(4.5);

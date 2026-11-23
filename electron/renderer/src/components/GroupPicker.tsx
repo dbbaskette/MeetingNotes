@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { IconLabel } from './icons';
 import { useGroupsStore } from '../store/groups';
 
 export type GroupChoice = string | null | undefined;
@@ -109,7 +110,7 @@ export function GroupPicker({
             </div>
             <div className="border-t border-surface-border pt-1">
               <button type="button" onClick={() => { setCreating(true); setError(null); }}
-                className="w-full text-left px-2.5 py-1.5 text-sm font-semibold text-brand-indigo hover:bg-surface-sunken rounded-md">+ New group…</button>
+                className="w-full text-left px-2.5 py-1.5 text-sm font-semibold text-brand-indigo hover:bg-surface-sunken rounded-md"><IconLabel icon="plus">New group…</IconLabel></button>
             </div>
           </> : <form onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
             <label className="block text-xs font-semibold mb-1" htmlFor="new-group-name">New group</label>

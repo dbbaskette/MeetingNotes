@@ -114,6 +114,31 @@ describe('runSummarizing', () => {
     expect(systemMsg).toContain('This meeting is about: **Team sync**');
   });
 
+  it('keeps SPEAKER labels for a meeting that skipped speaker naming, even with notes-first off', async () => {
+    const prompts: string[] = [];
+    for (const meeting of [{ slug: 'slug', title: 'Team sync', skipSpeakerId: true }, { slug: 'slug', title: 'Team sync', skipSpeakerId: false }]) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-skip-'));
+      const f = path.join(dir, 'meetings', 'slug');
+      fs.mkdirSync(f, { recursive: true });
+      fs.writeFileSync(path.join(f, 'transcript.md'), '[SPEAKER_00 00:00] Hi.');
+      const chat = vi.fn(async (_request: { messages: { role: string; content: string }[] }) => '## Overview\nshort meeting.');
+      const ctx = summaryContext({
+        libraryRoot: dir,
+        llmSupervisor: { ensureReady: async () => {} },
+        lmStudio: { chat },
+        meetings: { findById: () => meeting, updateTitle: vi.fn() },
+        // notesFirst is off: only the per-meeting flag can ask for the labels.
+        settings: { get: (k: string) => (k === 'llmModel' ? 'llama-3.1-8b' : k === 'notesFirst' ? false : 'detailed') },
+        logger: { info: () => {} },
+      });
+      await runSummarizing({ meetingId: 'm' }, ctx);
+      prompts.push(chat.mock.calls[0]![0].messages[0]!.content);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    expect(prompts[0]).toContain('preserve the exact SPEAKER_00-style label');
+    expect(prompts[1]).not.toContain('preserve the exact SPEAKER_00-style label');
+  });
+
   it('omits the topic anchor for default recording-... titles', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mn-s-noanchor-'));
     const f = path.join(dir, 'meetings', 'slug');

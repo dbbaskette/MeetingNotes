@@ -171,41 +171,47 @@ function PermissionsStep({ onStatus }: { onStatus: (s: StepStatus) => void }): J
             ) : null
           }
         />
+        {/* The helper's probe reports "granted" for this permission even when
+            it is not (it opens an empty tap), so a green tick here would be a
+            promise we cannot keep (#299). Say what is actually known. */}
         <PermRow
           label="Screen & System Audio"
           state={audioCapture}
+          unverified
           action={
-            audioCapture !== 'granted' ? (
-              <button
-                onClick={() => void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')}
-                className="text-xs font-semibold border border-surface-border px-3 py-1 rounded-md"
-              >
-                System Settings
-              </button>
-            ) : null
+            <button
+              onClick={() => void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')}
+              className="text-xs font-semibold border border-surface-border px-3 py-1 rounded-md"
+            >
+              System Settings
+            </button>
           }
         />
       </div>
       <div className="text-xs text-ink-muted italic mt-4">
-        Tip: macOS will also prompt for &ldquo;Screen &amp; System Audio
-        Recording&rdquo; the first time you click Record — you can skip
-        the System Settings button and grant it then.
+        macOS asks for &ldquo;Screen &amp; System Audio Recording&rdquo; the
+        first time you record, and only a recording confirms it works. You can
+        skip the System Settings button and grant it then; Settings has a Test
+        recording that checks it without a meeting.
       </div>
     </div>
   );
 }
 
 function PermRow({
-  label, state, action,
+  label, state, action, unverified = false,
 }: {
   label: string;
   state: PermState;
   action?: React.ReactNode;
+  /** The probe cannot confirm a grant for this permission; only a denial is reliable. */
+  unverified?: boolean;
 }): JSX.Element {
-  const cls = state === 'granted' ? 'text-status-ok'
+  const cls = state === 'granted' && !unverified ? 'text-status-ok'
     : state === 'denied' ? 'text-danger'
       : 'text-ink-muted';
-  const txt = state === 'granted' ? <IconLabel icon="check">Granted</IconLabel>
+  const txt = state === 'granted' && unverified ? 'Confirmed when you first record'
+    : state === 'granted' ? <IconLabel icon="check">Granted</IconLabel>
     : state === 'denied' ? <IconLabel icon="x">Denied</IconLabel>
       : state === 'not-determined' ? 'Not granted yet'
         : 'Unknown';
@@ -220,10 +226,14 @@ function PermRow({
 
 // ─── Step 4: LM Studio ─────────────────────────────────────────────────
 
+type SummaryProvider = 'external' | 'lm-studio' | 'ollama';
+const PROVIDER_NAMES: Record<SummaryProvider, string> = { 'external': 'a server I run myself', 'lm-studio': 'LM Studio', 'ollama': 'Ollama' };
+
 function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Element {
   const [providers, setProviders] = useState<
     { lmStudio: { binary: boolean; running: boolean }; ollama: { binary: boolean; running: boolean } } | null
   >(null);
+  const [provider, setProvider] = useState<SummaryProvider>('external');
   const [loaded, setLoaded] = useState<string[] | null>(null);
   const [picked, setPicked] = useState<string>('');
   const [checking, setChecking] = useState(true);
@@ -231,15 +241,26 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
   const [health, setHealth] = useState<'checking' | 'ok' | 'loops' | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
+  /** Detect providers, list the active provider's models, and settle on one.
+   *  The choice is SAVED here (#299): this step used to show the first model
+   *  as picked without persisting it, so finishing setup left Settings on the
+   *  built-in default and the first real summary failed. */
   async function check(): Promise<void> {
     setChecking(true); setErr(null);
     try {
+      const settings = (await api.settings.getAll()) as { summaryProvider: SummaryProvider; llmModel: string };
+      setProvider(settings.summaryProvider);
       // Same detection the Settings provider dropdown uses — surfaced here so a
       // new user sees "LM Studio found / running" instead of a bare model list.
       setProviders(await api.llm.detectProviders());
       const models = (await api.models.list()) as string[];
       setLoaded(models);
-      if (models[0] && !picked) { setPicked(models[0]); void runCanary(models[0]); }
+      // Keep a model the user already saved if the server still offers it;
+      // otherwise take the first one and save that.
+      const choice = models.includes(settings.llmModel) ? settings.llmModel : models[0] ?? '';
+      setPicked(choice);
+      if (choice && choice !== settings.llmModel) await api.settings.set('llmModel', choice);
+      if (choice) void runCanary(choice); else setHealth(null);
       onStatus(models.length > 0 ? 'ok' : 'warn');
     } catch (e) {
       setErr((e as Error).message);
@@ -272,35 +293,57 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
     void runCanary(modelId);
   }
 
+  /** Switch where summaries run, save it, and re-read that server's models. */
+  async function chooseProvider(next: SummaryProvider): Promise<void> {
+    setProvider(next); setErr(null);
+    try { await api.settings.set('summaryProvider', next); await check(); }
+    catch (e) { setErr((e as Error).message); }
+  }
+
+  const name = PROVIDER_NAMES[provider];
   return (
     <div>
-      <StepHeader title="Pick an LM Studio model" />
-      {providers && (
-        <div className="text-xs text-ink-muted mb-2">
-          {providers.lmStudio.binary
-            ? providers.lmStudio.running ? <IconLabel icon="check">LM Studio detected and running.</IconLabel> : 'LM Studio CLI found — start its local server to load a model.'
-            : 'LM Studio CLI not found.'}
-          {providers.ollama.binary ? ' Ollama also detected.' : ''}
-        </div>
-      )}
+      <StepHeader title="Pick a summary model" />
+      <label className="block text-sm mb-3">
+        <span className="block text-xs font-semibold text-ink-muted mb-1">Run summaries with</span>
+        <select aria-label="Summary provider" className="input" value={provider} disabled={checking}
+          onChange={(e) => void chooseProvider(e.target.value as SummaryProvider)}>
+          <option value="lm-studio" disabled={providers != null && !providers.lmStudio.binary}>
+            LM Studio, started for me{providers && !providers.lmStudio.binary ? ' — not installed' : providers?.lmStudio.running ? ' — running' : ''}
+          </option>
+          <option value="ollama" disabled={providers != null && !providers.ollama.binary}>
+            Ollama, started for me{providers && !providers.ollama.binary ? ' — not installed' : providers?.ollama.running ? ' — running' : ''}
+          </option>
+          <option value="external">A server I run myself (LM Studio, Ollama or compatible)</option>
+        </select>
+      </label>
       <p className="text-sm text-ink-muted leading-relaxed mb-3">
-        The summariser runs through a chat model loaded in{' '}
+        Summaries and action items come from a local chat model. Install{' '}
         <a
           href="https://lmstudio.ai"
           onClick={(e) => { e.preventDefault(); void api.onboarding.openExternal('https://lmstudio.ai'); }}
           className="text-brand-indigo hover:underline"
         >
           LM Studio
-        </a>. Load any chat model (qwen3.5-9b is a solid default for Apple
-        Silicon under 32 GB RAM), enable the Local Server, and we&apos;ll
-        pick it up below.
+        </a>{' '}or{' '}
+        <a
+          href="https://ollama.com"
+          onClick={(e) => { e.preventDefault(); void api.onboarding.openExternal('https://ollama.com'); }}
+          className="text-brand-indigo hover:underline"
+        >
+          Ollama
+        </a>, download a chat model (qwen3.5-9b is a solid default for Apple
+        Silicon under 32 GB RAM), and it will appear below.
       </p>
-      {checking && <div className="text-sm text-ink-muted italic">Checking LM Studio…</div>}
+      {checking && <div className="text-sm text-ink-muted italic">Checking {name}…</div>}
       {!checking && (loaded?.length ?? 0) === 0 && (
         <div className="text-sm text-danger bg-danger-bg border border-danger-border rounded-lg p-3">
-          LM Studio isn&apos;t reachable at its default URL. Make sure
-          LM Studio is running, the local-server toggle is on, and a
-          chat model is loaded. Then click Re-check.
+          No models were found on {name}.{' '}
+          {provider === 'ollama' ? 'Pull a chat model (for example with “ollama pull”), then click Re-check.'
+            : provider === 'lm-studio' ? 'Download a chat model in LM Studio, then click Re-check.'
+            : 'Make sure the server is running with a chat model loaded, then click Re-check.'}
+          {providers && provider !== 'ollama' && providers.ollama.running && ' Ollama is running on this Mac — choose it above to use its models.'}
+          {providers && provider !== 'lm-studio' && providers.lmStudio.running && ' LM Studio is running on this Mac — choose it above to use its models.'}
         </div>
       )}
       {!checking && (loaded?.length ?? 0) > 0 && (

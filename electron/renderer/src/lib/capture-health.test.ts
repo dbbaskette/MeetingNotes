@@ -51,4 +51,18 @@ describe('deriveCaptureHealth', () => {
     expect(captureSummary(new Set(['mic', 'system', 'mixed']))).toBe('Captured microphone and app audio');
     expect(captureSummary(new Set())).toBe('No audible audio was detected');
   });
+
+  it('tells callback starvation apart from a quiet call', () => {
+    const base = { startedAtMs: 0, nowMs: 30_000, lastAudibleAt: { mic: 29_000, mixed: 29_000 } };
+    // App samples arrive but are silent: quiet participants.
+    expect(deriveCaptureHealth({ ...base, received: { mic: true, system: true, mixed: true } }).warning).toBe('app-silent');
+    // No app sample has ever arrived: the capture callback is starved.
+    const starved = deriveCaptureHealth({ ...base, received: { mic: true, mixed: true } });
+    expect(starved.warning).toBe('app-starved');
+    expect(starved.message).toMatch(/not a quiet call/);
+    // Still inside the startup grace period: no verdict yet.
+    expect(deriveCaptureHealth({ ...base, nowMs: 2_000, received: { mic: true } }).state).toBe('checking');
+    // Callers that do not track received samples keep the old behaviour.
+    expect(deriveCaptureHealth(base).warning).toBe('app-silent');
+  });
 });

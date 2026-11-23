@@ -1,5 +1,5 @@
 export type CaptureLevelSource = 'mic' | 'system' | 'mixed';
-export type CaptureWarning = 'app-silent' | 'mic-silent' | 'output-silent' | 'all-silent';
+export type CaptureWarning = 'app-silent' | 'app-starved' | 'mic-silent' | 'output-silent' | 'all-silent';
 
 export interface CaptureHealth {
   state: 'checking' | 'healthy' | 'warning';
@@ -12,6 +12,10 @@ export function deriveCaptureHealth(input: {
   startedAtMs: number;
   nowMs: number;
   lastAudibleAt: Partial<Record<CaptureLevelSource, number>>;
+  /** Sources that have delivered any level event at all, silent or not. When
+   *  given, a source that never delivered one is reported as starved rather
+   *  than quiet (#297). */
+  received?: Partial<Record<CaptureLevelSource, boolean>>;
   graceMs?: number;
   windowMs?: number;
   micEnabled?: boolean;
@@ -29,6 +33,17 @@ export function deriveCaptureHealth(input: {
   if (input.nowMs - input.startedAtMs < graceMs) return { state: 'checking', active };
   if (input.micEnabled === false && active.system && active.mixed) return { state: 'healthy', active };
   if (active.mic && active.system && active.mixed) return { state: 'healthy', active };
+  // No app-audio sample has ever arrived: the capture callback is not firing.
+  // That is a routing or permission problem (a call on a Bluetooth or other
+  // non-default output device, or Screen & System Audio Recording not
+  // granted), not quiet participants, and waiting will not fix it.
+  if (input.received && !input.received.system && (input.received.mic || input.received.mixed)) {
+    return {
+      state: 'warning', warning: 'app-starved', active,
+      message: 'No app audio is reaching MeetingNotes at all — this is not a quiet call. '
+        + 'The call may be playing through a different output device, or Screen & System Audio Recording may be off.',
+    };
+  }
   if (active.mic && !active.system) {
     return {
       state: 'warning', warning: 'app-silent', active,

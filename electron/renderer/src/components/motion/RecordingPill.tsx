@@ -3,10 +3,11 @@
 // to the full controls (a hand-ported take on Cult UI's Dynamic Island).
 import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { m } from 'motion/react';
-import { api } from '../../ipc/client';
 import { LiveRecordingRow } from '../LiveRecordingRow';
 import { useElapsed, fmtElapsed } from '../../lib/useElapsed';
 import { SPRING } from './spring';
+import { liveCapture, useCapturePeaks } from '../../lib/live-capture';
+import { fmtCountdown, useCountdownSeconds, useSilencePrompt } from '../../lib/silence-prompt';
 
 const BARS = [0.15, 0.45, 0.75];
 
@@ -15,16 +16,17 @@ export function RecordingPill(props: ComponentProps<typeof LiveRecordingRow>): J
   const root = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const elapsed = useElapsed(props.startedAt, true);
-  const [level, setLevel] = useState(0);
   const { sessionId } = props;
-
-  useEffect(() => {
-    const off = api.recording.onLevel((event) => {
-      if (event.sessionId !== sessionId || (event.source ?? 'mixed') !== 'mixed' || !Number.isFinite(event.peakDb)) return;
-      setLevel(Math.min(1, Math.max(0, (event.peakDb + 60) / 60)));
-    });
-    return () => { off(); };
-  }, [sessionId]);
+  // Levels come from the shared store the expanded row reads too, so there is
+  // one subscription and the bars and the meter always agree.
+  const peaks = useCapturePeaks();
+  const level = liveCapture.sessionId() === sessionId ? Math.min(1, Math.max(0, (peaks.mixed + 60) / 60)) : 0;
+  // A pending "all audio stopped" prompt must be seen from any view (#305):
+  // open the controls and show the countdown on the pill itself.
+  const silence = useSilencePrompt(sessionId);
+  const silenceSeconds = useCountdownSeconds(silence?.autoStopAtMs ?? null);
+  const silencePending = silence !== null;
+  useEffect(() => { if (silencePending) setOpen(true); }, [silencePending]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,16 +48,18 @@ export function RecordingPill(props: ComponentProps<typeof LiveRecordingRow>): J
   return (
     <div ref={root} className="fixed top-0.5 left-1/2 z-[950] -translate-x-1/2">
       <button type="button" aria-expanded={open} aria-controls={panelId}
-        aria-label={`Recording, ${time}. ${open ? 'Hide' : 'Show'} controls`}
+        aria-label={silencePending
+          ? `Recording, ${time}. All audio stopped, stopping in ${fmtCountdown(silenceSeconds)}. ${open ? 'Hide' : 'Show'} controls`
+          : `Recording, ${time}. ${open ? 'Hide' : 'Show'} controls`}
         title={`Recording: ${props.label}`}
         onClick={() => setOpen((value) => !value)}
-        className="mx-auto flex h-6 items-center gap-2 rounded-full bg-ink px-3 text-xs font-semibold tabular-nums text-surface shadow-card transition hover:opacity-90">
+        className={`mx-auto flex h-6 items-center gap-2 rounded-full px-3 text-xs font-semibold tabular-nums shadow-card transition hover:opacity-90 ${silencePending ? 'bg-status-warnSolid text-white' : 'bg-ink text-surface'}`}>
         <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-danger-solid" />
-        <span>{time}</span>
+        <span>{silencePending ? `Silent · stopping in ${fmtCountdown(silenceSeconds)}` : time}</span>
         <span aria-hidden="true" className="flex h-3 items-end gap-0.5">
           {BARS.map((threshold, index) => (
             <span key={threshold} style={{ height: `${40 + index * 30}%` }}
-              className={`w-0.5 rounded-full transition-opacity ${level >= threshold ? 'bg-surface opacity-100' : 'bg-surface opacity-30'}`} />
+              className={`w-0.5 rounded-full transition-opacity bg-current ${level >= threshold ? 'opacity-100' : 'opacity-30'}`} />
           ))}
         </span>
       </button>

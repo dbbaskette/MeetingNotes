@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
   await run('window.fixture.fail=true; document.querySelector("input[placeholder=You]").dispatchEvent(new FocusEvent("focusout",{bubbles:true}))'); await settle();
   assert(await run('document.body.innerText.includes("Couldn’t save")'));
   await run('window.fixture.fail=false'); await click('Retry'); await settle();
-  assert.equal(await run('window.fixture.saves.at(-1).value'),'Daniel'); assert(await run('document.body.innerText.includes("userName: Saved")'));
+  assert.equal(await run('window.fixture.saves.at(-1).value'),'Daniel'); assert(await run('document.body.innerText.includes("Your name: Saved")'));
   await click('Storage'); await settle(); const before = await run('window.fixture.saves.length');
   await input('[aria-label="Storage settings"] input','/fixture/new'); await settle();
   assert.equal(await run('window.fixture.saves.length'),before); await click('Apply path'); await settle();

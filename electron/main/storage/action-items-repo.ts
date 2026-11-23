@@ -43,7 +43,8 @@ export class ActionItemsRepo {
       conditions.push(`(a.owner_speaker_id=@me OR (a.owner_speaker_id IS NULL AND ${owner} COLLATE NOCASE=@name))`);
       params.me = me.id; params.name = me.name;
     } else if (parsed.owner !== 'all') { conditions.push(`${owner}=@owner COLLATE NOCASE`); params.owner = parsed.owner; }
-    if (parsed.groupId) { conditions.push('m.group_id=@groupId'); params.groupId = parsed.groupId; }
+    if (parsed.ungrouped) conditions.push('m.group_id IS NULL');
+    else if (parsed.groupId) { conditions.push('m.group_id=@groupId'); params.groupId = parsed.groupId; }
     if (parsed.due === 'undated') conditions.push('a.due_date IS NULL');
     else if (parsed.due === 'overdue') conditions.push("a.due_date < date('now','localtime')");
     else if (parsed.due === 'soon') conditions.push("a.due_date BETWEEN date('now','localtime') AND date('now','localtime','+7 days')");

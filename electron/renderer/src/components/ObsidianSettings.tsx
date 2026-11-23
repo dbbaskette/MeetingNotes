@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { ModalShell } from './ModalShell';
+import { LineDiff } from './LineDiff';
+import { requestNavigation } from '../lib/deep-link';
 import { useSettingsSectionShown } from './SettingsNavigation';
 import type {
   ObsidianOptions,
@@ -187,22 +189,7 @@ export function ObsidianSettings(): JSX.Element {
                   Review the external edit before updating. Edits made in Obsidian do not sync back
                   to MeetingNotes.
                 </p>
-                <label className="block text-xs">
-                  Current vault note
-                  <textarea
-                    readOnly
-                    className={`${input} mt-1 h-36 font-mono`}
-                    value={comparison.current}
-                  />
-                </label>
-                <label className="block text-xs">
-                  Latest MeetingNotes version
-                  <textarea
-                    readOnly
-                    className={`${input} mt-1 h-36 font-mono`}
-                    value={comparison.proposed}
-                  />
-                </label>
+                <LineDiff before={comparison.current} after={comparison.proposed} beforeLabel="the vault note" afterLabel="the latest MeetingNotes version" />
                 <div className="flex flex-wrap gap-2">
                   <button className={button} onClick={() => setComparison(null)}>
                     Back
@@ -400,6 +387,10 @@ export function ObsidianSettings(): JSX.Element {
                               }
                             >
                               Review note
+                            </button>
+                            <button type="button" className={`${button} mt-1 ml-2`}
+                              onClick={() => { setOpen(false); requestNavigation({ kind: 'detail', id: issue.id }); }}>
+                              Open meeting
                             </button>
                           </div>
                         ))}

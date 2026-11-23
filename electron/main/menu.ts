@@ -44,6 +44,7 @@ export function buildAppMenu(): Menu {
     submenu: [
       { label: 'Library', accelerator: 'CmdOrCtrl+1', click: () => emit('view-library') },
       { label: 'Weekly Summary', accelerator: 'CmdOrCtrl+2', click: () => emit('view-weekly') },
+      { label: 'Actions', accelerator: 'CmdOrCtrl+3', click: () => emit('view-actions') },
       { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => emit('view-settings') },
       { type: 'separator' },
       { label: 'Back', accelerator: 'CmdOrCtrl+[', click: () => emit('nav-back') },

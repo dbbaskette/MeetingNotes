@@ -1,5 +1,5 @@
 // electron/renderer/src/views/SettingsView.tsx
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { GroupTemplateDefaults } from '../components/SummaryTemplates';
 import { api } from '../ipc/client';
@@ -17,6 +17,10 @@ import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
+import type { SettingsSectionName } from '../lib/deep-link';
+import { acceleratorFromEvent, formatAccelerator } from '../lib/shortcut';
+import { buildDiagnosticsReport } from '../lib/diagnostics-report';
+import { useToast } from '../components/Toasts';
 import { formatLogTimestamp } from '../lib/log-timestamp.js';
 import { effectiveLlmUrl as providerUrl, isIdleProbe } from '../../../shared/inference-endpoints.js';
 
@@ -42,6 +46,9 @@ interface Settings {
     silenceMs: number;
   };
   autoRecordZoom: boolean;
+  autoStopOnSilence: boolean;
+  silencePromptAfterS: number;
+  silenceCountdownS: number;
   autoProcessRecordings: boolean;
   autoMatchSpeakers: boolean;
   notesFirst: boolean;
@@ -68,7 +75,7 @@ interface ProviderAvailability {
 type PermState = 'granted' | 'denied' | 'not-determined' | 'unknown';
 interface AudioPerms { mic: PermState; audioCapture: PermState; }
 
-export function SettingsView({
+export function SettingsView({ initialSection,
   onNav,
   onRunSetupAgain,
 }: {
@@ -76,6 +83,8 @@ export function SettingsView({
    *  App's history-aware navigate(). 'settings' never arrives. */
   onNav: (target: NavTarget) => void;
   onRunSetupAgain?: () => void;
+  /** Deep link: open on this section (for example from "Connect a Google account in Settings"). */
+  initialSection?: SettingsSectionName;
 }): JSX.Element {
   const [s, setS] = useState<Settings | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -101,6 +110,23 @@ export function SettingsView({
     return () => setUnsavedGuard(null);
   }, [saveStates]);
   useEffect(() => () => {leaveResolver.current?.(false);}, []);
+  // "Saved" confirmations clear themselves; the banner used to keep every
+  // key that had ever been touched for the whole visit (#299).
+  useEffect(() => {
+    if (!Object.values(saveStates).includes('Saved')) return;
+    const timer = window.setTimeout(() => setSaveStates(previous => Object.fromEntries(Object.entries(previous).filter(([, state]) => state !== 'Saved'))), 2500);
+    return () => window.clearTimeout(timer);
+  }, [saveStates]);
+  // The model list belongs to whichever server the active provider points at,
+  // so it is re-read when the provider or URL changes and after a successful
+  // Test, not only once when Settings opens.
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const refreshModels = useCallback(async (): Promise<void> => {
+    setModelsLoading(true);
+    try { setModels(await api.models.list()); }
+    catch { /* keep the list we have; the saved model still shows */ }
+    finally { setModelsLoading(false); }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -186,13 +212,13 @@ export function SettingsView({
       </AppHeader>
       <div className="settings-view flex-1 min-h-0 flex flex-col max-w-2xl mx-auto w-full">
       <div className="shrink-0 px-8 py-2 text-xs max-h-24 overflow-auto" aria-live="polite">
-        {Object.entries(saveStates).map(([key, state]) => <div key={key} className={state.startsWith('Couldn') ? 'text-danger' : 'text-ink-muted'}>{key}: {state}
+        {Object.entries(saveStates).map(([key, state]) => <div key={key} className={state.startsWith('Couldn') ? 'text-danger' : 'text-ink-muted'}>{settingLabel(key)}: {state}
           {state.startsWith('Couldn') && !['libraryPath','audioWatchPath'].includes(key) && <button className="ml-2 underline" onClick={() => void update(key as keyof Settings, s[key as keyof Settings])}>Retry</button>}
         </div>)}
-        {loadError && <p role="alert">Some Settings information could not load: {loadError}</p>}
+        {loadError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-danger-text">Some Settings information could not load: {loadError}</p>}
       </div>
       <SetupHealth />
-      <SettingsNavigation>
+      <SettingsNavigation initialSection={initialSection}>
       <SettingsSection section="Processing" keywords="Apple SpeakerKit native speech language transcription STT setup">
         <NativeSpeechPanel language={s.sttLanguage} />
       </SettingsSection>
@@ -233,7 +259,7 @@ export function SettingsView({
       <Field label="Summary provider (LLM lifecycle)">
         <select
           value={s.summaryProvider}
-          onChange={(e) => update('summaryProvider', e.target.value as Settings['summaryProvider'])}
+          onChange={(e) => void update('summaryProvider', e.target.value as Settings['summaryProvider']).then(saved => { if (saved) void refreshModels(); })}
           className="input"
         >
           <option value="external">External — I run LM Studio / Ollama myself</option>
@@ -256,10 +282,10 @@ export function SettingsView({
         <div className="flex gap-2">
           <input
             value={s.lmStudioUrl}
-            onChange={(e) => edit('lmStudioUrl', e.target.value)} onBlur={() => void update('lmStudioUrl', s.lmStudioUrl)}
+            onChange={(e) => edit('lmStudioUrl', e.target.value)} onBlur={() => void update('lmStudioUrl', s.lmStudioUrl).then(saved => { if (saved) void refreshModels(); })}
             className="input flex-1"
           />
-          <TestButton kind="llm" url={effectiveLlmUrl} lazySpawn={s.summaryProvider !== 'external'} />
+          <TestButton kind="llm" url={effectiveLlmUrl} lazySpawn={s.summaryProvider !== 'external'} onReachable={() => void refreshModels()} />
         </div>
         <div className="text-xs text-ink-muted mt-1">
           Default for the &lsquo;external&rsquo; provider. Managed providers use their own
@@ -270,12 +296,17 @@ export function SettingsView({
         </div>
       </Field>
       <Field label="LLM Model">
+        <div className="flex gap-2">
         <select
           value={s.llmModel}
           onChange={(e) => void changeLlmModel(e.target.value)}
-          className="input"
+          className="input flex-1"
         >
           <option value="">(choose)</option>
+          {/* The saved model stays selectable when the server does not list it
+              right now (a managed server that is idle, or a model not loaded);
+              without this the picker showed "(choose)" and looked unset. */}
+          {s.llmModel && !models.includes(s.llmModel) && <option value={s.llmModel}>{s.llmModel} (saved — not listed by the server right now)</option>}
           {models.map((m) => (
             <option key={m} value={m}>
               {/* Plain-text only inside <option>; a suffix reads clearer
@@ -285,6 +316,8 @@ export function SettingsView({
             </option>
           ))}
         </select>
+        <button type="button" className="btn-secondary shrink-0" disabled={modelsLoading} onClick={() => void refreshModels()}>{modelsLoading ? 'Refreshing…' : 'Refresh models'}</button>
+        </div>
         {healthCheck && healthCheck.modelId === s.llmModel && (
           <div className={`text-xs mt-1.5 px-2.5 py-1 rounded-lg border ${
             healthCheck.state === 'checking'
@@ -560,6 +593,38 @@ export function SettingsView({
         </label>
       </section>
 
+      <section className="border-t border-surface-border pt-5 space-y-3">
+        <div className="settings-section-title text-ink-muted font-semibold">When audio goes silent</div>
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" className="mt-0.5 accent-brand-solid" checked={s.autoStopOnSilence}
+            onChange={(e) => void update('autoStopOnSilence', e.target.checked)} />
+          <div className="flex-1">
+            <div className="text-sm text-ink">Ask before stopping a silent recording</div>
+            <div className="text-xs text-ink-muted mt-0.5">
+              When the microphone and app audio have both been silent for a while (a call ended and Stop was
+              forgotten), MeetingNotes asks whether to stop or continue and shows a countdown. With no answer it
+              stops and saves the recording. Turn this off to keep recording until you stop it.
+            </div>
+          </div>
+        </label>
+        <div className={`flex flex-wrap gap-4 text-sm ${s.autoStopOnSilence ? '' : 'opacity-50'}`}>
+          <label className="flex flex-col gap-1">Ask after
+            <select className="input !w-auto" disabled={!s.autoStopOnSilence} value={s.silencePromptAfterS}
+              onChange={(e) => void update('silencePromptAfterS', Number(e.target.value))}>
+              {[...new Set([60, 120, 300, 600, 900, s.silencePromptAfterS])].sort((a, b) => a - b).map(seconds =>
+                <option key={seconds} value={seconds}>{seconds % 60 === 0 ? `${seconds / 60} min of silence` : `${seconds} s of silence`}</option>)}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">Then stop after
+            <select className="input !w-auto" disabled={!s.autoStopOnSilence} value={s.silenceCountdownS}
+              onChange={(e) => void update('silenceCountdownS', Number(e.target.value))}>
+              {[...new Set([30, 60, 120, 300, s.silenceCountdownS])].sort((a, b) => a - b).map(seconds =>
+                <option key={seconds} value={seconds}>{seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`} with no answer</option>)}
+            </select>
+          </label>
+        </div>
+      </section>
+
       </SettingsSection>
       <SettingsSection section="Integrations" keywords="webhook exporter notifications URL token payload Telegram Slack">
       <WebhookExporterCard
@@ -587,16 +652,9 @@ export function SettingsView({
           </span>
         </label>
         <Field label="Start/stop shortcut (works in any app)">
-          <input
-            value={s.recordShortcut ?? ''}
-            onChange={(e) => edit('recordShortcut', e.target.value)} onBlur={() => void update('recordShortcut', s.recordShortcut ?? '')}
-            placeholder="None — for example Control+Shift+R"
-            className="input font-mono text-xs"
-            spellCheck={false}
-            autoCapitalize="off"
-          />
+          <ShortcutRecorder value={s.recordShortcut ?? ''} onChange={(accelerator) => void update('recordShortcut', accelerator)} />
           <div className="text-xs text-ink-muted mt-1">
-            Starts recording all system audio with your microphone, or stops the current recording. Leave empty for no shortcut. A combination that cannot be registered, usually because another app uses it, is refused.
+            Starts recording all system audio with your microphone, or stops the current recording. A combination that cannot be registered, usually because another app uses it, is refused.
           </div>
         </Field>
       </section>
@@ -616,10 +674,13 @@ export function SettingsView({
           <div className="text-sm text-ink-muted">Checking…</div>
         ) : (
           <div className="space-y-1">
-            <PermRow label="Microphone" state={perms.mic} />
-            <PermRow label="System audio" state={perms.audioCapture} />
+            <PermRow label="Microphone" state={perms.mic} action={perms.mic === 'granted' ? null : perms.mic === 'not-determined'
+              ? <button type="button" className="btn-secondary" onClick={() => void api.permissions.requestMic().then(recheckPerms, recheckPerms)}>Request access</button>
+              : <button type="button" className="btn-secondary" onClick={() => void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone')}>Open System Settings</button>} />
+            <PermRow label="System audio" state={perms.audioCapture} action={perms.audioCapture === 'granted' ? null
+              : <button type="button" className="btn-secondary" onClick={() => void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')}>Open System Settings</button>} />
             <div className="text-xs text-ink-muted mt-2">
-              Both must be granted for the built-in recorder to capture meeting audio. Open System Settings → Privacy &amp; Security to change either.
+              Both must be granted for the built-in recorder to capture meeting audio. System audio is only fully confirmed by a recording: use Test recording under Setup &amp; health. After changing a permission in System Settings, choose Recheck.
             </div>
           </div>
         )}
@@ -654,6 +715,25 @@ function DiagnosticsSection(): JSX.Element {
   const [filter, setFilter] = useState<LogFilter>('warn');
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+
+  /** App version, active provider and model, setup health and the log as
+   *  filtered on screen, as plain text for an issue or a support thread. */
+  async function copyDiagnostics(): Promise<void> {
+    try {
+      const [version, settings, health] = await Promise.all([
+        api.app.getVersion().catch(() => ''),
+        api.settings.getAll() as Promise<Settings>,
+        api.permissions.setupHealth().catch(() => []),
+      ]);
+      await navigator.clipboard.writeText(buildDiagnosticsReport({
+        version, provider: settings.summaryProvider, model: settings.llmModel,
+        llmUrl: providerUrl(settings.summaryProvider, settings.lmStudioUrl), health, entries: shown,
+        filterLabel: filter === 'error' ? 'errors' : filter === 'warn' ? 'warnings and errors' : 'all levels',
+      }));
+      toast.show({ message: 'Diagnostics copied', durationMs: 3000 });
+    } catch (error) { toast.show({ message: `Could not copy diagnostics: ${(error as Error).message}`, variant: 'error' }); }
+  }
 
   async function refresh(): Promise<void> {
     setLoading(true);
@@ -721,6 +801,7 @@ function DiagnosticsSection(): JSX.Element {
         <span className="text-[11px] text-ink-muted tabular-nums">
           {loaded ? `${shown.length} shown` : ''}
         </span>
+        <button type="button" className="btn-secondary" disabled={!loaded} onClick={() => void copyDiagnostics()}>Copy diagnostics</button>
       </div>
 
       <div className="rounded-lg border border-surface-border bg-surface-sunken/40 max-h-72 overflow-auto font-mono text-[11px] leading-relaxed">
@@ -768,7 +849,7 @@ function LogRow({ entry }: { entry: LogEntry }): JSX.Element {
   );
 }
 
-function PermRow({ label, state }: { label: string; state: PermState }): JSX.Element {
+function PermRow({ label, state, action }: { label: string; state: PermState; action?: ReactNode }): JSX.Element {
   const cls = state === 'granted'
     ? 'text-status-ok'
     : state === 'denied'
@@ -782,6 +863,56 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
     <div className="flex items-center gap-3 text-sm">
       <span className="flex-1">{label}</span>
       <span className={`font-semibold ${cls}`}>{txt}</span>
+      {action}
+    </div>
+  );
+}
+
+/** Human-readable names for the save banner, which used to print raw setting
+ *  keys such as "autoMatchSpeakers: Saved" (#299). */
+const SETTING_LABELS: Record<string, string> = {
+  lmStudioUrl: 'LLM server URL', llmModel: 'LLM model', summaryProvider: 'Summary provider', llmContextLength: 'Context length',
+  summaryDetail: 'Summary detail', disableThinking: 'Disable model thinking', reasoningEffort: 'Reasoning effort',
+  libraryPath: 'Library folder', audioWatchPath: 'Watched audio folder', sttLanguage: 'Transcription language',
+  recordingBitrateKbps: 'Recording quality', autoDetectMeetings: 'Meeting auto-detect', autoRecordZoom: 'Always record Zoom',
+  autoStopOnSilence: 'Ask before stopping a silent recording', silencePromptAfterS: 'Silence before asking', silenceCountdownS: 'Countdown before stopping',
+  autoProcessRecordings: 'Process recordings automatically', autoMatchSpeakers: 'Match speakers automatically', notesFirst: 'Notes before speaker naming',
+  showMenuBarIcon: 'Menu bar icon', recordShortcut: 'Start/stop shortcut', userName: 'Your name', userSpeakerId: 'You are…',
+  theme: 'Appearance', googleClientId: 'Google client ID', googleClientSecret: 'Google client secret',
+  webhookUrl: 'Webhook URL', webhookToken: 'Webhook token', webhookEnabled: 'Webhook exporter',
+};
+function settingLabel(key: string): string {
+  // Unknown keys still read as words rather than camelCase.
+  return SETTING_LABELS[key] ?? key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
+}
+
+/** Records a global shortcut by pressing it, instead of hand-typing an
+ *  Electron accelerator string (#299). Click Record, press the combination;
+ *  Escape cancels. Clear removes the shortcut. */
+function ShortcutRecorder({ value, onChange }: { value: string; onChange: (accelerator: string) => void }): JSX.Element {
+  const [recording, setRecording] = useState(false);
+  const [hint, setHint] = useState('');
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" aria-label={recording ? 'Press the key combination to use' : value ? `Shortcut ${value}. Record a different one` : 'Record a shortcut'}
+        onClick={() => { setRecording(true); setHint(''); }}
+        onBlur={() => setRecording(false)}
+        onKeyDown={(event) => {
+          if (!recording) return;
+          // Tab must keep moving focus so the field is never a trap.
+          if (event.key === 'Tab') { setRecording(false); return; }
+          event.preventDefault(); event.stopPropagation();
+          if (event.key === 'Escape') { setRecording(false); setHint(''); return; }
+          const accelerator = acceleratorFromEvent(event);
+          if (accelerator) { setRecording(false); setHint(''); onChange(accelerator); }
+          else if (!['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) setHint('Add Control, Option or Command to the key.');
+        }}
+        className={`input !w-auto min-w-[12rem] text-left font-mono text-xs ${recording ? 'ring-2 ring-brand-indigo/50 border-brand-indigo' : ''}`}>
+        {recording ? 'Press a key combination…' : value ? `${formatAccelerator(value)}  (${value})` : 'None'}
+      </button>
+      {!recording && <button type="button" className="btn-secondary" onClick={() => { setRecording(true); setHint(''); }}>{value ? 'Change' : 'Record shortcut'}</button>}
+      {value && !recording && <button type="button" className="btn-secondary" onClick={() => onChange('')}>Clear</button>}
+      <span role="status" aria-live="polite" className="text-xs text-ink-muted">{recording ? (hint || 'Esc cancels.') : ''}</span>
     </div>
   );
 }
@@ -865,7 +996,9 @@ function Field({ label, children }: { label: string; children: ReactNode }): JSX
  *  Surfaces config errors at edit time instead of letting them bite the
  *  user 5–15 minutes into a pipeline run. Result auto-clears after 6 s
  *  so the row doesn't accumulate stale state as the user keeps editing. */
-function TestButton({ url, lazySpawn = false }: { kind: 'llm'; url: string; lazySpawn?: boolean }): JSX.Element {
+function TestButton({ url, lazySpawn = false, onReachable }: { kind: 'llm'; url: string; lazySpawn?: boolean;
+  /** The server answered: the caller refreshes whatever depends on it (the model list). */
+  onReachable?: () => void }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<
     | { ok: true; detail?: string }
@@ -888,6 +1021,7 @@ function TestButton({ url, lazySpawn = false }: { kind: 'llm'; url: string; lazy
     try {
       {
         const r = await api.llm.probe(url);
+        if (r.ok) onReachable?.();
         setResult(r.ok
           ? { ok: true, detail: `${r.models.length} model${r.models.length === 1 ? '' : 's'} loaded` }
           : { ok: false, error: r.error, code: r.code });
@@ -1275,8 +1409,11 @@ function SpeakerRosterRow({
         </>
       )}
       <button className="text-xs text-brand-indigo" aria-expanded={showProfiles} onClick={() => setShowProfiles(value => !value)}>Voiceprints</button>
-      {showProfiles && others.length > 0 && !editing && (
+      {/* Merge sits on the row itself; it used to be hidden until the
+          Voiceprints drawer was opened (#298). */}
+      {others.length > 0 && !editing && (
         <select
+          aria-label={`Merge ${speaker.displayName} into another speaker`}
           value=""
           onChange={(e) => { if (e.target.value) void mergeInto(e.target.value); }}
           disabled={busy}

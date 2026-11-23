@@ -44,6 +44,11 @@ describe('IPC argument schemas', () => {
     ['app:get-version', ['unexpected']],
     ['settings:set', [null, 'value']],
     ['speakers:merge', ['only-one']],
+    ['recording:continue-silence', []],
+    ['recording:continue-silence', [42]],
+    ['recording:continue-silence', ['']],
+    ['recording:continue-silence', ['session', 'extra']],
+    ['recording:silence-state', ['unexpected']],
   ])('rejects malformed arguments for %s: %j', (channel, args) => {
     expect(checkIpcArgs(channel, args)).toMatch(new RegExp(`^Invalid .* for ${channel}: `));
   });
@@ -67,6 +72,8 @@ describe('IPC argument schemas', () => {
     ['terminology:save', [{ from: 'Salsa', to: 'SLSA' }]],
     ['recovery:list', []],
     ['app:get-version', []],
+    ['recording:continue-silence', ['a1b2c3d4']],
+    ['recording:silence-state', []],
   ])('accepts the shapes the preload sends for %s: %j', (channel, args) => {
     expect(checkIpcArgs(channel, args)).toBeNull();
   });

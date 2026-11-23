@@ -284,9 +284,21 @@ export const IPC_CHANNELS = {
   recordingState: 'recording:state',
   recordingTest: 'recording:test',
   recordingActive: 'recording:active',
+  /** Answer the silence prompt with Continue (#305). Arg: sessionId. */
+  recordingContinueSilence: 'recording:continue-silence',
+  /** The pending silence prompt `{ sessionId, silentForMs, autoStopAtMs }`,
+   *  or null. Lets a window that opens mid-countdown show it. */
+  recordingSilenceState: 'recording:silence-state',
   setupHealth: 'setup:health',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  /** Push channel: every audio source has been silent for the prompt window.
+   *  Recording continues; it stops at `autoStopAtMs` (epoch ms) unless the
+   *  user continues, stops, or audio returns. */
+  recordingSilencePromptEvent: 'recording:silence-prompt',
+  /** Push channel: the silence prompt is over. `reason` is 'audio-resumed',
+   *  'continued', 'stopped' or 'auto-stopped'. */
+  recordingSilenceClearedEvent: 'recording:silence-cleared',
   recoveryList: 'recovery:list',
   recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',

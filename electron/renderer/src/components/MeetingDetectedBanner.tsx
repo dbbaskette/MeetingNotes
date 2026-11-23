@@ -11,45 +11,27 @@ import type { RecordingStartInput } from '../App';
 import { GroupPicker } from './GroupPicker';
 import { useGroupsStore } from '../store/groups';
 import { recordingStartFeedback, type RecordingStartFeedback } from '../lib/recording-start-feedback';
+import { meetingDetection, titleFromDetected, useDetectedMeeting } from '../lib/meeting-detection';
 
-export interface BrowserDetected {
-  source: 'browser-tab';
-  platform: string;
-  url: string;
-  title: string | null;
-  browserPid: number;
-  browserLabel: string;
-}
-
-export interface NativeAppDetected {
-  source: 'native-app';
-  appName: string;
-  bundleId: string;
-  pid: number;
-}
-
-export type Detected = BrowserDetected | NativeAppDetected;
+export type { BrowserDetected, NativeAppDetected, Detected } from '../lib/meeting-detection';
 
 export function MeetingDetectedBanner({
-  onStartRecording, groupId,
+  onStartRecording, groupId, className = 'mb-6',
 }: {
   onStartRecording: (info: { sessionId: string; label: string; startInput: RecordingStartInput }) => void;
   groupId?: string | null;
+  className?: string;
 }): JSX.Element | null {
-  const [detected, setDetected] = useState<Detected | null>(null);
+  // Shared with every other mounted banner: the Library shows it inline, and
+  // App shows it above the other views, so detection is visible everywhere.
+  const detected = useDetectedMeeting();
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<RecordingStartFeedback | null>(null);
   const [saveGroupId, setSaveGroupId] = useState<string | null>(groupId ?? null);
   const groups = useGroupsStore(state => state.groups);
   useEffect(() => { setSaveGroupId(groupId ?? null); }, [groupId]);
 
-  useEffect(() => {
-    const unsub = api.meetingDetector.onDetected((m) => {
-      setDetected(m);
-      setFeedback(null);
-    });
-    return () => { unsub(); };
-  }, []);
+  useEffect(() => { setFeedback(null); }, [detected]);
 
   if (!detected) return null;
 
@@ -63,10 +45,13 @@ export function MeetingDetectedBanner({
       const targetPid = detected.source === 'browser-tab'
         ? detected.browserPid
         : detected.pid;
-      const input: RecordingStartInput = { targetPid, targetLabel: label, mic: true, groupId: saveGroupId };
+      // Name the recording after the meeting when the tab title carries one,
+      // instead of leaving a timestamped default to rename later (#297).
+      const title = titleFromDetected(detected);
+      const input: RecordingStartInput = { targetPid, targetLabel: label, mic: true, groupId: saveGroupId, ...(title ? { title } : {}) };
       const { sessionId } = await api.recording.start(input) as { sessionId: string };
       onStartRecording({ sessionId, label, startInput: input });
-      setDetected(null);
+      meetingDetection.clear();
     } catch (e) {
       setFeedback(await recordingStartFeedback(e, api.recording));
     } finally {
@@ -82,7 +67,7 @@ export function MeetingDetectedBanner({
         void api.meetingDetector.dismiss({ kind: 'native-app', bundleId: detected.bundleId });
       }
     }
-    setDetected(null);
+    meetingDetection.clear();
   }
 
   const headline = detected.source === 'browser-tab'
@@ -96,7 +81,7 @@ export function MeetingDetectedBanner({
     : `MeetingNotes will record only ${detected.appName}'s audio plus your mic.`;
 
   return (
-    <div className="mb-6 rounded-xl border border-brand-indigo/30 bg-brand-indigo/5 px-4 py-3 flex items-center gap-3">
+    <div role="status" className={`${className} rounded-xl border border-brand-indigo/30 bg-brand-indigo/5 px-4 py-3 flex flex-wrap items-center gap-3`}>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold">
           {headline}

@@ -1,4 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from '../components/icons';
+import { splitHighlight } from '../lib/find-highlight';
 import { TranscriptWindow } from '../components/TranscriptWindow';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
@@ -59,6 +61,8 @@ export function TranscriptPanel({
   const groupByLine = useMemo(()=>{const indexes:number[]=[];groups.forEach((group,index)=>group.lineIndices.forEach(line=>{indexes[line]=index;}));return indexes;},[groups]);
   const activeGroupIdx = activeIdx < 0 ? -1 : groupByLine[activeIdx] ?? -1;
   const [find,setFind]=useState(''),[matchIndex,setMatchIndex]=useState(0),[jump,setJump]=useState<{index:number;nonce:number}|null>(null);
+  // Marks follow typing a frame behind, so a long transcript never blocks the Find box.
+  const deferredFind=useDeferredValue(find);
   const matches=useMemo(()=>find.trim()?parsed.lines.flatMap((line,index)=>`${line.speaker} ${line.text}`.toLowerCase().includes(find.toLowerCase())?[index]:[]):[],[parsed.lines,find]);
   const estimate=useCallback((index:number)=>viewMode==='lines'?30+22*Math.ceil((parsed.lines[index]!.text.length+30)/70):52+22*Math.ceil(groups[index]!.text.length/70),[viewMode,parsed.lines,groups]);
   function goMatch(index:number):void {if(!matches.length)return;const next=(index+matches.length)%matches.length;setMatchIndex(next);const line=matches[next]!;setJump({index:viewMode==='lines'?line:groupByLine[line]!,nonce:Date.now()});}
@@ -133,9 +137,14 @@ export function TranscriptPanel({
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <input ref={findRef} aria-label="Find in full transcript" value={find} onChange={event=>setFind(event.target.value)} placeholder="Find in transcript…" className="input-sm"
-          onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();goMatch(matchIndex+(event.shiftKey?-1:1));}}}/>
+          onKeyDown={event=>{
+            if(event.key==='Enter'){event.preventDefault();goMatch(matchIndex+(event.shiftKey?-1:1));}
+            // Esc clears the search first; a second Esc is left for the page.
+            else if(event.key==='Escape'&&find){event.preventDefault();event.stopPropagation();setFind('');}
+          }}/>
+        {find&&<button type="button" className="btn-secondary !px-1.5" aria-label="Clear find" title="Clear (Esc)" onClick={()=>{setFind('');findRef.current?.focus();}}><Icon name="x" className="w-3 h-3" /></button>}
         {find&&<><span role="status" aria-live="polite">{matches.length?Math.min(matchIndex+1,matches.length):0} / {matches.length} matches</span><button className="btn-secondary" disabled={!matches.length} onClick={()=>goMatch(matchIndex-1)}>Previous</button><button className="btn-secondary" disabled={!matches.length} onClick={()=>goMatch(matchIndex+1)}>Next</button></>}
-        <button className="btn-secondary" onClick={()=>{void navigator.clipboard.writeText(body).catch(error=>toast.show({message:`Could not copy transcript: ${(error as Error).message}`,variant:'error'}));}}>Copy full transcript</button>
+        <button className="btn-secondary" onClick={()=>{void navigator.clipboard.writeText(body).then(()=>toast.show({message:'Transcript copied',durationMs:3000})).catch(error=>toast.show({message:`Could not copy transcript: ${(error as Error).message}`,variant:'error'}));}}>Copy full transcript</button>
         <span className="text-ink-muted">Up / Down moves between transcript rows.</span>
       </div>
       {/* Scrolling is delegated to the parent rail now that the detail
@@ -147,8 +156,8 @@ export function TranscriptPanel({
         <TranscriptWindow key={viewMode} contentRevision={body} count={viewMode==='lines'?parsed.lines.length:groups.length} estimate={estimate}
           active={viewMode==='lines'?activeIdx:activeGroupIdx} seekRevision={seekRevision} jump={jump}
           follow={()=>Date.now()-lastManualScrollAt.current>=3000}
-          renderRow={i=>viewMode==='lines'?<TranscriptLineRow line={parsed.lines[i]!} active={i===activeIdx} speakerColor={speakerColor(parsed.lines[i]!.speaker)} onSeek={onSeek} activeRef={activeRef}/>:
-            <TranscriptGroupRow group={groups[i]!} active={i===activeGroupIdx} speakerColor={speakerColor(groups[i]!.speaker)} onSeek={onSeek} activeRef={activeRef}/>}
+          renderRow={i=>viewMode==='lines'?<TranscriptLineRow line={parsed.lines[i]!} active={i===activeIdx} speakerColor={speakerColor(parsed.lines[i]!.speaker)} find={deferredFind} onSeek={onSeek} activeRef={activeRef}/>:
+            <TranscriptGroupRow group={groups[i]!} active={i===activeGroupIdx} speakerColor={speakerColor(groups[i]!.speaker)} find={deferredFind} onSeek={onSeek} activeRef={activeRef}/>}
         />
       </div>
     </div>
@@ -313,8 +322,10 @@ function ExportMenuItem({
 // `active` boolean — so memo bails on all rows except the two whose
 // `active` flag flipped.
 const TranscriptLineRow = memo(function TranscriptLineRow({
-  line, active, speakerColor, onSeek, activeRef,
+  line, active, speakerColor, find, onSeek, activeRef,
 }: {
+  /** Find needle; matches inside the speaker and text are marked. */
+  find: string;
   line: TranscriptLine;
   active: boolean;
   /** Palette color for this line's speaker (#A4). A primitive string
@@ -338,18 +349,27 @@ const TranscriptLineRow = memo(function TranscriptLineRow({
       <span className="font-mono text-[11px] text-ink-muted tabular-nums mr-2">
         {fmtTimestamp(line.seconds)}
       </span>
-      <span className="font-semibold mr-2" style={{ color: speakerColor }}>{line.speaker}</span>
-      <span>{line.text}</span>
+      <span className="font-semibold mr-2" style={{ color: speakerColor }}><Highlighted text={line.speaker} find={find} /></span>
+      <span><Highlighted text={line.text} find={find} /></span>
     </button>
   );
 });
+
+/** Text with every occurrence of the Find needle marked. */
+function Highlighted({ text, find }: { text: string; find: string }): JSX.Element {
+  if (!find.trim()) return <>{text}</>;
+  return <>{splitHighlight(text, find).map((part, index) => part.match
+    ? <mark key={index} className="rounded-sm bg-status-warnBg px-0.5 text-status-warnText">{part.text}</mark>
+    : <span key={index}>{part.text}</span>)}</>;
+}
 
 /** Grouped-view row: speaker name on its own line above the merged
  *  paragraph, with the start–end range to its right. Cleaner than
  *  inlining everything when the merged text is long. */
 const TranscriptGroupRow = memo(function TranscriptGroupRow({
-  group, active, speakerColor, onSeek, activeRef,
+  group, active, speakerColor, find, onSeek, activeRef,
 }: {
+  find: string;
   group: TranscriptGroup;
   active: boolean;
   /** Primitive palette color for the group's speaker — see TranscriptLineRow. */
@@ -369,7 +389,7 @@ const TranscriptGroupRow = memo(function TranscriptGroupRow({
           : 'hover:bg-surface-sunken'}`}
     >
       <div className="flex items-baseline gap-2 mb-1">
-        <span className="font-semibold" style={{ color: speakerColor }}>{group.speaker}</span>
+        <span className="font-semibold" style={{ color: speakerColor }}><Highlighted text={group.speaker} find={find} /></span>
         <span className="font-mono text-[11px] text-ink-muted tabular-nums">
           {fmtTimestamp(group.startSeconds)}
           {showRange && (
@@ -382,7 +402,7 @@ const TranscriptGroupRow = memo(function TranscriptGroupRow({
           )}
         </span>
       </div>
-      <div className="text-ink-soft">{group.text}</div>
+      <div className="text-ink-soft"><Highlighted text={group.text} find={find} /></div>
     </button>
   );
 });
