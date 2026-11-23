@@ -77,6 +77,43 @@ describe('LLMSupervisor', () => {
     await sup.stop();
   });
 
+  it('ensureServerUp starts the LM Studio server without loading a model', async () => {
+    let probeCalls = 0;
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
+    const lmsLoadModel = vi.fn(async () => {});
+    const sup = new LLMSupervisor({
+      getProvider: () => 'lm-studio',
+      getModelId: () => 'qwen/qwen3.8-27b',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: async () => ({ ok: ++probeCalls >= 2 }),
+      ollamaProbe: async () => ({ ok: false }),
+      lmsLoadModel,
+      lmsListLoadedModels: async () => [],
+      idleShutdownMs: 0,
+    });
+    await sup.ensureServerUp();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0][1]).toEqual(['server', 'start', '--port', '1234']);
+    expect(lmsLoadModel).not.toHaveBeenCalled();
+    await sup.stop();
+  });
+
+  it('ensureServerUp is a no-op when provider is "external"', async () => {
+    const spawn = vi.fn(() => fakeProc() as unknown as ChildProcess);
+    const sup = new LLMSupervisor({
+      getProvider: () => 'external',
+      spawn,
+      findLmsBinary: () => '/fake/lms',
+      findOllamaBinary: () => '/fake/ollama',
+      lmStudioProbe: async () => ({ ok: false }),
+      ollamaProbe: async () => ({ ok: false }),
+    });
+    await sup.ensureServerUp();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('ollama mode spawns `ollama serve` with OLLAMA_HOST env', async () => {
     let probeCalls = 0;
     const probe = async (): Promise<{ ok: boolean }> => {

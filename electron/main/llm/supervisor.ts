@@ -247,6 +247,21 @@ export class LLMSupervisor {
     }
   }
 
+  /** Starts (or adopts) the managed provider's server without loading a
+   *  model. Used by the Settings model picker: listing models only needs
+   *  /v1/models to answer, and loading a 27B model into VRAM just to
+   *  open Settings would be wasteful. No-op for 'external'. */
+  async ensureServerUp(): Promise<void> {
+    switch (this.opts.getProvider()) {
+      case 'external':
+        return;
+      case 'lm-studio':
+        return this.lmStudio.ensureReady();
+      case 'ollama':
+        return this.ollama.ensureReady();
+    }
+  }
+
   /** Best-effort: load the configured model into VRAM if it isn't
    *  already. Failure is non-fatal — the user might be deliberately
    *  using a different model than `settings.llmModel`, or the model
