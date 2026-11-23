@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from '../ipc/client';
 import { VuMeter } from './VuMeter';
 import { Icon } from './icons';
 import { ConfirmDialog } from './ConfirmDialog';
 import { stopRecording } from '../lib/stop-recording';
 import { recordingStartFeedback } from '../lib/recording-start-feedback';
-import { useElapsed, fmtElapsed } from '../lib/useElapsed';
+import { fmtElapsed } from '../lib/useElapsed';
 import {
   captureSummary, deriveCaptureHealth, type CaptureLevelSource,
 } from '../lib/capture-health';
@@ -14,6 +14,42 @@ import {
  *  plain Stop button. Long enough for a deliberate second click, short
  *  enough that an accidental first click can't lie in wait. */
 const CONFIRM_STOP_MS = 3000;
+
+type Peaks = Record<CaptureLevelSource, number>;
+
+/** Live peak levels outside React state (#301). Level events arrive many
+ *  times a second; holding them in the row's state re-rendered the whole row
+ *  (buttons, health banner, dialog) on each one. Only the meter and the
+ *  diagnostics readout subscribe here. */
+function createPeakStore() {
+  let peaks: Peaks = { mic: -60, system: -60, mixed: -60 };
+  const listeners = new Set<() => void>();
+  return {
+    get: (): Peaks => peaks,
+    set(source: CaptureLevelSource, peakDb: number): void {
+      if (peaks[source] === peakDb) return;
+      peaks = { ...peaks, [source]: peakDb };
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    },
+  };
+}
+type PeakStore = ReturnType<typeof createPeakStore>;
+
+function LiveVuMeter({ store }: { store: PeakStore }): JSX.Element {
+  return <VuMeter peakDb={useSyncExternalStore(store.subscribe, store.get).mixed} />;
+}
+
+function PeakReadout({ store, source }: { store: PeakStore; source: CaptureLevelSource }): JSX.Element {
+  return <>{useSyncExternalStore(store.subscribe, store.get)[source].toFixed(1)} dBFS</>;
+}
+
+/** How often a still-audible source refreshes its "last heard" time. Capture
+ *  health works in whole seconds, so finer updates only cost renders. */
+const AUDIBLE_REFRESH_MS = 1000;
 
 export function LiveRecordingRow({
   sessionId, label, startedAt, groupId, title, micEnabled = true, onStopped, onRestarted,
@@ -28,8 +64,7 @@ export function LiveRecordingRow({
   onRestarted: (recording: { sessionId: string; label: string; startedAt: string;
     startInput?: { targetPid: number | 'system'; targetLabel: string; mic: boolean; groupId?: string | null; title?: string } }) => void;
 }): JSX.Element {
-  const elapsed = useElapsed(startedAt, true);
-  const [peaks, setPeaks] = useState<Record<CaptureLevelSource, number>>({ mic: -60, system: -60, mixed: -60 });
+  const [peakStore] = useState(createPeakStore);
   const [received, setReceived] = useState<Partial<Record<CaptureLevelSource, boolean>>>({});
   const [lastAudibleAt, setLastAudibleAt] = useState<Partial<Record<CaptureLevelSource, number>>>({});
   const [nowMs, setNowMs] = useState(Date.now());
@@ -43,6 +78,9 @@ export function LiveRecordingRow({
   const seen = useRef(new Set<CaptureLevelSource>());
 
   const parsedStart = Date.parse(startedAt);
+  // One 1 s tick (`nowMs`) drives both the elapsed label and capture health.
+  const elapsedMs = nowMs - parsedStart;
+  const elapsed = Number.isFinite(elapsedMs) && elapsedMs >= 0 ? Math.floor(elapsedMs / 1000) : null;
   const health = deriveCaptureHealth({
     startedAtMs: Number.isFinite(parsedStart) ? parsedStart : nowMs,
     nowMs,
@@ -56,16 +94,21 @@ export function LiveRecordingRow({
       const source = e.source ?? 'mixed';
       if (!Number.isFinite(e.peakDb)) return;
       setReceived(current => current[source] ? current : { ...current, [source]: true });
-      setPeaks((current) => ({ ...current, [source]: e.peakDb }));
+      peakStore.set(source, e.peakDb);
       if (e.peakDb > -50) {
         const at = Date.now();
         seen.current.add(source);
-        setLastAudibleAt((current) => ({ ...current, [source]: at }));
+        // First sound from a source updates at once; after that, at most once
+        // a second per source instead of on every level event.
+        setLastAudibleAt((current) => {
+          const previous = current[source];
+          return previous !== undefined && at - previous < AUDIBLE_REFRESH_MS ? current : { ...current, [source]: at };
+        });
       }
     });
     const tick = setInterval(() => setNowMs(Date.now()), 1000);
     return () => { off(); clearInterval(tick); };
-  }, [sessionId]);
+  }, [sessionId, peakStore]);
 
   useEffect(() => {
     mounted.current = true;
@@ -136,7 +179,7 @@ export function LiveRecordingRow({
           <StreamIndicator label="App" active={health.active.system} checking={health.state === 'checking'} />
           <StreamIndicator label="File" active={health.active.mixed} checking={health.state === 'checking'} />
         </div>
-        <VuMeter peakDb={peaks.mixed} />
+        <LiveVuMeter store={peakStore} />
         <button
           onClick={handleStopClick}
           disabled={stopping}
@@ -165,7 +208,7 @@ export function LiveRecordingRow({
       <details className="mt-2 text-xs text-ink-muted">
         <summary className="cursor-pointer">Stream diagnostics</summary>
         <div className="flex flex-wrap gap-4 tabular-nums mt-1" aria-live="off">
-          {(['mic', 'system', 'mixed'] as const).map(source => <span key={source}>{source === 'system' ? 'App' : source === 'mixed' ? 'File' : 'Mic'} peak: {source === 'mic' && !micEnabled ? 'disabled' : received[source] ? `${peaks[source].toFixed(1)} dBFS` : 'waiting for samples'}</span>)}
+          {(['mic', 'system', 'mixed'] as const).map(source => <span key={source}>{source === 'system' ? 'App' : source === 'mixed' ? 'File' : 'Mic'} peak: {source === 'mic' && !micEnabled ? 'disabled' : received[source] ? <PeakReadout store={peakStore} source={source} /> : 'waiting for samples'}</span>)}
         </div>
         <p className="mt-1">Live sample peaks, not a guarantee of playable saved audio. Check the finalized recording in Library.</p>
       </details>

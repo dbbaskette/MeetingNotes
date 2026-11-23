@@ -7,8 +7,9 @@
 // makes the whole catalog searchable and removes the conceptual split
 // between "arrivals" and "meetings" — they're all meetings, some
 // haven't started processing yet.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { useStore } from 'zustand';
+import { useShallow } from 'zustand/react/shallow';
 import { useMeetingsStore, useMeetingsPoll } from '../store/meetings';
 import { LibraryRow } from '../components/LibraryRow';
 import { VirtualMeetingList } from '../components/VirtualMeetingList';
@@ -45,7 +46,7 @@ import type { SearchFacets } from '../../../shared/search';
 import { arrivalBaseline, acknowledgeArrivals } from '../lib/new-arrivals';
 import {readBrowsePreferences,saveBrowsePreferences} from '../lib/library-browse-preferences';
 import { organizedSections } from '../lib/organized-sections';
-import type { MeetingSummary } from '../lib/paged-meetings';
+import type { MeetingSummary, PagedMeetingsState } from '../lib/paged-meetings';
 import { pipelineQueueKey, type PipelineStatusSnapshot } from '../lib/status-bar';
 import { shouldPollLibrary } from '../lib/poll-gate';
 import { shortcutMod } from '../lib/shortcut';
@@ -85,13 +86,34 @@ type LibFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
 const SORT_STORAGE_KEY = 'librarySortKey';
 const VIEW_STORAGE_KEY = 'libraryViewMode';
 
+function selectLibraryPage(state: PagedMeetingsState) {
+  return {
+    items: state.items, counts: state.counts, total: state.total, hasMore: state.hasMore,
+    loadingInitial: state.loadingInitial, loadingMore: state.loadingMore, error: state.error,
+    query: state.query, setQuery: state.setQuery, refresh: state.refresh, invalidate: state.invalidate,
+    loadMore: state.loadMore, retry: state.retry,
+  };
+}
+
+/** The flat list is the only consumer of the store's `refreshing` flag (it
+ *  gates auto load-more), so the subscription lives here instead of at the
+ *  Library root. */
+function FlatMeetingList(props: Omit<ComponentProps<typeof VirtualMeetingList>, 'refreshing'>): JSX.Element {
+  const refreshing = useMeetingsStore(state => state.refreshing);
+  return <VirtualMeetingList {...props} refreshing={refreshing} />;
+}
+
 export function LibraryView({
   active = true, onOpen, onNav, onOpenSearch, liveRecording, onStartRecording, onRecordingStopped,
 }: Props): JSX.Element {
+  // Shallow-selected, and deliberately without `refreshing`: that flag flips
+  // twice on every 3 s poll, and subscribing to it here re-rendered the whole
+  // Library even when the poll changed nothing (#301). FlatMeetingList below
+  // is the only reader.
   const {
     items: meetings, counts, total, hasMore, loadingInitial, loadingMore,
-    refreshing, error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
-  } = useMeetingsStore();
+    error, query: pageQuery, setQuery: setPageQuery, refresh: refreshPages, invalidate: invalidatePages, loadMore, retry,
+  } = useMeetingsStore(useShallow(selectLibraryPage));
   const [facets,setFacets]=useState<SearchFacets>({});
   const [prepareGroupId, setPrepareGroupId] = useState<string | null>(null);
   const searchClientId=useRef(`library-${crypto.randomUUID()}`),searchRequestId=useRef(0);
@@ -309,8 +331,19 @@ export function LibraryView({
   // App retains the Library while details are open. Refresh every projection
   // on return, including expanded group pages, search and Needs attention.
   // Invalidation also fences any request that began before the detail edit.
-  useEffect(() => { if (active) void invalidate(); }, [active, invalidate]);
-  useMeetingsPoll(active && hasMotion);
+  // The mount itself already issues one fetch per source (setPageQuery,
+  // attention.start, refreshGroups), so the first active run must not
+  // invalidate and double them all (#301).
+  const firstActiveRun = useRef(true);
+  useEffect(() => {
+    const first = firstActiveRun.current;
+    firstActiveRun.current = false;
+    if (active && !first) void invalidate();
+  }, [active, invalidate]);
+  // The organized overview never renders the flat list; its group sections
+  // refresh on queue changes via `invalidate`. Polling flat pages there only
+  // refreshed chip counts, which those same pushes already cover (#301).
+  useMeetingsPoll(active && hasMotion && !organizedFull);
   useEffect(() => {
     const onVisible = (): void => {
       if (document.visibilityState === 'visible') void refresh();
@@ -413,6 +446,13 @@ export function LibraryView({
   const [pendingSnapshot, setPendingSnapshot] = useState<{ selection: Set<string>; ids: string[] } | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   useEffect(() => {
+    if (selected.size === 0) {
+      // Nothing to hydrate: no IPC and no fresh snapshot object per poll tick.
+      setPendingSnapshot(previous => previous?.selection === selected && previous.ids.length === 0
+        ? previous : { selection: selected, ids: [] });
+      setSelectionError(null);
+      return;
+    }
     let cancelled = false;
     let inflight = false;
     const hydrate = async (): Promise<void> => {
@@ -442,6 +482,10 @@ export function LibraryView({
   // arrows here would put all 100+ rows back on the 3 s poll treadmill.
   const toggleSelect = useCallback((id: string): void => {
     if (!librarySelection.getState().busy) librarySelection.getState().toggle(id);
+  }, []);
+
+  const moveUngrouped = useCallback((meeting: { id: string; title: string }): void => {
+    setMoveSelection({ ids: [meeting.id], hiddenCount: 0, meeting: { title: meeting.title, groupId: null } });
   }, []);
 
   const rowChanged = useCallback((): void => {
@@ -828,7 +872,7 @@ export function LibraryView({
                 <LibraryRow
                   meeting={m}
                   isNew={m.groupId === null && !!m.createdAt && m.createdAt > newBaseline}
-                  onMove={m.groupId === null ? () => setMoveSelection({ids:[m.id],hiddenCount:0,meeting:{title:m.title,groupId:null}}) : undefined}
+                  onMove={m.groupId === null ? moveUngrouped : undefined}
                   onOpen={onOpen}
                   onChanged={rowChanged}
                   checked={selected.has(m.id)}
@@ -863,14 +907,13 @@ export function LibraryView({
             onDeleteGroup={(id) => { setTargetGroupId(id); setGroupDialog('delete'); setGroupError(null); }}
           />;
           if (!isSearching) return (
-            <VirtualMeetingList
+            <FlatMeetingList
               scrollRef={listRef}
               key={`${scopeToken}:${libFilter}:${sortKey}`}
               items={browseList}
               renderRow={(m) => renderRow(m, false)}
               hasMore={hasMore}
               loadingMore={loadingMore}
-              refreshing={refreshing}
               error={error}
               loadMore={loadMore}
               className={selected.size > 0 ? 'pb-28' : 'pb-8'}

@@ -1,6 +1,14 @@
 import Foundation
 import Darwin
 
+private struct ResultEnvelope<T: Encodable>: Encodable {
+    let version: Int
+    let id: String
+    let kind: String
+    let elapsedMs: Double
+    let result: T
+}
+
 @main
 enum SpeechMain {
     static func main() async {
@@ -16,6 +24,12 @@ enum SpeechMain {
             guard let bytes = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
             output.write(bytes); output.write(Data([10]))
         }
+        func emitEncodable<T: Encodable>(_ value: T) throws {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let bytes = try encoder.encode(value)
+            output.write(bytes); output.write(Data([10]))
+        }
         var id = "invalid"
         do {
             guard let line = readLine(), line.utf8.count <= 65_536 else { throw SpeechFailure("Invalid speech request.") }
@@ -23,27 +37,30 @@ enum SpeechMain {
             id = request.id
             guard request.version == 1, !id.isEmpty, id.count < 201 else { throw SpeechFailure("Unsupported speech protocol.") }
             let begin = Date()
-            let result: [String: Any]
-            switch request.operation {
-            case "health":
-                if #available(macOS 26, *) { result = try await AppleTranscription.health(locale: request.locale ?? "en-US") }
-                else { result = ["available": false, "installed": false, "status": "Requires macOS 26 or later"] }
-            case "provision-apple":
+            if request.operation == "transcribe" {
                 guard #available(macOS 26, *) else { throw SpeechFailure("Apple transcription requires macOS 26 or later.") }
-                try await AppleTranscription.provision(locale: request.locale ?? "en-US") { fraction in
+                let typed = try await AppleTranscription.transcribe(request) { fraction in
                     emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
                 }
-                result = ["installed": true]
-            case "transcribe":
-                guard #available(macOS 26, *) else { throw SpeechFailure("Apple transcription requires macOS 26 or later.") }
-                result = try await AppleTranscription.transcribe(request) { fraction in
-                    emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
+                try emitEncodable(ResultEnvelope(version: 1, id: id, kind: "result", elapsedMs: Date().timeIntervalSince(begin) * 1000, result: typed))
+            } else {
+                let result: [String: Any]
+                switch request.operation {
+                case "health":
+                    if #available(macOS 26, *) { result = try await AppleTranscription.health(locale: request.locale ?? "en-US") }
+                    else { result = ["available": false, "installed": false, "status": "Requires macOS 26 or later"] }
+                case "provision-apple":
+                    guard #available(macOS 26, *) else { throw SpeechFailure("Apple transcription requires macOS 26 or later.") }
+                    try await AppleTranscription.provision(locale: request.locale ?? "en-US") { fraction in
+                        emit(["version": 1, "id": id, "kind": "progress", "fraction": fraction])
+                    }
+                    result = ["installed": true]
+                case "provision-speakers": result = try await SpeakerProcessing.provision(request)
+                case "diarize": result = try await SpeakerProcessing.diarize(request)
+                default: throw SpeechFailure("Unknown speech operation.")
                 }
-            case "provision-speakers": result = try await SpeakerProcessing.provision(request)
-            case "diarize": result = try await SpeakerProcessing.diarize(request)
-            default: throw SpeechFailure("Unknown speech operation.")
+                emit(["version": 1, "id": id, "kind": "result", "elapsedMs": Date().timeIntervalSince(begin) * 1000, "result": result])
             }
-            emit(["version": 1, "id": id, "kind": "result", "elapsedMs": Date().timeIntervalSince(begin) * 1000, "result": result])
         } catch {
             emit(["version": 1, "id": id, "kind": "error", "message": error.localizedDescription])
             exit(1)

@@ -13,6 +13,10 @@ export function supportsNativeSpeech(platform = process.platform, arch = process
 export function appleLocale(language: string): string { return language === 'en' ? 'en-US' : language; }
 const Health = z.object({ available: z.boolean(), installed: z.boolean() });
 
+/** How long a "ready" health answer is reused. Each status() used to spawn
+ *  the Swift helper, and Settings/onboarding call it repeatedly (#301). */
+const STATUS_TTL_MS = 30_000;
+
 /** The stable app's only native-engine owner. Provisioning is explicit;
  * inference never downloads models, starts legacy servers, or reads HF tokens. */
 export class NativeSpeechService {
@@ -20,6 +24,7 @@ export class NativeSpeechService {
   private provisioning?: AbortController;
   private state: NativeSpeechStatus;
   private setupError: string | null = null;
+  private statusCache?: { locale: string; checkedAt: number };
   constructor(executable: string, private readonly modelFolder: string) {
     this.client = new SpeechClient(executable);
     this.state = { supported: supportsNativeSpeech() && fs.existsSync(executable), appleReady: false,
@@ -27,19 +32,29 @@ export class NativeSpeechService {
   }
   snapshot(): NativeSpeechStatus { return { ...this.state }; }
   async status(language: string): Promise<NativeSpeechStatus> {
+    const locale = appleLocale(language);
     if (this.state.supported && !this.state.busy) {
+      const now = Date.now();
+      if (this.statusCache && this.statusCache.locale === locale && now - this.statusCache.checkedAt < STATUS_TTL_MS) {
+        this.state.speakerReady = modelsReady(this.modelFolder);
+        return this.snapshot();
+      }
       try {
-        const health = Health.parse((await this.client.request('health', { locale: appleLocale(language) })).result);
+        const health = Health.parse((await this.client.request('health', { locale })).result);
         this.state.appleReady = health.available && health.installed;
         this.state.error = health.available ? this.setupError : 'Apple transcription is unavailable for this language on this Mac.';
         this.state.speakerReady = modelsReady(this.modelFolder);
-      } catch (e) { this.state.appleReady = false; this.state.error = String(e); }
+        // Cache only a ready answer. "Not installed yet" must be re-checked on
+        // the next call, or Settings/onboarding would lag behind a download.
+        this.statusCache = this.state.appleReady ? { locale, checkedAt: Date.now() } : undefined;
+      } catch (e) { this.state.appleReady = false; this.state.error = String(e); this.statusCache = undefined; }
     }
     return this.snapshot();
   }
   async prepare(language: string): Promise<NativeSpeechStatus> {
     if (!this.state.supported) throw new Error('Native speech requires Apple silicon, macOS 26 or newer, and the bundled speech helper.');
     if (this.provisioning) throw new Error('Speech setup is already running.');
+    this.statusCache = undefined;
     const controller = new AbortController(); this.provisioning = controller;
     this.setupError = null;
     this.state = { ...this.state, appleReady: false, busy: true, error: null, phase: 'Preparing Apple language assets', progress: 0 };

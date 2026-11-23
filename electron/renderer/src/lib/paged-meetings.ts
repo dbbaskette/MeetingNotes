@@ -32,6 +32,11 @@ function normalizeQuery(query: MeetingQuery): MeetingQuery {
     pageSize: Number.isFinite(size) ? Math.max(1, Math.min(100, Math.floor(size))) : 50 };
 }
 
+function countsEqual(a: MeetingCounts, b: MeetingCounts): boolean {
+  return a.all === b.all && a.pending === b.pending && a.processing === b.processing
+    && a.done === b.done && a.failed === b.failed;
+}
+
 function uniqueRows(rows: MeetingSummary[]): MeetingSummary[] {
   const seen = new Set<string>();
   return rows.filter((row) => {
@@ -97,7 +102,13 @@ export function createPagedMeetings(fetchPage: FetchPage) {
               if (revision !== invalidation) continue;
               cursor = nextCursor;
               pageCount = loadedPages;
-              set({ items: recycleMeetings(get().items, uniqueRows(rows)), counts: result.counts, total: result.total, hasMore: cursor !== null });
+              const prev = get();
+              const nextItems = recycleMeetings(prev.items, uniqueRows(rows));
+              const nextCounts = countsEqual(prev.counts, result.counts) ? prev.counts : result.counts;
+              const nextHasMore = cursor !== null;
+              if (nextItems !== prev.items || nextCounts !== prev.counts || result.total !== prev.total || nextHasMore !== prev.hasMore) {
+                set({ items: nextItems, counts: nextCounts, total: result.total, hasMore: nextHasMore });
+              }
             } catch (error) {
               if (current !== generation) return;
               if (revision !== invalidation) continue;

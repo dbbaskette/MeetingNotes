@@ -3,6 +3,16 @@ import AVFoundation
 import Speech
 
 @available(macOS 26, *)
+struct AppleTranscriptionResult: Encodable {
+    let text: String
+    let segments: [TimedText]
+    let durationS: Double
+    let provider: String
+    let locale: String
+    let osVersion: String
+}
+
+@available(macOS 26, *)
 enum AppleTranscription {
     static func transcriber(_ requested: String) async throws -> SpeechTranscriber {
         guard SpeechTranscriber.isAvailable,
@@ -39,7 +49,7 @@ enum AppleTranscription {
         progress(1)
     }
 
-    static func transcribe(_ request: Request, progress: @escaping (Double) -> Void = { _ in }) async throws -> [String: Any] {
+    static func transcribe(_ request: Request, progress: @escaping (Double) -> Void = { _ in }) async throws -> AppleTranscriptionResult {
         let url = try requiredAudio(request)
         let module = try await transcriber(request.locale ?? "en-US")
         guard await AssetInventory.status(forModules: [module]) == .installed else {
@@ -78,10 +88,14 @@ enum AppleTranscription {
             else { try await analyzer.finalizeAndFinishThroughEndOfInput() }
             let segments = try await reader.value
             try validateSegments(segments, duration: duration)
-            let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(segments))
-            return ["text": segments.map(\.text).joined(separator: " "), "segments": encoded,
-                    "durationS": duration, "provider": "apple", "locale": module.selectedLocales.first?.identifier ?? "",
-                    "osVersion": ProcessInfo.processInfo.operatingSystemVersionString]
+            return AppleTranscriptionResult(
+                text: segments.map(\.text).joined(separator: " "),
+                segments: segments,
+                durationS: duration,
+                provider: "apple",
+                locale: module.selectedLocales.first?.identifier ?? "",
+                osVersion: ProcessInfo.processInfo.operatingSystemVersionString
+            )
         } catch {
             await analyzer.cancelAndFinishNow()
             reader.cancel()

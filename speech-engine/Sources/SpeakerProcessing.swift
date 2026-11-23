@@ -53,8 +53,10 @@ enum SpeakerProcessing {
 
     static func diarize(_ request: Request) async throws -> [String: Any] {
         let audioURL = try requiredAudio(request)
-        let kit = try await SpeakerKit(configuration(request, download: false))
-        let audio = try loadAudio(audioURL)
+        let config = try configuration(request, download: false)
+        async let kitTask = SpeakerKit(config)
+        let audioTask = Task.detached(priority: .userInitiated) { try loadAudio(audioURL) }
+        let (kit, audio) = try await (kitTask, audioTask.value)
         let result = try await kit.diarize(audioArray: audio, options: PyannoteDiarizationOptions(centroidSource: .trainableOnly))
         let centroids = Dictionary(uniqueKeysWithValues: result.speakerCentroidEmbeddings.compactMap { id, vector -> (String, [Float])? in
             usableVector(vector) ? (String(format: "SPEAKER_%02d", id), vector) : nil

@@ -1,5 +1,5 @@
 // electron/renderer/src/App.tsx
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { RenameDialog } from './components/MeetingRowMenu';
 import { LibraryView } from './views/LibraryView';
 import { PermissionsModal } from './components/PermissionsModal';
@@ -139,6 +139,10 @@ function AppInner(): JSX.Element {
     });
   }, [navigate, showToast]);
 
+  // One settings read at launch, shared by the theme and first-run effects
+  // below (#301) — each used to issue its own `settings:getAll`.
+  const [initialSettings] = useState(() => api.settings.getAll());
+
   // Theme: read the persisted choice, apply it, and keep it live. 'system'
   // follows the OS; 'light'/'dark' override. We mirror the resolved choice to
   // localStorage so the inline script in index.html can paint flash-free on
@@ -147,6 +151,7 @@ function AppInner(): JSX.Element {
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     let choice: ThemeChoice = 'system';
+    let themeChanged = false;
 
     const apply = (): void => {
       const dark = resolveDark(choice, mq.matches);
@@ -155,13 +160,15 @@ function AppInner(): JSX.Element {
     };
 
     void (async () => {
-      const all = (await api.settings.getAll()) as { theme?: ThemeChoice };
-      choice = all.theme ?? 'system';
+      const all = (await initialSettings) as { theme?: ThemeChoice };
+      // A theme picked while the read was in flight wins over the stored one.
+      if (!themeChanged) choice = all.theme ?? 'system';
       apply();
     })();
 
     const onSystemChange = (): void => { if (choice === 'system') apply(); };
     const onThemeChanged = (e: Event): void => {
+      themeChanged = true;
       choice = (e as CustomEvent<ThemeChoice>).detail ?? 'system';
       apply();
     };
@@ -171,7 +178,7 @@ function AppInner(): JSX.Element {
       mq.removeEventListener('change', onSystemChange);
       window.removeEventListener('mn:theme-changed', onThemeChanged as EventListener);
     };
-  }, []);
+  }, [initialSettings]);
 
   // Global keyboard shortcuts. Cmd+K opens search palette; Cmd+R is
   // dispatched as a custom event the LibraryView's RecordButton wrapper
@@ -234,10 +241,10 @@ function AppInner(): JSX.Element {
   const [forceOpenSetup, setForceOpenSetup] = useState(false);
   useEffect(() => {
     void (async () => {
-      const all = (await api.settings.getAll()) as { onboardedAt: string | null };
+      const all = (await initialSettings) as { onboardedAt: string | null };
       setOnboardStatus(firstRunStatus(all.onboardedAt));
     })();
-  }, []);
+  }, [initialSettings]);
   // Re-open path: recompute from the flag once it flips. onboardedAt stays put.
   useEffect(() => {
     if (forceOpenSetup) setOnboardStatus(firstRunStatus('forced', { forceOpen: true }));
@@ -466,6 +473,14 @@ function AppInner(): JSX.Element {
     toast.show({message:summary,durationMs:5000});
     if(sessionId)void api.recording.meeting(sessionId).then(meeting=>{if(meeting)toast.show({message:'Recording saved to Library',durationMs:15000,action:{label:'Rename',onClick:()=>setRenameAfterStop(meeting)}});}).catch(()=>{});
   }
+  // Stable identities: LibraryView hands onOpen to every memoized LibraryRow,
+  // so an inline arrow here re-rendered all rows on each App render (#301).
+  type LibraryViewProps = ComponentProps<typeof LibraryView>;
+  const openFromLibrary = useCallback<LibraryViewProps['onOpen']>(
+    (id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds }), [navigate]);
+  const navFromLibrary = useCallback<LibraryViewProps['onNav']>(
+    (target) => { if (target !== 'library') void navigate({ kind: target }); }, [navigate]);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
   const visitedWeekly = useRef(false);
   if (view.kind === 'weekly') visitedWeekly.current = true;
   const readyForViews = onboardStatus === 'done' && permsOk;
@@ -474,9 +489,9 @@ function AppInner(): JSX.Element {
     <ErrorBoundary scope="library" label="The Library">
     <LibraryView
       active={view.kind === 'library'}
-      onOpen={(id, hint, opts) => void navigate({ kind: 'detail', id, hint, seekSeconds: opts?.seekSeconds })}
-      onNav={(target) => { if (target !== 'library') void navigate({ kind: target }); }}
-      onOpenSearch={() => setSearchOpen(true)} liveRecording={liveRecording}
+      onOpen={openFromLibrary}
+      onNav={navFromLibrary}
+      onOpenSearch={openSearch} liveRecording={liveRecording}
       onStartRecording={setLiveRecording}
       onRecordingStopped={stopped}
     /></ErrorBoundary></div>

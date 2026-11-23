@@ -5,9 +5,16 @@ import { api } from '../ipc/client';
 import { createPagedMeetings } from '../lib/paged-meetings';
 import { createSharedInterval } from '../lib/shared-interval';
 
+import type { PagedMeetingsState } from '../lib/paged-meetings';
+
 const meetingsStore = createPagedMeetings(api.meetings.listPage);
+function useMeetingsStoreHook(): PagedMeetingsState;
+function useMeetingsStoreHook<T>(selector: (state: PagedMeetingsState) => T): T;
+function useMeetingsStoreHook<T>(selector?: (state: PagedMeetingsState) => T): PagedMeetingsState | T {
+  return useStore(meetingsStore, selector as (state: PagedMeetingsState) => T);
+}
 export const useMeetingsStore = Object.assign(
-  () => useStore(meetingsStore),
+  useMeetingsStoreHook,
   meetingsStore,
 );
 

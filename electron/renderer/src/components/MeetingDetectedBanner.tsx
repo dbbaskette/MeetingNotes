@@ -40,7 +40,7 @@ export function MeetingDetectedBanner({
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<RecordingStartFeedback | null>(null);
   const [saveGroupId, setSaveGroupId] = useState<string | null>(groupId ?? null);
-  const { groups } = useGroupsStore();
+  const groups = useGroupsStore(state => state.groups);
   useEffect(() => { setSaveGroupId(groupId ?? null); }, [groupId]);
 
   useEffect(() => {
