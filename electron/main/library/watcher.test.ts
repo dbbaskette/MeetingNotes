@@ -119,13 +119,22 @@ describe('LibraryWatcher', () => {
     expect(seen).toEqual([file]);
 
     // Chokidar 'ready' describes its scan, not fs.watchFile's asynchronous
-    // initial stat. Let two default binary polling periods (300 ms each)
-    // establish that baseline before testing a later released-path change.
-    // The event itself is still condition-waited and must actually arrive.
-    await new Promise(resolve=>setTimeout(resolve,600));
+    // initial stat of this file, so an append made too early can become part
+    // of that baseline and never look like a change. Release first, then
+    // append until the change is delivered: every append after the baseline
+    // exists is a real size change, so this converges however slow the
+    // threadpool is. Each wait outlasts the binary poll (300 ms) plus the
+    // stability window, so appends never keep the write from settling.
     w.release(file);
-    try{fs.appendFileSync(file, Buffer.alloc(10));await waitFor(() => seen.length === 2);}
-    finally{await w.stop();}
+    try {
+      while (seen.length < 2) {
+        fs.appendFileSync(file, Buffer.alloc(10));
+        for (let waited = 0; waited < 500 && seen.length < 2; waited += 10) await sleep(10);
+      }
+      // Delivery dedupes again: later changes to the same path stay quiet.
+      fs.appendFileSync(file, Buffer.alloc(10));
+      await sleep(500);
+    } finally { await w.stop(); }
     expect(seen).toEqual([file, file]);
   });
 
