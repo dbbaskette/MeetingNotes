@@ -70,14 +70,29 @@ export class ActionItemsRepo {
 
   replaceForMeeting(meetingId: string, items: readonly ActionItemWithSource[]): void {
     const del = this.db.prepare('DELETE FROM action_items WHERE meeting_id = ?');
+    const linkedSpeakers = this.db.prepare(`
+      SELECT sp.id, sp.display_name
+      FROM meeting_speakers ms
+      JOIN speakers sp ON sp.id = ms.roster_speaker_id
+      WHERE ms.meeting_id = ?
+    `).all(meetingId) as { id: string; display_name: string }[];
+    const speakerByName = new Map<string, string>();
+    for (const sp of linkedSpeakers) {
+      const key = sp.display_name.trim().toLowerCase();
+      if (key && !speakerByName.has(key)) speakerByName.set(key, sp.id);
+    }
     const ins = this.db.prepare(`
-      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, due_date, source_quote, status, exported_to, created_at)
-      VALUES (?, ?, ?, NULL, ?, ?, 'open', '[]', ?)
+      INSERT INTO action_items (id, meeting_id, text, owner_speaker_id, owner_name, due_date, source_quote, status, exported_to, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'open', '[]', ?)
     `);
     const tx = this.db.transaction(() => {
       del.run(meetingId);
       const now = new Date().toISOString();
-      for (const it of items) ins.run(`ai_${shortId()}`, meetingId, it.text, it.due_date, it.sourceQuote ?? null, now);
+      for (const it of items) {
+        const ownerName = it.owner?.trim() || null;
+        const ownerSpeakerId = ownerName ? (speakerByName.get(ownerName.toLowerCase()) ?? null) : null;
+        ins.run(`ai_${shortId()}`, meetingId, it.text, ownerSpeakerId, ownerName, it.due_date, it.sourceQuote ?? null, now);
+      }
     });
     tx();
   }

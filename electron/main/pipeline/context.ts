@@ -33,7 +33,7 @@ export interface PipelineContext {
    *  and the existing user-managed flow continues unchanged.
    *  Stages call `await llmSupervisor.ensureReady()` before
    *  invoking `lmStudio.chat()`. */
-  llmSupervisor: { ensureReady: () => Promise<void> };
+  llmSupervisor: { ensureReady: (signal?: AbortSignal) => Promise<void> };
   meetings: MeetingsRepo;
   speakers: SpeakersRepo;
   actionItems: ActionItemsRepo;

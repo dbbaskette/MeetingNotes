@@ -290,6 +290,41 @@ describe('paginated meeting summaries', () => {
       fsSync.rmSync(libraryRoot, { recursive: true, force: true });
     }
   });
+
+  it('blocks deleting the currently executing meeting and dequeues a queued meeting before trashing', () => {
+    const libraryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'mn-delete-active-'));
+    try {
+      for (const id of ['running', 'queued']) {
+        const audioPath = path.join(libraryRoot, `${id}.m4a`);
+        fsSync.writeFileSync(audioPath, id);
+        meetings.insert({ id, slug: id, title: id, startedAt: null, durationS: 60, audioPath, status: 'processing', pipelineStage: 'summarizing' });
+      }
+      const removeQueued = vi.fn(() => true);
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain,
+        baseServices({
+          meetings, speakers, actionItems, libraryRoot,
+          pipeline: {
+            enqueue: () => {},
+            getStatus: () => ({ paused: false, currentId: 'running', queueLength: 1, queueIds: ['queued'] }),
+            removeQueued,
+            pause: () => {},
+            resume: () => {},
+            clearQueue: () => [],
+            cancelCurrent: () => {},
+          },
+        }));
+      expect(() => invoke('meetings:delete', 'running')).toThrow(/Wait for processing to finish or cancel/i);
+      expect(meetings.findById('running')?.deletedAt).toBeNull();
+      expect(fsSync.existsSync(path.join(libraryRoot, 'running.m4a'))).toBe(true);
+
+      expect(invoke('meetings:delete', 'queued')).toBe(true);
+      expect(removeQueued).toHaveBeenCalledWith('queued');
+      expect(meetings.findById('queued')?.deletedAt).toBeTruthy();
+      expect(fsSync.existsSync(path.join(libraryRoot, 'queued.m4a'))).toBe(false);
+    } finally {
+      fsSync.rmSync(libraryRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function baseServices(overrides: Record<string, unknown> = {}): IpcServices {

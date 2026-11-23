@@ -95,7 +95,7 @@ export interface IpcServices {
    *  does — a no-op when provider='external' (user-managed LM Studio).
    *  The model picker calls ensureServerUp() to start the server without
    *  loading a model. */
-  llmSupervisor: { ensureReady: () => Promise<void>; ensureServerUp: () => Promise<void> };
+  llmSupervisor: { ensureReady: (signal?: AbortSignal) => Promise<void>; ensureServerUp: () => Promise<void> };
   recordingManager: RecordingManager;
   recordingRecovery: RecordingRecoveryService;
   appEnumerator: AppEnumerator;
@@ -469,6 +469,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof id !== 'string' || id.length === 0) throw new Error('invalid args');
     const m = s.meetings.findById(id);
     if (!m || m.deletedAt) return false; // idempotent no-op, not a new deletion
+    const pipelineStatus = s.pipeline.getStatus?.();
+    if (pipelineStatus ? pipelineStatus.currentId === id : m.status === 'processing') {
+      throw new Error('Wait for processing to finish or cancel it before deleting this meeting.');
+    }
+    if (pipelineStatus?.queueIds.includes(id)) {
+      s.pipeline.removeQueued?.(id);
+    }
     // Soft-delete: move files to the per-meeting trash dir, stamp
     // deleted_at on the row. The undo path (meetingsUndoDelete) moves
     // everything back. Purge expired entries on startup + on a timer.
@@ -1233,6 +1240,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         model: modelId,
         temperature: 0,
         disableThinking: true,
+        reasoningEffort: 'none',
         maxTokens: 1500,
         messages: [
           { role: 'system', content: ACTION_ITEM_SYSTEM_PROMPT },

@@ -72,7 +72,7 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
   const terminology = ctx.terminology?.snapshotSummary(meetingId);
   // Wake the LLM provider on demand (managed mode) or no-op
   // (external mode). See ctx.llmSupervisor docs.
-  await ctx.llmSupervisor.ensureReady();
+  await ctx.llmSupervisor.ensureReady(ctx.signal);
   // Anchor off-topic detection on the meeting's real title. A still-default
   // `recording-…` filename tells us nothing, so fall back to letting the model
   // infer the purpose from the transcript.
@@ -82,6 +82,7 @@ export const runSummarizing: StageHandler = async ({ meetingId }, ctx) => {
     model: ctx.settings.get('llmModel'),
     temperature: 0.2,
     disableThinking: ctx.settings.get('disableThinking'),
+    reasoningEffort: ctx.settings.get('reasoningEffort'),
     // Generous cap: large enough for a reasoning model's <think> budget plus a
     // detailed summary (observed worst case ≈ 5k tokens), but small enough that
     // a runaway repetition loop is bounded to a few minutes instead of running
