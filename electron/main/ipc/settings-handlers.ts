@@ -71,6 +71,11 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   });
 
   ipc.handle(IPC_CHANNELS.modelsList, async () => {
+    // In managed mode the server may be off (LM Studio restarted without
+    // auto-start, or idle shutdown). Wake it first so the picker isn't
+    // empty; a failed wake still falls through to a plain probe.
+    try { await s.llmSupervisor.ensureServerUp(); }
+    catch (e) { s.logger.info('llm', { line: `models:list: server wake failed: ${String(e)}` }); }
     try { return await s.lmStudio.listModels(); }
     catch { return []; }
   });

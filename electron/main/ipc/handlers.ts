@@ -92,8 +92,10 @@ export interface IpcServices {
   lmStudio: LMStudioClient;
   /** Lazy-spawn supervisor for the summary LLM. reextract calls
    *  ensureReady() before its chat() call, exactly as the extract stage
-   *  does — a no-op when provider='external' (user-managed LM Studio). */
-  llmSupervisor: { ensureReady: (signal?: AbortSignal) => Promise<void> };
+   *  does — a no-op when provider='external' (user-managed LM Studio).
+   *  The model picker calls ensureServerUp() to start the server without
+   *  loading a model. */
+  llmSupervisor: { ensureReady: (signal?: AbortSignal) => Promise<void>; ensureServerUp: () => Promise<void> };
   recordingManager: RecordingManager;
   recordingRecovery: RecordingRecoveryService;
   appEnumerator: AppEnumerator;

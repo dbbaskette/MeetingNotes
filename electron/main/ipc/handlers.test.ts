@@ -349,7 +349,7 @@ function baseServices(overrides: Record<string, unknown> = {}): IpcServices {
     exporters: {},
     libraryRoot: '/tmp',
     artifactCache: new ArtifactCache(),
-    llmSupervisor: { ensureReady: async () => {} },
+    llmSupervisor: { ensureReady: async () => {}, ensureServerUp: async () => {} },
     logger: { info: () => {}, error: () => {} },
     gateNotified: new Set<string>(),
     ...overrides,
