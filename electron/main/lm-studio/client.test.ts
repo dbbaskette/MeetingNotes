@@ -260,6 +260,28 @@ describe('LMStudioClient.chat — timeout & runaway handling', () => {
       c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }] }),
     ).rejects.toThrow(/repetit|looping/i);
   });
+
+  it('aborts immediately without 2s retry or false timeout when caller signal aborts with custom Error', async () => {
+    const controller = new AbortController();
+    const cancelReason = new Error('Processing cancelled by you.');
+    fetchMock.mockImplementationOnce(async () => {
+      controller.abort(cancelReason);
+      throw cancelReason;
+    });
+    const c = new LMStudioClient('http://localhost:1234');
+    const started = Date.now();
+    await expect(
+      c.chat({ model: 'm', messages: [{ role: 'user', content: 'hi' }], signal: controller.signal }),
+    ).rejects.toThrow('Processing cancelled by you.');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('uses the configured provider label in error messages', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    const c = new LMStudioClient('http://127.0.0.1:11434', () => 'Ollama');
+    await expect(c.listModels()).rejects.toThrow(/Ollama unreachable at http:\/\/127\.0\.0\.1:11434/);
+  });
 });
 
 describe('looksDegenerate', () => {

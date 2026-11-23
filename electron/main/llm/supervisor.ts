@@ -58,14 +58,14 @@ export interface LLMSupervisorOpts {
   ollamaProbe?: ManagedServiceDeps['healthProbe'];
   /** Test seam for the LM Studio model-load step. Defaults to
    *  shelling out via execFile to the resolved `lms` binary. */
-  lmsLoadModel?: (binary: string, modelId: string, contextLength?: number) => Promise<void>;
+  lmsLoadModel?: (binary: string, modelId: string, contextLength?: number, signal?: AbortSignal) => Promise<void>;
   /** Context window (tokens) to request at model load. 0/undefined = let
    *  LM Studio use the model's saved default. Read per-load so a Settings
    *  change applies on the next respawn without an app restart. */
   getContextLength?: () => number;
   /** Test seam for the loaded-models check. Returns ids that LM
    *  Studio's /v1/models endpoint reports as currently loaded. */
-  lmsListLoadedModels?: (host: string, port: number) => Promise<string[]>;
+  lmsListLoadedModels?: (host: string, port: number, signal?: AbortSignal) => Promise<string[]>;
   onLog?: (line: string) => void;
 }
 
@@ -118,12 +118,32 @@ async function modelsListProbe(host: string, port: number): Promise<ProbeResult>
   }
 }
 
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(typeof signal.reason === 'string' && signal.reason ? signal.reason : 'Aborted');
+}
+
+function raceWithSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(abortError(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
+
 /** Default implementation of "what's loaded right now" — hits LM
  *  Studio's /v1/models. Returns the list of model ids in `data[]`.
  *  Lifted out for testability. */
-async function defaultLmsListLoaded(host: string, port: number): Promise<string[]> {
+async function defaultLmsListLoaded(host: string, port: number, signal?: AbortSignal): Promise<string[]> {
+  const timeout = AbortSignal.timeout(2000);
   const resp = await fetch(`http://${host}:${port}/v1/models`, {
-    signal: AbortSignal.timeout(2000),
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!resp.ok) return [];
   const body = (await resp.json().catch(() => null)) as
@@ -136,12 +156,12 @@ async function defaultLmsListLoaded(host: string, port: number): Promise<string[
 /** Default model-load implementation — shells out to `lms load`.
  *  60s timeout matches the worst-case Q5 load time for a 7B-class
  *  model on Apple Silicon. */
-async function defaultLmsLoadModel(binary: string, modelId: string, contextLength?: number): Promise<void> {
+async function defaultLmsLoadModel(binary: string, modelId: string, contextLength?: number, signal?: AbortSignal): Promise<void> {
   const args = ['load', modelId];
   // Without an explicit context length LM Studio falls back to the model's
   // saved default (often 4k), which silently truncates meeting transcripts.
   if (contextLength && contextLength > 0) args.push('--context-length', String(contextLength));
-  await execFileAsync(binary, args, { timeout: 60_000 });
+  await execFileAsync(binary, args, { timeout: 60_000, signal });
 }
 
 /** Reports which providers are available (binary present + reachable
@@ -230,20 +250,21 @@ export class LLMSupervisor {
    *  in VRAM (LM Studio's `lms server start` brings the OpenAI-compat
    *  server up but doesn't auto-load any model — without this step
    *  the first `chat()` call returns a 404). */
-  async ensureReady(): Promise<void> {
+  async ensureReady(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError(signal);
     const provider = this.opts.getProvider();
     switch (provider) {
       case 'external':
         return;
       case 'lm-studio':
-        await this.lmStudio.ensureReady();
-        await this.ensureLmStudioModelLoaded();
+        await raceWithSignal(this.lmStudio.ensureReady(), signal);
+        await this.ensureLmStudioModelLoaded(signal);
         return;
       case 'ollama':
         // Ollama lazy-loads models on first inference — no equivalent
         // step needed. The OpenAI-compat call to /v1/chat/completions
         // triggers the load and the response just takes longer.
-        return this.ollama.ensureReady();
+        return raceWithSignal(this.ollama.ensureReady(), signal);
     }
   }
 
@@ -253,7 +274,8 @@ export class LLMSupervisor {
    *  id might be misspelled. We log and continue; the subsequent
    *  chat() call will surface a clearer error if the model truly
    *  isn't available. */
-  private async ensureLmStudioModelLoaded(): Promise<void> {
+  private async ensureLmStudioModelLoaded(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError(signal);
     const wanted = this.opts.getModelId?.()?.trim();
     if (!wanted) return;
     const host = '127.0.0.1';
@@ -261,11 +283,13 @@ export class LLMSupervisor {
     const lister = this.opts.lmsListLoadedModels ?? defaultLmsListLoaded;
     let loaded: string[] = [];
     try {
-      loaded = await lister(host, port);
+      loaded = await raceWithSignal(signal ? lister(host, port, signal) : lister(host, port), signal);
     } catch (e) {
+      if (signal?.aborted) throw abortError(signal);
       this.opts.onLog?.(`lm-studio: list-loaded-models failed: ${String(e)}`);
       // Fall through and try to load — worst case the load is a no-op.
     }
+    if (signal?.aborted) throw abortError(signal);
     if (loaded.includes(wanted)) return;
 
     const findLms = this.opts.findLmsBinary ?? findLmsBinary;
@@ -280,9 +304,10 @@ export class LLMSupervisor {
     try {
       const ctx = this.opts.getContextLength?.() ?? 0;
       this.opts.onLog?.(`lm-studio: loading ${wanted}${ctx > 0 ? ` (context ${ctx})` : ''}…`);
-      await loader(binary, wanted, ctx);
+      await raceWithSignal(signal ? loader(binary, wanted, ctx, signal) : loader(binary, wanted, ctx), signal);
       this.opts.onLog?.(`lm-studio: ${wanted} loaded`);
     } catch (e) {
+      if (signal?.aborted) throw abortError(signal);
       this.opts.onLog?.(
         `lm-studio: auto-load of ${wanted} failed (${String(e)}). ` +
         'The next chat() call may 404 if the model isn\'t loaded — ' +

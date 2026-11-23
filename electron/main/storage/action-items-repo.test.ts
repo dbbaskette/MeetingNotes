@@ -5,9 +5,11 @@ import path from 'node:path';
 import { openDb } from './db.js';
 import { MeetingsRepo } from './meetings-repo.js';
 import { ActionItemsRepo } from './action-items-repo.js';
+import { SpeakersRepo } from './speakers-repo.js';
 
 let repo: ActionItemsRepo;
 let meetings: MeetingsRepo;
+let speakers: SpeakersRepo;
 let meetingId: string;
 
 beforeEach(() => {
@@ -15,6 +17,7 @@ beforeEach(() => {
   const db = openDb(path.join(dir, 'db.sqlite'));
   meetings = new MeetingsRepo(db);
   repo = new ActionItemsRepo(db);
+  speakers = new SpeakersRepo(db);
   meetingId = 'm1';
   meetings.insert({ id: meetingId, slug: 's', title: 't', startedAt: null, durationS: null, audioPath: '/a', status: 'done', pipelineStage: 'done' });
 });
@@ -32,14 +35,27 @@ describe('ActionItemsRepo', () => {
     expect(repo.countsForMeetings([])).toEqual(new Map());
   });
 
-  it('replace + listByMeeting', () => {
+  it('replace + listByMeeting persists owner_name and links matching meeting speakers', () => {
+    const danId = speakers.create({ displayName: 'Dan' });
+    speakers.linkToMeeting(meetingId, 'SPEAKER_00', danId, 1);
     repo.replaceForMeeting(meetingId, [
       { text: 'a', owner: null, due_date: null },
-      { text: 'b', owner: 'Dan', due_date: '2026-04-22' },
+      { text: 'b', owner: '  Dan  ', due_date: '2026-04-22' },
+      { text: 'c', owner: 'SPEAKER_01', due_date: null },
     ]);
     const all = repo.listByMeeting(meetingId);
-    expect(all).toHaveLength(2);
+    expect(all).toHaveLength(3);
     expect(all[0]!.text).toBe('a');
+    expect(all[0]!.ownerName).toBeNull();
+    expect(all[0]!.ownerSpeakerId).toBeNull();
+    expect(all[1]!.ownerName).toBe('Dan');
+    expect(all[1]!.ownerSpeakerId).toBe(danId);
+    expect(all[2]!.ownerName).toBe('SPEAKER_01');
+    expect(all[2]!.ownerSpeakerId).toBeNull();
+
+    // Notes-first speaker resolution updates persisted SPEAKER_01 owners too.
+    repo.resolveLabels(meetingId, { SPEAKER_01: 'Maya' });
+    expect(repo.listByMeeting(meetingId)[2]!.ownerName).toBe('Maya');
   });
 
   it('setStatus', () => {

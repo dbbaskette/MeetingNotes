@@ -34,7 +34,7 @@ export interface ExtractActionItemsDeps {
   signal?: AbortSignal;
   lmStudio: Pick<LMStudioClient, 'chat'>;
   /** Wakes a managed LLM provider on demand; no-op for user-managed ones. */
-  llmSupervisor: { ensureReady(): Promise<void> };
+  llmSupervisor: { ensureReady(signal?: AbortSignal): Promise<void> };
   settings: Pick<SettingsRepo, 'get'>;
   actionItems: Pick<ActionItemsRepo, 'replaceForMeeting'>;
   /** Optional log hook for each re-sample retry (the caller has a logger; this
@@ -80,7 +80,7 @@ export async function extractActionItemsFromSummary(
   if (!summary) {
     throw new Error(`summary.md is missing or empty — ${missingSummaryHint}`);
   }
-  await deps.llmSupervisor.ensureReady();
+  await deps.llmSupervisor.ensureReady(deps.signal);
   const runExtraction = async (temperature: number): Promise<string> =>
     deps.lmStudio.chat({
       model: deps.settings.get('llmModel'),

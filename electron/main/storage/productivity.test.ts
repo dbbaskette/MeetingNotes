@@ -13,7 +13,7 @@ it('finds old unfinished work, filters owners/dates/groups and excludes trash/do
   meeting('old'); meeting('trash');
   const group = groups.create('Research'); groups.assign(['old'], group.id);
   items.replaceForMeeting('old', [{ text: 'Follow up', owner: 'Dan', due_date: '2020-02-01' }, { text: 'Unscheduled', owner: null, due_date: null }]);
-  const first = items.listByMeeting('old')[0]!; items.update(first.id, { ownerName: 'Dan' });
+  const first = items.listByMeeting('old')[0]!;
   items.replaceForMeeting('trash', [{ text: 'Deleted meeting', owner: null, due_date: null }]); meetings.softDelete('trash');
   expect(items.live({ owner: 'mine', due: 'overdue', groupId: group.id }, { id: null, name: 'Dan' }).items.map(item => item.id)).toEqual([first.id]);
   expect(items.live({ owner: 'all', due: 'undated' }, { id: null, name: null }).total).toBe(1);
