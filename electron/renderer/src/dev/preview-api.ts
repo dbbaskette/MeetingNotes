@@ -60,6 +60,7 @@ const previewSettings: Settings = {
   autoRecordZoom: false,
   autoProcessRecordings: false,
   autoMatchSpeakers: false,
+  calendarAware: false,
   notesFirst: false,
   showMenuBarIcon: true,
   recordShortcut: '',
@@ -177,6 +178,7 @@ export const overrides: PreviewOverrides = {
     requestMic: async () => true,
     micStatus: async () => 'granted',
     setupHealth: async () => [],
+    calendar: async () => ({ enabled: false, state: 'off' }),
   },
   pipeline: {
     cancel: async () => {},

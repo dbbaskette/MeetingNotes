@@ -319,6 +319,10 @@ export const IPC_CHANNELS = {
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
+  /** Calendar-aware recording (#253): `{ enabled, state }`, where state is
+   *  'off' (setting off, nothing asked), a macOS access state, or
+   *  'unavailable'. Never shows a permission dialog. */
+  calendarStatus: 'calendar:status',
   speakersList: 'speakers:list',
   speakersRename: 'speakers:rename',
   /** Merge one roster speaker into another (duplicate cleanup). All meeting

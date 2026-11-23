@@ -55,6 +55,7 @@ export async function catalogAudio(audioPath: string, deps: {
         groupId,
       };
       deps.meetings.insert(meeting);
+      if (session?.calendarEvent) deps.meetings.setCalendarEvent(id, session.calendarEvent);
       return { kind: 'added', meeting };
     } catch (error) {
       if (!String(error).includes('UNIQUE')) throw error;

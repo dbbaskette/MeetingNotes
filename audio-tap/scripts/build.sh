@@ -30,6 +30,7 @@ xcrun swiftc \
   -framework AVFoundation \
   -framework AudioToolbox \
   -framework CoreAudio \
+  -framework EventKit \
   -Xlinker -sectcreate \
   -Xlinker __TEXT \
   -Xlinker __info_plist \

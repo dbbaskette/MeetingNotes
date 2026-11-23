@@ -119,6 +119,7 @@ export const IPC_ARG_SCHEMAS: Record<string, ArgSchema> = {
   [C.permissionsAudioGet]: none,
   [C.permissionsMicStatus]: none,
   [C.permissionsRequestMic]: none,
+  [C.calendarStatus]: none,
 
   // Speakers and action items
   [C.speakersList]: none,

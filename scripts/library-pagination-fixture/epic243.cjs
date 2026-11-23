@@ -75,11 +75,16 @@ app
     await win.loadURL('about:blank');
     await win.loadURL(process.env.MN_LIBRARY_FIXTURE_URL);
     await until('window.fixture && document.querySelectorAll("[data-transcript-index]").length>0');
-    win.show();
-    win.focus();
-    app.focus({ steal: true });
-    win.webContents.focus();
-    await until('document.hasFocus()');
+    // The page must behave as focused even when macOS will not give this
+    // process the foreground; OS focus is still requested below (#256).
+    if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    // Ask again on every poll: another window can take focus in between (#256).
+    for (let i = 0; ; i++) {
+      win.show(); win.focus(); app.focus({ steal: true }); win.webContents.focus();
+      if (await run('document.hasFocus()')) break;
+      if (i === 200) throw new Error('Not ready: document.hasFocus()');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await run(
       `const input=document.querySelector('input[aria-label="Find in full transcript"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'NEEDLE-UNMOUNTED');input.dispatchEvent(new Event('input',{bubbles:true}));`,
     );

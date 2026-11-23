@@ -42,6 +42,8 @@ describe('IPC argument schemas', () => {
     ['transcript:export', [{ content: 'x', format: 'docx' }]],
     ['obsidian:enable', ['not-a-uuid']],
     ['app:get-version', ['unexpected']],
+    ['calendar:status', ['request']],
+    ['calendar:status', [{ prompt: true }]],
     ['settings:set', [null, 'value']],
     ['speakers:merge', ['only-one']],
     ['recording:continue-silence', []],
@@ -85,6 +87,7 @@ describe('IPC argument schemas', () => {
     ['app:get-version', []],
     ['recording:continue-silence', ['a1b2c3d4']],
     ['recording:silence-state', []],
+    ['calendar:status', []],
   ])('accepts the shapes the preload sends for %s: %j', (channel, args) => {
     expect(checkIpcArgs(channel, args)).toBeNull();
   });

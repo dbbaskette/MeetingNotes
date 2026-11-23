@@ -58,6 +58,8 @@ case .record(let opts):
 
   dispatchMain()
 
+case .calendar(let sub):
+  CalendarTool.run(sub)
 case .probePermissions:
   StatusEvent.emit([
     "event": "permissions",

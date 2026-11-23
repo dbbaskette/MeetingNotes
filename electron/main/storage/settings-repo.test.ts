@@ -19,6 +19,12 @@ describe('SettingsRepo', () => {
     repo.set('autoMatchSpeakers', false);
     expect(repo.get('autoMatchSpeakers')).toBe(false);
   });
+  it('defaults calendar-aware recording off (#253)', () => {
+    expect(DEFAULT_SETTINGS.calendarAware).toBe(false);
+    expect(repo.get('calendarAware')).toBe(false);
+    repo.set('calendarAware', true);
+    expect(repo.getAll().calendarAware).toBe(true);
+  });
   it('falls back to defaults when unset', () => {
     expect(repo.get('lmStudioUrl')).toBe(DEFAULT_SETTINGS.lmStudioUrl);
   });

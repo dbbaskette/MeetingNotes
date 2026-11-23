@@ -10,6 +10,7 @@ import { storageLocations } from '../lib/storage-paths.js';
 import { validateSetting } from '../storage/settings-validation.js';
 import { isSecretSettingKey } from '../../shared/secrets.js';
 import { isSafeExternalUrl } from '../lib/navigation-guard.js';
+import { calendarFromServices } from '../calendar/service.js';
 
 export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   const native = () => { if (!s.nativeSpeech) throw new Error('Native speech helper is unavailable. Reinstall MeetingNotes.'); return s.nativeSpeech; };
@@ -37,6 +38,12 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
     if (key === 'showMenuBarIcon') s.menuBar?.setVisible(value as boolean);
     if (key === 'theme') {
       nativeTheme.themeSource = value as 'system' | 'light' | 'dark';
+    }
+    // Calendar-aware recording (#253). Turning it on here is the only place
+    // that may show the macOS Calendars permission dialog. Denying access
+    // keeps the setting on but inert; the Settings row shows the state.
+    if (key === 'calendarAware' && value === true) {
+      return calendarFromServices(s).requestAccess().then(() => value);
     }
     // Toggle each meeting detector live when the user flips its switch —
     // no need to restart the app. autoDetectMeetings is the object form

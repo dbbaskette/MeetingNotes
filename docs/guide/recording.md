@@ -21,6 +21,19 @@ If every source (microphone and app audio) stays silent for two minutes, Meeting
 
 Change the two-minute wait and the one-minute countdown, or turn the whole thing off, under **Settings → Recording → When audio goes silent** (the `autoStopOnSilence`, `silencePromptAfterS` and `silenceCountdownS` settings; [reference](settings.md#full-settings-reference)). A change applies to a recording that is already running. With it turned off, MeetingNotes never asks and never stops a recording for silence.
 
+## Calendar-aware recording
+
+MeetingNotes can use your Mac's calendar to name recordings and suggest who was speaking. It is off by default. Turn it on under **Settings → Recording → Calendar** (the `calendarAware` setting; [reference](settings.md#full-settings-reference)). Turning it on makes macOS ask once for calendar access; the setting shows whether access is granted, and **Setup & health** has a **Calendar** row.
+
+With access granted:
+
+- **Title.** A recording that starts during a calendar event, or up to five minutes before one, is titled after the event. All-day events and events you declined are ignored; if several events overlap, the one that started closest to now is used. A title you type in the source picker, or pass as `title=` in a `meetingnotes://record` URL, always wins. Recording never waits for the calendar: it starts at once, and the event title is applied a moment later; a title you give the meeting before then is kept.
+- **Speaker names.** When you name a voice, the event's attendees appear under **From the calendar invite**. Picking one names that voice; an attendee who is already a saved speaker reuses that speaker. Nothing is assigned automatically.
+
+MeetingNotes keeps the event's title, start and end, recurring-series identifier and the attendees' display names with the meeting. It never stores e-mail addresses, never changes your calendar and never sends calendar data anywhere. It reads whatever calendars the macOS Calendar app shows, including Google and Exchange accounts added there; it does not connect to Google or Microsoft itself.
+
+If you deny access, or turn the setting off, recording works exactly as before and no calendar is read. To allow access later, use **System Settings → Privacy & Security → Calendars**.
+
 ## From the menu bar or a shortcut
 
 MeetingNotes shows an item in the macOS menu bar. While recording it displays the elapsed time. Click it to:

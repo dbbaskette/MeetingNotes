@@ -414,6 +414,24 @@ export const MIGRATIONS: Migration[] = [
       changed_at TEXT NOT NULL
     );
   ` },
+  // Calendar-aware recording (#253). The event overlapping a recording's
+  // start rides on its session until the meeting is cataloged, then lives in
+  // its own row. Attendees are display names only (a JSON array); no e-mail
+  // addresses are stored. Side tables only, so rerunning is harmless.
+  { version: 29, up: `
+    CREATE TABLE IF NOT EXISTS recording_session_calendar_events (
+      session_id TEXT PRIMARY KEY REFERENCES recording_sessions(id) ON DELETE CASCADE,
+      event_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS meeting_calendar_events (
+      meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      starts_at TEXT NOT NULL,
+      ends_at TEXT NOT NULL,
+      attendees_json TEXT NOT NULL DEFAULT '[]',
+      series_id TEXT
+    );
+  ` },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -18,6 +18,15 @@ it('packages only capture/native speech helpers and no Python sidecar', () => {
     expect(read(file)).not.toMatch(/whisper-cpp|whisper-server|HF_TOKEN|huggingface\/token|pip install|sidecar:bundle/);
   }
 });
+it('ships the read-only calendar entitlement and usage string for calendar-aware recording (#253)', () => {
+  const entitlement = /<key>com\.apple\.security\.personal-information\.calendars<\/key>\s*<true\/>/;
+  for (const file of ['build/entitlements.mac.plist', 'audio-tap/entitlements.plist']) expect(read(file), file).toMatch(entitlement);
+  for (const file of ['electron-builder.yml', 'electron-builder.beta.yml'])
+    expect(parse(read(file)).mac.extendInfo.NSCalendarsFullAccessUsageDescription, file).toMatch(/calendar/i);
+  expect(read('audio-tap/Info.plist')).toMatch(/<key>NSCalendarsFullAccessUsageDescription<\/key>\s*<string>[^<]+<\/string>/);
+  // Read-only: no write-only or reminders access is requested.
+  expect(read('build/entitlements.mac.plist')).not.toMatch(/reminders|NSCalendarsWriteOnly/);
+});
 it('has no legacy download, HF-token or remote STT bridge', () => {
   for (const file of ['electron/preload/index.ts', 'electron/main/ipc/contracts.ts', 'electron/main/ipc/settings-handlers.ts'])
     expect(read(file)).not.toMatch(/onboardingWhisper|onboardingHfToken|sttProbe|downloadWhisperModel/);

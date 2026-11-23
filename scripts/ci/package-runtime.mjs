@@ -19,6 +19,18 @@ for (const beta of ['dist/electron/main/beta/index.js', 'dist/preload/electron/p
   assert(!fs.existsSync(path.join(resources, 'app.asar', beta)), `Beta artifact must not ship in the production app: ${beta}`);
 assert(fs.existsSync(path.join(resources, 'app.asar/dist/renderer/index.html')), 'Packaged renderer must ship');
 assert(fs.existsSync(path.join(resources, 'bin/meeting-notes-speech')), 'Native helper must ship');
+// Calendar-aware recording (#253): the usage string must reach the packaged
+// Info.plist, and a signed app must carry the read-only calendars entitlement.
+assert(/<key>NSCalendarsFullAccessUsageDescription<\/key>\s*<string>[^<]+<\/string>/.test(fs.readFileSync(path.join(appPath, 'Contents/Info.plist'), 'utf8')),
+  'Packaged Info.plist must carry NSCalendarsFullAccessUsageDescription');
+{
+  const { execFileSync } = await import('node:child_process');
+  let entitlements = '';
+  try { entitlements = execFileSync('codesign', ['-d', '--entitlements', '-', '--xml', appPath], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { /* unsigned build */ }
+  if (entitlements.includes('com.apple.security.device.audio-input'))
+    assert(entitlements.includes('com.apple.security.personal-information.calendars'), 'Signed app must carry the calendars entitlement');
+}
+console.log('PASS packaged calendar usage string and entitlement');
 assert.equal(typeof LMStudioClient.prototype.transcribe, 'undefined', 'Remote/legacy STT transport must not ship');
 const sourceList = await new AppEnumerator({ helperPath: path.join(resources, 'bin/meeting-notes-tap') }).list();
 console.log(`PASS packaged helper enumeration (${sourceList.length} sources; no capture)`);

@@ -26,6 +26,8 @@ import { AutoProcessRecordings } from './recording/auto-process.js';
 import { probeAudio } from './library/ffprobe.js';
 import { AppEnumerator } from './recording/app-enumerator.js';
 import { resolveHelperPath } from './recording/helper-path.js';
+import { CalendarService } from './calendar/service.js';
+import { attachLateCalendarEvent } from './calendar/late-event.js';
 import { recoverOrphans } from './recording/orphan-recovery.js';
 import { RecordingSessionsRepo } from './storage/recording-sessions-repo.js';
 import { IPC_CHANNELS } from './ipc/contracts.js';
@@ -174,7 +176,18 @@ export async function createServices(smokeRoot: string | null) {
   const recordingsDir = recordingsDirFor(libraryRoot);
   fs.mkdirSync(recordingsDir, { recursive: true });
   const recordingSessionsRepo = new RecordingSessionsRepo(db);
+  // Calendar-aware recording (#253): opt-in, read-only, through the helper.
+  // Reads the setting on every call; while it is off nothing is spawned.
+  const calendar = new CalendarService({ helperPath, enabled: () => settings.get('calendarAware'), logger });
   const recordingManager = new RecordingManager({
+    calendarEventAt: (now) => calendar.eventAt(now),
+    // A late lookup still reaches a meeting cataloged before it finished.
+    onCalendarEvent: (info) => {
+      attachLateCalendarEvent(meetings, info);
+      // Windows already showing that meeting reload it (existing per-meeting push).
+      const cataloged = info.title ? meetings.findByAudioPath(info.outputPath) : null;
+      if (cataloged) BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(IPC_CHANNELS.meetingStageEvent, cataloged.id));
+    },
     helperPath,
     recordingsDir,
     repo: recordingSessionsRepo,
@@ -401,7 +414,7 @@ export async function createServices(smokeRoot: string | null) {
   return {
     s, settingsDb, settings, secrets, db, libraryRoot, meetings, summaryTemplates, groups, speakers,
     actionItems, stageDurations, logger, artifactCache, terminology, notesHistory, obsidian, guardedIpc,
-    lmStudio, llmSupervisor, helperPath, recordingSessionsRepo, recordingManager, appEnumerator, roster,
+    lmStudio, llmSupervisor, helperPath, recordingSessionsRepo, recordingManager, appEnumerator, roster, calendar,
     nativeSpeech, pipeline, gateNotified, watcher, recordingRecovery, purgeExpiredTrash, trashPurgeTimer,
   };
 }

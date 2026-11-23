@@ -10,6 +10,10 @@ app.whenReady().then(async () => {
   const settle = () => run('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r,40))))');
   const count = () => run('document.querySelectorAll("[data-meeting-id]").length');
   const until = async expression => {for(let i=0;i<100;i++){if(await run(expression))return;await new Promise(r => setTimeout(r,30));}throw new Error(expression);};
+  // Another window can take focus between the request and the check (seen in
+  // the Tart guest and on a developer Mac), so ask again on every poll for up
+  // to ten seconds instead of asking once and waiting three (#256).
+  const focusWindow = async () => { for (let i = 0; i < 200; i++) { win.show(); win.focus(); app.focus({ steal: true }); win.webContents.focus(); if (await run('document.hasFocus()')) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Not ready: document.hasFocus()'); };
   const times = {before: [],after: []};
   for(let sample=0;sample<5;sample++) for(const plain of sample%2 ? [false,true] : [true,false]) {
     await win.loadURL(base+(plain?'?plain':'')); await until('window.fixture && document.querySelectorAll("[data-meeting-id]").length > 0'); await settle();
@@ -17,7 +21,7 @@ app.whenReady().then(async () => {
     const duration = await run('window.fixture.commits.reduce((a,b) => a+b,0)'); if(sample) times[plain?'before':'after'].push(duration);
   }
   await win.loadURL(base); await settle(); await until('document.querySelectorAll("[data-meeting-id]").length > 0');
-  if (process.env.MN_FIXTURE_FOCUS === '1') {win.show(); win.focus(); app.focus({steal: true}); win.webContents.focus(); await until('document.hasFocus()');}
+  if (process.env.MN_FIXTURE_FOCUS === '1') { if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true }); await focusWindow(); }
   await run('document.querySelector("[data-meeting-id=m-0] button[role=checkbox]").focus()');
   await settle();
   await run('document.querySelector("#viewport").scrollTop=108000'); await settle();

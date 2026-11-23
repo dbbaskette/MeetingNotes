@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,45 +24,74 @@ describe('owned search', () => {
         path.join(root, 'transcript.md'),
         'Synthetic long searchable content.\n'.repeat(300000),
       );
+      // ripgrep given a FIFO with no writer blocks in open() forever, so a
+      // child searching it is guaranteed to still be running until it is
+      // killed. A large file only made that likely: a fast scan could finish
+      // before a 0 ms timeout fired and the search came back 'complete'.
+      const blocked = path.join(root, 'blocked.md');
+      execFileSync('mkfifo', [blocked]);
       const owners = new SearchOwners();
       let live = 0,
         maximum = 0,
-        cancelled = 0;
-      const started = performance.now();
-      await Promise.all(
-        Array.from({ length: 30 }, async (_, index) => {
-          const owner = await owners.begin(1, 'burst', index + 1);
-          try {
-            const result = await ripgrepSearchDetailed(root, 'absent', {
-              signal: owner.signal,
-              onProcess: (state) => {
-                live += state === 'started' ? 1 : -1;
-                maximum = Math.max(maximum, live);
-              },
-            });
-            if (result.status === 'cancelled') cancelled++;
-          } finally {
-            owner.finish();
-          }
-        }),
-      );
+        spawned = 0;
+      const track = (state: 'started' | 'closed'): void => {
+        if (state === 'started') spawned++;
+        live += state === 'started' ? 1 : -1;
+        maximum = Math.max(maximum, live);
+      };
+      const search = async (index: number, target: string): Promise<string> => {
+        const owner = await owners.begin(1, 'burst', index + 1);
+        try {
+          return (await ripgrepSearchDetailed(target, 'absent', {
+            signal: owner.signal, onProcess: track, timeoutMs: 30_000,
+          })).status;
+        } finally {
+          owner.finish();
+        }
+      };
+      const until = async (check: () => boolean): Promise<void> => {
+        while (!check()) await new Promise((resolve) => setTimeout(resolve, 5));
+      };
+
+      // Rapid burst: every request is superseded before it can start, so only
+      // the newest one may spawn a child, and it runs to completion.
+      const burst = await Promise.all(Array.from({ length: 30 }, (_, i) => search(i, root)));
+      expect(burst.slice(0, 29)).toEqual(Array(29).fill('cancelled'));
+      expect(burst[29]).toBe('complete');
+      expect(maximum).toBeLessThanOrEqual(1);
+      expect(live).toBe(0);
+
+      // Staged burst: each request starts a child that can never finish on
+      // its own before the next request supersedes it. The replacement must
+      // wait for that child to exit, so live children never exceed one.
+      const staged: Array<Promise<string>> = [];
+      const before = spawned;
+      for (let i = 0; i < 5; i++) {
+        staged.push(search(30 + i, blocked));
+        await until(() => spawned === before + i + 1);
+      }
+      staged.push(search(35, root));
+      const stagedStatus = await Promise.all(staged);
+      expect(stagedStatus).toEqual([...Array(5).fill('cancelled'), 'complete']);
+      expect(spawned).toBe(before + 6);
       expect(maximum).toBe(1);
       expect(live).toBe(0);
-      expect(cancelled).toBe(29);
+
+      // A running child is really killed on abort, and a timeout reports the
+      // results as partial rather than waiting for the child.
       const abort = new AbortController();
-      const result = await ripgrepSearchDetailed(root, 'absent', {
+      let closed = false;
+      const cancelled = ripgrepSearchDetailed(blocked, 'absent', {
         signal: abort.signal,
         onProcess: (state) => {
-          if (state === 'started') abort.abort();
+          if (state === 'started') setTimeout(() => abort.abort(), 20);
+          else closed = true;
         },
       });
-      expect(result.status).toBe('cancelled');
-      expect((await ripgrepSearchDetailed(root, 'absent', { timeoutMs: 0 })).status).toBe(
+      expect((await cancelled).status).toBe('cancelled');
+      expect(closed).toBe(true);
+      expect((await ripgrepSearchDetailed(blocked, 'absent', { timeoutMs: 0 })).status).toBe(
         'partial',
-      );
-      console.log(
-        'Search burst: 30 requests, maximum 1 child, 29 cancelled, elapsed ms',
-        Math.round(performance.now() - started),
       );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

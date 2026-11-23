@@ -371,6 +371,9 @@ function SpeakerEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const suggestions = review?.suggestions ?? [];
+  // Attendee names from the calendar invite (#253). Offered only: a voice is
+  // named when the user picks one, never automatically.
+  const calendarNames = (review?.calendarSuggestions ?? []).filter((c) => !c.rosterId || c.rosterId !== rosterId);
   const [pendingAssignment, setPendingAssignment] = useState<{ rid: string; impact: string } | null>(null);
 
   // Lazy-load the sample the first time the row expands; keeps Library scroll
@@ -409,16 +412,26 @@ function SpeakerEditor({
     finally { setBusy(false); }
   }
 
-  async function createNew(): Promise<void> {
-    const name = newName.trim();
-    if (!name) return;
+  async function createNamed(name: string): Promise<boolean> {
     setBusy(true); setError(null);
     try {
       await api.speakers.assign({ meetingId, localLabel, mode: 'new', displayName: name });
-      setNewName('');
       onChanged();
-    } catch (e) { setError((e as Error).message); }
+      return true;
+    } catch (e) { setError((e as Error).message); return false; }
     finally { setBusy(false); }
+  }
+
+  async function createNew(): Promise<void> {
+    const name = newName.trim();
+    if (!name) return;
+    if (await createNamed(name)) setNewName('');
+  }
+
+  /** A calendar name reuses the saved speaker of that name, if there is one. */
+  async function assignCalendarName(candidate: { displayName: string; rosterId: string | null }): Promise<void> {
+    if (candidate.rosterId) await assignExisting(candidate.rosterId);
+    else await createNamed(candidate.displayName);
   }
 
   async function unlink(): Promise<void> {
@@ -473,6 +486,26 @@ function SpeakerEditor({
                            hover:bg-brand-indigo/20 disabled:opacity-40 disabled:cursor-not-allowed transition"
               >
                 {sug.displayName} ({sug.scoreKind === 'similarity' ? `similarity ${sug.confidence.toFixed(2)} · confirm` : `${Math.round(sug.confidence * 100)}%`})
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {calendarNames.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold text-ink-muted uppercase mb-1">From the calendar invite</div>
+          <div className="flex flex-wrap gap-1.5">
+            {calendarNames.map((candidate) => (
+              <button
+                key={candidate.displayName}
+                disabled={busy}
+                onClick={() => void assignCalendarName(candidate)}
+                aria-label={`Name this voice ${candidate.displayName}, from the calendar invite`}
+                className="text-[11px] font-medium px-2 py-1 rounded-full border border-surface-border bg-surface text-ink
+                           hover:bg-surface-sunken disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                {candidate.displayName}
               </button>
             ))}
           </div>

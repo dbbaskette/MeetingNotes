@@ -132,6 +132,7 @@ const IPC_CHANNELS = {
   permissionsAudioGet: 'permissions:audio-get',
   permissionsRequestMic: 'permissions:request-mic',
   permissionsMicStatus: 'permissions:mic-status',
+  calendarStatus: 'calendar:status',
   speakersList: 'speakers:list',
   speakersRename: 'speakers:rename',
   speakersMerge: 'speakers:merge',
@@ -445,7 +446,9 @@ const api = {
   },
   speakers: {
     list: () => ipcRenderer.invoke(IPC_CHANNELS.speakersList),
-    review: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersReview, meetingId) as Promise<{ label: string; reason?: string; suggestions: { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[] }[]>,
+    review: (meetingId: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersReview, meetingId) as Promise<{ label: string; reason?: string; suggestions: { id: string; displayName: string; confidence: number; scoreKind?: 'similarity' }[];
+      /** Attendee names from the calendar invite (#253): suggestions only, never assigned automatically. */
+      calendarSuggestions?: { displayName: string; rosterId: string | null }[] }[]>,
     profiles: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersProfiles, id) as Promise<{ space: string; confirmedAt?: string; source?: string; canUndo: boolean }[]>,
     undoProfile: (id: string, space: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersUndoProfile, id, space) as Promise<void>,
     rename: (id: string, name: string) => ipcRenderer.invoke(IPC_CHANNELS.speakersRename, id, name),
@@ -673,6 +676,12 @@ const api = {
     }>,
     requestMic: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsRequestMic) as Promise<boolean>,
     micStatus: () => ipcRenderer.invoke(IPC_CHANNELS.permissionsMicStatus) as Promise<'granted' | 'denied' | 'not-determined' | 'unknown'>,
+    /** Calendar-aware recording (#253). Never shows a permission dialog:
+     *  turning the setting on (settings.set) is what asks. */
+    calendar: () => ipcRenderer.invoke(IPC_CHANNELS.calendarStatus) as Promise<{
+      enabled: boolean;
+      state: 'off' | 'unavailable' | 'notDetermined' | 'denied' | 'restricted' | 'fullAccess' | 'writeOnly';
+    }>,
   },
   app: {
     undoEdit: () => ipcRenderer.invoke(IPC_CHANNELS.appUndoEdit) as Promise<void>,
