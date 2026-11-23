@@ -10,6 +10,7 @@ import { AppHeader, APP_SHELL_CLASS } from '../components/AppHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
+import type { TranscriptionEngine } from '../../../shared/native-speech';
 import { SPEAKER_AUTO_MATCH } from '../../../shared/speaker-matching';
 import { SetupHealth } from '../components/SetupHealth';
 import { Icon, IconLabel } from '../components/icons';
@@ -30,6 +31,7 @@ interface Settings {
   libraryPath: string;
   audioWatchPath: string;
   sttLanguage: string;
+  transcriptionEngine?: TranscriptionEngine;
   exporterWebhook: boolean;
   webhookUrl: string;
   webhookSecret: string;
@@ -215,8 +217,14 @@ export function SettingsView({ initialSection,
       </div>
       <SetupHealth />
       <SettingsNavigation initialSection={initialSection}>
-      <SettingsSection section="Processing" keywords="Apple SpeakerKit native speech language transcription STT setup">
-        <NativeSpeechPanel language={s.sttLanguage} />
+      <SettingsSection section="Processing" keywords="Apple SpeakerKit WhisperKit native speech language transcription engine accuracy STT setup">
+        <NativeSpeechPanel language={s.sttLanguage} engine={s.transcriptionEngine ?? 'apple'}
+          onEngineChange={async engine => {
+            // A refused change (processing or setup is running) must not leave
+            // the control showing an engine that was not saved.
+            const previous = s.transcriptionEngine ?? 'apple';
+            if (!await update('transcriptionEngine', engine)) setS(current => current ? { ...current, transcriptionEngine: previous } : current);
+          }} />
       </SettingsSection>
       <SettingsSection section="Processing" keywords="speaker voices voiceprints automatic match identity similarity">
         <label className="flex items-start gap-3 text-sm">
@@ -437,7 +445,7 @@ export function SettingsView({ initialSection,
           onChange={(e) => edit('sttLanguage', e.target.value)} onBlur={() => void update('sttLanguage', s.sttLanguage)}
           className="input"
         />
-        <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing.</p>
+        <p className="text-xs text-ink-muted mt-1">Use a supported Apple locale (for example en-US); en selects en-US. After saving a new language, check or prepare its assets above before processing. WhisperKit uses the language part only (en, de, ja).</p>
       </Field>
       </SettingsSection>
       <SettingsSection section="Organization" keywords="your name speakers roster rename merge weekly owner">
@@ -850,7 +858,7 @@ function PermRow({ label, state, action }: { label: string; state: PermState; ac
 const SETTING_LABELS: Record<string, string> = {
   lmStudioUrl: 'LLM server URL', llmModel: 'LLM model', summaryProvider: 'Summary provider', llmContextLength: 'Context length',
   summaryDetail: 'Summary detail', disableThinking: 'Disable model thinking', reasoningEffort: 'Reasoning effort',
-  libraryPath: 'Library folder', audioWatchPath: 'Watched audio folder', sttLanguage: 'Transcription language',
+  libraryPath: 'Library folder', audioWatchPath: 'Watched audio folder', sttLanguage: 'Transcription language', transcriptionEngine: 'Transcription engine',
   autoStopOnSilence: 'Ask before stopping a silent recording', silencePromptAfterS: 'Silence before asking', silenceCountdownS: 'Countdown before stopping',
   autoProcessRecordings: 'Process recordings automatically', autoMatchSpeakers: 'Match speakers automatically', notesFirst: 'Notes before speaker naming',
   showMenuBarIcon: 'Menu bar icon', recordShortcut: 'Start/stop shortcut', userName: 'Your name', userSpeakerId: 'You are…',

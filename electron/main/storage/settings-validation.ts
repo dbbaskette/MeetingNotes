@@ -7,6 +7,7 @@ const enums: Record<string, readonly [string, ...string[]]> = {
   summaryDetail: ['concise', 'standard', 'detailed'], webhookTemplate: ['compact', 'full', 'telegram-markdown', 'slack-blocks'],
   webhookOwnerFilter: ['mine', 'all', 'none'],
   reasoningEffort: ['none', 'minimal', 'low', 'default'],
+  transcriptionEngine: ['apple', 'whisperkit'],
 };
 export function validateSetting(key: string, value: unknown): unknown {
   if (!Object.hasOwn(DEFAULT_SETTINGS, key)) throw new Error('Unknown setting');

@@ -8,6 +8,24 @@ struct Request: Decodable {
     let locale: String?
     let modelFolder: String?
     let modelRevision: String?
+    /// Transcription engine: "apple" (default) or "whisperkit".
+    let engine: String?
+    /// Names and terms the user expects in the meeting (dictionary, roster).
+    let contextualStrings: [String]?
+}
+
+/// Trimmed, de-duplicated vocabulary, in the order given. Bounded so a large
+/// dictionary cannot crowd out the audio context of either engine.
+func vocabulary(_ strings: [String]?, limit: Int = 100) -> [String] {
+    var seen = Set<String>(), kept: [String] = []
+    for raw in strings ?? [] {
+        let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty, term.count <= 80, term.rangeOfCharacter(from: .newlines) == nil,
+              seen.insert(term.lowercased()).inserted else { continue }
+        kept.append(term)
+        if kept.count == limit { break }
+    }
+    return kept
 }
 
 struct SpeechFailure: LocalizedError {

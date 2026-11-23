@@ -24,6 +24,10 @@ it('accepts only the supported numeric context lengths', () => {
   for (const value of [0, 8192, 16384, 32768]) expect(validateSetting('llmContextLength', value)).toBe(value);
   for (const value of ['8192', -1, 8192.5, Infinity, NaN, 999999]) expect(() => validateSetting('llmContextLength', value)).toThrow();
 });
+it('accepts only the two transcription engines', () => {
+  for (const value of ['apple', 'whisperkit']) expect(validateSetting('transcriptionEngine', value)).toBe(value);
+  for (const value of ['whisper', 'whisper-server', 'WhisperKit', '', null, true]) expect(() => validateSetting('transcriptionEngine', value)).toThrow();
+});
 it('rejects prototype keys, managed settings, malformed and unsafe endpoints', () => {
   for (const key of ['toString', '__proto__', 'obsidian', 'googleRefreshTokenEnc', 'speechProvider', 'sttUrl', 'sttModel']) expect(() => validateSetting(key, null)).toThrow();
   for (const value of ['local', 'file:///tmp/private', 'https://user:secret@example.org']) expect(() => validateSetting('lmStudioUrl', value)).toThrow();

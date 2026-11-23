@@ -1,6 +1,6 @@
 # Settings and storage
 
-Speech uses **Apple transcription + SpeakerKit**, set up under **Settings → Processing**. It is the only speech engine, including on upgrades. Apple silicon/macOS 26+ is required. The [comparison beta](speech-beta.md) is a separate development app with its own copied library; it never writes results or profiles back.
+Speech uses **Apple transcription + SpeakerKit**, set up under **Settings → Processing**. An optional **WhisperKit** transcription engine can be chosen there for higher accuracy on difficult audio; see [Models](models.md#optional-whisperkit-for-higher-accuracy). Apple silicon/macOS 26+ is required. The [comparison beta](speech-beta.md) is a separate development app with its own copied library; it never writes results or profiles back.
 
 **Settings:** searchable Recording, Processing, Organization, Integrations, Storage, and Advanced sections keep routine controls separate from endpoints and diagnostics. Text saves when you leave a field, with visible save/error status. Storage paths use explicit Choose/Apply controls, require a restart, and do not relocate existing files. See [Settings and recovery guide](../usability-improvements.md).
 
@@ -19,7 +19,7 @@ Speech uses **Apple transcription + SpeakerKit**, set up under **Settings → Pr
 
 **Settings → Storage → Back up Library** previews size and missing files, then creates a private local backup of the actual library and canonical settings databases, meeting audio (including external capture stems), notes, groups, speakers, and terminology. Model caches are excluded. Backup requires idle recording/processing/sync and protects writes while copying; checksummed manifests validate the result. A changed file inventory requires a fresh preview. Restore only into a new destination with the supplied script, never over a live Library. See [backup, privacy, restore, and rollback](../library-backup.md).
 
-**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing includes explicit native asset preparation/cancel/retry. There is no speech-engine selector, Whisper management, custom STT endpoint or HF-token setup. LLM setup and capture permissions remain. See [capture, processing and delivery guide](../reliable-capture-processing.md).
+**Setup & health:** read-only readiness links to those sections; an explicitly confirmed disposable eight-second test verifies capture without adding a meeting. Processing includes explicit native asset preparation/cancel/retry. The **Transcription engine** control chooses Apple Speech or the optional WhisperKit model; there is no Whisper server management, custom STT endpoint or Hugging Face token setup. LLM setup and capture permissions remain. See [capture, processing and delivery guide](../reliable-capture-processing.md).
 
 **Native storage:** `<library>/voice-profiles/` holds model-tagged confirmed profiles, separate from legacy `<library>/speakers/embeddings/`. Verified public model files use `~/Library/Application Support/MeetingNotes/speech-models/<revision>/`; Apple language assets are managed by macOS. Neither upgrade nor setup bulk-reprocesses old meetings. Library backups include voice profiles; asset caches can be re-downloaded.
 
@@ -44,7 +44,8 @@ Every key in the `Settings` interface ([`settings-repo.ts`](../../electron/main/
 | `reasoningEffort` | `none` | **Model thinking / reasoning effort**: `none` (sends `enable_thinking: false` and `reasoning_effort: "none"`), `minimal`, `low`, or `default` (no override). |
 | `disableThinking` | `true` | Older form of `reasoningEffort`, kept in step with it: `true` when the effort is `none`, `false` otherwise. |
 | `summaryDetail` | `detailed` | Notes verbosity: `concise` / `standard` / `detailed`. |
-| `sttLanguage` | `en` | Speech language. `en` selects en-US; Apple's API checks locale support. Prepare the assets again after changing it. Changes require idle processing/setup. |
+| `sttLanguage` | `en` | Speech language. `en` selects en-US; Apple's API checks locale support. Prepare the assets again after changing it. Changes require idle processing/setup. WhisperKit uses the language part only (`en`, `de`, `ja`). |
+| `transcriptionEngine` | `apple` | `apple` (Apple SpeechTranscriber, built in) or `whisperkit` (the optional downloaded Whisper large-v3-turbo Core ML model). Applies to meetings processed after the change; each run records the engine it used. Changes require idle processing/setup. |
 | `autoProcessRecordings` | `false` | **Process recordings automatically when capture finishes.** Applies only to new built-in recordings with usable finalized audio, not imports or recovery. Queue pause and voice review still apply. |
 | `autoMatchSpeakers` | `false` | **Automatically match known voices.** Applies strong native voiceprint matches on the next identification run; see [Working with meetings](meetings.md#optional-automatic-voice-matching). |
 | `notesFirst` | `false` | **Generate notes before naming every voice.** Processing does not pause for unknown voices; notes use `SPEAKER_00`-style labels that are resolved when you name the voice later. |

@@ -77,6 +77,7 @@ import { registerTerminologyHandlers } from './terminology-handlers.js';
 import type { NotesHistory } from '../storage/notes-history.js';
 import type {LibraryBackup} from '../storage/library-backup.js';
 import type { NativeSpeechService } from '../speech/service.js';
+import { TRANSCRIPTION_ENGINE_LABELS } from '../../shared/native-speech.js';
 
 export interface IpcServices {
   nativeSpeech?: NativeSpeechService;
@@ -346,7 +347,7 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     // Tiny per-run manifest + summary read concurrently through the cache.
     // Historical meetings without provenance must not be relabelled as Apple.
     const [speech, summaryMd] = await Promise.all([
-      s.artifactCache.readJson<{ provider?: string }>(path.join(folder, 'processing-speech.json')).catch(() => null),
+      s.artifactCache.readJson<{ provider?: string; engine?: string }>(path.join(folder, 'processing-speech.json')).catch(() => null),
       s.artifactCache.readText(path.join(folder, 'summary.md')),
     ]);
     const items = s.actionItems.listByMeeting(id);
@@ -390,7 +391,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
         sourceQuote: ai.sourceQuote,
         isMine: isMyItem(ai, me),
       })),
-      models: { stt: speech?.provider === 'native' ? 'Apple SpeechTranscriber' : undefined, llm: settingsSnapshot.llmModel },
+      // The engine pinned for this meeting's last speech run, not the current setting.
+      models: { stt: speech?.provider === 'native' ? TRANSCRIPTION_ENGINE_LABELS[speech.engine === 'whisperkit' ? 'whisperkit' : 'apple'] : undefined, llm: settingsSnapshot.llmModel },
     };
   });
 

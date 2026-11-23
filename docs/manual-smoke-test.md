@@ -9,7 +9,8 @@ Paths below use the default Library, `~/Documents/MeetingNotes`. If **Settings �
 
 - [ ] If this release changes the Library, meeting page, recording row or Weekly view, refresh the README screenshots: `npm run dev:renderer` in one terminal, `npm run screenshots` in another.
 - [ ] LM Studio or Ollama available with a chat model (`qwen/qwen3.5-9b` or similar), and **Settings → Advanced → LLM Model** set to it.
-- [ ] Apple silicon, macOS 26 or newer. **Settings → Processing** shows Apple assets and Speaker models **ready**. There is no speech-engine selector, Whisper control, token field or model download other than **Prepare native speech**.
+- [ ] Apple silicon, macOS 26 or newer. **Settings → Processing** shows Apple assets and Speaker models **ready**. **Transcription engine** is **Apple Speech (Built-in)**. There is no token field, and the only download control is **Prepare native speech**.
+- [ ] Optional, needs about 1 GB free and a few minutes: choose **WhisperKit Large-v3-Turbo (High accuracy)**. Nothing downloads until you click **Prepare native speech**; the status then goes through download, verification and optimization to **WhisperKit model: ready**. Process a short recording and confirm the meeting's processing details name **WhisperKit large-v3-turbo**. Switch back to Apple Speech, reprocess the same meeting, and confirm the details now name **Apple SpeechTranscriber** and the earlier transcript is in history.
 - [ ] Latest installer built: `npm run dist` produces a versioned DMG and ZIP under `release/` (the loose `.app` is removed after packaging).
 
 ## Meeting groups

@@ -46,6 +46,7 @@ const previewSettings: Settings = {
   libraryPath: '~/Documents/MeetingNotes',
   audioWatchPath: '',
   sttLanguage: 'en',
+  transcriptionEngine: 'apple',
   exporterWebhook: false,
   webhookUrl: '',
   webhookSecret: '',

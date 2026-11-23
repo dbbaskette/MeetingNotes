@@ -13,10 +13,10 @@ import { isSafeExternalUrl } from '../lib/navigation-guard.js';
 
 export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   const native = () => { if (!s.nativeSpeech) throw new Error('Native speech helper is unavailable. Reinstall MeetingNotes.'); return s.nativeSpeech; };
-  ipc.handle(IPC_CHANNELS.nativeSpeechStatus, () => native().status(s.settings.get('sttLanguage')));
+  ipc.handle(IPC_CHANNELS.nativeSpeechStatus, () => native().status(s.settings.get('sttLanguage'), s.settings.get('transcriptionEngine')));
   ipc.handle(IPC_CHANNELS.nativeSpeechPrepare, () => {
     if (s.pipeline.getStatus().currentId || s.pipeline.getStatus().queueLength) throw new Error('Wait for processing to finish before preparing speech assets.');
-    return native().prepare(s.settings.get('sttLanguage'));
+    return native().prepare(s.settings.get('sttLanguage'), s.settings.get('transcriptionEngine'));
   });
   ipc.handle(IPC_CHANNELS.nativeSpeechCancel, () => native().cancelSetup());
   // Secrets never cross to the renderer: it sees a mask or an empty string.
@@ -24,9 +24,10 @@ export function registerSettingsHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.settingsSet, (_e: unknown, key: unknown, value: unknown) => {
     if (typeof key !== 'string' || !(key in DEFAULT_SETTINGS)) throw new Error(`unknown setting: ${String(key)}`);
     value = validateSetting(key, value);
-    if (key === 'sttLanguage') {
+    if (key === 'sttLanguage' || key === 'transcriptionEngine') {
       const status = s.pipeline.getStatus();
-      if (status.currentId || status.queueLength || s.nativeSpeech?.snapshot().busy) throw new Error('Wait for processing and speech setup to finish before changing the speech language.');
+      if (status.currentId || status.queueLength || s.nativeSpeech?.snapshot().busy)
+        throw new Error(`Wait for processing and speech setup to finish before changing the ${key === 'sttLanguage' ? 'speech language' : 'transcription engine'}.`);
     }
     if (isSecretSettingKey(key)) return s.secrets.write(key, value as string);
     // Register first: a shortcut another app already holds must be refused
