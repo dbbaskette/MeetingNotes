@@ -45,6 +45,34 @@ describe('paged meetings', () => {
     expect(store.getState().items[0]).toMatchObject(patch);
   });
 
+  it('keeps item and count references when a refresh returns the same data', async () => {
+    const store = createPagedMeetings(() => Promise.resolve(page([row('a'), row('b')])));
+    await store.getState().refresh();
+    const before = store.getState();
+    const selected: unknown[] = [];
+    // What a selector-based subscriber sees: only these two references.
+    store.subscribe((state) => { selected.push(state.items, state.counts); });
+    await store.getState().refresh();
+    const after = store.getState();
+    expect(after.items).toBe(before.items);
+    expect(after.counts).toBe(before.counts);
+    expect(selected.every((value) => value === before.items || value === before.counts)).toBe(true);
+  });
+
+  it('publishes new counts when they change', async () => {
+    let calls = 0;
+    const store = createPagedMeetings(() => {
+      const result = page([row('a')]);
+      if (++calls === 2) result.counts = { ...result.counts, pending: 21, done: 139 };
+      return Promise.resolve(result);
+    });
+    await store.getState().refresh();
+    const before = store.getState().counts;
+    await store.getState().refresh();
+    expect(store.getState().counts).not.toBe(before);
+    expect(store.getState().counts.pending).toBe(21);
+  });
+
   it('can retry a synchronous IPC failure without leaving the first request locked', async () => {
     let attempts = 0;
     const store = createPagedMeetings(() => {

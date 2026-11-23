@@ -18,13 +18,22 @@ interface GroupsState {
   delete: (id: string) => Promise<boolean>;
 }
 
+let lastSnapshotJson = '';
 export const groupsStore = createStore<GroupsState>()((set, get) => ({
   groups: [], allCount: 0, ungroupedCount: 0, loaded: false, error: null,
   async refresh() {
     const revision = ++refreshRevision;
     try {
       const snapshot = await api.groups.list();
-      if (revision === refreshRevision) set({ ...snapshot, loaded: true, error: null });
+      if (revision !== refreshRevision) return;
+      // Refreshes are frequent (every Library invalidation) and usually return
+      // the same groups. Keep the previous references then, so subscribers
+      // and their memoized derivations don't re-run for nothing (#301).
+      const json = JSON.stringify(snapshot);
+      const previous = get();
+      if (json === lastSnapshotJson && previous.loaded && previous.error === null) return;
+      lastSnapshotJson = json;
+      set({ ...snapshot, loaded: true, error: null });
     } catch (error) {
       if (revision === refreshRevision) set({ loaded: true, error: (error as Error).message });
     }
@@ -45,6 +54,8 @@ export const groupsStore = createStore<GroupsState>()((set, get) => ({
   },
 }));
 
-export function useGroupsStore(): GroupsState {
-  return useStore(groupsStore);
+export function useGroupsStore(): GroupsState;
+export function useGroupsStore<T>(selector: (state: GroupsState) => T): T;
+export function useGroupsStore<T>(selector?: (state: GroupsState) => T): GroupsState | T {
+  return useStore(groupsStore, selector as (state: GroupsState) => T);
 }

@@ -156,22 +156,62 @@ export function TranscriptWindow({
       }
     }
   });
-  const measured = useCallback(
-    (index: number, height: number) => {
-      if (height <= 0 || Math.abs((cache.current.get(index) ?? -1) - height) < 0.5) return;
+  const applyMeasurements = useCallback(
+    (updates: Array<{ index: number; height: number }>) => {
+      let changed = false;
       const parent = scroll.current,
         el = root.current;
+      let top = 0;
       if (parent && el) {
-        const top =
-          parent.getBoundingClientRect().top + parent.clientTop - el.getBoundingClientRect().top;
-        if (positions.current[index + 1]! <= top)
-          parent.scrollTop += height - (positions.current[index + 1]! - positions.current[index]!);
+        top = parent.getBoundingClientRect().top + parent.clientTop - el.getBoundingClientRect().top;
       }
-      cache.current.set(index, height);
+      let scrollDelta = 0;
+      for (const { index, height } of updates) {
+        if (height <= 0 || Math.abs((cache.current.get(index) ?? -1) - height) < 0.5) continue;
+        if (parent && el && positions.current[index + 1]! <= top) {
+          scrollDelta += height - (positions.current[index + 1]! - positions.current[index]!);
+        }
+        cache.current.set(index, height);
+        changed = true;
+      }
+      if (!changed) return;
+      if (parent && scrollDelta !== 0) parent.scrollTop += scrollDelta;
       setRevision((value) => value + 1);
       measure();
     },
     [measure],
+  );
+  const applyRef = useRef(applyMeasurements);
+  applyRef.current = applyMeasurements;
+  const rowObserver = useRef<ResizeObserver | null>(null);
+  const ensureRowObserver = useCallback((): ResizeObserver => {
+    if (!rowObserver.current) {
+      rowObserver.current = new ResizeObserver((entries) => {
+        const updates: Array<{ index: number; height: number }> = [];
+        for (const entry of entries) {
+          const target = entry.target as HTMLElement;
+          const raw = target.dataset.transcriptIndex;
+          if (raw === undefined) continue;
+          const index = Number(raw);
+          const borderHeight = entry.borderBoxSize?.[0]?.blockSize;
+          const height = borderHeight && borderHeight > 0
+            ? borderHeight
+            : entry.contentRect.height || target.getBoundingClientRect().height;
+          if (Number.isFinite(index) && height > 0) updates.push({ index, height });
+        }
+        if (updates.length > 0) applyRef.current(updates);
+      });
+    }
+    return rowObserver.current;
+  }, []);
+  useEffect(() => () => { rowObserver.current?.disconnect(); rowObserver.current = null; }, []);
+  const registerRow = useCallback(
+    (el: HTMLDivElement | null, prev: HTMLDivElement | null) => {
+      const obs = ensureRowObserver();
+      if (prev && prev !== el) obs.unobserve(prev);
+      if (el) obs.observe(el);
+    },
+    [ensureRowObserver],
   );
   return (
     <div
@@ -186,7 +226,7 @@ export function TranscriptWindow({
             key={index}
             index={index}
             top={offsets[index]!}
-            measured={measured}
+            registerRow={registerRow}
             onFocus={() => setFocused(index)}
             onBlur={() =>
               queueMicrotask(() => {
@@ -209,7 +249,7 @@ export function TranscriptWindow({
 function MeasuredTranscriptRow({
   index,
   top,
-  measured,
+  registerRow,
   children,
   onFocus,
   onBlur,
@@ -217,7 +257,7 @@ function MeasuredTranscriptRow({
 }: {
   index: number;
   top: number;
-  measured: (i: number, h: number) => void;
+  registerRow: (el: HTMLDivElement | null, prev: HTMLDivElement | null) => void;
   children: ReactNode;
   onFocus: () => void;
   onBlur: () => void;
@@ -227,10 +267,9 @@ function MeasuredTranscriptRow({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => measured(index, el.getBoundingClientRect().height));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [index, measured]);
+    registerRow(el, null);
+    return () => registerRow(null, el);
+  }, [registerRow]);
   return (
     <div
       ref={ref}

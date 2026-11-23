@@ -59,8 +59,10 @@ interface Props {
   selectionActive?: boolean;
   showGroup?: boolean;
   isNew?: boolean;
-  onMove?: () => void;
+  onMove?: (meeting: Meeting) => void;
 }
+
+const DATE_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
 function fmtDur(s: number | null): string {
   if (s === null) return '';
@@ -74,7 +76,7 @@ function fmtDate(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.valueOf())) return iso.slice(0, 10);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return DATE_FMT.format(d);
 }
 
 export const LibraryRow = memo(function LibraryRow({
@@ -192,7 +194,7 @@ export const LibraryRow = memo(function LibraryRow({
       )}
 
       {isNew && <span className="text-xs text-brand-indigo">New</span>}
-      {onMove && <button type="button" aria-label={`Move ${meeting.title} to a group`} onClick={event => { event.stopPropagation(); onMove(); }} className="text-xs font-semibold text-brand-indigo rounded px-2 py-1 hover:bg-brand-indigo/10">Move…</button>}
+      {onMove && <button type="button" aria-label={`Move ${meeting.title} to a group`} onClick={event => { event.stopPropagation(); onMove(meeting); }} className="text-xs font-semibold text-brand-indigo rounded px-2 py-1 hover:bg-brand-indigo/10">Move…</button>}
       <StatusChip meeting={meeting} />
 
       <MeetingRowMenu meeting={meeting} onChanged={onChanged} />

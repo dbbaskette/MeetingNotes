@@ -56,7 +56,7 @@ export function VirtualMeetingList({ items, renderRow, hasMore, loadingMore, ref
       measureFrame.current = null; measure();
     });
   }, [measure]);
-  useLayoutEffect(() => { if (parentScrollRef) schedule(); });
+  useLayoutEffect(() => { if (parentScrollRef) schedule(); }, [parentScrollRef, schedule, items.length]);
   useEffect(() => {
     const scroll = scrollRef.current;
     if (!scroll) return;

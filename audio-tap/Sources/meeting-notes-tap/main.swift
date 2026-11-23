@@ -15,7 +15,7 @@ case .record(let opts):
   sigterm.setEventHandler {
     Task {
       await recorder.stop()
-      exit(0)
+      StatusEvent.exitAfterFlush(0)
     }
   }
   sigterm.resume()
@@ -25,7 +25,7 @@ case .record(let opts):
   sigint.setEventHandler {
     Task {
       await recorder.stop()
-      exit(0)
+      StatusEvent.exitAfterFlush(0)
     }
   }
   sigint.resume()
@@ -36,7 +36,7 @@ case .record(let opts):
     Task {
       StatusEvent.emit(["event": "parent_exited"])
       await recorder.stop()
-      exit(0)
+      StatusEvent.exitAfterFlush(0)
     }
   }
 
@@ -50,7 +50,7 @@ case .record(let opts):
       Task {
         StatusEvent.emit(["event": "idle_stop"])
         await recorder.stop()
-        exit(0)
+        StatusEvent.exitAfterFlush(0)
       }
     }
   }
@@ -82,3 +82,7 @@ case .listAudioProcesses:
   }
   StatusEvent.emit(["event": "processes", "items": procs])
 }
+
+// One-shot commands fall through to here and the process ends. Events are
+// written on a background queue, so drain it first or the parent reads nothing.
+StatusEvent.flush()

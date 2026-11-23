@@ -1,4 +1,5 @@
 import AVFoundation
+import Accelerate
 import AudioToolbox
 import CoreAudio
 
@@ -117,7 +118,7 @@ final class Recorder {
       Task {
         StatusEvent.emit(["event": "target_exited", "pid": Int(targetPID)])
         await self?.stop()
-        exit(0)
+        StatusEvent.exitAfterFlush(0)
       }
     }
   }
@@ -627,9 +628,10 @@ final class Recorder {
   }
 
   private func emitLevel(source: String, buffer: AVAudioPCMBuffer) {
+    let db = Self.peakDB(buffer)
     let now = Date().timeIntervalSince1970
     levelLock.lock()
-    if Self.peakDB(buffer) > -50 { lastSignalAt = .init() }
+    if db > -50 { lastSignalAt = .init() }
     let shouldEmit = now - (lastLevelEmitAt[source] ?? 0) > 0.1
     if shouldEmit { lastLevelEmitAt[source] = now }
     levelLock.unlock()
@@ -637,7 +639,7 @@ final class Recorder {
     StatusEvent.emit([
       "event": "level",
       "source": source,
-      "peak_db": Self.peakDB(buffer),
+      "peak_db": db,
     ])
   }
 
@@ -718,11 +720,13 @@ final class Recorder {
   private static func peakDB(_ buffer: AVAudioPCMBuffer) -> Double {
     guard let channels = buffer.floatChannelData else { return -160 }
     let n = Int(buffer.frameLength)
+    guard n > 0 else { return -160 }
     var peak: Float = 0
     for c in 0..<Int(buffer.format.channelCount) {
-      for i in 0..<n {
-        peak = max(peak, abs(channels[c][i]))
-      }
+      // Vectorized max-magnitude: this runs on every audio callback.
+      var channelPeak: Float = 0
+      vDSP_maxmgv(channels[c], 1, &channelPeak, vDSP_Length(n))
+      peak = max(peak, channelPeak)
     }
     return peak == 0 ? -160 : 20 * log10(Double(peak))
   }

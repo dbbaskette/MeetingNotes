@@ -1,5 +1,5 @@
 // electron/renderer/src/views/SettingsView.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { GroupTemplateDefaults } from '../components/SummaryTemplates';
 import { api } from '../ipc/client';
@@ -80,6 +80,10 @@ export function SettingsView({
   const [perms, setPerms] = useState<AudioPerms | null>(null);
   const [speakers, setSpeakers] = useState<SpeakerListEntry[]>([]);
   const [speakerQuery, setSpeakerQuery] = useState('');
+  const matchingSpeakers = useMemo(() => {
+    const needle = speakerQuery.toLocaleLowerCase();
+    return speakers.filter(sp => sp.displayName.toLocaleLowerCase().includes(needle));
+  }, [speakers, speakerQuery]);
   const [speakerLimit, setSpeakerLimit] = useState(10);
   const [providers, setProviders] = useState<ProviderAvailability | null>(null);
   const [healthCheck, setHealthCheck] = useState<{ modelId: string; state: 'checking' | 'ok' | 'loops' } | null>(null);
@@ -466,7 +470,7 @@ export function SettingsView({
         ) : (
           <><input className="input mb-2" aria-label="Find a saved speaker" placeholder="Find a speaker…" value={speakerQuery} onChange={event => { setSpeakerQuery(event.target.value); setSpeakerLimit(10); }} />
           <ul className="space-y-1.5">
-            {speakers.filter(sp => sp.displayName.toLocaleLowerCase().includes(speakerQuery.toLocaleLowerCase())).slice(0, speakerLimit).map((sp) => (
+            {matchingSpeakers.slice(0, speakerLimit).map((sp) => (
               <SpeakerRosterRow
                 key={sp.id}
                 speaker={sp}
@@ -475,7 +479,7 @@ export function SettingsView({
               />
             ))}
           </ul>
-          {speakers.filter(sp => sp.displayName.toLocaleLowerCase().includes(speakerQuery.toLocaleLowerCase())).length > speakerLimit && <button className="text-brand-indigo text-xs mt-2" onClick={() => setSpeakerLimit(limit => limit + 10)}>Show 10 more speakers</button>}
+          {matchingSpeakers.length > speakerLimit && <button className="text-brand-indigo text-xs mt-2" onClick={() => setSpeakerLimit(limit => limit + 10)}>Show 10 more speakers</button>}
           </>
         )}
       </section>
@@ -678,11 +682,11 @@ function DiagnosticsSection(): JSX.Element {
     void refresh();
   }, []);
 
-  const rank: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
-  const minRank = filter === 'error' ? 3 : filter === 'warn' ? 2 : 0;
-  const shown = entries
-    .filter((e) => (rank[e.level] ?? 1) >= minRank)
-    .reverse(); // newest first
+  const shown = useMemo(() => {
+    const rank: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+    const minRank = filter === 'error' ? 3 : filter === 'warn' ? 2 : 0;
+    return entries.filter((e) => (rank[e.level] ?? 1) >= minRank).reverse(); // newest first
+  }, [entries, filter]);
 
   return (
     <section className="border-t border-surface-border pt-5 space-y-3">

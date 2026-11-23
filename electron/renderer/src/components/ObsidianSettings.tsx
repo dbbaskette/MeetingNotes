@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
+import { useSettingsSectionShown } from './SettingsNavigation';
 import type {
   ObsidianOptions,
   ObsidianPreview,
@@ -18,6 +19,7 @@ const defaults: ObsidianOptions = {
 };
 export function ObsidianSettings(): JSX.Element {
   const [status, setStatus] = useState<ObsidianStatus | null>(null);
+  const shown = useSettingsSectionShown();
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState(defaults);
   const [preview, setPreview] = useState<ObsidianPreview | null>(null);
@@ -38,13 +40,16 @@ export function ObsidianSettings(): JSX.Element {
         .catch((e) => {
           if (active) setError(String(e.message));
         });
+    // Poll only while this Settings tab is on screen (#301); returning to the
+    // tab re-runs the effect and refreshes at once.
+    if (!shown) return () => { active = false; };
     refresh();
     const timer = setInterval(refresh, 3000);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [shown]);
   useEffect(() => {
     if (open && !modal.current?.open) modal.current?.showModal();
   }, [open]);

@@ -66,7 +66,6 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
   /** Wall-clock seconds since the narrative call started — drives
    *  the elapsed-time label inside the skeleton. */
   const [narrStartedAt, setNarrStartedAt] = useState<number | null>(null);
-  const [narrElapsedMs, setNarrElapsedMs] = useState(0);
   /** Bumped on each load so a stale fetch's resolution can be
    *  ignored when the user has already navigated away. */
   const fetchSeq = useRef(0);
@@ -171,18 +170,9 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
     return()=>{fetchSeq.current++;};
   }, [week, load, active]);
 
-  // Tick the elapsed-time label while the narrative is loading.
-  // Stops as soon as narrState leaves 'loading'.
-  useEffect(() => {
-    if (narrState !== 'loading' || narrStartedAt == null) {
-      setNarrElapsedMs(0);
-      return;
-    }
-    const id = setInterval(() => {
-      setNarrElapsedMs(Date.now() - narrStartedAt);
-    }, 1000);
-    return () => clearInterval(id);
-  }, [narrState, narrStartedAt]);
+  // The elapsed-time label ticks inside the Overview card (it gets
+  // `narrStartedAt`), not here: a 1 Hz state update at this root re-rendered
+  // every meeting and task row while the report was drafting (#301).
 
   const onPrev = (): void => setWeek((w) => shiftWeek(w, -1));
   const onNext = (): void => {
@@ -308,7 +298,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
           structured={structured}
           narrative={narrative}
           narrState={narrState}
-          narrElapsedMs={narrElapsedMs}
+          narrStartedAt={narrStartedAt}
           narrError={narrState === 'error' ? errorMsg : null}
           onRegenerate={onRegenerate}
           onOpenMeeting={onOpenMeeting}
@@ -326,14 +316,14 @@ interface BodyProps {
   structured: WeeklyStructured;
   narrative: WeeklyNarrativeResult | null;
   narrState: 'idle' | 'loading' | 'ready' | 'error';
-  narrElapsedMs: number;
+  narrStartedAt: number | null;
   narrError: string | null;
   onRegenerate: () => Promise<void>;
   onOpenMeeting: (id: string) => void;
 }
 
 function WeeklyBody({
-  structured, narrative, narrState, narrElapsedMs, narrError, onRegenerate, onOpenMeeting, onTaskPatch, onTasksSaved,
+  structured, narrative, narrState, narrStartedAt, narrError, onRegenerate, onOpenMeeting, onTaskPatch, onTasksSaved,
 }: BodyProps): JSX.Element {
   // Alias for the original prop name throughout the body so the
   // existing JSX further down keeps working without per-line edits.
@@ -342,7 +332,7 @@ function WeeklyBody({
   const [taskFilter,setTaskFilter]=useState<'all'|'mine'|'overdue'|'week'>('all');
   const snapshotDate=data.capturedAt??data.savedAt;
   const today=snapshotDate?new Date(snapshotDate):new Date();const todayString=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  const filteredGroups=data.openActionGroups.map(group=>({...group,items:group.items.filter(item=>taskFilter==='all'||taskFilter==='mine'&&item.isYou||taskFilter==='overdue'&&!!item.dueDate&&item.dueDate<todayString||taskFilter==='week'&&!!item.dueDate&&new Date(`${item.dueDate}T12:00:00`).getTime()>=Date.parse(data.rangeStart)&&new Date(`${item.dueDate}T12:00:00`).getTime()<=Date.parse(data.rangeEnd))})).filter(group=>group.items.length>0);
+  const filteredGroups=useMemo(()=>data.openActionGroups.map(group=>({...group,items:group.items.filter(item=>taskFilter==='all'||taskFilter==='mine'&&item.isYou||taskFilter==='overdue'&&!!item.dueDate&&item.dueDate<todayString||taskFilter==='week'&&!!item.dueDate&&new Date(`${item.dueDate}T12:00:00`).getTime()>=Date.parse(data.rangeStart)&&new Date(`${item.dueDate}T12:00:00`).getTime()<=Date.parse(data.rangeEnd))})).filter(group=>group.items.length>0),[data.openActionGroups,data.rangeStart,data.rangeEnd,taskFilter,todayString]);
 
   return (
     <>
@@ -390,7 +380,7 @@ function WeeklyBody({
               meetingCount={data.meetings.length}
               narrative={narrative}
               narrState={narrState}
-              narrElapsedMs={narrElapsedMs}
+              narrStartedAt={narrStartedAt}
               narrError={narrError}
               inProgress={data.inProgress}
               hasFreshCache={data.hasFreshCache}
@@ -587,7 +577,7 @@ interface NarrativeCardProps {
   meetingCount: number;
   narrative: WeeklyNarrativeResult | null;
   narrState: 'idle' | 'loading' | 'ready' | 'error';
-  narrElapsedMs: number;
+  narrStartedAt: number | null;
   narrError: string | null;
   /** True when viewing the current (still-running) week. We skip
    *  narrative generation in that case because meetings keep getting
@@ -609,9 +599,17 @@ interface NarrativeCardProps {
  *   - ready:   the rendered narrative + "Generated X ago" + Regenerate.
  */
 function NarrativeCard({
-  meetingCount, narrative, narrState, narrElapsedMs, narrError, inProgress, hasFreshCache, onRegenerate,
+  meetingCount, narrative, narrState, narrStartedAt, narrError, inProgress, hasFreshCache, onRegenerate,
 }: NarrativeCardProps): JSX.Element {
-  const elapsedSec = Math.floor(narrElapsedMs / 1000);
+  // Ticks only while the narrative is loading, and only re-renders this card.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (narrState !== 'loading' || narrStartedAt == null) { setElapsedSec(0); return; }
+    const tick = (): void => setElapsedSec(Math.floor((Date.now() - narrStartedAt) / 1000));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [narrState, narrStartedAt]);
   return (
     <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-6">
       <div className="flex items-center gap-2 mb-4">

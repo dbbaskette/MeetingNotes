@@ -1,4 +1,4 @@
-import { Children, isValidElement, createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { Children, isValidElement, createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../ipc/client';
 import { SlidingPill } from './motion/SlidingPill';
 
@@ -39,11 +39,26 @@ export function SettingsNavigation({ children }: { children: ReactNode }): JSX.E
     </visibility.Provider>
   </>;
 }
+/** True while the enclosing SettingsSection is on screen. Sections stay
+ *  mounted once opened (so drafts survive a tab switch), which means timers
+ *  and polls inside them must check this instead of assuming "mounted =
+ *  visible". Defaults to true outside a section. */
+const sectionShown = createContext(true);
+export function useSettingsSectionShown(): boolean { return useContext(sectionShown); }
+
 export function SettingsSection({ section, keywords, children }: { section: Section; keywords: string; children: ReactNode }): JSX.Element {
   const current = useContext(visibility);
   const shown = current.query ? `${section} ${keywords}`.toLowerCase().includes(current.query) : current.section === section;
+  // Mount a section's children the first time it is shown, then keep them
+  // (#301). All six tabs used to mount at once behind `hidden`, so opening
+  // Settings fetched 500 log rows and started the Obsidian poll for tabs the
+  // user never looked at.
+  const opened = useRef(shown);
+  if (shown) opened.current = true;
   return <div hidden={!shown} className="space-y-5" aria-label={`${section} settings`}>
-    {current.query && <h2 className="text-lg font-semibold">{section}</h2>}{children}
+    {opened.current && <sectionShown.Provider value={shown}>
+      {shown && current.query && <h2 className="text-lg font-semibold">{section}</h2>}{children}
+    </sectionShown.Provider>}
   </div>;
 }
 

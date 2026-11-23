@@ -49,3 +49,21 @@ supported('does not show an old locale as ready after a failed language check', 
   const changed = await service.status('unsupported');
   expect(changed.appleReady).toBe(false); expect(changed.error).toContain('Unsupported locale');
 });
+supported('reuses a ready health answer for the same locale instead of respawning the helper', async () => {
+  const request = vi.spyOn(SpeechClient.prototype, 'request').mockResolvedValue({ result: { available: true, installed: true }, elapsedMs: 1 });
+  const service = new NativeSpeechService('/usr/bin/true', '/fixture/models');
+  expect((await service.status('en')).appleReady).toBe(true);
+  expect((await service.status('en')).appleReady).toBe(true);
+  expect(request).toHaveBeenCalledTimes(1);
+  await service.status('de');
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(request).toHaveBeenLastCalledWith('health', { locale: 'de' });
+});
+supported('re-checks every time while the language assets are not installed', async () => {
+  const request = vi.spyOn(SpeechClient.prototype, 'request').mockResolvedValue({ result: { available: true, installed: false }, elapsedMs: 1 });
+  const service = new NativeSpeechService('/usr/bin/true', '/fixture/models');
+  expect((await service.status('en')).appleReady).toBe(false);
+  request.mockResolvedValue({ result: { available: true, installed: true }, elapsedMs: 1 });
+  expect((await service.status('en')).appleReady).toBe(true);
+  expect(request).toHaveBeenCalledTimes(2);
+});

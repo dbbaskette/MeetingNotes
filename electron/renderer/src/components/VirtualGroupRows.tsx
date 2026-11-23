@@ -31,7 +31,7 @@ export function VirtualGroupRows({items, scrollRef, renderRow}: {
   }, [measure]);
   // Never synchronously set state on every commit: measuring changes to the
   // shared flex/scroll layout can otherwise cause a nested React update loop.
-  useLayoutEffect(scheduleMeasure);
+  useLayoutEffect(() => { scheduleMeasure(); }, [scheduleMeasure, items.length]);
   useEffect(() => {
     const scroll = scrollRef.current, list = listRef.current;
     if (!scroll || !list) return;

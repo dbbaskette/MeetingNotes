@@ -1,5 +1,5 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { MeetingTemplatePicker } from '../components/SummaryTemplates';
 import ReactMarkdown from 'react-markdown';
@@ -14,6 +14,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Icon } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
 import { toFileUrl } from '../lib/file-url';
+import { createPlaybackClock, usePlaybackTime, type PlaybackClock } from '../lib/playback-clock';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
 import { REASONING_LOOP_MARKER } from '../lib/reasoning-loop';
 import { USER_STEPS, stepIndexFor } from '../lib/pipeline-steps';
@@ -177,27 +178,25 @@ export function MeetingDetailView({
   // ref survives tab switches; tab switches alone never unmount the
   // player. (#42)
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
+  // The playback position is NOT root state: only the transcript reads it,
+  // through this clock, so a playback tick re-renders the transcript alone
+  // instead of the whole detail tree (#301).
+  const [playbackClock] = useState(() => createPlaybackClock());
   // timeupdate fires ~4x/sec, but the transcript highlight only changes
-  // at whole-second granularity. Quantize the state update to 1/sec so
-  // playback doesn't re-render the whole detail tree 4x/sec.
-  const lastFlooredTimeRef = useRef(0);
+  // at whole-second granularity; the clock drops repeats of the same second.
   const onTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>): void => {
-    const floored = Math.floor((e.target as HTMLAudioElement).currentTime);
-    if (floored === lastFlooredTimeRef.current) return;
-    lastFlooredTimeRef.current = floored;
-    setCurrentTime(floored);
-  }, []);
+    playbackClock.set(Math.floor((e.target as HTMLAudioElement).currentTime));
+  }, [playbackClock]);
   // Stable identity: passed down to every (memoized) transcript row —
   // a fresh function per render would defeat React.memo on the rows.
   const [seekRevision,setSeekRevision]=useState(0);
   const seekTo = useCallback((seconds: number): void => {
-    setCurrentTime(seconds);setSeekRevision(value=>value+1);
+    playbackClock.set(seconds);setSeekRevision(value=>value+1);
     const el = audioRef.current;
     if (!el) return;
     el.currentTime = seconds;
     if (el.paused) void el.play();
-  }, []);
+  }, [playbackClock]);
 
   // Playback controls (#A3): speed cycle + ±15s skips. The chosen rate is
   // per-session component state; a ref mirrors it so the loadedmetadata
@@ -333,9 +332,11 @@ export function MeetingDetailView({
   // the effect tears down its old timer and starts fresh — polling resumes
   // even after the meeting had already settled at 'done'.
   const [kick, setKick] = useState(0);
-  const reload = async (): Promise<void> => {
+  // Stable identity: the memoized RightRail and panels receive it as a prop.
+  const reload = useCallback(async (): Promise<void> => {
     setKick((k) => k + 1);
-  };
+  }, []);
+  const retrySpeakerReview = useCallback(() => { void artifacts.request(id, 'speakerReview'); }, [artifacts, id]);
 
   // Stage events refresh the shell immediately. A slower DB-only poll covers
   // events missed while the renderer was suspended or reloading.
@@ -547,7 +548,7 @@ export function MeetingDetailView({
             meeting={m}
             tab={tab}
             onTab={setTab}
-            currentTime={currentTime}
+            playbackClock={playbackClock}
             seekRevision={seekRevision}
             onSeek={seekTo}
             onReload={reload}
@@ -564,7 +565,7 @@ export function MeetingDetailView({
           />
         </div>
         <div className={`detail-inspector order-3 min-w-0 lg:overflow-y-auto ${railOpen ? '' : 'lg:hidden'}`}><RightRail meeting={m} onReload={reload}
-          speakerReviewState={speakerReview} onRetrySpeakerReview={() => void artifacts.request(id, 'speakerReview')} /></div>
+          speakerReviewState={speakerReview} onRetrySpeakerReview={retrySpeakerReview} /></div>
       </div>
 
       {/* Audio player pinned to the bottom of the card. Lives outside the
@@ -1394,14 +1395,14 @@ function ArtifactFeedback({ label, state, onRetry }: {
 const DETAIL_TABS = ['summary', 'transcript', 'actions'] as const;
 
 function CenterPane({
-  meeting, tab, onTab, currentTime, seekRevision, onSeek, onReload, onShowSource, provenance,
+  meeting, tab, onTab, playbackClock, seekRevision, onSeek, onReload, onShowSource, provenance,
   summaryMode, onSummaryMode, summaryDraft, onSummaryDraft, summarySaved, onSummaryBaseline,
   transcriptState, onRetryTranscript,
 }: {
   meeting: MeetingDetail;
   tab: Tab;
   onTab: (t: Tab) => void;
-  currentTime: number;
+  playbackClock: PlaybackClock;
   seekRevision: number;
   onSeek: (seconds: number) => void;
   onReload: () => Promise<void>;
@@ -1419,6 +1420,7 @@ function CenterPane({
   onRetryTranscript: () => void;
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
+  const contentVersion = useContentVersion(meeting.transcriptMd, meeting.summaryMd);
   return (
     <div>
       {/* Sentence-case tabs share the app's system typography.
@@ -1477,13 +1479,13 @@ function CenterPane({
         {tab === 'transcript' && (
           <ErrorBoundary scope="detail:transcript" label="The transcript" variant="panel" resetKey={meeting.id}>
             <ArtifactFeedback label="transcript" state={transcriptState} onRetry={onRetryTranscript} />
-            {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={meeting.transcriptMd + (meeting.summaryMd ?? '')}
+            {meeting.transcriptMd && <TerminologyPanel key={`terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={contentVersion}
               groupId={meeting.groupId} groupName={meeting.groupName} disabled={meeting.status === 'processing' || summaryDraft !== summarySaved || summaryMode === 'edit'} onReload={onReload}/>}
-            {transcriptState.data !== undefined && <TranscriptPanel
+            {transcriptState.data !== undefined && <PlaybackTranscriptPanel
               seekRevision={seekRevision}
               meeting={meeting}
               showRaw={showRaw}
-              currentTime={currentTime}
+              clock={playbackClock}
               onSeek={onSeek}
             />}
           </ErrorBoundary>
@@ -1492,6 +1494,26 @@ function CenterPane({
       </div>
     </div>
   );
+}
+
+/** The one subscriber to the playback clock: a tick re-renders this wrapper
+ *  and the transcript, nothing above them. */
+function PlaybackTranscriptPanel({ clock, ...rest }: Omit<Parameters<typeof TranscriptPanel>[0], 'currentTime'> & { clock: PlaybackClock }): JSX.Element {
+  return <TranscriptPanel {...rest} currentTime={usePlaybackTime(clock)} />;
+}
+
+/** A short token that changes whenever the transcript or notes text does.
+ *  TerminologyPanel only needs "did the content change", and concatenating
+ *  two multi-hundred-KB strings on every render to tell it was pure waste
+ *  (#301). Comparing against the previous strings is a pointer check on
+ *  ordinary re-renders. */
+function useContentVersion(transcriptMd: string | null, summaryMd: string | null): string | null {
+  const previous = useRef<{ transcriptMd: string | null; summaryMd: string | null; revision: number }>(
+    { transcriptMd, summaryMd, revision: 0 });
+  if (previous.current.transcriptMd !== transcriptMd || previous.current.summaryMd !== summaryMd) {
+    previous.current = { transcriptMd, summaryMd, revision: previous.current.revision + 1 };
+  }
+  return transcriptMd || summaryMd ? `r${previous.current.revision}` : null;
 }
 
 // Click-to-seek transcript (#42). Each parsed line becomes a button that
@@ -1566,6 +1588,11 @@ function SummaryPanel({
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
 
   const dirty = draft !== savedValue;
+  // Edit mode: the textarea updates at once, the parsed preview follows when
+  // React has a free frame, so typing in a long summary doesn't wait on a
+  // full markdown re-parse per keystroke (#301).
+  const previewDraft = useDeferredValue(draft);
+  const contentVersion = useContentVersion(meeting.transcriptMd, meeting.summaryMd);
 
   async function save(): Promise<void> {
     if (!dirty || saving) return;
@@ -1615,7 +1642,7 @@ function SummaryPanel({
       }}/>
       {termCandidates.length > 0 && <RememberTerms key={termCandidates.map(c => c.source+c.replacement).join('|')} candidates={termCandidates}
         groupId={meeting.groupId} groupName={meeting.groupName} onClose={() => {for (const c of termCandidates) dismissedTerms.current.add(`${c.source}\0${c.replacement}`); setTermCandidates([]);}}/>}
-      <TerminologyPanel key={`summary-terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={(meeting.summaryMd ?? '') + (meeting.transcriptMd ?? '')}
+      <TerminologyPanel key={`summary-terms-${meeting.id}`} meetingId={meeting.id} artifact="meeting" version={contentVersion}
         groupId={meeting.groupId} groupName={meeting.groupName} disabled={dirty || mode === 'edit' || meeting.status === 'processing'} onReload={onReload}/>
       <SummaryToolbar
         mode={mode}
@@ -1632,7 +1659,7 @@ function SummaryPanel({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MarkdownEditor value={draft} onChange={onDraft} />
           <div className="border border-surface-border rounded-lg p-4 bg-surface-sunken/40 overflow-auto max-h-[60vh]">
-            <MarkdownPreview source={draft} />
+            <MarkdownPreview source={previewDraft} />
           </div>
         </div>
       )}
@@ -1785,7 +1812,7 @@ function MarkdownEditor({
   );
 }
 
-function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview }: {
+const RightRail = memo(function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview }: {
   meeting: MeetingDetail;
   onReload: () => Promise<void>;
   speakerReviewState: DetailArtifactState<unknown>;
@@ -1796,4 +1823,4 @@ function RightRail({ meeting, onReload, speakerReviewState, onRetrySpeakerReview
     <ErrorBoundary scope="detail:speakers" label="Speakers" variant="panel" resetKey={meeting.id}><SpeakersPanel meeting={meeting} onReload={onReload} /></ErrorBoundary>
     <ErrorBoundary scope="detail:export" label="Export" variant="panel" resetKey={meeting.id}><MeetingExportPanel meeting={meeting} onReload={onReload} /></ErrorBoundary>
   </div>;
-}
+});
