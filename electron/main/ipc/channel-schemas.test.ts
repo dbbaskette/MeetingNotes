@@ -49,6 +49,14 @@ describe('IPC argument schemas', () => {
     ['recording:continue-silence', ['']],
     ['recording:continue-silence', ['session', 'extra']],
     ['recording:silence-state', ['unexpected']],
+    ['search:ask', ['pricing?', { facets: { week: '2026-W99' } }]],
+    ['search:ask', ['pricing?', { facets: { status: 'archived' } }]],
+    ['search:ask', ['pricing?', { facets: { from: '2026-10-09', to: '2026-10-01' } }]],
+    ['search:ask', ['pricing?', { facets: { groupId: 'g' } }]],
+    ['search:ask', ['pricing?', { meetingId: '' }]],
+    ['search:ask', ['pricing?', { meetingId: 'm', facets: {} }]],
+    ['search:ask', ['pricing?', { everything: true }]],
+    ['search:ask', ['pricing?', 'm1']],
   ])('rejects malformed arguments for %s: %j', (channel, args) => {
     expect(checkIpcArgs(channel, args)).toMatch(new RegExp(`^Invalid .* for ${channel}: `));
   });
@@ -65,6 +73,9 @@ describe('IPC argument schemas', () => {
     ['weekly:get-narrative', [2026, 41, true]],
     ['search:query', ['pricing', 20, undefined, { clientId: 'c', requestId: 1 }]],
     ['search:query', ['pricing', 20, null]],
+    ['search:ask', ['pricing?']],
+    ['search:ask', ['pricing?', { meetingId: 'm1' }]],
+    ['search:ask', ['pricing?', { facets: { week: '2026-W41', speakerId: 's1', status: 'done', content: 'transcript' } }]],
     ['export:run', [{ exporter: 'pdf', meetingId: 'm', itemIds: ['a'], outputPath: undefined }]],
     ['dialog:save', [undefined]],
     ['obsidian:retry', []],

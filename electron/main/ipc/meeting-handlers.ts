@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { recordingsDirFor } from '../lib/storage-paths.js';
 import { importAudioFiles } from '../library/import-dropped.js';
-import { IPC_CHANNELS, MeetingListQuerySchema, MeetingListFilterSchema, MeetingIdsSchema,
+import { IPC_CHANNELS, MeetingListQuerySchema, MeetingIdsFilterSchema, MeetingIdsSchema,
   GroupIdSchema, GroupNameSchema, OptionalGroupScopeSchema, AssignGroupSchema,
   type MeetingSummary, type MeetingSummaryPage, type MeetingStartManyResult } from './contracts.js';
 import type { SpeakersRepo } from '../storage/speakers-repo.js';
@@ -66,17 +66,22 @@ function scopedMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSumm
   return rows.map((m) => meetingSummary(s, m, speakers.get(m.id) ?? [], counts.get(m.id) ?? 0));
 }
 
-/** Status-list shape for Needs Attention: skip speaker/action joins and ETA
- *  file probes. The panel only needs id/title/status/stage/startedAt. */
-function shellMeetingSummaries(rows: MeetingRow[]): MeetingSummary[] {
+/** Status-list shape for Needs Attention: skip the action-item aggregate and
+ *  ETA file probes. The panel needs id/title/status/stage/startedAt plus the
+ *  real unidentifiedCount for "Voices to name" (#252); that comes from one
+ *  batched meeting_speakers query (no file reads) through the same helper the
+ *  Library row uses, so both show the same number. Speaker rows stay empty. */
+function shellMeetingSummaries(s: IpcServices, rows: MeetingRow[]): MeetingSummary[] {
+  const links: ReturnType<SpeakersRepo['listForMeetings']> = rows.length > 0
+    ? s.speakers.listForMeetings(rows.map((m) => m.id)) : new Map();
   return rows.map((m) => ({
     id: m.id, slug: m.slug, title: m.title,
     groupId: m.groupId, groupName: m.groupName,
     startedAt: m.startedAt, durationS: m.durationS,
     pipelineStage: m.pipelineStage, status: m.status,
     errorMessage: m.errorMessage, stageStartedAt: m.stageStartedAt, skipSpeakerId: m.skipSpeakerId,
-    unidentifiedCount: 0, actionItemsCount: 0,
-    stageEtaMs: null, stageEtaRough: false, speakers: [],
+    unidentifiedCount: unidentifiedCount((links.get(m.id) ?? []).map((link) => ({ rosterId: link.rosterSpeakerId }))),
+    actionItemsCount: 0, stageEtaMs: null, stageEtaRough: false, speakers: [],
   }));
 }
 
@@ -94,11 +99,11 @@ export function registerMeetingListHandlers(ipc: IpcMain, s: IpcServices): void 
     const ids = MeetingIdsSchema.parse(input);
     const rows = s.meetings.findByIds(ids);
     const shell = Boolean(opts && typeof opts === 'object' && (opts as { shell?: unknown }).shell === true);
-    return shell ? shellMeetingSummaries(rows) : scopedMeetingSummaries(s, rows);
+    return shell ? shellMeetingSummaries(s, rows) : scopedMeetingSummaries(s, rows);
   });
 
   ipc.handle(IPC_CHANNELS.meetingsListIds, (_e, input: unknown, groupId: unknown): string[] =>
-    s.meetings.listIds(MeetingListFilterSchema.parse(input), OptionalGroupScopeSchema.parse(groupId)));
+    s.meetings.listIds(MeetingIdsFilterSchema.parse(input), OptionalGroupScopeSchema.parse(groupId)));
 }
 
 export function registerGroupHandlers(ipc: IpcMain, s: IpcServices): void {
@@ -178,6 +183,9 @@ export function registerMeetingHandlers(ipc: IpcMain, s: IpcServices): void {
       userIdentified: userIsIdentified(me),
       summaryMd,
       summaryStale: s.terminology?.stale(id as string) ?? false,
+      // Voices were named after these notes were written with SPEAKER_00-
+      // style labels; the notes panel offers to regenerate them (#252).
+      namesChangedSinceNotes: s.meetings.namesChangedSinceNotes?.(id) ?? false,
       audioPath: m.audioPath,
       actionItems: items.map((ai) => ({
         id: ai.id, text: ai.text, ownerName: ai.ownerName,
@@ -326,7 +334,13 @@ export function registerMeetingHandlers(ipc: IpcMain, s: IpcServices): void {
       if (snapshot) s.meetings.recordProcessingEvent(parsed.id, 'retry', parsed.fromStage, `Previous transcript preserved in the meeting folder: ${snapshot}`);
       clearArtifactsFromStage(folder, parsed.fromStage, s.artifactCache);
     }
-    if (shouldClearActionItems(parsed.fromStage)) s.actionItems.deleteForMeeting(parsed.id);
+    if (shouldClearActionItems(parsed.fromStage)) {
+      s.actionItems.deleteForMeeting(parsed.id);
+      // The notes are regenerated from here (extracting redoes only the
+      // tasks), so names known by now are used: drop the "names changed
+      // since these notes" prompt (#252).
+      if (parsed.fromStage !== 'extracting') s.meetings.clearNamesChangedSinceNotes(parsed.id);
+    }
     if (shouldClearSpeakerLinks(parsed.fromStage)) s.speakers.unlinkMeeting(parsed.id);
     s.meetings.updateStage(parsed.id, parsed.fromStage);
     // A re-run may drive the meeting back into the gate — clear so it re-alerts.

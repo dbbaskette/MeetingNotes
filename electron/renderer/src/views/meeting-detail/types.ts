@@ -28,6 +28,9 @@ export interface MeetingDetail {
   rawTranscriptText: string | null;
   summaryMd: string | null;
   summaryStale?: boolean;
+  /** Voices were named after these notes were written with SPEAKER_00-style
+   *  labels; the notes panel offers to regenerate them (#252). */
+  namesChangedSinceNotes?: boolean;
   audioPath: string;
   userIdentified: boolean;
   speakers: DetailSpeaker[];

@@ -79,6 +79,7 @@ The reusable, stack-neutral [Golden Gate design skill](macos-goldengate-skill/SK
 - **Notes shaped for your meeting.** Choose General, 1:1, Standup, Customer call, Interview or Decision review templates per group or meeting. Existing notes change only when you explicitly re-run processing.
 - **A Library that stays organised.** Groups, search across titles, notes and transcripts, and a **Needs attention** panel for failed runs, voices to name and interrupted recordings. Renames made in meeting details appear when you return, without switching filters or reloading your groups.
 - **Uninterrupted processing and recording controls.** Browse one Library scroll area, open an in-progress meeting while other meetings are selected, and queue recordings without a blocking popup. Menu-bar controls and an optional global start/stop shortcut let you manage capture without switching windows.
+- **Ask your meetings.** Ask a question across the library (⌘K, **Shift+Enter**), across just the meetings your search filters allow, or inside one meeting from its page. Answers cite numbered passages; a transcript citation jumps the player to that moment. Each answer says whether the model ran on this Mac or names the endpoint the question was sent to. See [Asking your meetings](docs/guide/meetings.md#asking-your-meetings).
 - **Saved weekly reports.** Themes across the week's meetings, recaps, decisions, and actions, preserved as static snapshots until you explicitly regenerate them.
 - **Exports when you want them.** Apple Reminders, Google Tasks, Google Docs, PDF, Markdown, an Obsidian vault, or a webhook.
 
@@ -179,7 +180,7 @@ Native profiles live at `<library>/voice-profiles/`; legacy profiles stay at `<l
 
 | You configure | What is sent | Where |
 | --- | --- | --- |
-| A remote LLM endpoint | Transcript text for notes/action items | That endpoint |
+| A remote LLM endpoint | Transcript text for notes/action items; for **Ask**, your question and the quoted passages (the answer names the host) | That endpoint |
 | Google Tasks or Docs export | The items or notes you export | Google |
 | A webhook | The meeting payload, per the template and owner filter | Your URL |
 | Obsidian sync | Notes written into your vault | Wherever the vault itself syncs |

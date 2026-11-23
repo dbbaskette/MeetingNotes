@@ -30,6 +30,10 @@ export interface MeetingInsert {
 }
 
 export type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+/** listIds also takes `unnamedVoices`: finished meetings with at least one
+ *  voice not linked to the roster, i.e. unidentifiedCount > 0 (#252). It is
+ *  an ID-snapshot filter for Needs attention, not a browse filter. */
+export type MeetingIdsFilter = MeetingListFilter | 'unnamedVoices';
 export type MeetingListSort = 'newest' | 'oldest' | 'longest' | 'title';
 
 export interface MeetingListQuery {
@@ -86,6 +90,11 @@ function filterSql(filter: MeetingListFilter): string {
   if (!Object.hasOwn(FILTER_SQL, filter)) throw new Error('Invalid meeting filter');
   return FILTER_SQL[filter];
 }
+
+// Same rule as unidentifiedCount() in ipc/meeting-speakers.ts (a link with no
+// roster speaker), answered from the (meeting_id, local_label) primary key.
+const UNNAMED_VOICES_SQL = `status = 'done' AND EXISTS (SELECT 1 FROM meeting_speakers ms
+  WHERE ms.meeting_id = meetings.id AND ms.roster_speaker_id IS NULL)`;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -261,11 +270,12 @@ export class MeetingsRepo {
   }
 
   /** Exact live-ID snapshot for bulk selection, in deterministic ID order. */
-  listIds(filter: MeetingListFilter, groupId?: string | null): string[] {
+  listIds(filter: MeetingIdsFilter, groupId?: string | null): string[] {
     const params: Record<string, SortValue> = {};
     const group = groupSql(groupId, params);
+    const where = filter === 'unnamedVoices' ? UNNAMED_VOICES_SQL : filterSql(filter);
     const rows = this.db.prepare(`
-      SELECT id FROM meetings WHERE deleted_at IS NULL AND ${filterSql(filter)} AND ${group} ORDER BY id ASC
+      SELECT id FROM meetings WHERE deleted_at IS NULL AND ${where} AND ${group} ORDER BY id ASC
     `).all(params) as { id: string }[];
     return rows.map((row) => row.id);
   }
@@ -346,6 +356,21 @@ export class MeetingsRepo {
     this.db.prepare(
       'UPDATE meetings SET pipeline_stage = ?, stage_started_at = ?, updated_at = ? WHERE id = ?',
     ).run(stage, now, now, id);
+  }
+
+  /** Notes-first marker (#252): voices were named after the notes were
+   *  written with unresolved speaker labels. Cleared when notes are regenerated. */
+  markNamesChangedSinceNotes(id: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO notes_names_changed (meeting_id, changed_at) VALUES (?, ?)')
+      .run(id, new Date().toISOString());
+  }
+
+  clearNamesChangedSinceNotes(id: string): void {
+    this.db.prepare('DELETE FROM notes_names_changed WHERE meeting_id = ?').run(id);
+  }
+
+  namesChangedSinceNotes(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM notes_names_changed WHERE meeting_id = ?').get(id);
   }
 
   updateTitle(id: string, title: string, explicit = true): void {

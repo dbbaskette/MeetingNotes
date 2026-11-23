@@ -1,4 +1,4 @@
-export type AttentionKind = 'recovery' | 'failed' | 'speaker' | 'pending';
+export type AttentionKind = 'recovery' | 'failed' | 'speaker' | 'pending' | 'voices';
 
 export interface AttentionItem {
   id: string;
@@ -21,6 +21,9 @@ interface MeetingInput {
   status: string;
   pipelineStage: string;
   startedAt: string | null;
+  /** Voices not linked to the roster (same count as the Library row's
+   *  "N to identify"). Only finished meetings use it. */
+  unidentifiedCount?: number;
 }
 
 interface RecoveryInput {
@@ -34,6 +37,9 @@ const GROUPS: Array<{ kind: AttentionKind; label: string; actionLabel: string }>
   { kind: 'failed', label: 'Processing failed', actionLabel: 'Review failure' },
   { kind: 'speaker', label: 'Speaker review', actionLabel: 'Name speakers' },
   { kind: 'pending', label: 'Ready to process', actionLabel: 'Process' },
+  // Low priority (#252): notes are already written; naming the voices later
+  // rewrites them. Opens the meeting.
+  { kind: 'voices', label: 'Voices to name', actionLabel: 'Name voices' },
 ];
 
 export function buildNeedsAttention(input: {
@@ -57,7 +63,8 @@ export function buildNeedsAttention(input: {
   for (const meeting of input.meetings) {
     const kind: AttentionKind | null = meeting.status === 'failed' ? 'failed'
       : meeting.pipelineStage === 'awaiting_speaker_id' || meeting.status === 'awaiting_user' ? 'speaker'
-        : meeting.status === 'pending' ? 'pending' : null;
+        : meeting.status === 'pending' ? 'pending'
+          : meeting.status === 'done' && (meeting.unidentifiedCount ?? 0) > 0 ? 'voices' : null;
     if (!kind) continue;
     const spec = GROUPS.find((group) => group.kind === kind)!;
     add({

@@ -6,6 +6,7 @@ import { openDb } from './db.js';
 import { MeetingsRepo } from './meetings-repo.js';
 import { ActionItemsRepo } from './action-items-repo.js';
 import { SpeakersRepo } from './speakers-repo.js';
+import { isMyItem } from '../exporters/owner-filter.js';
 
 let repo: ActionItemsRepo;
 let meetings: MeetingsRepo;
@@ -56,6 +57,42 @@ describe('ActionItemsRepo', () => {
     // Notes-first speaker resolution updates persisted SPEAKER_01 owners too.
     repo.resolveLabels(meetingId, { SPEAKER_01: 'Maya' });
     expect(repo.listByMeeting(meetingId)[2]!.ownerName).toBe('Maya');
+  });
+
+  it('resolveLabels links the owner to the roster speaker the label now maps to (#252)', () => {
+    const mayaId = speakers.create({ displayName: 'Maya' });
+    repo.replaceForMeeting(meetingId, [{ text: 'SPEAKER_01 sends the plan', owner: 'SPEAKER_01', due_date: null }]);
+    expect(repo.listByMeeting(meetingId)[0]!.ownerSpeakerId).toBeNull();
+    speakers.linkToMeeting(meetingId, 'SPEAKER_01', mayaId, 1);
+    repo.resolveLabels(meetingId, { SPEAKER_01: 'Maya' });
+    const [item] = repo.listByMeeting(meetingId);
+    expect(item).toMatchObject({ text: 'Maya sends the plan', ownerName: 'Maya', ownerSpeakerId: mayaId });
+  });
+
+  it('resolveLabels never overwrites an owner link that is already set', () => {
+    const danId = speakers.create({ displayName: 'Dan' });
+    const mayaId = speakers.create({ displayName: 'Maya' });
+    speakers.linkToMeeting(meetingId, 'SPEAKER_00', danId, 1);
+    repo.replaceForMeeting(meetingId, [{ text: 'x', owner: 'Dan', due_date: null }]);
+    expect(repo.listByMeeting(meetingId)[0]!.ownerSpeakerId).toBe(danId);
+    // A later label resolution that maps the owner text elsewhere keeps the link.
+    speakers.linkToMeeting(meetingId, 'SPEAKER_01', mayaId, 1);
+    repo.resolveLabels(meetingId, { SPEAKER_01: 'Maya', Dan: 'Maya' });
+    expect(repo.listByMeeting(meetingId)[0]!.ownerSpeakerId).toBe(danId);
+  });
+
+  it('a task whose owner label resolves to the user becomes "mine" (#252)', () => {
+    const meId = speakers.create({ displayName: 'Dan' });
+    repo.replaceForMeeting(meetingId, [{ text: 'Draft the memo', owner: 'SPEAKER_00', due_date: null }]);
+    const me = { userSpeakerId: meId, userDisplayName: null };
+    expect(isMyItem(repo.listByMeeting(meetingId)[0]!, me)).toBe(false);
+    expect(repo.live({ owner: 'mine' }, { id: meId, name: null }).total).toBe(0);
+    speakers.linkToMeeting(meetingId, 'SPEAKER_00', meId, 1);
+    repo.resolveLabels(meetingId, { SPEAKER_00: 'Dan' });
+    expect(isMyItem(repo.listByMeeting(meetingId)[0]!, me)).toBe(true);
+    // The link survives the user renaming themselves later.
+    speakers.rename(meId, 'Daniel');
+    expect(repo.live({ owner: 'mine' }, { id: meId, name: 'Daniel' }).total).toBe(1);
   });
 
   it('setStatus', () => {

@@ -86,6 +86,7 @@ type Row = typeof rows[number];
 const inFilter = (m: Row, filter: string): boolean =>
   filter === 'all' ? true
   : filter === 'processing' ? m.status === 'processing' || m.status === 'awaiting_user'
+  : filter === 'unnamedVoices' ? m.status === 'done' && m.unidentifiedCount > 0
   : m.status === filter;
 
 const counts = {
@@ -137,7 +138,7 @@ export const overrides: PreviewOverrides = {
     run: async () => ({ hits: [], status: 'complete' }),
     ask: async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      return { found: true, answer: 'Pricing stays at twenty dollars through the year [1]. Bob will send the rollback plan by Friday [2].',
+      return { found: true, asked: true, endpoint: { local: true }, scopeLabel: null, answer: 'Pricing stays at twenty dollars through the year [1]. Bob will send the rollback plan by Friday [2].',
         sources: [
           { n: 1, meetingId: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', kind: 'summary', startS: null, heading: 'Decisions', snippet: 'Pricing stays at twenty dollars through the year.' },
           { n: 2, meetingId: 'a', title: 'Quarterly planning review', startedAt: '2026-04-20T08:00:00', kind: 'transcript', startS: 754, heading: null, snippet: 'Bob: I will send the rollback plan by Friday.' },

@@ -7,7 +7,7 @@ import type { ActionFilter, ActionPage, GroupBrief } from '../shared/productivit
 import type { SpeechWork } from '../shared/processing-progress.js';
 import type { NativeSpeechStatus } from '../shared/native-speech.js';
 import type { SearchRequest, SearchResponse } from '../shared/search';
-import type { AskResult } from '../shared/ask';
+import type { AskResult, AskScope } from '../shared/ask';
 import type {BackupPreview,BackupStatus} from '../shared/backup';
 import type { NotesVersion, NotesComparison } from '../shared/notes-history';
 import type { ObsidianOptions, ObsidianPreview, ObsidianStatus, ObsidianComparison } from '../shared/obsidian.js';
@@ -26,6 +26,8 @@ type SilenceCleared = { sessionId: string; reason: 'audio-resumed' | 'continued'
 // Keep these structural types local: importing main contracts makes the CJS
 // compiler emit main-process modules again.
 type MeetingListFilter = 'all' | 'pending' | 'processing' | 'done' | 'failed';
+/** listIds only: `unnamedVoices` = finished meetings with voices to name (#252). */
+type MeetingIdsFilter = MeetingListFilter | 'unnamedVoices';
 type MeetingListQuery = {
   filter: MeetingListFilter;
   sort: 'newest' | 'oldest' | 'longest' | 'title';
@@ -226,7 +228,7 @@ const api = {
       opts?.shell
         ? ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids, opts) as Promise<MeetingSummary[]>
         : ipcRenderer.invoke(IPC_CHANNELS.meetingsGetMany, ids) as Promise<MeetingSummary[]>,
-    listIds: (filter: MeetingListFilter, groupId?: string | null) =>
+    listIds: (filter: MeetingIdsFilter, groupId?: string | null) =>
       (groupId === undefined
         ? ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter)
         : ipcRenderer.invoke(IPC_CHANNELS.meetingsListIds, filter, groupId)) as Promise<string[]>,
@@ -562,10 +564,12 @@ const api = {
     run: (q:string, limit:number, groupId:string|null|undefined, request:SearchRequest) =>
       ipcRenderer.invoke(IPC_CHANNELS.searchQuery,q,limit,groupId,request) as Promise<SearchResponse>,
     cancel: (clientId:string, requestId:number) => ipcRenderer.invoke(IPC_CHANNELS.searchCancel,{clientId,requestId}) as Promise<void>,
-    /** Answer a question from every meeting's notes and transcript, with
-     *  numbered sources. Runs the local model, so it can take a while; a new
-     *  question or `cancelAsk` stops the one in flight. */
-    ask: (question: string) => ipcRenderer.invoke(IPC_CHANNELS.searchAsk, question) as Promise<AskResult>,
+    /** Answer a question from meetings' notes and transcripts, with numbered
+     *  sources: the whole library, the meetings `scope.facets` allow (the
+     *  same filters as `run`), or the one meeting `scope.meetingId` names.
+     *  Runs the summary model, so it can take a while; a new question or
+     *  `cancelAsk` stops the one in flight. */
+    ask: (question: string, scope?: AskScope) => ipcRenderer.invoke(IPC_CHANNELS.searchAsk, question, scope) as Promise<AskResult>,
     cancelAsk: () => ipcRenderer.invoke(IPC_CHANNELS.searchAskCancel) as Promise<void>,
   },
   weekly: {

@@ -201,9 +201,29 @@ describe('paginated meeting summaries', () => {
     scopedSpeakers.mockClear(); scopedCounts.mockClear();
     const shells = invoke('meetings:get-many', ['a', 'b'], { shell: true });
     expect(shells.map((m: { id: string }) => m.id)).toEqual(['a', 'b']);
-    expect(shells[0]).toMatchObject({ speakers: [], actionItemsCount: 0, unidentifiedCount: 0, stageEtaMs: null });
-    expect(scopedSpeakers).not.toHaveBeenCalled();
+    // Shells skip the action aggregate but carry the same unidentifiedCount
+    // as the Library row, from one batched speaker query (#252).
+    expect(shells[0]).toMatchObject({ speakers: [], actionItemsCount: 0, unidentifiedCount: reference.unidentifiedCount, stageEtaMs: null });
+    expect(shells[0].unidentifiedCount).toBe(1);
+    expect(shells[1].unidentifiedCount).toBe(0);
+    expect(scopedSpeakers).toHaveBeenCalledTimes(1);
+    expect(scopedSpeakers).toHaveBeenLastCalledWith(['a', 'b']);
     expect(scopedCounts).not.toHaveBeenCalled();
+  });
+
+  it('lists finished meetings with voices to name for Needs attention (#252)', () => {
+    for (const id of ['named', 'unnamed', 'pending-unnamed', 'deleted-unnamed', 'none']) insert(id, id === 'pending-unnamed' ? 'pending' : 'done');
+    db.prepare('UPDATE meetings SET deleted_at = ? WHERE id = ?').run('2026-09-08', 'deleted-unnamed');
+    const rosterId = speakers.create({ displayName: 'Alex' });
+    speakers.linkToMeeting('named', 'SPEAKER_00', rosterId, 1);
+    for (const id of ['unnamed', 'pending-unnamed', 'deleted-unnamed']) {
+      speakers.linkToMeeting(id, 'SPEAKER_00', rosterId, 1);
+      speakers.linkToMeeting(id, 'SPEAKER_01', null, 0);
+    }
+    expect(invoke('meetings:list-ids', 'unnamedVoices')).toEqual(['unnamed']);
+    // Same rule as the Library row count.
+    expect(invoke('meetings:get-many', ['unnamed'])[0].unidentifiedCount).toBe(1);
+    expect(() => invoke('meetings:list-page', { filter: 'unnamedVoices', sort: 'newest' })).toThrow();
   });
 
   it('reuses first-page counts for continuation pages of the same query', () => {
@@ -384,6 +404,50 @@ describe('registerIpcHandlers', () => {
       await expect(assign(ipcEvent, { meetingId: 'm', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: person })).rejects.toThrow(/finish processing/);
     } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
   });
+  it('notes-first naming links task owners, flags the notes for regeneration and clears the flag on regenerate (#252)', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-names-changed-'));
+    const db = openDb(':memory:');
+    try {
+      const meetings = new MeetingsRepo(db), speakers = new SpeakersRepo(db), actionItems = new ActionItemsRepo(db);
+      for (const id of ['first', 'known']) {
+        meetings.insert({ id, slug: id, title: id, audioPath: '/synthetic', startedAt: null, durationS: 60, status: 'done', pipelineStage: 'done' });
+        await fs.mkdir(path.join(root, 'meetings', id), { recursive: true });
+      }
+      const me = speakers.create({ displayName: 'Dana' });
+      // Notes written before the voice was named.
+      speakers.linkToMeeting('first', 'SPEAKER_00', null, 0);
+      actionItems.replaceForMeeting('first', [{ text: 'Send the plan', owner: 'SPEAKER_00', due_date: null }]);
+      await fs.writeFile(path.join(root, 'meetings', 'first', 'summary.md'), 'SPEAKER_00 sends the plan.');
+      // Notes written when every name was already known.
+      speakers.linkToMeeting('known', 'SPEAKER_00', null, 0);
+      await fs.writeFile(path.join(root, 'meetings', 'known', 'summary.md'), 'Dana sends the plan.');
+      const handlers = new Map<string, TestHandler>();
+      registerIpcHandlers({ handle: (channel: string, handler: TestHandler) => handlers.set(channel, handler) } as unknown as IpcMain, baseServices({
+        libraryRoot: root, meetings, speakers, actionItems,
+        settings: { getAll: () => ({ userSpeakerId: me }), get: () => '', set: () => {} },
+      }));
+      const get = async (id: string) => await handlers.get('meetings:get')!(ipcEvent, id);
+      expect((await get('first')).namesChangedSinceNotes).toBe(false);
+      expect((await get('first')).actionItems[0].isMine).toBe(false);
+
+      await handlers.get('speakers:assign')!(ipcEvent, { meetingId: 'first', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: me });
+      await handlers.get('speakers:assign')!(ipcEvent, { meetingId: 'known', localLabel: 'SPEAKER_00', mode: 'existing', rosterId: me });
+      const first = await get('first');
+      expect(first.namesChangedSinceNotes).toBe(true);
+      expect(first.summaryMd).toBe('Dana sends the plan.');
+      expect(actionItems.listByMeeting('first')[0]).toMatchObject({ ownerName: 'Dana', ownerSpeakerId: me });
+      expect(first.actionItems[0].isMine).toBe(true);
+      expect((await get('known')).namesChangedSinceNotes).toBe(false);
+
+      // Extracting redoes only the tasks: the notes still predate the names.
+      handlers.get('meetings:rerun')!(ipcEvent, 'first', 'extracting');
+      expect(meetings.namesChangedSinceNotes('first')).toBe(true);
+      meetings.updateStatus('first', 'done');
+      // "Notes and action items only" regenerates the notes with the names.
+      handlers.get('meetings:rerun')!(ipcEvent, 'first', 'summarizing');
+      expect(meetings.namesChangedSinceNotes('first')).toBe(false);
+    } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+  });
   it('summary save refreshes the shared cache even with an unchanged fingerprint', async () => {
     const libraryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'mn-save-cache-'));
     try {
@@ -488,7 +552,7 @@ describe('registerIpcHandlers', () => {
         meetings: {
           findById: () => ({ id: 'm1', slug: 'slug' }),
           updateStatus: () => {}, updateStage: () => {},
-          processingHistory: () => [], recordProcessingEvent: () => {},
+          processingHistory: () => [], recordProcessingEvent: () => {}, clearNamesChangedSinceNotes: () => {},
         },
         speakers: { listForMeeting: () => [] },
         actionItems: { listByMeeting: () => [], deleteForMeeting: () => {} },
