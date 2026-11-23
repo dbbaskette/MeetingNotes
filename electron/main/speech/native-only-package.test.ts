@@ -34,6 +34,7 @@ it('keeps the speech-beta comparison app out of the production package', () => {
   expect(beta.files).toContain('dist/**');
   expect(beta.files.filter((entry: string) => entry.startsWith('!') && /beta/.test(entry))).toEqual([]);
   // Nothing the production app loads may reach into the beta sources.
-  const prodEntry = read('electron/main/index.ts') + read('electron/preload/index.ts') + read('electron/renderer/src/main.tsx');
+  const prodEntry = ['index.ts', 'services.ts', 'app-surfaces.ts', 'app-ipc.ts', 'app-window.ts', 'scheme-urls.ts']
+    .map((file) => read(`electron/main/${file}`)).join('') + read('electron/preload/index.ts') + read('electron/renderer/src/main.tsx');
   expect(prodEntry).not.toMatch(/from ['"][^'"]*\/beta\//);
 });
