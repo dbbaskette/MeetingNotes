@@ -76,13 +76,17 @@ export class LibraryWatcher {
     // for size changes that never come), so we do this ourselves and rely on
     // chokidar only for *new* arrivals.
     try {
-      for (const name of fs.readdirSync(watchPath)) {
-        if (!SUPPORTED_EXT.test(name) || isStemArtifact(name)) continue;
-        const full = path.join(watchPath, name);
-        try {
-          const st = fs.statSync(full);
-          if (!st.isFile()) continue;
-        } catch { continue; }
+      const entries = await fs.promises.readdir(watchPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!SUPPORTED_EXT.test(entry.name) || isStemArtifact(entry.name)) continue;
+        const full = path.join(watchPath, entry.name);
+        if (!entry.isFile()) {
+          if (!entry.isSymbolicLink()) continue;
+          try {
+            const st = await fs.promises.stat(full);
+            if (!st.isFile()) continue;
+          } catch { continue; }
+        }
         this.emit(full);
       }
     } catch { /* unreadable dir is reported by chokidar 'error' below */ }

@@ -165,8 +165,7 @@ export class RecordingManager {
           let nl;
           while ((nl = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-            this.handleLine(sessionId, line);
-            try { if (JSON.parse(line).event === 'started') succeed(); } catch { /* diagnostics may be plain text */ }
+            if (this.handleLine(sessionId, line)) succeed();
           }
         };
         proc.stdout.on('data', onChunk);
@@ -324,10 +323,11 @@ export class RecordingManager {
     for (const cb of this.listeners.stateChange) cb(sessionId, state, reason);
   }
 
-  private handleLine(sessionId: string, line: string): void {
-    if (!line.trim().startsWith('{')) return;
+  private handleLine(sessionId: string, line: string): boolean {
+    if (!line.trim().startsWith('{')) return false;
     let payload: Record<string, unknown> | undefined;
-    try { payload = JSON.parse(line); } catch { return; }
+    try { payload = JSON.parse(line); } catch { return false; }
+    if (payload?.event === 'started') return true;
     const stage = CAPTURE_DIAGNOSTIC_STAGES.find((known) => known === payload?.stage);
     if (payload?.event === 'diag' && stage) {
       // Persist only stable numeric capture metadata. Never forward arbitrary
@@ -348,6 +348,7 @@ export class RecordingManager {
       if (payload.peak_db > SILENCE_THRESHOLD_DB) this.armSilenceTimer(sessionId);
       for (const cb of this.listeners.level) cb(sessionId, source, payload.peak_db);
     }
+    return false;
   }
 
   private clearSilenceTimer(entry: SessionEntry): void {

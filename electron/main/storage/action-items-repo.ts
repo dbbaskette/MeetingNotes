@@ -47,13 +47,14 @@ export class ActionItemsRepo {
     if (parsed.due === 'undated') conditions.push('a.due_date IS NULL');
     else if (parsed.due === 'overdue') conditions.push("a.due_date < date('now','localtime')");
     else if (parsed.due === 'soon') conditions.push("a.due_date BETWEEN date('now','localtime') AND date('now','localtime','+7 days')");
-    const join = 'FROM action_items a JOIN meetings m ON m.id=a.meeting_id LEFT JOIN speakers sp ON sp.id=a.owner_speaker_id LEFT JOIN groups g ON g.id=m.group_id';
+    const baseJoin = 'FROM action_items a JOIN meetings m ON m.id=a.meeting_id LEFT JOIN speakers sp ON sp.id=a.owner_speaker_id';
+    const join = `${baseJoin} LEFT JOIN groups g ON g.id=m.group_id`;
     const where = conditions.join(' AND ');
-    const total = (this.db.prepare(`SELECT COUNT(*) AS n ${join} WHERE ${where}`).get(params) as { n: number }).n;
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n ${baseJoin} WHERE ${where}`).get(params) as { n: number }).n;
     const rows = this.db.prepare(`SELECT a.id,a.meeting_id AS meetingId,m.title AS meetingTitle,a.text,
       ${owner} AS ownerName,a.due_date AS dueDate,g.name AS groupName,m.status='processing' AS processing
       ${join} WHERE ${where} ORDER BY a.due_date IS NULL,a.due_date,m.started_at DESC,a.id LIMIT 100 OFFSET @offset`).all({ ...params, offset: parsed.offset }) as (Omit<ActionPage['items'][number], 'processing'> & { processing: number })[];
-    const owners = (this.db.prepare(`SELECT DISTINCT ${owner} AS name ${join} WHERE a.status!='done' AND m.deleted_at IS NULL AND ${owner} IS NOT NULL ORDER BY name COLLATE NOCASE`).all() as { name: string }[]).map(row => row.name);
+    const owners = (this.db.prepare(`SELECT DISTINCT ${owner} AS name ${baseJoin} WHERE a.status!='done' AND m.deleted_at IS NULL AND ${owner} IS NOT NULL ORDER BY name COLLATE NOCASE`).all() as { name: string }[]).map(row => row.name);
     return { items: rows.map(row => ({ ...row, processing: !!row.processing })), total, owners, identified: !!(me.id || me.name) };
   }
   resolveLabels(meetingId: string, names: Record<string, string>): void {
@@ -100,6 +101,31 @@ export class ActionItemsRepo {
   listByMeeting(meetingId: string): ActionItemRow[] {
     const rows = this.db.prepare('SELECT * FROM action_items WHERE meeting_id = ? ORDER BY created_at').all(meetingId) as Record<string, unknown>[];
     return rows.map(row);
+  }
+
+  countByMeeting(meetingId: string): number {
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM action_items WHERE meeting_id = ?').get(meetingId) as { n: number };
+    return r.n;
+  }
+
+  listForMeetings(meetingIds: readonly string[]): Map<string, ActionItemRow[]> {
+    const out = new Map<string, ActionItemRow[]>();
+    if (meetingIds.length === 0) return out;
+    const unique = [...new Set(meetingIds)];
+    for (let i = 0; i < unique.length; i += 500) {
+      const batch = unique.slice(i, i + 500);
+      const placeholders = batch.map(() => '?').join(',');
+      const rows = this.db.prepare(
+        `SELECT * FROM action_items WHERE meeting_id IN (${placeholders}) ORDER BY created_at`,
+      ).all(...batch) as Record<string, unknown>[];
+      for (const r of rows) {
+        const mapped = row(r);
+        const list = out.get(mapped.meetingId);
+        if (list) list.push(mapped);
+        else out.set(mapped.meetingId, [mapped]);
+      }
+    }
+    return out;
   }
 
   countsByMeeting(): Map<string, number> {

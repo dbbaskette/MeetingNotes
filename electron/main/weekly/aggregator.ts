@@ -83,8 +83,10 @@ export class WeeklyAggregator {
     const meetings = this.deps.meetings.listInRange(startIso, endIso);
     const inProgress = end.getTime() > Date.now();
     const totalDurationS = meetings.reduce((s, m) => s + (m.durationS ?? 0), 0);
-    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
-    const openActionGroups = this.collectOpenActions(meetings);
+    const summaries = this.loadSummaries(meetings);
+    const actionsByMeeting = this.loadActionsByMeeting(meetings);
+    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m, summaries.get(m.id) ?? null));
+    const openActionGroups = this.collectOpenActions(meetings, actionsByMeeting);
     const openActionCount = openActionGroups.reduce((s, g) => s + g.items.length, 0);
 
     return {
@@ -168,15 +170,17 @@ export class WeeklyAggregator {
       start.toISOString(),
       end.toISOString(),
     );
-    const inputHash = this.computeInputHash(meetings);
     if (meetings.length === 0) {
       if (opts.force && this.deps.weeklySummaries.get(isoYear, isoWeek)) {
         throw new Error('No source meetings remain for this week. Your saved report has been kept.');
       }
       return { narrative: '', themes: [], decisions: [], generatedAt: '', fromCache: false };
     }
-    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m));
-    const openActionGroups = this.collectOpenActions(meetings);
+    const summaries = this.loadSummaries(meetings);
+    const actionsByMeeting = this.loadActionsByMeeting(meetings);
+    const inputHash = this.computeInputHash(meetings, summaries, actionsByMeeting);
+    const weeklyMeetings = meetings.map((m) => this.buildWeeklyMeeting(m, summaries.get(m.id) ?? null));
+    const openActionGroups = this.collectOpenActions(meetings, actionsByMeeting);
     const snapshot: WeeklySnapshot = {
       isoYear, isoWeek, rangeStart: start.toISOString(), rangeEnd: end.toISOString(),
       totalDurationS: meetings.reduce((sum, m) => sum + (m.durationS ?? 0), 0),
@@ -186,7 +190,7 @@ export class WeeklyAggregator {
       capturedAt: new Date().toISOString(),
     };
     const out = await this.regenerate(
-      isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash, snapshot,
+      isoYear, isoWeek, meetings, weeklyMeetings, openActionGroups, inputHash, snapshot, summaries,
     );
     return {
       narrative: out.narrative,
@@ -229,16 +233,39 @@ export class WeeklyAggregator {
 
   // ──────── Internals ────────
 
-  private buildWeeklyMeeting(m: MeetingRow): WeeklyMeeting {
-    const folder = meetingFolderPath(this.deps.libraryRoot, m.slug);
-    const summaryPath = path.join(folder, 'summary.md');
-    let highlight: string | null = null;
-    if (fs.existsSync(summaryPath)) {
+  private loadSummaries(meetings: readonly MeetingRow[]): Map<string, string | null> {
+    const out = new Map<string, string | null>();
+    for (const m of meetings) {
+      const summaryPath = path.join(meetingFolderPath(this.deps.libraryRoot, m.slug), 'summary.md');
       try {
-        const md = fs.readFileSync(summaryPath, 'utf8');
+        out.set(m.id, fs.readFileSync(summaryPath, 'utf8'));
+      } catch {
+        out.set(m.id, null);
+      }
+    }
+    return out;
+  }
+
+  private loadActionsByMeeting(meetings: readonly MeetingRow[]): Map<string, ActionItemRow[]> {
+    const repo = this.deps.actionItems as ActionItemsRepo & {
+      listForMeetings?: (ids: readonly string[]) => Map<string, ActionItemRow[]>;
+    };
+    if (typeof repo.listForMeetings === 'function') {
+      return repo.listForMeetings(meetings.map((m) => m.id));
+    }
+    const out = new Map<string, ActionItemRow[]>();
+    for (const m of meetings) out.set(m.id, this.deps.actionItems.listByMeeting(m.id));
+    return out;
+  }
+
+  private buildWeeklyMeeting(m: MeetingRow, summaryMd: string | null): WeeklyMeeting {
+    const folder = meetingFolderPath(this.deps.libraryRoot, m.slug);
+    let highlight: string | null = null;
+    if (summaryMd !== null) {
+      try {
         // A multi-sentence recap from the summary's Overview section — enough
         // to recall what the meeting was about without opening it.
-        highlight = extractOverviewRecap(md);
+        highlight = extractOverviewRecap(summaryMd);
       } catch { /* best-effort */ }
     }
     // Speaker count comes from the tiny diarization.meta.json sidecar —
@@ -275,7 +302,10 @@ export class WeeklyAggregator {
     };
   }
 
-  private collectOpenActions(meetings: readonly MeetingRow[]): WeeklyOwnerGroup[] {
+  private collectOpenActions(
+    meetings: readonly MeetingRow[],
+    actionsByMeeting: ReadonlyMap<string, ActionItemRow[]>,
+  ): WeeklyOwnerGroup[] {
     const userSpeakerId = this.deps.settings.get('userSpeakerId');
     // Build a quick speaker_id → display_name lookup to resolve
     // owner labels without N round-trips per item.
@@ -284,7 +314,7 @@ export class WeeklyAggregator {
 
     const byOwner = new Map<string, WeeklyOwnerGroup>();
     for (const m of meetings) {
-      const items = this.deps.actionItems.listByMeeting(m.id);
+      const items = actionsByMeeting.get(m.id) ?? [];
       for (const it of items) {
         if (it.status !== 'open') continue;
         const ownerLabel = this.resolveOwnerLabel(it, speakerName);
@@ -334,20 +364,23 @@ export class WeeklyAggregator {
     return it.ownerName ?? null;
   }
 
-  private computeInputHash(meetings: readonly MeetingRow[]): string {
+  private computeInputHash(
+    meetings: readonly MeetingRow[],
+    summaries: ReadonlyMap<string, string | null> = this.loadSummaries(meetings),
+    actionsByMeeting: ReadonlyMap<string, ActionItemRow[]> = this.loadActionsByMeeting(meetings),
+  ): string {
     const sorted = [...meetings].sort((a, b) => a.id.localeCompare(b.id));
-    const ownerIds = new Set(meetings.flatMap(m => this.deps.actionItems.listByMeeting(m.id)
-      .map(item => item.ownerSpeakerId).filter((id): id is string => id !== null)));
+    const ownerIds = new Set(meetings.flatMap((m) => (actionsByMeeting.get(m.id) ?? [])
+      .map((item) => item.ownerSpeakerId).filter((id): id is string => id !== null)));
     // Hash the actual source content, not incidental timestamp mutations.
     // This catches summary/terminology/history edits and all task/roster paths.
     const payload = JSON.stringify({
-      meetings: sorted.map(m => {
-        let summary: string | null = null;
-        try { summary = fs.readFileSync(path.join(meetingFolderPath(this.deps.libraryRoot, m.slug), 'summary.md'), 'utf8'); } catch { /* absent summary */ }
-        return { id: m.id, title: m.title, startedAt: m.startedAt, durationS: m.durationS,
-          updatedAt: m.updatedAt, summary, actions: this.deps.actionItems.listByMeeting(m.id).sort((a, b) => a.id.localeCompare(b.id)) };
-      }),
-      roster: this.deps.speakers.list().filter(s => ownerIds.has(s.id)).map(s => [s.id, s.displayName]).sort((a, b) => a[0]!.localeCompare(b[0]!)),
+      meetings: sorted.map((m) => ({
+        id: m.id, title: m.title, startedAt: m.startedAt, durationS: m.durationS,
+        updatedAt: m.updatedAt, summary: summaries.get(m.id) ?? null,
+        actions: [...(actionsByMeeting.get(m.id) ?? [])].sort((a, b) => a.id.localeCompare(b.id)),
+      })),
+      roster: this.deps.speakers.list().filter((s) => ownerIds.has(s.id)).map((s) => [s.id, s.displayName]).sort((a, b) => a[0]!.localeCompare(b[0]!)),
       userSpeakerId: this.deps.settings.get('userSpeakerId'),
     });
     return crypto.createHash('sha256').update(payload).digest('hex');
@@ -361,6 +394,7 @@ export class WeeklyAggregator {
     openActionGroups: readonly WeeklyOwnerGroup[],
     inputHash: string,
     snapshot: WeeklySnapshot,
+    summaries: ReadonlyMap<string, string | null>,
   ): Promise<{ narrative: string; themes: WeeklyTheme[]; decisions: string[]; generatedAt: string }> {
     if (this.deps.ensureLLMReady) await this.deps.ensureLLMReady();
 
@@ -369,19 +403,12 @@ export class WeeklyAggregator {
     // material for the narrative; if a meeting hasn't been
     // summarized yet, we pass an empty body and the LLM is told to
     // skip it.
-    const meetingsForPrompt = meetings.map((m) => {
-      const folder = meetingFolderPath(this.deps.libraryRoot, m.slug);
-      const summaryPath = path.join(folder, 'summary.md');
-      const summaryMd = fs.existsSync(summaryPath)
-        ? fs.readFileSync(summaryPath, 'utf8')
-        : null;
-      return {
-        title: m.title,
-        startedAt: m.startedAt ?? m.createdAt,
-        durationS: m.durationS,
-        summaryMd,
-      };
-    });
+    const meetingsForPrompt = meetings.map((m) => ({
+      title: m.title,
+      startedAt: m.startedAt ?? m.createdAt,
+      durationS: m.durationS,
+      summaryMd: summaries.get(m.id) ?? null,
+    }));
 
     const openActions: Array<{ owner: string; text: string; due: string | null }> = [];
     for (const g of openActionGroups) {

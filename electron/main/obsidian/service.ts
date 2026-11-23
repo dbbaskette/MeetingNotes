@@ -345,6 +345,7 @@ export class ObsidianSync {
     after: string,
     next: Snapshot,
     revision: number,
+    verifiedRoot?: string,
   ): void {
     if (Buffer.byteLength(after) > 12_000_000)
       throw new Error(
@@ -354,7 +355,7 @@ export class ObsidianSync {
     this.db
       .prepare('UPDATE obsidian_exports SET pending=? WHERE destination=? AND meeting_id=?')
       .run(JSON.stringify(pending), d.id, row.meeting_id);
-    if (before !== after) atomicWrite(this.root(d), row.filename, before, after);
+    if (before !== after) atomicWrite(verifiedRoot ?? this.root(d), row.filename, before, after);
     this.finalize(d.id, row.meeting_id, pending);
   }
   private async findRenamed(root: string, id: string): Promise<string | undefined> {
@@ -387,8 +388,7 @@ export class ObsidianSync {
     if (this.running || this.stopped || backupIsLocked() || !c?.enabled) return;
     this.running = true;
     try {
-      const d = this.dest(c),
-        root = this.root(d, true);
+      const d = this.dest(c);
       const candidates = this.db
         .prepare(
           `SELECT r.meeting_id AS id,r.revision FROM obsidian_revisions r
@@ -399,10 +399,11 @@ export class ObsidianSync {
         ORDER BY r.meeting_id LIMIT 100`,
         )
         .all(d.id) as { id: string; revision: number }[];
+      if (candidates.length === 0 && !this.checkIndex) return;
+      const root = this.root(d, true);
       for (const candidate of candidates) {
         await pause();
         if (this.stopped || !this.config()?.enabled || this.config()?.destination !== d.id) break;
-        this.root(d);
         let row = this.row(d.id, candidate.id);
         try {
           if (row?.pending) {
@@ -410,7 +411,7 @@ export class ObsidianSync {
             const current = readText(safePath(root, row.filename));
             if (current === p.after) this.finalize(d.id, candidate.id, p);
             else if (current === p.before)
-              this.write(d, row, current, p.after, p.snapshot, p.revision);
+              this.write(d, row, current, p.after, p.snapshot, p.revision, root);
             else
               throw new Error(
                 'File changed after an interrupted write. Restore the prior file or inspect the conflict.',
@@ -463,7 +464,7 @@ export class ObsidianSync {
           if (!previous && current !== null)
             throw new Error('A file already exists at this path; it will not be overwritten');
           const after = previous ? mergeNote(current!, previous, next) : newNote(next);
-          this.write(d, row, current, after, next, candidate.revision);
+          this.write(d, row, current, after, next, candidate.revision, root);
         } catch (error) {
           // Keep the prior snapshot and all user bytes; errors do not fail meetings.
           if (!row) {

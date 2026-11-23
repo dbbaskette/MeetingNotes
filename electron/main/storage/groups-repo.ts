@@ -53,17 +53,45 @@ export class GroupsRepo {
   }
 
   listWithCounts(): GroupListSnapshot {
-    const totals = this.db.prepare(`SELECT COUNT(*) AS all_count,
-      COUNT(CASE WHEN group_id IS NULL THEN 1 END) AS ungrouped_count
-      FROM meetings WHERE deleted_at IS NULL`).get() as { all_count: number; ungrouped_count: number };
-    const statuses = this.db.prepare(`SELECT group_id,
-      SUM(status = 'pending') AS pending,
-      SUM(status IN ('processing', 'awaiting_user')) AS processing,
-      SUM(status = 'failed') AS failed FROM meetings WHERE deleted_at IS NULL GROUP BY group_id
-    `).all() as ({ group_id: string | null } & ActionableCounts)[];
-    const byGroup = new Map(statuses.map(({ group_id, ...counts }) => [group_id, counts]));
-    return { groups: this.list().map(group => ({ ...group, statusCounts: byGroup.get(group.id) })),
-      allCount: totals.all_count, ungroupedCount: totals.ungrouped_count, ungroupedStatus: byGroup.get(null) };
+    const groupRows = this.db.prepare(
+      'SELECT id, name, created_at, updated_at, pinned FROM groups ORDER BY pinned DESC, name COLLATE NOCASE, id',
+    ).all() as Record<string, unknown>[];
+    const counts = this.db.prepare(`
+      SELECT group_id,
+        COUNT(*) AS total,
+        SUM(status = 'pending') AS pending,
+        SUM(status IN ('processing', 'awaiting_user')) AS processing,
+        SUM(status = 'failed') AS failed
+      FROM meetings WHERE deleted_at IS NULL GROUP BY group_id
+    `).all() as ({ group_id: string | null; total: number } & ActionableCounts)[];
+    let allCount = 0;
+    let ungroupedCount = 0;
+    let ungroupedStatus: ActionableCounts | undefined;
+    const byGroup = new Map<string, { total: number; statusCounts: ActionableCounts }>();
+    for (const r of counts) {
+      const statusCounts: ActionableCounts = { pending: r.pending, processing: r.processing, failed: r.failed };
+      allCount += r.total;
+      if (r.group_id === null) {
+        ungroupedCount = r.total;
+        ungroupedStatus = statusCounts;
+      } else {
+        byGroup.set(r.group_id, { total: r.total, statusCounts });
+      }
+    }
+    const groups: MeetingGroup[] = groupRows.map((row) => {
+      const id = row.id as string;
+      const stats = byGroup.get(id);
+      return {
+        id,
+        name: row.name as string,
+        count: stats?.total ?? 0,
+        createdAt: row.created_at as string,
+        updatedAt: row.updated_at as string,
+        pinned: row.pinned === 1,
+        statusCounts: stats?.statusCounts,
+      };
+    });
+    return { groups, allCount, ungroupedCount, ungroupedStatus };
   }
 
   exists(id: string): boolean {
