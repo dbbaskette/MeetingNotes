@@ -67,7 +67,18 @@ export async function verifyPackageSmoke(root: string, win: BrowserWindow, packa
     : !['Permissions needed', 'Microphone', 'System audio', 'Grant'].every(label => state.text.includes(label))) {
     throw new Error('Packaged view does not match the real microphone permission state');
   }
-  const png = (await win.webContents.capturePage()).toPNG();
+  // With GPU rendering disabled, Chromium first tries its software GL backend
+  // and, when that fails to start, restarts the GPU process in software
+  // compositing mode. A capture requested during that restart is rejected
+  // (UnknownVizError) although the page has painted. Startup became fast
+  // enough in 1.23 to land in that window, so wait the restart out.
+  let png: Buffer | null = null;
+  let captureError: unknown = null;
+  for (let attempt = 0; attempt < 40 && !png; attempt++) {
+    try { png = (await win.webContents.capturePage()).toPNG(); }
+    catch (error) { captureError = error; await new Promise(resolve => setTimeout(resolve, 250)); }
+  }
+  if (!png) throw captureError ?? new Error('Packaged render could not be captured');
   if (png.byteLength < 10000) throw new Error('Packaged render screenshot is unexpectedly empty');
   fs.writeFileSync(path.join(root, 'render.png'), png);
   fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ packaged, view, softwareRendering: process.argv.includes('--disable-gpu'), ...state }, null, 2));
