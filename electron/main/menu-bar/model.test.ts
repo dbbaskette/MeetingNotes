@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMenuBarItems, formatElapsed, menuBarStatus, menuBarTitle, type MenuBarState } from './model.js';
+import { buildMenuBarItems, formatElapsed, menuBarSilenceStatus, menuBarStatus, menuBarTitle, type MenuBarState } from './model.js';
 
 const idle: MenuBarState = { recording: null, processingTitle: null, queued: 0, paused: false };
 const enabled = (state: MenuBarState): Record<string, boolean> =>
@@ -52,6 +52,36 @@ describe('buildMenuBarItems', () => {
       buildMenuBarItems(state, 0).flatMap((i) => (i.type === 'action' && i.action === 'toggle-queue' ? [i.label] : []))[0];
     expect(label(idle)).toBe('Pause Processing');
     expect(label({ ...idle, paused: true })).toBe('Resume Processing');
+  });
+
+  it('while audio is silent, shows the pending stop and puts Continue and Stop now first', () => {
+    const state: MenuBarState = { ...idle, recording: { label: 'Zoom', startedAt: 0 }, silencePrompt: { autoStopAt: 345_000 } };
+    const items = buildMenuBarItems(state, 300_000);
+    expect(items.slice(0, 5)).toEqual([
+      { type: 'status', label: 'Recording Zoom · 5:00' },
+      { type: 'status', label: 'Audio stopped — auto-stop in 0:45' },
+      { type: 'action', action: 'continue-silence', label: 'Continue recording', enabled: true },
+      { type: 'action', action: 'stop', label: 'Stop now', enabled: true },
+      { type: 'separator' },
+    ]);
+    // One way to stop, not two.
+    expect(items.filter((item) => item.type === 'action' && item.action === 'stop')).toHaveLength(1);
+    expect(enabled(state)).toMatchObject({ 'record-system': false, 'record-choose': false, 'open-window': true });
+    // The title is redrawn every second, so it carries the live countdown.
+    expect(menuBarTitle(state, 300_000)).toBe(' 5:00 · stops in 0:45');
+    expect(menuBarTitle(state, 344_000)).toBe(' 5:44 · stops in 0:01');
+    expect(menuBarTitle(state, 400_000)).toBe(' 6:40 · stops in 0:00');
+  });
+
+  it('offers no silence answers without a pending prompt or without a recording', () => {
+    const recording: MenuBarState = { ...idle, recording: { label: 'Zoom', startedAt: 0 } };
+    for (const state of [idle, recording, { ...recording, silencePrompt: null }, { ...idle, silencePrompt: { autoStopAt: 9_000 } }]) {
+      expect(menuBarSilenceStatus(state, 0)).toBeNull();
+      expect(enabled(state)).not.toHaveProperty('continue-silence');
+      expect(buildMenuBarItems(state, 0).some((item) => item.type === 'action' && item.label === 'Stop Recording')).toBe(true);
+    }
+    expect(menuBarTitle(recording, 65_000)).toBe(' 1:05');
+    expect(menuBarTitle({ ...idle, silencePrompt: { autoStopAt: 9_000 } }, 0)).toBe('');
   });
 
   it('always offers the window and quit', () => {

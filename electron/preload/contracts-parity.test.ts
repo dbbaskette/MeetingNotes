@@ -44,6 +44,36 @@ describe('preload IPC_CHANNELS parity', () => {
     expect(invoke).toHaveBeenLastCalledWith('meetings:list-ids', 'done');
   });
 
+  it('bridges the silence prompt: Continue, the pending state, and both push events', async () => {
+    const invoke = vi.fn(async () => null);
+    const listeners = new Map<string, (event: unknown, payload: unknown) => void>();
+    const on = vi.fn((channel: string, listener: (event: unknown, payload: unknown) => void) => { listeners.set(channel, listener); });
+    const off = vi.fn((channel: string, listener: unknown) => { if (listeners.get(channel) === listener) listeners.delete(channel); });
+    let api: MeetingNotesApi | undefined;
+    const compiled = ts.transpileModule(preloadSrc, {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    runInNewContext(compiled, { exports: {}, require: () => ({ ipcRenderer: { invoke, on, off }, contextBridge: {
+      exposeInMainWorld: (_key: string, value: MeetingNotesApi) => { api = value; },
+    } }) });
+    await api!.recording.continueSilence('a1b2c3d4');
+    expect(invoke).toHaveBeenLastCalledWith('recording:continue-silence', 'a1b2c3d4');
+    expect(await api!.recording.silenceState()).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith('recording:silence-state');
+
+    const prompt = { sessionId: 'a1b2c3d4', silentForMs: 120_000, autoStopAtMs: 1_800_000_060_000 };
+    const cleared = { sessionId: 'a1b2c3d4', reason: 'continued' as const };
+    const onPrompt = vi.fn(), onCleared = vi.fn();
+    const offPrompt = api!.recording.onSilencePrompt(onPrompt), offCleared = api!.recording.onSilenceCleared(onCleared);
+    listeners.get('recording:silence-prompt')!({}, prompt);
+    listeners.get('recording:silence-cleared')!({}, cleared);
+    // The callback gets the payload only, never the IPC event.
+    expect(onPrompt.mock.calls).toEqual([[prompt]]);
+    expect(onCleared.mock.calls).toEqual([[cleared]]);
+    offPrompt(); offCleared();
+    expect(listeners.size).toBe(0);
+  });
+
   it('exposes the paginated library channels', () => {
     expect(PRELOAD_CHANNELS).toMatchObject({
       meetingsListPage: 'meetings:list-page',

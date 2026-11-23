@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { SPEAKER_COLOR_COUNT, speakerFill, speakerText } from './tokens';
 
 const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
 type RGB = [number, number, number];
@@ -35,9 +36,64 @@ describe('Golden Gate appearance tokens', () => {
         });
       }
     }
-    it(`${theme}: filled accent keeps white labels readable`, () => {
-      expect(contrast([255, 255, 255], color('brand-solid'))).toBeGreaterThanOrEqual(4.5);
-      expect(contrast([255, 255, 255], [112, 66, 190])).toBeGreaterThanOrEqual(4.5);
+    const WHITE: RGB = [255, 255, 255];
+    const PLANES = ['surface', 'surface-sunken', 'content', 'chrome', 'selection'];
+    // Every filled control in the app sits under a white label (#296): the
+    // primary button gradient, the speaker-ID "Continue" call to action, and
+    // destructive confirms.
+    for (const fill of ['brand-solid', 'brand-solid-end', 'status-warn-solid', 'danger-solid']) {
+      it(`${theme}: white labels are readable on ${fill}`, () => {
+        expect(contrast(WHITE, color(fill))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+    it(`${theme}: the "running long" label is readable on the active stage chip`, () => {
+      expect(contrast(color('status-warn-on-solid'), color('brand-solid'))).toBeGreaterThanOrEqual(4.5);
+    });
+    // Tinted status blocks: the line diff (added / removed lines), warning
+    // banners and the silence prompt put status text on its own tint.
+    for (const [text, tint] of [['status-ok', 'status-ok-bg'], ['danger-text', 'danger-bg'], ['status-warn-text', 'status-warn-bg']] as const) {
+      it(`${theme}: ${text} is readable on ${tint}`, () => {
+        expect(contrast(color(text), color(tint))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+    for (let n = 1; n <= SPEAKER_COLOR_COUNT; n++) {
+      it(`${theme}: speaker ${n} avatar keeps white initials readable`, () => {
+        expect(contrast(WHITE, color(`speaker-${n}`))).toBeGreaterThanOrEqual(4.5);
+      });
+      for (const plane of PLANES) {
+        it(`${theme}: speaker ${n} name is readable on ${plane}`, () => {
+          expect(contrast(color(`speaker-${n}-text`), color(plane))).toBeGreaterThanOrEqual(4.5);
+        });
+      }
+    }
+  }
+});
+
+describe('renderer source colors', () => {
+  it('speaker helpers resolve to the checked CSS tokens and wrap around', () => {
+    expect(speakerFill(0)).toBe('rgb(var(--speaker-1))');
+    expect(speakerText(SPEAKER_COLOR_COUNT)).toBe('rgb(var(--speaker-1-text))');
+    expect(speakerFill(SPEAKER_COLOR_COUNT + 2)).toBe('rgb(var(--speaker-3))');
+  });
+
+  // Tokens only help if components use them. These patterns are the ones
+  // that produced unreadable controls: pastel dark-mode text tokens used as
+  // a button fill under white, the light amber indicator under white, and
+  // raw palette colors that ignore the appearance.
+  const sources = Object.entries(import.meta.glob('../**/*.tsx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>)
+    .filter(([file]) => !file.includes('/beta/'));
+  const banned: [RegExp, string][] = [
+    [/from-brand-indigo|to-brand-violet/, 'gradient built from text tokens; use btn-primary / brand-fill'],
+    [/bg-status-warn\b(?![A-Za-z/-])[^'"`]*text-white|text-white[^'"`]*bg-status-warn\b(?![A-Za-z/-])/, 'white on the amber indicator; use bg-status-warnSolid'],
+    [/\b(?:bg|text|border)-(?:gray|emerald|amber|red|green|blue|slate|zinc|stone|yellow|orange|sky)-\d{2,3}\b/, 'raw Tailwind palette color; use a theme token'],
+    [/linear-gradient\(|#[0-9a-fA-F]{6}\b/, 'hardcoded color; use a theme token'],
+    [/\b(bg-[a-z-]+-solid)\b[^'"`]*hover:\1(?![\w/-])/, 'hover state identical to the resting state'],
+  ];
+  it('finds component sources to check', () => { expect(sources.length).toBeGreaterThan(40); });
+  for (const [pattern, why] of banned) {
+    it(`no component uses ${why}`, () => {
+      const offenders = sources.filter(([, text]) => pattern.test(text)).map(([file]) => file);
+      expect(offenders).toEqual([]);
     });
   }
 });

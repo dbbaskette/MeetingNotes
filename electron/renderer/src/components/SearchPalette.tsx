@@ -162,6 +162,10 @@ export function SearchPalette({
         <div className="px-4 py-2"><SearchFilters facets={facets} onChange={setFacets} query={q} onQuery={setQ}/>{completion&&<p role="status" className="text-xs text-status-warnText">{completion}</p>}</div>
         {asking !== null && <AskAnswer question={asking} onBack={() => { setAsking(null); inputRef.current?.focus(); }}
           onOpen={(source) => { onOpenMeeting({ meetingId: source.meetingId, title: source.title, ...(source.startS !== null ? { seekSeconds: source.startS } : {}) }); onClose(); }} />}
+        {/* Announce result counts: the listbox updates silently for screen readers. */}
+        <p role="status" aria-live="polite" className="sr-only">
+          {asking !== null || !q.trim() ? '' : loading ? 'Searching…' : error ? 'Search failed.' : `${results.length} ${results.length === 1 ? 'meeting' : 'meetings'} found.`}
+        </p>
         <div id="meeting-search-results" role="listbox" aria-label="Matching meetings" hidden={asking !== null} className="max-h-[60vh] overflow-y-auto">
           {(() => {
             const view = paletteSearchView({ query: q || (Object.keys(facets).length ? 'filtered meetings' : ''), loading, error, results });
@@ -236,7 +240,10 @@ function ResultRow({
   return (
     <div
       ref={rowRef} id={id} role="option" aria-selected={active}
-      onMouseMove={onHover}
+      // Scrolling the list under a resting cursor also fires mousemove (with
+      // zero movement); only a real pointer move may take the selection from
+      // the arrow keys (#298).
+      onMouseMove={(event) => { if (event.movementX !== 0 || event.movementY !== 0) onHover(); }}
       onClick={onClick}
       className={`px-4 py-3 cursor-pointer border-b border-surface-border/50 last:border-0
         ${active ? 'bg-brand-indigo/5' : 'hover:bg-surface-sunken'}`}

@@ -27,7 +27,7 @@ import type { NativeAppDetector } from '../meeting-detector/native-app-detector.
 import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
 import type { RosterService } from '../speakers/roster-service.js';
 import { VoiceProfiles } from '../speakers/voice-profiles.js';
-import { ActionFilterSchema, briefSection, resolveSpeakerLabels } from '../../shared/productivity.js';
+import { ActionFilterSchema, briefPrepSections, briefSection, resolveSpeakerLabels } from '../../shared/productivity.js';
 import type { Pipeline } from '../pipeline/pipeline.js';
 import type { Exporter } from '../exporters/interface.js';
 import { meetingFolderPath } from '../storage/meeting-folder.js';
@@ -330,7 +330,8 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
       const notes = await s.artifactCache.readText(path.join(meetingFolderPath(s.libraryRoot, row.slug), 'summary.md'));
       return { id: row.id, title: row.title, startedAt: row.startedAt, missingNotes: !notes,
         decisions: briefSection(notes ?? '', 'Decisions'), questions: briefSection(notes ?? '', 'Open Questions'),
-        overview: briefSection(notes ?? '', 'Overview').join(' ').slice(0, 1500) };
+        overview: briefSection(notes ?? '', 'Overview').join(' ').slice(0, 1500),
+        prep: briefPrepSections(notes ?? '') };
     }));
     const actions = s.actionItems.live({ owner: 'all', groupId: id }, { id: null, name: null });
     return { meetings, actions: actions.items, openActionCount: actions.total };
@@ -701,6 +702,13 @@ export function registerIpcHandlers(ipc: IpcMain, s: IpcServices): void {
     if (typeof sessionId !== 'string') throw new Error('sessionId required');
     return s.recordingManager.state(sessionId);
   });
+  // Silence prompt (#305). The prompt and its clearing are broadcast from
+  // index.ts; these answer it and let a late window catch up.
+  ipc.handle(IPC_CHANNELS.recordingContinueSilence, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') throw new Error('sessionId required');
+    s.recordingManager.continueSilence(sessionId);
+  });
+  ipc.handle(IPC_CHANNELS.recordingSilenceState, () => s.recordingManager.silenceState());
 
   ipc.handle(IPC_CHANNELS.recoveryList, (event, requestId: unknown) => {
     if (requestId !== undefined && (typeof requestId !== 'string' || requestId.length > 100)) {

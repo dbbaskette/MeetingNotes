@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb } from './db.js';
-import { SettingsRepo, DEFAULT_SETTINGS, normalizeAutoDetectMeetings } from './settings-repo.js';
+import { SettingsRepo, DEFAULT_SETTINGS, normalizeAutoDetectMeetings, normalizeSilenceSeconds } from './settings-repo.js';
 
 let repo: SettingsRepo;
 beforeEach(() => {
@@ -69,6 +69,38 @@ describe('SettingsRepo', () => {
     expect(repo.get('disableThinking')).toBe(false);
     repo.set('reasoningEffort', 'none');
     expect(repo.get('disableThinking')).toBe(true);
+  });
+});
+
+describe('silence prompt settings', () => {
+  it('defaults to prompting after two minutes with a one-minute countdown', () => {
+    expect(repo.get('autoStopOnSilence')).toBe(true);
+    expect(repo.get('silencePromptAfterS')).toBe(120);
+    expect(repo.get('silenceCountdownS')).toBe(60);
+    expect(repo.getAll()).toMatchObject({ autoStopOnSilence: true, silencePromptAfterS: 120, silenceCountdownS: 60 });
+  });
+  it('round-trips a change, and reads an out-of-range or malformed row as a usable value', () => {
+    repo.set('autoStopOnSilence', false);
+    repo.set('silencePromptAfterS', 300);
+    repo.set('silenceCountdownS', 30);
+    expect(repo.getAll()).toMatchObject({ autoStopOnSilence: false, silencePromptAfterS: 300, silenceCountdownS: 30 });
+    repo.set('silencePromptAfterS', 1);
+    repo.set('silenceCountdownS', 'soon' as unknown as number);
+    repo.set('autoStopOnSilence', 'no' as unknown as boolean);
+    expect(repo.get('silencePromptAfterS')).toBe(30);
+    expect(repo.get('silenceCountdownS')).toBe(60);
+    expect(repo.get('autoStopOnSilence')).toBe(true);
+    expect(repo.getAll()).toMatchObject({ autoStopOnSilence: true, silencePromptAfterS: 30, silenceCountdownS: 60 });
+  });
+  it('normalizes a stored duration to whole seconds inside its range', () => {
+    expect(normalizeSilenceSeconds('silencePromptAfterS', 5)).toBe(30);
+    expect(normalizeSilenceSeconds('silencePromptAfterS', 99_999)).toBe(1800);
+    expect(normalizeSilenceSeconds('silencePromptAfterS', 90.4)).toBe(90);
+    expect(normalizeSilenceSeconds('silencePromptAfterS', '300')).toBe(120);
+    expect(normalizeSilenceSeconds('silenceCountdownS', 1)).toBe(10);
+    expect(normalizeSilenceSeconds('silenceCountdownS', 9000)).toBe(600);
+    expect(normalizeSilenceSeconds('silenceCountdownS', Number.NaN)).toBe(60);
+    expect(normalizeSilenceSeconds('silenceCountdownS', null)).toBe(60);
   });
 });
 

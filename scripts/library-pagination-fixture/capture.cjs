@@ -11,7 +11,7 @@ app.whenReady().then(async()=>{
   const settle=()=>run('new Promise(r=>setTimeout(r,80))');
   const until=async expression=>{for(let i=0;i<100;i++){if(await run(expression))return;await new Promise(r=>setTimeout(r,30));}throw new Error(expression);};
   const click=async text=>{await run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent===${JSON.stringify(text)}).click()`);await settle();};
-  const stop=async()=>{await click('■ Stop');await click('Confirm stop');};
+  const stop=async()=>{await click('Stop');await click('Confirm stop');};
   await win.loadURL(base);await until('document.body.innerText.includes("Recording: Synthetic app")');await settle();
   assert.equal(await run('document.querySelectorAll("[aria-label^=\\"Select SPEAKER_\\"]").length'),3,'Compact inline roster is capped');
   assert(await run('!!document.querySelector("a[href=\\"#meeting-speakers\\"]")'));
@@ -24,12 +24,12 @@ app.whenReady().then(async()=>{
   await click('Reset live fixture');await run('window.fixture.state="recording"');await stop();
   assert.equal(await run('window.fixture.stopped'),1,'Confirmed Stop clears controls exactly once');
   await click('Reset live fixture');await run('window.fixture.state="recording";window.fixture.holdStop=true');
-  await click('■ Stop');await click('Confirm stop');await click('Unmount live fixture');
+  await click('Stop');await click('Confirm stop');await click('Unmount live fixture');
   await run('window.fixture.resolveStop()');await settle();assert.equal(await run('window.fixture.stopped'),1,'Unmounted Stop never invokes stale callbacks');
   assert(await run('document.body.innerText.includes("A processing service is not ready")'));
   assert.equal(await run('document.querySelector("details pre").checkVisibility()'),false,'Raw errors remain behind disclosure');
-  await click('Retry ↻');assert(await run('document.body.innerText.includes("Could not retry")'));
-  await run('window.fixture.failRetry=false');await click('Retry ↻');assert.equal(await run('window.fixture.retries'),2);
+  await click('Retry');assert(await run('document.body.innerText.includes("Could not retry")'));
+  await run('window.fixture.failRetry=false');await click('Retry');assert.equal(await run('window.fixture.retries'),2);
   await run('Array.from(document.querySelectorAll("summary")).find(s=>s.textContent==="Technical details and retry history").click()');await settle();
   assert(await run('document.body.innerText.includes("Synthetic historical failure")'));
   const startsBefore=await run('window.fixture.starts.length');

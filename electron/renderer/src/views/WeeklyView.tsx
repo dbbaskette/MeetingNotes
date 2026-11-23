@@ -10,11 +10,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
-import { AppNav, type NavTarget } from '../components/AppNav';
+import type { NavTarget } from '../components/AppNav';
+import { AppHeader } from '../components/AppHeader';
 import { WeeklyTaskRow } from '../components/WeeklyTaskRow';
 import { weekToInputValue, parseWeekInput, compareIsoWeeks } from '../lib/week-input';
 import { isContextOverflowError } from '../lib/context-overflow';
-import logoUrl from '../assets/logo.png';
 import { getIsoWeek as currentIsoWeek, addWeeks as shiftWeek } from '../../../shared/local-week';
 import type { WeeklyStructured, WeeklyNarrative as WeeklyNarrativeResult } from '../../../main/ipc/contracts';
 
@@ -216,18 +216,14 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
     <div className="app-view h-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 flex flex-col">
       {/* Header — pinned via shrink-0; only the content region below scrolls,
           matching the Library page's top bar. */}
-      <header className="app-chrome shrink-0 flex items-center gap-4 mb-8">
-        <div className="flex items-center gap-2.5">
-          <img src={logoUrl} alt="MeetingNotes" className="h-9 w-auto" />
-          <h1 className="text-lg font-semibold tracking-tight">MeetingNotes</h1>
-        </div>
-        <AppNav key={active ? 'shown' : 'hidden'} active="weekly" onNav={onNav} />
+      <AppHeader active="weekly" onNav={onNav} navKey={active ? 'shown' : 'hidden'}>
         <div className="flex-1" />
         <div className="flex items-center gap-1">
           <button
             onClick={onPrev}
             className="w-8 h-8 rounded-md hover:bg-surface-sunken text-ink-muted flex items-center justify-center"
             title="Previous week"
+            aria-label="Previous week"
           >
             <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M15 18l-6-6 6-6" />
@@ -261,6 +257,7 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
               isCurrentWeek ? 'text-ink-muted opacity-30 cursor-not-allowed' : 'text-ink-muted hover:bg-surface-sunken'
             }`}
             title="Next week"
+            aria-label="Next week"
           >
             <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2}>
               <path d="M9 18l6-6-6-6" />
@@ -277,14 +274,14 @@ export function WeeklyView({ active=true, onOpenMeeting, onNav }: Props): JSX.El
             <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
           </svg>
         </button>
-      </header>
+      </AppHeader>
 
       {/* Scroll region — content scrolls under the pinned header. The
           negative right margin + right padding insets the scrollbar so it
           doesn't crowd the cards (same trick as the Library list). */}
       <div className="flex-1 min-h-0 overflow-y-auto -mr-2 pr-2 pb-8">
       {structState === 'error' && (
-        <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-xl p-4 mb-6 text-sm">
+        <div role="alert" className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-xl p-4 mb-6 text-sm">
           Couldn&apos;t load this week: {errorMsg ?? 'unknown error'}
         </div>
       )}
@@ -501,15 +498,13 @@ function WeeklyBody({
                   Each item also repeats the owner badge — the header avatar
                   is below the fold once you scroll, the per-row one isn't. */}
               <div className="flex flex-col gap-6">
-                <div className="flex flex-wrap gap-2 text-xs">{(['all','mine','overdue','week'] as const).map(filter=><button key={filter} aria-pressed={filter===taskFilter} onClick={()=>setTaskFilter(filter)} className={`rounded-full border px-3 py-1 ${taskFilter===filter?'border-brand-indigo text-brand-indigo':'border-surface-border text-ink-muted'}`}>{filter==='week'?'Due this week':filter==='mine'?'Mine':filter==='all'?'All open':filter}</button>)}</div>
+                <div className="flex flex-wrap gap-2 text-xs">{(['all','mine','overdue','week'] as const).map(filter=><button key={filter} aria-pressed={filter===taskFilter} onClick={()=>setTaskFilter(filter)} className={`rounded-full border px-3 py-1 ${taskFilter===filter?'border-brand-indigo text-brand-indigo':'border-surface-border text-ink-muted'}`}>{filter==='week'?'Due this week':filter==='mine'?'Mine':filter==='all'?'All open':'Overdue'}</button>)}</div>
                 {filteredGroups.length===0&&<p className="text-sm text-ink-muted">No open actions match this filter.</p>}
                 {filteredGroups.map((group, gi) => {
                   const initials = group.isYou
                     ? 'YOU'
                     : group.ownerLabel.split(/\s+/).map((s) => s[0]).join('').slice(0, 2).toUpperCase();
-                  const badgeStyle: React.CSSProperties = group.isYou
-                    ? { background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#ffffff' }
-                    : { backgroundColor: '#f5f5f4', color: '#44403c' };
+                  const badgeClass = group.isYou ? 'brand-fill text-white' : 'bg-surface-sunken text-ink-soft';
                   return (
                     <div
                       key={gi}
@@ -522,8 +517,7 @@ function WeeklyBody({
                       <div className="px-5 pt-4 pb-2">
                         <div className="flex items-center gap-2.5">
                           <div
-                            className="w-6 h-6 rounded-full text-[10px] font-semibold flex items-center justify-center shrink-0"
-                            style={badgeStyle}
+                            className={`w-6 h-6 rounded-full text-[10px] font-semibold flex items-center justify-center shrink-0 ${badgeClass}`}
                           >
                             {initials}
                           </div>
@@ -613,8 +607,7 @@ function NarrativeCard({
   return (
     <div className="report-section bg-surface rounded-xl shadow-card border border-surface-border p-6">
       <div className="flex items-center gap-2 mb-4">
-        <div className="w-1.5 h-1.5 rounded-full"
-          style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }} />
+        <div className="brand-fill w-1.5 h-1.5 rounded-full" />
         <div className="report-heading text-ink-muted">
           Overview
         </div>
@@ -661,7 +654,7 @@ function NarrativeCard({
       )}
 
       {!inProgress && narrState === 'error' && (
-        <div className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-lg p-3 text-sm">
+        <div role="alert" className="bg-status-warnBg text-status-warnText border border-status-warn/30 rounded-lg p-3 text-sm">
           <div className="font-medium mb-1">Couldn&apos;t generate the report.</div>
           <div className="text-xs">{narrError ?? 'unknown error'}</div>
           <div className="text-xs mt-2 text-ink-muted">

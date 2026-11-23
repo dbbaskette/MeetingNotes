@@ -50,7 +50,8 @@ export function VirtualGroupRows({items, scrollRef, renderRow}: {
   const indexes = retainedRowIndexes({items, start: window.start, end: window.end, retainedIds: focused ? [...dialogs, focused] : dialogs});
   return <RowDialogRetention.Provider value={retainDialog}>
     <div ref={listRef} className="relative" style={{height: window.totalHeight}}>
-      {indexes.map(index => { const meeting = items[index]!; return <div key={meeting.id} className="absolute left-0 right-0" style={{top: index*72, height: 72, paddingBottom: 8}}
+      {indexes.map(index => { const meeting = items[index]!; return <div key={meeting.id} data-row-id={meeting.id}
+        className={`absolute left-0 right-0 ${focused === meeting.id ? 'ring-1 ring-brand-indigo/40 rounded-lg z-[1]' : ''}`} style={{top: index*72, height: 72, paddingBottom: 8}}
         onFocusCapture={() => {focusRevision.current++; setFocused(meeting.id);}}
         onBlurCapture={() => {const revision = ++focusRevision.current; queueMicrotask(() => {if (revision === focusRevision.current) setFocused(null);});}}>
         {renderRow(meeting)}

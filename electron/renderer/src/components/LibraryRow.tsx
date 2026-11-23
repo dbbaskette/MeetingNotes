@@ -20,7 +20,7 @@
 // the parent would defeat the memo.
 import { memo } from 'react';
 import { processingDiagnosis } from '../../../shared/processing-recovery';
-import { colorForSpeakerIndex } from '../theme/tokens';
+import { speakerFill } from '../theme/tokens';
 import { useElapsed, fmtElapsed } from '../lib/useElapsed';
 import { stepIndexFor, TOTAL_USER_STEPS } from '../lib/pipeline-steps';
 import { MeetingRowMenu } from './MeetingRowMenu';
@@ -245,7 +245,7 @@ function AvatarStack({ meeting }: { meeting: Meeting }): JSX.Element {
       {meeting.speakers.slice(0, 4).map((sp, i) => (
         <div
           key={i}
-          style={{ background: colorForSpeakerIndex(i), marginLeft: i === 0 ? 0 : -6 }}
+          style={{ background: speakerFill(i), marginLeft: i === 0 ? 0 : -6 }}
           className="w-7 h-7 rounded-full text-white text-xs font-bold flex items-center justify-center border-2 border-surface"
         >
           {(sp.displayName?.[0] ?? '?').toUpperCase()}

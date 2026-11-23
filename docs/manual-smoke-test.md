@@ -50,7 +50,7 @@ Run before merging significant feature work or releasing. ~10 min total.
 - [ ] Pick an app (e.g., Music or QuickTime playing audio).
 - [ ] LiveRecordingRow appears at the top of the library: red dot pulse, "Recording: <app name>", elapsed timer ticking, VU meter responds to audio.
 - [ ] Talk into the mic for ~10 seconds.
-- [ ] Click ■ Stop. Row disappears. File appears in `~/Music/MeetingNotes/recording-YYYYMMDD-HHMM-<sessionId>.m4a`.
+- [ ] Click Stop, then Confirm stop. Row disappears. File appears in `~/Music/MeetingNotes/recording-YYYYMMDD-HHMM-<sessionId>.m4a`.
 - [ ] Within ~1s, an Inbox row appears for the new recording.
 - [ ] Open the file in QuickTime / `afplay` — both your voice and the app's audio are audible, mixed mono.
 

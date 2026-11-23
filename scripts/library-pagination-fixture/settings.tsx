@@ -28,9 +28,10 @@ window.api = {
 } as any;
 const {SettingsView} = await import('../../electron/renderer/src/views/SettingsView');
 const {NotesHistory} = await import('../../electron/renderer/src/components/NotesHistory');
+const {ToastHost} = await import('../../electron/renderer/src/components/Toasts');
 const root = createRoot(document.getElementById('root')!);
 const {OnboardingView} = await import('../../electron/renderer/src/views/OnboardingView');
-(window as any).showOnboarding = () => root.render(<OnboardingView onFinished={() => {}}/>);
-root.render(<div style={{height: '100vh'}}>
+(window as any).showOnboarding = () => root.render(<ToastHost><OnboardingView onFinished={() => {}}/></ToastHost>);
+root.render(<ToastHost><div style={{height: '100vh'}}>
   <SettingsView onNav={() => {}}/><div style={{position: 'fixed',bottom: 8,right: 8}}><NotesHistory meetingId="m" disabled={false} onRestored={async summary => {fixture.restored=summary;}}/></div>
-</div>);
+</div></ToastHost>);

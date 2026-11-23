@@ -93,19 +93,20 @@ export function WeeklyTaskRow({
         <span className={`text-xs rounded-full px-2 py-1 ${dueLabel.tier==='overdue'?'bg-danger-bg text-danger-text':dueLabel.tier==='this-week'?'bg-status-warnBg text-status-warnText':'text-ink-muted'}`}>{busy ? 'Saving…' : dueLabel.label}</span>
       </div>
       {!savedAt && <div className="flex flex-wrap items-center gap-2 text-xs">
-        <label>
+        <label className="inline-flex items-center gap-1.5">
           Owner{' '}
           <input
             value={owner}
             disabled={busy}
             onChange={(event) => setOwner(event.target.value)}
             maxLength={200}
-            className="rounded border border-surface-border px-2 py-1 max-w-40"
+            className="input-sm max-w-40"
           />
         </label>
-        <label>
+        <label className="inline-flex items-center gap-1.5">
           Due{' '}
           <input
+            className="input-sm"
             type="date"
             value={due}
             disabled={busy}
@@ -120,11 +121,11 @@ export function WeeklyTaskRow({
               ...(due !== (item.dueDate ?? '') ? { dueDate: due || null } : {}),
             })
           }
-          className="text-brand-indigo disabled:opacity-40"
+          className="btn-secondary"
         >
           Save
         </button>
-        <button disabled={busy} onClick={snooze}>
+        <button className="btn-secondary" disabled={busy} onClick={snooze}>
           Snooze 1 week
         </button>
       </div>}

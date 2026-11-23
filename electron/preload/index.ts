@@ -16,6 +16,8 @@ interface RecoveryItem {
   files: { name: string; role: 'combined' | 'microphone' | 'app'; sizeBytes: number }[];
 }
 let recoveryRequest = 0;
+type SilencePrompt = { sessionId: string; silentForMs: number; autoStopAtMs: number };
+type SilenceCleared = { sessionId: string; reason: 'audio-resumed' | 'continued' | 'stopped' | 'auto-stopped' };
 
 // Keep these structural types local: importing main contracts makes the CJS
 // compiler emit main-process modules again.
@@ -108,9 +110,13 @@ const IPC_CHANNELS = {
   recordingState: 'recording:state',
   recordingTest: 'recording:test',
   recordingActive: 'recording:active',
+  recordingContinueSilence: 'recording:continue-silence',
+  recordingSilenceState: 'recording:silence-state',
   setupHealth: 'setup:health',
   recordingLevelEvent: 'recording:level',
   recordingStateEvent: 'recording:state-change',
+  recordingSilencePromptEvent: 'recording:silence-prompt',
+  recordingSilenceClearedEvent: 'recording:silence-cleared',
   recoveryList: 'recovery:list',
   recoveryItem: 'recovery:item',
   recoveryRecover: 'recovery:recover',
@@ -391,6 +397,27 @@ const api = {
       const wrapped = (_e: unknown, payload: { sessionId: string; state: string; reason?: string }): void => cb(payload);
       ipcRenderer.on(IPC_CHANNELS.recordingStateEvent, wrapped);
       return () => ipcRenderer.off(IPC_CHANNELS.recordingStateEvent, wrapped);
+    },
+    /** Answer the silence prompt with Continue: recording carries on and the
+     *  next prompt waits longer. Harmless when no prompt is pending. */
+    continueSilence: (sessionId: string) =>
+      ipcRenderer.invoke(IPC_CHANNELS.recordingContinueSilence, sessionId) as Promise<void>,
+    /** The silence prompt that is waiting for an answer, or null. Call on
+     *  mount: a window opened mid-countdown missed the push event. */
+    silenceState: () => ipcRenderer.invoke(IPC_CHANNELS.recordingSilenceState) as Promise<SilencePrompt | null>,
+    /** Every audio source has gone silent. Recording continues until
+     *  `autoStopAtMs` (epoch ms) unless the user continues or stops. */
+    onSilencePrompt: (cb: (e: SilencePrompt) => void) => {
+      const wrapped = (_e: unknown, payload: SilencePrompt): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingSilencePromptEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingSilencePromptEvent, wrapped);
+    },
+    /** The silence prompt ended, and why. After 'auto-stopped' the recording
+     *  is stopping; its `idle` state change carries the reason text. */
+    onSilenceCleared: (cb: (e: SilenceCleared) => void) => {
+      const wrapped = (_e: unknown, payload: SilenceCleared): void => cb(payload);
+      ipcRenderer.on(IPC_CHANNELS.recordingSilenceClearedEvent, wrapped);
+      return () => ipcRenderer.off(IPC_CHANNELS.recordingSilenceClearedEvent, wrapped);
     },
   },
   recovery: {

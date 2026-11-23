@@ -17,7 +17,7 @@ export function setupHealth(s: IpcServices): { label: string; state: 'ready' | '
     detail: 'Apple transcription uses local language assets. Prepare or check them in Processing.', section: 'Processing' });
   rows.push({ label: 'Speakers', state: native?.supported && native.speakerReady ? 'ready' : 'check',
     detail: 'SpeakerKit uses verified local models. Prepare them in Processing; no account or token is required.', section: 'Processing' });
-  rows.push({ label: 'Summary', state: 'check', detail: `${settings.summaryProvider} · ${effectiveLlmUrl(settings.summaryProvider, settings.lmStudioUrl)} · ${settings.llmModel || 'Choose a model'}. Managed services can be idle; use Test in Processing to check connectivity.`, section: 'Processing' });
+  rows.push({ label: 'Summary', state: 'check', detail: `${settings.summaryProvider} · ${effectiveLlmUrl(settings.summaryProvider, settings.lmStudioUrl)} · ${settings.llmModel || 'Choose a model'}. Managed services can be idle; use Test in Advanced to check connectivity.`, section: 'Advanced' });
   rows.push({ label: 'Exporters', state: 'optional', detail: 'Optional. Google, Obsidian and webhook setup do not block recording or processing.', section: 'Integrations' });
   return rows;
 }

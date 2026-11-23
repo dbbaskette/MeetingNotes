@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { IconLabel } from './icons';
 import { rememberGroupUndo } from '../lib/group-undo';
 import { recentGroups, rememberDestination, pruneDestinations } from '../lib/recent-groups';
 import { api } from '../ipc/client';
@@ -158,7 +159,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
         <label htmlFor="move-new-group" className="text-sm font-semibold">New destination group</label>
         <input id="move-new-group" ref={input} maxLength={80} value={name} onChange={(event) => setName(event.target.value)}
           disabled={busy} placeholder="Group name"
-          className="mt-1.5 w-full rounded-lg border border-surface-border px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo disabled:opacity-50" />
+          className="mt-1.5 w-full rounded-lg border border-surface-border bg-surface text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo disabled:opacity-50" />
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" disabled={busy} onClick={() => { setCreating(false); setError(null); }}
             className="px-3 py-1.5 text-sm text-ink-muted disabled:opacity-50">Back to groups</button>
@@ -194,7 +195,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
           {loaded && !groupsError && destinations.length === 0 && <p className="px-3 py-3 text-xs text-ink-muted">No destination matches “{search}”.</p>}
         </div>
         <button type="button" disabled={busy || !loaded || !!groupsError} onClick={() => { setCreating(true); setDestination(null); setError(null); }}
-          className="mt-2 w-full border-t border-surface-border px-3 pt-2 text-left text-sm font-semibold text-brand-indigo disabled:opacity-50">+ New group…</button>
+          className="mt-2 w-full border-t border-surface-border px-3 pt-2 text-left text-sm font-semibold text-brand-indigo disabled:opacity-50"><IconLabel icon="plus">New group…</IconLabel></button>
         {destination && <div className="mt-4 rounded-lg border border-brand-indigo/25 bg-brand-indigo/5 px-3 py-2.5 text-sm" role="status">
           <span className="text-ink-muted">Destination</span>
           <span className="mx-2 text-ink-muted" aria-hidden="true">→</span>

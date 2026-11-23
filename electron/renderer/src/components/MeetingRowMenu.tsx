@@ -6,7 +6,8 @@
 // each row. Clicks bubble-stop so they don't also toggle the surrounding
 // row (select / open detail). The refresh callback is fired after each
 // mutation so the containing list re-queries.
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useMenuKeyboard } from '../lib/menu-keyboard';
 import { createPortal } from 'react-dom';
 import { api } from '../ipc/client';
 import { useToast } from './Toasts';
@@ -88,12 +89,17 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
     };
   }, [open]);
 
+  const closeMenu = useCallback(() => setOpen(false), []);
+  useMenuKeyboard(menuRef, btnRef, open && anchor !== null, closeMenu);
+
   return (
     <>
       <button
         ref={btnRef}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        aria-label="Actions"
+        aria-label={`Actions for ${meeting.title}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
         title="Actions"
         className="
           w-9 h-9 rounded-md shrink-0 flex items-center justify-center
@@ -110,6 +116,8 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
       {open && anchor && createPortal(
         <div
           ref={menuRef}
+          role="menu"
+          aria-label={`Actions for ${meeting.title}`}
           onClick={(e) => e.stopPropagation()}
           style={{
             position: 'fixed',
@@ -125,18 +133,21 @@ export function MeetingRowMenu({ meeting, onChanged, onDeleted }: MeetingRowMenu
           "
         >
           <button
+            type="button" role="menuitem"
             onClick={() => { setOpen(false); setModal('move'); }}
             className="w-full text-left px-3 py-1.5 text-brand-indigo hover:bg-surface-sunken"
           >
             Move to group…
           </button>
           <button
+            type="button" role="menuitem"
             onClick={() => { setOpen(false); setModal('rename'); }}
             className="w-full text-left px-3 py-1.5 hover:bg-surface-sunken"
           >
             Rename…
           </button>
           <button
+            type="button" role="menuitem"
             onClick={() => { setOpen(false); setModal('delete'); }}
             className="w-full text-left px-3 py-1.5 text-danger hover:bg-danger-bg"
           >
@@ -231,7 +242,7 @@ export function RenameDialog({
         <button
           onClick={() => void save()}
           disabled={busy}
-          className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-gradient-to-br from-brand-indigo to-brand-violet disabled:opacity-50"
+          className="btn-primary px-3 py-1.5 text-sm"
         >
           {busy ? 'Saving…' : 'Save'}
         </button>
@@ -307,7 +318,7 @@ function DeleteDialog({
         <button
           onClick={() => void confirm()}
           disabled={busy}
-          className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-danger-solid hover:bg-danger-solid disabled:opacity-50"
+          className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-danger-solid hover:brightness-90 disabled:opacity-50"
         >
           {busy ? 'Deleting…' : 'Delete'}
         </button>

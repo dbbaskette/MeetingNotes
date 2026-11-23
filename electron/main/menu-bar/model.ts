@@ -7,6 +7,9 @@
 export interface MenuBarState {
   /** The open capture, if any. `startedAt` is epoch milliseconds. */
   recording: { label: string; startedAt: number } | null;
+  /** Set while the recorder is asking whether to stop because every audio
+   *  source went silent (#305). `autoStopAt` is epoch milliseconds. */
+  silencePrompt?: { autoStopAt: number } | null;
   /** Title of the meeting being processed, if any. */
   processingTitle: string | null;
   queued: number;
@@ -17,6 +20,7 @@ export type MenuBarAction =
   | 'record-system'
   | 'record-choose'
   | 'stop'
+  | 'continue-silence'
   | 'open-window'
   | 'toggle-queue'
   | 'quit';
@@ -36,7 +40,17 @@ export function formatElapsed(ms: number): string {
 
 /** Text beside the icon. Empty when idle so the item stays small. */
 export function menuBarTitle(state: MenuBarState, now: number): string {
-  return state.recording ? ` ${formatElapsed(now - state.recording.startedAt)}` : '';
+  if (!state.recording) return '';
+  const elapsed = ` ${formatElapsed(now - state.recording.startedAt)}`;
+  // The title is redrawn every second while recording, so this counts down.
+  return state.silencePrompt ? `${elapsed} · stops in ${formatElapsed(state.silencePrompt.autoStopAt - now)}` : elapsed;
+}
+
+/** The pending automatic stop, or null. The menu is built when it opens, so
+ *  the time is right at that moment and does not tick while the menu is up. */
+export function menuBarSilenceStatus(state: MenuBarState, now: number): string | null {
+  if (!state.recording || !state.silencePrompt) return null;
+  return `Audio stopped — auto-stop in ${formatElapsed(state.silencePrompt.autoStopAt - now)}`;
 }
 
 function clip(text: string, max = 48): string {
@@ -55,14 +69,21 @@ export function menuBarStatus(state: MenuBarState, now: number): string {
 
 export function buildMenuBarItems(state: MenuBarState, now: number): MenuBarItem[] {
   const recording = state.recording !== null;
+  const silence = menuBarSilenceStatus(state, now);
   return [
     { type: 'status', label: menuBarStatus(state, now) },
+    // While the recorder is waiting for an answer, the answer comes first.
+    ...(silence ? [
+      { type: 'status', label: silence },
+      { type: 'action', action: 'continue-silence', label: 'Continue recording', enabled: true },
+      { type: 'action', action: 'stop', label: 'Stop now', enabled: true },
+    ] satisfies MenuBarItem[] : []),
     { type: 'separator' },
     // Starting while a capture is open is refused by the recorder with its own
     // guidance; disabling here just avoids offering it.
     { type: 'action', action: 'record-system', label: 'Record All System Audio', enabled: !recording },
     { type: 'action', action: 'record-choose', label: 'Choose What to Record…', enabled: !recording },
-    { type: 'action', action: 'stop', label: 'Stop Recording', enabled: recording },
+    ...(silence ? [] : [{ type: 'action', action: 'stop', label: 'Stop Recording', enabled: recording }] satisfies MenuBarItem[]),
     { type: 'separator' },
     { type: 'action', action: 'toggle-queue', label: state.paused ? 'Resume Processing' : 'Pause Processing', enabled: true },
     { type: 'action', action: 'open-window', label: 'Open MeetingNotes', enabled: true },

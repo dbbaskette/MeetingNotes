@@ -6,7 +6,7 @@
 // the same color for the whole transcript regardless of how the
 // speakers rail happens to sort them, and the mapping is deterministic
 // for a given transcript. The index feeds the same palette the speaker
-// avatars use (theme/tokens colorForSpeakerIndex).
+// avatars use (theme/tokens speakerFill / speakerText).
 
 /** Map each distinct speaker label to a palette index, in order of
  *  first appearance. Pure — safe to memoize on the parsed lines. */

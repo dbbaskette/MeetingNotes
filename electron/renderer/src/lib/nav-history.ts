@@ -91,11 +91,15 @@ export function createNavHistory<V>(
  *  + seek target for detail views) counts as one entry even when row hints
  *  captured at click-time differ between clicks. */
 export function viewsEqual(a: unknown, b: unknown): boolean {
-  const x = a as { kind: string; id?: string; seekSeconds?: number };
-  const y = b as { kind: string; id?: string; seekSeconds?: number };
+  type V = { kind: string; id?: string; seekSeconds?: number; section?: string; groupId?: string | null };
+  const x = a as V, y = b as V;
   if (x.kind !== y.kind) return false;
   if (x.kind === 'detail' && y.kind === 'detail') {
     return x.id === y.id && x.seekSeconds === y.seekSeconds;
   }
+  // Deep links: Settings opened at another section, or Actions filtered to
+  // another group, is a different destination and must not be de-duplicated.
+  if (x.kind === 'settings') return x.section === y.section;
+  if (x.kind === 'actions') return x.groupId === y.groupId;
   return true;
 }

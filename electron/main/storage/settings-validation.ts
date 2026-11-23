@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_SETTINGS } from './settings-repo.js';
+import { DEFAULT_SETTINGS, SILENCE_LIMITS } from './settings-repo.js';
 import { existingFolder } from '../lib/pasted-path.js';
 
 const enums: Record<string, readonly [string, ...string[]]> = {
@@ -16,6 +16,10 @@ export function validateSetting(key: string, value: unknown): unknown {
   if (key === 'autoDetectMeetings') return z.object({ browserTabs: z.boolean(), nativeApps: z.boolean(), silenceMs: z.number().finite().min(0).max(600_000) }).strict().parse(value);
   if (key === 'recordingBitrateKbps') return z.union([z.literal(96), z.literal(128), z.literal(192)]).parse(value);
   if (key === 'llmContextLength') return z.union([z.literal(0), z.literal(8192), z.literal(16384), z.literal(32768)]).parse(value);
+  if (key === 'silencePromptAfterS' || key === 'silenceCountdownS') {
+    const { min, max } = SILENCE_LIMITS[key];
+    return z.number().int().min(min).max(max).parse(value);
+  }
   if (key === 'libraryPath' || key === 'audioWatchPath') {
     const input = z.string().max(4096).parse(value);
     return key === 'audioWatchPath' && !input.trim() ? '' : existingFolder(input);

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { shortcutMod } from '../lib/shortcut';
 import type { MeetingDetail } from './MeetingDetailView';
 
@@ -16,14 +17,32 @@ export function ActionItemsPanel({
   const [adding, setAdding] = useState(false);
   const [reextracting, setReextracting] = useState(false);
   const [reextractError, setReextractError] = useState<string | null>(null);
-  const items = meeting.actionItems;
+  const all = meeting.actionItems;
+  // Open / Done / Mine filter (#298). "Open" is the working view once a
+  // meeting has a long list; the choice is per visit, not persisted.
+  const [show, setShow] = useState<'all' | 'open' | 'done' | 'mine'>('all');
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
+  const openCount = all.filter((it) => it.status !== 'done').length;
+  const mineCount = all.filter((it) => it.isMine).length;
+  const items = show === 'open' ? all.filter((it) => it.status !== 'done')
+    : show === 'done' ? all.filter((it) => it.status === 'done')
+    : show === 'mine' ? all.filter((it) => it.isMine) : all;
 
   // Flip a single item between open ⇄ done. Same reload path add/delete
   // use: the setStatus IPC persists, then onReload() re-fetches the meeting
   // so the row re-renders with the DONE badge / strikethrough.
   async function toggleStatus(it: MeetingDetail['actionItems'][number]): Promise<void> {
-    await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
-    await onReload();
+    if (toggling) return;
+    setToggling(it.id); setStatusError(null);
+    try {
+      await api.actionItems.setStatus(it.id, it.status === 'done' ? 'open' : 'done');
+      await onReload();
+    } catch (e) {
+      // This used to be an unhandled rejection: the circle simply did not
+      // change and nothing said why.
+      setStatusError(`Could not update “${it.text.slice(0, 60)}”: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '')}`);
+    } finally { setToggling(null); }
   }
 
   // Re-run ONLY the extract step over the current SAVED summary.md and swap in
@@ -49,10 +68,23 @@ export function ActionItemsPanel({
       <div className="font-mono text-[11px] tracking-[0.2em] uppercase text-ink-muted font-semibold mb-3 flex items-center gap-2">
         <span>Action items</span>
         <span className="font-normal opacity-70">
-          {items.length > 0 ? `· ${items.length}` : ''}
+          {all.length > 0 ? `· ${openCount} open of ${all.length}` : ''}
         </span>
       </div>
-      {items.length === 0 && !adding && (
+      {all.length > 0 && (
+        <SegmentedControl label="Show action items" className="mb-3" value={show} onChange={setShow}
+          options={[
+            { value: 'all', label: `All ${all.length}` },
+            { value: 'open', label: `Open ${openCount}` },
+            { value: 'done', label: `Done ${all.length - openCount}` },
+            { value: 'mine', label: `Mine ${mineCount}` },
+          ]} />
+      )}
+      {statusError && <p role="alert" className="mb-3 rounded-lg border border-danger-border bg-danger-bg px-3 py-2 text-xs text-danger-text">{statusError}</p>}
+      {all.length > 0 && items.length === 0 && !adding && (
+        <div className="text-sm text-ink-muted mb-3">No {show === 'mine' ? 'action items assigned to you' : `${show} action items`} in this meeting.</div>
+      )}
+      {all.length === 0 && !adding && (
         <div className="text-sm text-ink-muted italic mb-3">
           No action items yet. Run Summarize + Extract to get some, or click
           &ldquo;Add item&rdquo; below to write one by hand.
@@ -94,14 +126,14 @@ export function ActionItemsPanel({
               onClick={() => setAdding(true)}
               className="text-xs font-semibold text-brand-indigo hover:underline"
             >
-              + Add item
+              <IconLabel icon="plus">Add item</IconLabel>
             </button>
             <button
               onClick={() => void reextract()}
               disabled={reextracting}
               className="text-xs font-semibold text-brand-indigo hover:underline disabled:opacity-50 disabled:no-underline"
             >
-              {reextracting ? 'Re-extracting…' : '↻ Re-extract from summary'}
+              {reextracting ? 'Re-extracting…' : <IconLabel icon="rotate-cw">Re-extract from summary</IconLabel>}
             </button>
           </div>
           <div className="text-[11px] text-ink-muted">
@@ -129,7 +161,7 @@ function ActionItemDisplay({
 }): JSX.Element {
   const done = item.status === 'done';
   return (
-    <div className="relative flex items-start gap-2">
+    <div className="flex items-start gap-2">
       {/* Click-to-toggle done circle. A sibling of the open-editor button
           (nested buttons are invalid HTML), so checking an item off never
           accidentally opens the editor. */}
@@ -137,6 +169,7 @@ function ActionItemDisplay({
         type="button"
         onClick={onToggleStatus}
         aria-pressed={done}
+        aria-label={`${done ? 'Mark as open' : 'Mark as done'}: ${item.text}`}
         title={done ? 'Mark as open' : 'Mark as done'}
         className={`mt-2.5 w-4 h-4 rounded-full border shrink-0 flex items-center justify-center transition-colors
           ${done
@@ -176,18 +209,19 @@ function ActionItemDisplay({
           )}
         </div>
       </button>
+      {/* A real button beside the item, not a span floated over it: it is
+          reachable by keyboard and can never cover long item text. */}
       {item.sourceQuote && (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={() => onShowSource(item.sourceQuote!)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowSource(item.sourceQuote!); } }}
           title="Show the summary bullet this came from"
-          className="absolute top-2 right-2 text-[11px] font-semibold text-brand-indigo/80
-                     hover:text-brand-indigo hover:underline cursor-pointer select-none"
+          aria-label={`Show source for: ${item.text}`}
+          className="shrink-0 mt-2 inline-flex items-center gap-1 rounded px-1 text-[11px] font-semibold text-brand-indigo
+                     hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"
         >
-          ↦ source
-        </span>
+          <Icon name="corner-down-right" className="w-3 h-3" />source
+        </button>
       )}
     </div>
   );
@@ -265,6 +299,7 @@ function ActionItemEditor({
           if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
         }}
         placeholder="What needs to happen?"
+        aria-label="Action item"
         rows={2}
         className="w-full text-sm p-2 border border-surface-border rounded-md bg-surface
                    focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]
@@ -275,12 +310,14 @@ function ActionItemEditor({
           value={owner}
           onChange={(e) => setOwner(e.target.value)}
           placeholder="Owner (optional)"
+          aria-label="Owner"
           maxLength={200}
           className="flex-1 text-sm p-2 border border-surface-border rounded-md bg-surface
                      focus:outline-none focus:border-brand-indigo"
         />
         <input
           type="date"
+          aria-label="Due date"
           value={due}
           onChange={(e) => setDue(e.target.value)}
           className="text-sm p-2 border border-surface-border rounded-md bg-surface

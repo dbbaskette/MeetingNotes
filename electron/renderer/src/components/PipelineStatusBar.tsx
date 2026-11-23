@@ -16,6 +16,7 @@ import {
   type PipelineStatusSnapshot,
 } from '../lib/status-bar';
 import { api } from '../ipc/client';
+import { useToast } from './Toasts';
 import { speechWorkText } from '../../../shared/processing-progress';
 
 interface Props {
@@ -59,6 +60,7 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
   // Memoized: useElapsed re-renders this bar every second while processing,
   // and deriveStatusBar scans the whole meetings array each call.
   const model = useMemo(() => deriveStatusBar(meetings, status), [meetings, status]);
+  const toast = useToast();
 
   const elapsed = useElapsed(model?.stageStartedAt ?? null, model?.kind === 'processing');
 
@@ -83,9 +85,22 @@ export function PipelineStatusBar({ onOpenMeeting }: Props): JSX.Element {
       ) : (
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-status-ok/70" />
       )}
-      <span className="truncate">
+      <span className="truncate flex-1">
         {status.cancelling ? 'Cancelling current meeting…' : status.speechWork ? speechWorkText(status.speechWork) : model ? statusBarText(model, elapsed) : `MeetingNotes${version ? ` v${version}` : ''} · Ready`}
       </span>
+      {/* Cancel the meeting in flight from any view (#298); the only Cancel
+          used to be on the Library's queue banner. */}
+      {status.currentId && !status.cancelling && (
+        <button type="button" className="shrink-0 rounded px-1.5 py-0.5 font-semibold text-danger-text hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"
+          onKeyDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation(); // the bar itself opens the meeting
+            const id = status.currentId!;
+            void api.pipeline.cancel(id)
+              .then(() => toast.show({ message: 'Stopping this meeting only. Original audio is retained.', durationMs: 4000 }))
+              .catch((error: unknown) => toast.show({ message: String((error as Error).message ?? error), variant: 'error' }));
+          }}>Cancel</button>
+      )}
     </div>
   );
 }

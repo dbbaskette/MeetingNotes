@@ -31,7 +31,6 @@ export default {
           indigo: cssVar('brand-indigo'),
           violet: cssVar('brand-violet'),
           solid: cssVar('brand-solid'),
-          gradient: 'linear-gradient(135deg,#6366f1,#8b5cf6)',
         },
         status: {
           ok: cssVar('status-ok'),
@@ -39,6 +38,9 @@ export default {
           warn: cssVar('status-warn'),
           warnBg: cssVar('status-warn-bg'),
           warnText: cssVar('status-warn-text'),
+          // Fill under a white label / light text on a filled brand chip.
+          warnSolid: cssVar('status-warn-solid'),
+          warnOnSolid: cssVar('status-warn-on-solid'),
           processing: cssVar('status-processing'),
           processingBg: cssVar('status-processing-bg'),
         },

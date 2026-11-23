@@ -6,8 +6,11 @@ const sections = ['Recording', 'Processing', 'Organization', 'Integrations', 'St
 type Section = typeof sections[number];
 const visibility = createContext<{ section: Section; query: string }>({ section: 'Recording', query: '' });
 
-export function SettingsNavigation({ children }: { children: ReactNode }): JSX.Element {
-  const [section, setSection] = useState<Section>('Recording');
+export function SettingsNavigation({ children, initialSection }: { children: ReactNode;
+  /** Section to open on, and to switch to when it changes (deep links into Settings). */
+  initialSection?: Section }): JSX.Element {
+  const [section, setSection] = useState<Section>(initialSection ?? 'Recording');
+  useEffect(() => { if (initialSection) { setSection(initialSection); setQuery(''); } }, [initialSection]);
   const [query, setQuery] = useState('');
   useEffect(() => {
     const choose = (event: Event): void => {

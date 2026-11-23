@@ -13,6 +13,15 @@ it('validates types, enum values and finite bounds at the IPC boundary', () => {
   expect(validateSetting('recordingBitrateKbps', 192)).toBe(192);
   expect(validateSetting('audioWatchPath', '')).toBe('');
 });
+it('validates the silence prompt settings: a boolean switch and whole seconds inside their ranges', () => {
+  expect(validateSetting('autoStopOnSilence', false)).toBe(false);
+  expect(validateSetting('autoStopOnSilence', true)).toBe(true);
+  for (const value of ['false', 0, null, undefined]) expect(() => validateSetting('autoStopOnSilence', value)).toThrow();
+  for (const value of [30, 120, 1800]) expect(validateSetting('silencePromptAfterS', value)).toBe(value);
+  for (const value of [29, 1801, 0, -120, 90.5, '120', null, Infinity, NaN]) expect(() => validateSetting('silencePromptAfterS', value)).toThrow();
+  for (const value of [10, 60, 600]) expect(validateSetting('silenceCountdownS', value)).toBe(value);
+  for (const value of [9, 601, 0, -60, 30.5, '60', null, Infinity, NaN]) expect(() => validateSetting('silenceCountdownS', value)).toThrow();
+});
 it('accepts only the supported numeric context lengths', () => {
   for (const value of [0, 8192, 16384, 32768]) expect(validateSetting('llmContextLength', value)).toBe(value);
   for (const value of ['8192', -1, 8192.5, Infinity, NaN, 999999]) expect(() => validateSetting('llmContextLength', value)).toThrow();

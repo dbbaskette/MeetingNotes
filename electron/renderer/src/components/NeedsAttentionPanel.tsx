@@ -5,6 +5,8 @@ import { RecoveryRow } from './RecoveryRow';
 import { formatBytes, formatRecordedAt, type RecoveryFileInput } from '../lib/recovery-files';
 import { attentionSummary, readAttentionCollapsed, saveAttentionCollapsed } from '../lib/attention-summary';
 import { Expandable } from './motion/Expandable';
+import { requestNavigation } from '../lib/deep-link';
+import type { ObsidianAttention } from '../lib/obsidian-attention';
 
 export interface RecoveryInboxItem {
   id: string;
@@ -29,8 +31,10 @@ interface AttentionMeeting {
 }
 
 export function NeedsAttentionPanel({
-  meetings, recovery, error, onRetry, onOpen, onChanged,
+  meetings, recovery, error, onRetry, onOpen, onChanged, sync,
 }: {
+  /** Obsidian sync needs the user (vault unavailable, notes paused by an external edit). */
+  sync?: ObsidianAttention | null;
   meetings: AttentionMeeting[];
   recovery: RecoveryInboxItem[];
   error?: string | null;
@@ -52,7 +56,7 @@ export function NeedsAttentionPanel({
       : capAttentionGroups(allGroups, ATTENTION_GROUP_CAP),
     [allGroups, expanded, limits],
   );
-  if (groups.length === 0 && !error) return null;
+  if (groups.length === 0 && !error && !sync) return null;
 
   // A failed refresh or action is never hidden behind a collapsed inbox.
   const collapsed = collapsedChoice && !error && !actionError;
@@ -61,7 +65,7 @@ export function NeedsAttentionPanel({
     setCollapsedChoice(next);
     saveAttentionCollapsed(next);
   };
-  const total = allGroups.reduce((n, group) => n + group.items.length, 0);
+  const total = allGroups.reduce((n, group) => n + group.items.length, 0) + (sync?.count ?? 0);
   const recoveryById = new Map(recovery.map((item) => [item.id, item]));
   async function primaryAction(kind: string, id: string): Promise<void> {
     if (busy) return;
@@ -91,7 +95,7 @@ export function NeedsAttentionPanel({
           </button>
         </h2>
         {collapsed
-          ? <span className="min-w-0 truncate text-xs text-ink-muted">{attentionSummary(allGroups.map(group => ({ label: group.label, totalCount: group.items.length })))}</span>
+          ? <span className="min-w-0 truncate text-xs text-ink-muted">{[attentionSummary(allGroups.map(group => ({ label: group.label, totalCount: group.items.length }))), sync ? 'Obsidian sync' : ''].filter(Boolean).join(' · ')}</span>
           : <button type="button" aria-expanded={expanded} aria-controls="attention-items" className="ml-auto text-xs font-semibold underline"
             onClick={() => { setExpanded(!expanded); setLimits({}); }}>{expanded ? 'Show compact inbox' : 'View all'}</button>}
       </div>
@@ -108,6 +112,12 @@ export function NeedsAttentionPanel({
         </div>
       )}
       {actionError && <p role="alert" className="px-4 py-2 text-xs text-danger">Could not complete this action: {actionError}. Try again.</p>}
+      {sync && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-status-warn/20 px-4 py-2.5 text-xs">
+          <span className="min-w-0 flex-1 text-ink">{sync.message}</span>
+          <button type="button" className="shrink-0 font-semibold underline" onClick={() => requestNavigation({ kind: 'settings', section: 'Integrations' })}>Open sync settings</button>
+        </div>
+      )}
       <div id="attention-items" className="divide-y divide-surface-border">
         {groups.map((group) => (
           <div key={group.kind} className="px-4 py-2.5">

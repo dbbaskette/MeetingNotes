@@ -8,8 +8,13 @@ import { openDb } from '../storage/db.js';
 import { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
 import {
   RecordingManager,
+  REPEATING_DIAGNOSTIC_INTERVAL_MS,
+  SILENCE_AUTO_STOP_REASON,
+  SILENCE_POLICY_POLL_MS,
+  SILENCE_PROMPT_MAX_MS,
   SILENCE_THRESHOLD_DB,
-  SILENCE_TIMEOUT_MS,
+  type SilencePolicy,
+  type SilencePrompt,
 } from './manager.js';
 
 function fakeRepo() {
@@ -53,7 +58,7 @@ describe('RecordingManager', () => {
     stdout.emit('data', JSON.stringify({ event: 'diag', stage: 'mic_format', sample_rate: 24000, channels: 1, requested_frames: 4096, device_name: 'private microphone', output_path: '/private/meeting.m4a' }) + '\n');
     stdout.emit('data', JSON.stringify({ event: 'diag', stage: 'capture_timing', source: 'mic', input_frames: 4096, converted_frames: 8192, callback_age_ms: 174.2, holdback_ms: 234.2, mic_late_frames: 0, system_late_frames: 0, content: 'private words' }) + '\n');
     stdout.emit('data', '{"event":"diag","stage":"capture_timing","source":"private-device","holdback_ms":-1,"callback_age_ms":1e400,"input_frames":"4096"}\n');
-    stdout.emit('data', '{"event":"diag","stage":"ioproc","input_frames":123}\n');
+    stdout.emit('data', '{"event":"diag","stage":"not_a_known_stage","input_frames":123}\n');
     expect(onDiagnostic.mock.calls).toEqual([
       [result.sessionId, { stage: 'mic_format', sample_rate: 24000, channels: 1, requested_frames: 4096 }],
       [result.sessionId, { stage: 'capture_timing', source: 'mic', input_frames: 4096, converted_frames: 8192, callback_age_ms: 174.2, holdback_ms: 234.2, mic_late_frames: 0, system_late_frames: 0 }],
@@ -73,6 +78,75 @@ describe('RecordingManager', () => {
       [result.sessionId, { stage: 'tap_stalled', attempt: 1, stalled_ms: 1000 }],
       [result.sessionId, { stage: 'tap_recovered', attempt: 2, stalled_ms: 2000 }],
     ]);
+    await manager.stop(result.sessionId);
+  });
+  it('retains app-audio tap format, device, callback, buffer and conversion numbers, and nothing else', async () => {
+    const onDiagnostic = vi.fn(), { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic });
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    const emit = (payload: Record<string, unknown>): boolean => stdout.emit('data', JSON.stringify({ event: 'diag', ...payload }) + '\n');
+    emit({ stage: 'tap_format', tap_sr: 48000, agg_sr: 44100, sr: 44100, ch: 2, bits: 32, bytes_per_frame: 8, fmt_flags: 9, device_name: 'private headset' });
+    emit({ stage: 'after_start', device_is_running: 1, agg_id: 91, tap_id: 92, stream_sr: 48000, stream_ch: 2 });
+    emit({ stage: 'ioproc', fire: 1, abl_count: 1, buf0_bytes: 4096, buf0_chans: 2, frames: 512, buf_peaks: [0.25, 0.5] });
+    emit({ stage: 'post_conv', out_frames: 512 });
+    emit({ stage: 'stop', ioproc_fires_total: 90210 });
+    // Out of range, wrong type, or not a number at all: dropped field by field.
+    stdout.emit('data', '{"event":"diag","stage":"tap_format","tap_sr":-1,"agg_sr":"44100","sr":1e400,"ch":2,"bits":null,"fmt_flags":9007199254740993}\n');
+    emit({ stage: 'post_conv', out_frames: '512' });
+    expect(onDiagnostic.mock.calls).toEqual([
+      [result.sessionId, { stage: 'tap_format', tap_sr: 48000, agg_sr: 44100, sr: 44100, ch: 2, bits: 32, bytes_per_frame: 8, fmt_flags: 9 }],
+      [result.sessionId, { stage: 'after_start', device_is_running: 1, stream_sr: 48000, stream_ch: 2 }],
+      [result.sessionId, { stage: 'ioproc', fire: 1, abl_count: 1, buf0_bytes: 4096, buf0_chans: 2, frames: 512 }],
+      [result.sessionId, { stage: 'post_conv', out_frames: 512 }],
+      [result.sessionId, { stage: 'stop', ioproc_fires_total: 90210 }],
+      [result.sessionId, { stage: 'tap_format', ch: 2 }],
+    ]);
+    await manager.stop(result.sessionId);
+  });
+  it('records that app-audio conversion failed without the helper\'s error text', async () => {
+    const onDiagnostic = vi.fn(), { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic });
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    stdout.emit('data', '{"event":"diag","stage":"conv_err","err":"Optional(Error Domain=private device detail)"}\n');
+    stdout.emit('data', '{"event":"diag","stage":"pcmbuf_nil"}\n');
+    stdout.emit('data', '{"event":"diag","stage":"avaudiofile_write_err","err":"/private/meeting.m4a"}\n');
+    expect(onDiagnostic.mock.calls).toEqual([
+      [result.sessionId, { stage: 'conv_err' }],
+      [result.sessionId, { stage: 'pcmbuf_nil' }],
+    ]);
+    await manager.stop(result.sessionId);
+  });
+  it('thins the diagnostics the helper repeats all recording long', async () => {
+    vi.useFakeTimers();
+    const onDiagnostic = vi.fn(), { proc, stdout } = fakeRecordingProcess();
+    const manager = new RecordingManager({ helperPath: '/h', recordingsDir: '/synthetic', repo: fakeRepo(), spawn: () => proc, onDiagnostic });
+    const result = await manager.start({ targetPid: 'system', targetLabel: 'All', mic: true });
+    const heartbeat = (fires: number, running = 1): boolean =>
+      stdout.emit('data', JSON.stringify({ event: 'diag', ioproc_fires: fires, device_is_running: running }) + '\n');
+    const stages = (): unknown[] => onDiagnostic.mock.calls.map(([, d]) => d);
+    // The once-a-second heartbeat: the first, then one a minute.
+    heartbeat(94); heartbeat(188); heartbeat(282);
+    expect(stages()).toEqual([{ stage: 'tap_heartbeat', ioproc_fires: 94, device_is_running: 1 }]);
+    // The device stopping (or starting again) is reported at once.
+    heartbeat(282, 0); heartbeat(282, 0); heartbeat(376, 1);
+    expect(stages().slice(1)).toEqual([
+      { stage: 'tap_heartbeat', ioproc_fires: 282, device_is_running: 0 },
+      { stage: 'tap_heartbeat', ioproc_fires: 376, device_is_running: 1 },
+    ]);
+    await vi.advanceTimersByTimeAsync(REPEATING_DIAGNOSTIC_INTERVAL_MS);
+    heartbeat(6000); heartbeat(6094);
+    expect(stages()).toHaveLength(4);
+    expect(stages()[3]).toEqual({ stage: 'tap_heartbeat', ioproc_fires: 6000, device_is_running: 1 });
+    // A stage-less diagnostic without a callback count is not a heartbeat.
+    stdout.emit('data', '{"event":"diag","device_is_running":1,"note":"private"}\n');
+    expect(stages()).toHaveLength(4);
+    // Per-callback detail: the first three, then one a minute.
+    onDiagnostic.mockClear();
+    for (const fire of [1, 2, 3, 200, 400]) stdout.emit('data', `{"event":"diag","stage":"ioproc","fire":${fire},"frames":512}\n`);
+    expect(stages()).toEqual([1, 2, 3].map((fire) => ({ stage: 'ioproc', fire, frames: 512 })));
+    await vi.advanceTimersByTimeAsync(REPEATING_DIAGNOSTIC_INTERVAL_MS);
+    stdout.emit('data', '{"event":"diag","stage":"ioproc","fire":6000,"frames":512}\n');
+    expect(stages()).toHaveLength(4);
     await manager.stop(result.sessionId);
   });
   it('isolates timing observer failures from audio levels and capture lifecycle', async () => {
@@ -328,54 +402,6 @@ describe('RecordingManager', () => {
     expect(spawned[0]!.args).toContain('--no-mic');
   });
 
-  it('auto-stops after five minutes without any level events', async () => {
-    vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc } = fakeRecordingProcess();
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
-
-    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS);
-
-    expect(onAutoStop).toHaveBeenCalledWith(sessionId, SILENCE_TIMEOUT_MS);
-    expect(proc.kill).toHaveBeenCalledTimes(1);
-    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
-    expect(mgr.state(sessionId)).toBe('idle');
-  });
-
-  it('resets the full timeout after an audible peak', async () => {
-    vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc, stdout } = fakeRecordingProcess();
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
-
-    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS - 1);
-    stdout.emit('data', `{"event":"level","peak_db":${SILENCE_THRESHOLD_DB + 1}}\n`);
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS - 1);
-    expect(mgr.state(sessionId)).toBe('recording');
-    expect(onAutoStop).not.toHaveBeenCalled();
-
-    await vi.advanceTimersByTimeAsync(1);
-    expect(onAutoStop).toHaveBeenCalledTimes(1);
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
-  });
-
   it('forwards source-aware levels and treats legacy events as mixed', async () => {
     const repo = fakeRepo();
     const { proc, stdout } = fakeRecordingProcess();
@@ -393,96 +419,263 @@ describe('RecordingManager', () => {
     ]);
     await mgr.stop(sessionId);
   });
+});
 
-  it('does not reset for a peak exactly at the silence threshold', async () => {
+describe('RecordingManager silence prompt', () => {
+  const PROMPT_AFTER = 120_000, COUNTDOWN = 60_000;
+
+  async function recording(opts: { policy?: Partial<SilencePolicy>; autoExitOnTerm?: boolean; disposable?: boolean } = {}) {
     vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc, stdout } = fakeRecordingProcess();
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
+    const repo = fakeRepo(), onAutoStop = vi.fn();
+    const { proc, stdout } = fakeRecordingProcess({ autoExitOnTerm: opts.autoExitOnTerm });
+    // Mutable on purpose: the manager must read it again, not remember it.
+    const policy: SilencePolicy = { autoStopOnSilence: true, promptAfterMs: PROMPT_AFTER, countdownMs: COUNTDOWN, ...opts.policy };
+    const mgr = new RecordingManager({ helperPath: '/h', recordingsDir: '/tmp', repo, spawn: () => proc, onAutoStop, getSilencePolicy: () => policy });
+    const prompts: SilencePrompt[] = [], cleared: string[] = [], states: [string, string | undefined][] = [];
+    mgr.on('silence-prompt', (prompt) => prompts.push(prompt));
+    mgr.on('silence-cleared', (id, reason) => cleared.push(`${id}:${reason}`));
+    mgr.on('state-change', (_id, state, reason) => states.push([state, reason]));
+    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true },
+      opts.disposable ? { disposable: true, outputDir: '/tmp/test-capture' } : {});
+    const level = (peakDb: number, source = 'system'): boolean =>
+      stdout.emit('data', JSON.stringify({ event: 'level', source, peak_db: peakDb }) + '\n');
+    const advance = (ms: number): Promise<unknown> => vi.advanceTimersByTimeAsync(ms);
+    return { mgr, repo, proc, policy, onAutoStop, prompts, cleared, states, sessionId, level, advance };
+  }
 
-    await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS / 2);
-    stdout.emit('data', `{"event":"level","peak_db":${SILENCE_THRESHOLD_DB}}\n`);
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS / 2);
+  it('prompts when every source has been silent for the window, keeps recording, then stops when nobody answers', async () => {
+    const t = await recording();
+    // Quiet levels from every source are still silence.
+    t.level(SILENCE_THRESHOLD_DB - 20, 'mic'); t.level(SILENCE_THRESHOLD_DB - 30, 'system');
+    await t.advance(PROMPT_AFTER - 1);
+    expect(t.prompts).toEqual([]);
+    await t.advance(1);
+    const prompt = { sessionId: t.sessionId, silentForMs: PROMPT_AFTER, autoStopAtMs: Date.now() + COUNTDOWN };
+    expect(t.prompts).toEqual([prompt]);
+    expect(t.mgr.silenceState()).toEqual(prompt);
+    // Phase 1 does not stop anything.
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
+    expect(t.proc.kill).not.toHaveBeenCalled();
 
-    expect(onAutoStop).toHaveBeenCalledTimes(1);
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    await t.advance(COUNTDOWN - 1);
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
+    expect(t.cleared).toEqual([]);
+    await t.advance(1);
+    expect(t.cleared).toEqual([`${t.sessionId}:auto-stopped`]);
+    expect(t.proc.kill).toHaveBeenCalledTimes(1);
+    expect(t.proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
+    expect(t.mgr.active()).toEqual([]);
+    expect(t.mgr.silenceState()).toBeNull();
+    // The user is told why through the ordinary state change.
+    expect(SILENCE_AUTO_STOP_REASON).toBe('Stopped automatically after audio went silent');
+    expect(t.states.slice(-2)).toEqual([['stopping', undefined], ['idle', SILENCE_AUTO_STOP_REASON]]);
+    expect(t.onAutoStop.mock.calls).toEqual([[t.sessionId, PROMPT_AFTER + COUNTDOWN]]);
   });
 
-  it('manual stop clears the pending watchdog', async () => {
-    vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc } = fakeRecordingProcess();
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
+  it('Continue cancels the countdown, clears the prompt and watches again with a longer window', async () => {
+    const t = await recording();
+    await t.advance(PROMPT_AFTER);
+    expect(t.prompts).toHaveLength(1);
+    t.mgr.continueSilence(t.sessionId);
+    expect(t.cleared).toEqual([`${t.sessionId}:continued`]);
+    expect(t.mgr.silenceState()).toBeNull();
+    // A second answer (another window, the menu bar) changes nothing.
+    t.mgr.continueSilence(t.sessionId);
+    t.mgr.continueSilence('no-such-session');
+    expect(t.cleared).toHaveLength(1);
 
-    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    await mgr.stop(sessionId);
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS);
+    await t.advance(COUNTDOWN);
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
 
-    expect(onAutoStop).not.toHaveBeenCalled();
-    expect(proc.kill).toHaveBeenCalledTimes(1);
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
+    // Still silent: the next prompt waits twice as long, counted from Continue.
+    await t.advance(2 * PROMPT_AFTER - COUNTDOWN - 1);
+    expect(t.prompts).toHaveLength(1);
+    await t.advance(1);
+    expect(t.prompts).toHaveLength(2);
+    expect(t.prompts[1]).toEqual({ sessionId: t.sessionId, silentForMs: 2 * PROMPT_AFTER, autoStopAtMs: Date.now() + COUNTDOWN });
+    // And unanswered, that one does stop the recording.
+    await t.advance(COUNTDOWN);
+    expect(t.cleared).toEqual([`${t.sessionId}:continued`, `${t.sessionId}:auto-stopped`]);
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
   });
 
-  it('manual and automatic stop racing signal and finalize once', async () => {
-    vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc } = fakeRecordingProcess({ autoExitOnTerm: false });
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
+  it('caps the window that Continue keeps doubling', async () => {
+    const t = await recording({ policy: { promptAfterMs: 20 * 60_000 } });
+    await t.advance(20 * 60_000);
+    t.mgr.continueSilence(t.sessionId);
+    await t.advance(SILENCE_PROMPT_MAX_MS - 1);
+    expect(t.prompts).toHaveLength(1);
+    await t.advance(1);
+    expect(t.prompts).toHaveLength(2);
+    t.mgr.continueSilence(t.sessionId);
+    await t.advance(SILENCE_PROMPT_MAX_MS);
+    expect(t.prompts).toHaveLength(3);
+    await t.mgr.stop(t.sessionId);
+  });
 
-    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS);
-    const manualStop = mgr.stop(sessionId);
-    proc.emit('exit', 0);
+  it('Stop now during the countdown stops at once and cancels the countdown', async () => {
+    const t = await recording();
+    await t.advance(PROMPT_AFTER);
+    expect(t.mgr.silenceState()).not.toBeNull();
+    await t.mgr.stop(t.sessionId);
+    expect(t.cleared).toEqual([`${t.sessionId}:stopped`]);
+    expect(t.mgr.silenceState()).toBeNull();
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+
+    await t.advance(COUNTDOWN * 2);
+    expect(t.proc.kill).toHaveBeenCalledTimes(1);
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+    expect(t.onAutoStop).not.toHaveBeenCalled();
+    expect(t.cleared).toHaveLength(1);
+    // A stop the user asked for is not reported as an automatic one.
+    expect(t.states.some(([, reason]) => reason === SILENCE_AUTO_STOP_REASON)).toBe(false);
+  });
+
+  it('audio above the threshold during the countdown cancels the stop and clears the prompt', async () => {
+    const t = await recording();
+    await t.advance(PROMPT_AFTER);
+    await t.advance(COUNTDOWN / 2);
+    // Exactly at the threshold is still silence.
+    t.level(SILENCE_THRESHOLD_DB);
+    expect(t.cleared).toEqual([]);
+    t.level(SILENCE_THRESHOLD_DB + 1, 'mic');
+    expect(t.cleared).toEqual([`${t.sessionId}:audio-resumed`]);
+    expect(t.mgr.silenceState()).toBeNull();
+
+    await t.advance(COUNTDOWN);
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
+
+    // Detection is armed again with the ordinary window, from that sound.
+    await t.advance(PROMPT_AFTER - COUNTDOWN - 1);
+    expect(t.prompts).toHaveLength(1);
+    await t.advance(1);
+    expect(t.prompts).toHaveLength(2);
+    expect(t.prompts[1]!.silentForMs).toBe(PROMPT_AFTER);
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('never prompts or stops when stopping on silence is turned off', async () => {
+    const t = await recording({ policy: { autoStopOnSilence: false } });
+    await t.advance(4 * 60 * 60_000);
+    expect(t.prompts).toEqual([]);
+    expect(t.cleared).toEqual([]);
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    expect(t.onAutoStop).not.toHaveBeenCalled();
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('applies a changed setting to a recording that is already running', async () => {
+    const t = await recording({ policy: { autoStopOnSilence: false } });
+    await t.advance(10 * 60_000);
+    expect(t.prompts).toEqual([]);
+    // Turned on: the long silence so far is noticed at the next check.
+    t.policy.autoStopOnSilence = true;
+    await t.advance(SILENCE_POLICY_POLL_MS);
+    expect(t.prompts).toHaveLength(1);
+    // Turned off while the prompt is showing: the recording is left running.
+    t.policy.autoStopOnSilence = false;
+    await t.advance(COUNTDOWN);
+    expect(t.cleared).toEqual([`${t.sessionId}:continued`]);
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    expect(t.mgr.state(t.sessionId)).toBe('recording');
+
+    // A shorter window is picked up without restarting the recording.
+    t.policy.autoStopOnSilence = true;
+    t.level(SILENCE_THRESHOLD_DB + 5);
+    t.policy.promptAfterMs = 30_000;
+    await t.advance(SILENCE_POLICY_POLL_MS + 30_000);
+    expect(t.prompts).toHaveLength(2);
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('falls back to the default policy when none, or a broken one, is supplied', async () => {
+    const t = await recording({ policy: { promptAfterMs: Number.NaN, countdownMs: -5 } });
+    await t.advance(120_000);
+    expect(t.prompts).toEqual([{ sessionId: t.sessionId, silentForMs: 120_000, autoStopAtMs: Date.now() + 60_000 }]);
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('an audible peak restarts the window; a peak exactly at the threshold does not', async () => {
+    const t = await recording();
+    await t.advance(PROMPT_AFTER - 1);
+    t.level(SILENCE_THRESHOLD_DB + 1);
+    await t.advance(PROMPT_AFTER - 1);
+    t.level(SILENCE_THRESHOLD_DB);
+    expect(t.prompts).toEqual([]);
+    await t.advance(1);
+    expect(t.prompts).toHaveLength(1);
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('a manual stop before any prompt leaves nothing armed', async () => {
+    const t = await recording();
+    await t.mgr.stop(t.sessionId);
+    await t.advance(PROMPT_AFTER + COUNTDOWN);
+    expect(t.prompts).toEqual([]);
+    expect(t.cleared).toEqual([]);
+    expect(t.onAutoStop).not.toHaveBeenCalled();
+    expect(t.proc.kill).toHaveBeenCalledTimes(1);
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+  });
+
+  it('a manual stop racing the automatic one signals and finalizes once', async () => {
+    const t = await recording({ autoExitOnTerm: false });
+    await t.advance(PROMPT_AFTER + COUNTDOWN);
+    expect(t.cleared).toEqual([`${t.sessionId}:auto-stopped`]);
+    const manualStop = t.mgr.stop(t.sessionId);
+    t.proc.emit('exit', 0);
     await manualStop;
-
-    expect(onAutoStop).toHaveBeenCalledTimes(1);
-    expect(proc.kill).toHaveBeenCalledTimes(1);
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
-    expect(mgr.state(sessionId)).toBe('idle');
+    expect(t.proc.kill).toHaveBeenCalledTimes(1);
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
+    expect(t.cleared).toHaveLength(1);
   });
 
-  it('helper self-exit clears the watchdog and finalizes once', async () => {
-    vi.useFakeTimers();
-    const repo = fakeRepo();
-    const onAutoStop = vi.fn();
-    const { proc } = fakeRecordingProcess({ autoExitOnTerm: false });
-    const mgr = new RecordingManager({
-      helperPath: '/h',
-      recordingsDir: '/tmp',
-      repo,
-      spawn: () => proc,
-      onAutoStop,
-    });
+  it('keeps Stop available when the automatic stop cannot confirm the recorder exited', async () => {
+    const t = await recording({ autoExitOnTerm: false });
+    await t.advance(PROMPT_AFTER + COUNTDOWN);
+    await t.advance(7000);
+    expect(t.mgr.state(t.sessionId)).toBe('stopping');
+    expect(t.states.at(-1)).toEqual(['stopping', 'Automatic Stop failed. Retry Stop to confirm recorder exit.']);
+    expect(t.repo.finalize).not.toHaveBeenCalled();
+    expect(t.onAutoStop).not.toHaveBeenCalled();
+    const retry = t.mgr.stop(t.sessionId); t.proc.emit('exit', 0); await retry;
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+  });
 
-    const { sessionId } = await mgr.start({ targetPid: 9, targetLabel: 'Zoom', mic: true });
-    proc.emit('exit', 0);
-    await vi.advanceTimersByTimeAsync(SILENCE_TIMEOUT_MS);
+  it('the helper exiting by itself during the countdown clears the prompt and finalizes once', async () => {
+    const t = await recording({ autoExitOnTerm: false });
+    await t.advance(PROMPT_AFTER);
+    t.proc.emit('exit', 0);
+    expect(t.cleared).toEqual([`${t.sessionId}:stopped`]);
+    await t.advance(COUNTDOWN * 2);
+    expect(t.onAutoStop).not.toHaveBeenCalled();
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
+    expect(t.states.at(-1)).toEqual(['idle', 'helper exited unexpectedly (code=0)']);
+  });
 
-    expect(onAutoStop).not.toHaveBeenCalled();
-    expect(proc.kill).not.toHaveBeenCalled();
-    expect(repo.finalize).toHaveBeenCalledTimes(1);
-    expect(mgr.state(sessionId)).toBe('idle');
+  it('does not prompt for a throwaway test capture', async () => {
+    const t = await recording({ disposable: true });
+    await t.advance(PROMPT_AFTER + COUNTDOWN);
+    expect(t.prompts).toEqual([]);
+    expect(t.proc.kill).not.toHaveBeenCalled();
+    await t.mgr.stop(t.sessionId);
+  });
+
+  it('an observer that throws cannot interrupt the prompt or the stop', async () => {
+    const t = await recording();
+    t.mgr.on('silence-prompt', () => { throw new Error('window gone'); });
+    t.mgr.on('silence-cleared', () => { throw new Error('window gone'); });
+    await t.advance(PROMPT_AFTER + COUNTDOWN);
+    expect(t.mgr.state(t.sessionId)).toBe('idle');
+    expect(t.repo.finalize).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,5 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { MeetingTemplatePicker } from '../components/SummaryTemplates';
 import ReactMarkdown from 'react-markdown';
@@ -11,7 +11,7 @@ import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
 import { toFileUrl } from '../lib/file-url';
 import { createPlaybackClock, usePlaybackTime, type PlaybackClock } from '../lib/playback-clock';
@@ -27,6 +27,10 @@ import { RememberTerms, TerminologyPanel } from '../components/Terminology';
 import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
 import { NotesHistory } from '../components/NotesHistory';
 import { SlidingPill } from '../components/motion/SlidingPill';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { useMenuKeyboard } from '../lib/menu-keyboard';
+import { useToast } from '../components/Toasts';
+import { shortcutMod } from '../lib/shortcut';
 import { nextTabIndex } from '../lib/tab-keys';
 import { processingDiagnosis, primaryProcessingStatus } from '../../../shared/processing-recovery';
 
@@ -140,6 +144,22 @@ export function MeetingDetailView({
   const [railOpen, setRailOpen] = useState<boolean>(() => {
     try { return localStorage.getItem(RAIL_PREFERENCE_KEY) !== 'closed'; } catch { return true; }
   });
+  // "Open full speaker review" (compact speakers panel) opens the rail if
+  // it is collapsed, then moves to it. The link used to point at a hidden
+  // element and do nothing (#298).
+  useEffect(() => {
+    const open = (): void => {
+      setRailOpen(true);
+      try { localStorage.setItem(RAIL_PREFERENCE_KEY, 'open'); } catch { /* preference only */ }
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const rail = document.getElementById('meeting-speakers');
+        rail?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        rail?.focus({ preventScroll: true });
+      }));
+    };
+    window.addEventListener('mn:open-speaker-review', open);
+    return () => window.removeEventListener('mn:open-speaker-review', open);
+  }, []);
   const toggleRail = useCallback(() => {
     setRailOpen((open) => {
       try { localStorage.setItem(RAIL_PREFERENCE_KEY, open ? 'closed' : 'open'); } catch { /* preference only */ }
@@ -232,6 +252,11 @@ export function MeetingDetailView({
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input,textarea,select,[contenteditable]')) return;
+      // A focused <audio> handles Space and the arrows itself; acting here
+      // too toggled playback twice. And while any dialog is open the keys
+      // belong to the dialog, not to the player behind it (#296).
+      if (t?.closest('audio,video')) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const el = audioRef.current;
       if (!el) return;
       if (e.code === 'Space') {
@@ -449,7 +474,7 @@ export function MeetingDetailView({
           onClick={onBack}
           className="text-ink-muted hover:text-ink text-sm shrink-0"
         >
-          ← Back
+          <IconLabel icon="arrow-left">Back</IconLabel>
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
             forcing the flex row to overflow — otherwise a long title would
@@ -703,7 +728,7 @@ function EditableTitle({
                    hover:underline decoration-dotted underline-offset-4"
       >
         {title}
-        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity">✎</span>
+        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity"><Icon name="pencil" className="inline w-3 h-3" /></span>
       </button>
     );
   }
@@ -762,7 +787,7 @@ function DetailUnavailable({ problem, onBack, onRetry }: {
   return (
     <div className="detail-view max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">← Back</button>
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0"><IconLabel icon="arrow-left">Back</IconLabel></button>
       </div>
       <div role="alert" className="px-6 py-16 text-center">
         <h2 className="text-base font-semibold text-ink">
@@ -805,7 +830,7 @@ function DetailSkeleton({
       {/* Title bar — uses real title when available */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
-          ← Back
+          <IconLabel icon="arrow-left">Back</IconLabel>
         </button>
         <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
           {hint?.title ?? (
@@ -971,9 +996,9 @@ function SpeakerIdControls({
         </label>
         <button
           onClick={() => void continueNow()}
-          className="text-sm font-semibold bg-status-warn hover:opacity-90 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+          className="text-sm font-semibold bg-status-warnSolid hover:brightness-90 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
         >
-          Continue →
+          <IconLabel icon="arrow-right" className="flex-row-reverse">Continue</IconLabel>
         </button>
         </div>
         {unidentified > 0 && <div className="mt-3 max-w-xl"><SpeakersPanel meeting={meeting} onReload={onReload} compact /></div>}
@@ -1069,9 +1094,9 @@ export function FailureBanner({
       <button
         onClick={() => void retry()}
         disabled={retrying}
-        className="shrink-0 text-sm font-semibold bg-danger-solid hover:bg-danger-solid disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+        className="shrink-0 text-sm font-semibold bg-danger-solid hover:brightness-90 disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
       >
-        {retrying ? 'Retrying…' : 'Retry ↻'}
+        {retrying ? 'Retrying…' : <IconLabel icon="rotate-cw" className="flex-row-reverse">Retry</IconLabel>}
       </button>
     </div>
   );
@@ -1202,7 +1227,7 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
                 <span className="font-normal opacity-80">
                   {fmtElapsed(elapsed)}
                   {' · '}
-                  <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnText font-semibold' : ''}>
+                  <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnOnSolid font-semibold' : ''}>
                     {fmtEta(meeting.stageEtaMs, meeting.stageEtaRough)}
                     {isRunningLong(elapsed, meeting.stageEtaMs) ? ' · running long' : ''}
                   </span>
@@ -1278,7 +1303,15 @@ function ProcessingMenu({
   const [operationError, setOperationError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [rerunStage, setRerunStage] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const container = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
+  const toast = useToast();
+  const closePanel = useCallback(() => setOpen(false), []);
+  // The panel mixes a template picker with action buttons, so it is a small
+  // dialog rather than a menu: Tab moves through it, arrows step the buttons.
+  useMenuKeyboard(panel, trigger, open, closePanel, { mixed: true });
   useEffect(() => {
     if (!open) return;
     const onPointer = (e: MouseEvent): void => { if (!container.current?.contains(e.target as Node)) setOpen(false); };
@@ -1292,6 +1325,17 @@ function ProcessingMenu({
     try { await api.meetings.start(meeting.id); await onReload(); }
     catch (error) { setOperationError((error as Error).message); }
     finally { setBusy(false); }
+  }
+  // Cancel the in-progress run for this meeting (#298). Until now the only
+  // Cancel was on the Library's queue banner.
+  async function cancelRun(): Promise<void> {
+    setCancelling(true); setOperationError(null);
+    try {
+      await api.pipeline.cancel(meeting.id);
+      toast.show({ message: 'Stopping this meeting only. Original audio is retained.', durationMs: 4000 });
+      await onReload();
+    } catch (error) { setOperationError((error as Error).message); }
+    finally { setCancelling(false); }
   }
   async function rerunFrom(stage: string): Promise<void> {
     setRerunStage(null); setOpen(false); setBusy(true); setOperationError(null);
@@ -1311,29 +1355,44 @@ function ProcessingMenu({
   return (
     <div ref={container} className="relative shrink-0">
       <ConfirmDialog open={rerunStage !== null} title="Re-run processing?" body="Generated results from the selected stage onward will be replaced. Notes and action items are saved in history. When a transcript is replaced, its previous version (including edits) is kept as a snapshot in the meeting folder. Original audio and remembered terminology are kept." confirmLabel="Re-run" onCancel={() => setRerunStage(null)} onConfirm={() => { if (rerunStage) void rerunFrom(rerunStage); }}/>
-      {neverProcessed ? (
+      <div className="flex items-center gap-2">
+        {neverProcessed && (
+          <button
+            type="button"
+            onClick={() => void startProcessing()}
+            disabled={busy}
+            className="bg-brand-solid text-white text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-brand-solid/90 transition inline-flex items-center gap-1.5 disabled:opacity-60"
+          >
+            <Icon name="play" className="w-3.5 h-3.5" />
+            Process recording
+          </button>
+        )}
+        {isProcessing && (
+          <button
+            type="button"
+            onClick={() => void cancelRun()}
+            disabled={cancelling}
+            className="text-xs font-semibold text-danger-text border border-danger-border rounded-lg px-2.5 py-1.5 hover:bg-danger-bg transition disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel processing'}
+          </button>
+        )}
+        {/* Shown before the first run too, so a notes template can be chosen
+            up front instead of processing once and re-running (#298). */}
         <button
-          onClick={() => void startProcessing()}
-          disabled={busy}
-          className="bg-brand-solid text-white text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-brand-solid/90 transition inline-flex items-center gap-1.5 disabled:opacity-60"
-        >
-          <Icon name="play" className="w-3.5 h-3.5" />
-          Process recording
-        </button>
-      ) : (
-        <button
+          ref={trigger}
           type="button"
-          aria-haspopup="menu"
+          aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           className="text-xs font-medium text-ink-muted hover:text-ink border border-surface-border rounded-lg px-2.5 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo"
         >
-          Processing ▾
+          <IconLabel icon="chevron-down" className="flex-row-reverse">{neverProcessed ? 'Options' : 'Processing'}</IconLabel>
         </button>
-      )}
+      </div>
       {operationError && <p role="alert" className="absolute right-0 top-full mt-1 w-64 text-xs text-danger bg-surface border border-surface-border rounded-lg p-2 z-30">Could not queue processing: {operationError}</p>}
       {open && (
-        <div role="menu" aria-label="Processing" className="material-popover absolute right-0 top-full mt-1 z-30 w-72 bg-surface border border-surface-border rounded-lg shadow-pop p-3 space-y-3 text-left">
+        <div ref={panel} role="dialog" aria-label="Processing options" tabIndex={-1} className="material-popover absolute right-0 top-full mt-1 z-30 w-72 bg-surface border border-surface-border rounded-lg shadow-pop p-3 space-y-3 text-left">
           {hasModels && (
             <div>
               <div className="text-[11px] text-ink-muted font-medium">Models used</div>
@@ -1342,7 +1401,11 @@ function ProcessingMenu({
             </div>
           )}
           <MeetingTemplatePicker meetingId={meeting.id} disabled={isProcessing} />
-          {isProcessing ? (
+          {neverProcessed ? (
+            <div className="text-xs text-ink-muted">
+              The template applies when you process this recording.
+            </div>
+          ) : isProcessing ? (
             <div className="text-xs text-ink-muted italic">
               Processing in progress — re-run options will be available once it finishes or fails.
             </div>
@@ -1356,12 +1419,12 @@ function ProcessingMenu({
               ] as const).map(([stage, label]) => (
                 <button
                   key={stage}
-                  role="menuitem"
+                  type="button"
                   onClick={() => { setOpen(false); setRerunStage(stage); }}
                   disabled={busy}
                   className="w-full text-left border border-surface-border rounded-lg py-1.5 px-2.5 text-[13px] text-ink-soft hover:border-brand-indigo/50 hover:text-ink transition disabled:opacity-50"
                 >
-                  <span className="mr-1.5">↻</span>{label}
+                  <Icon name="rotate-cw" className="inline w-3.5 h-3.5 mr-1.5 align-[-2px]" />{label}
                 </button>
               ))}
             </div>
@@ -1393,6 +1456,9 @@ function ArtifactFeedback({ label, state, onRetry }: {
 }
 
 const DETAIL_TABS = ['summary', 'transcript', 'actions'] as const;
+// The first tab holds what every other surface (banners, history, menus,
+// the Library) calls "Notes"; it used to be the one place saying "Summary".
+const TAB_LABELS: Record<typeof DETAIL_TABS[number], string> = { summary: 'Notes', transcript: 'Transcript', actions: 'Actions' };
 
 function CenterPane({
   meeting, tab, onTab, playbackClock, seekRevision, onSeek, onReload, onShowSource, provenance,
@@ -1421,6 +1487,7 @@ function CenterPane({
 }): JSX.Element {
   const showRaw = meeting.transcriptMd === null && meeting.rawTranscriptText !== null;
   const contentVersion = useContentVersion(meeting.transcriptMd, meeting.summaryMd);
+  const openActionCount = meeting.actionItems.filter((item) => item.status !== 'done').length;
   return (
     <div>
       {/* Sentence-case tabs share the app's system typography.
@@ -1454,7 +1521,12 @@ function CenterPane({
             className={`relative px-3 py-3 text-[13px] capitalize transition
               ${tab === t ? 'text-brand-indigo font-semibold' : 'text-ink-muted hover:text-ink'}`}
           >
-            {t}
+            {TAB_LABELS[t]}{t === 'actions' && meeting.actionItems.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-surface-sunken px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink-muted"
+                aria-label={`${openActionCount} open of ${meeting.actionItems.length}`}>
+                {openActionCount}/{meeting.actionItems.length}
+              </span>
+            )}
             {tab === t && <SlidingPill group="detail-tabs" className="-bottom-px h-0.5 bg-brand-indigo" />}
           </button>
         ))}
@@ -1575,6 +1647,7 @@ function SummaryPanel({
   onBaseline: (v: string) => void;
 }): JSX.Element {
   const original = meeting.summaryMd ?? '';
+  const toast = useToast();
   // Transient save-cycle state can stay local: losing "Saving…" / the
   // ✓-saved timestamp / an error banner on a tab switch is harmless.
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -1653,11 +1726,16 @@ function SummaryPanel({
         error={error}
         onSave={save}
         onRevert={() => { onDraft(savedValue); setError(null); }}
+        onCopy={() => {
+          void navigator.clipboard.writeText(draft)
+            .then(() => toast.show({ message: 'Notes copied as Markdown', durationMs: 3000 }))
+            .catch((cause: unknown) => toast.show({ message: `Could not copy notes: ${(cause as Error).message}`, variant: 'error' }));
+        }}
       />
       {mode === 'view' && <MarkdownPreview source={draft} highlight={provenance} />}
       {mode === 'edit' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <MarkdownEditor value={draft} onChange={onDraft} />
+          <MarkdownEditor value={draft} onChange={onDraft} onSave={() => { if (dirty && !saving) void save(); }} />
           <div className="border border-surface-border rounded-lg p-4 bg-surface-sunken/40 overflow-auto max-h-[60vh]">
             <MarkdownPreview source={previewDraft} />
           </div>
@@ -1668,10 +1746,12 @@ function SummaryPanel({
 }
 
 function SummaryToolbar({
-  mode, onMode, dirty, saving, savedAt, error, onSave, onRevert,
+  mode, onMode, dirty, saving, savedAt, error, onSave, onRevert, onCopy,
 }: {
   mode: SummaryMode;
   onMode: (m: SummaryMode) => void;
+  /** Copy the notes, as they are on screen, to the clipboard as Markdown. */
+  onCopy: () => void;
   dirty: boolean;
   saving: boolean;
   savedAt: Date | null;
@@ -1681,25 +1761,14 @@ function SummaryToolbar({
 }): JSX.Element {
   return (
     <div className="flex items-center gap-2">
-      <div className="inline-flex bg-surface-sunken rounded-lg p-0.5 text-xs font-semibold">
-        {(['view', 'edit'] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => onMode(m)}
-            className={`px-2.5 py-1 rounded-md transition-colors ${
-              mode === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
-            }`}
-          >
-            {m === 'view' ? 'View' : 'Edit'}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl label="Notes mode" value={mode} onChange={onMode}
+        options={[{ value: 'view', label: 'View' }, { value: 'edit', label: 'Edit' }]} />
       <div className="flex-1 min-w-0">
         {error && <span className="text-xs text-danger truncate" title={error}>{error}</span>}
         {!error && dirty && <span className="text-xs text-ink-muted">Unsaved changes</span>}
         {!error && !dirty && savedAt && (
           <span className="text-xs text-status-ok">
-            ✓ Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <Icon name="check" className="inline w-3.5 h-3.5 mr-1 align-[-2px]" />Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
       </div>
@@ -1711,9 +1780,14 @@ function SummaryToolbar({
           Revert
         </button>
       )}
+      <button type="button" onClick={onCopy} className="btn-secondary" title="Copy the notes as Markdown">
+        <IconLabel icon="copy">Copy Markdown</IconLabel>
+      </button>
       <button
+        type="button"
         onClick={() => void onSave()}
         disabled={!dirty || saving}
+        title={`Save (${shortcutMod()}S)`}
         className="text-xs font-semibold bg-brand-solid text-white px-3 py-1 rounded-md
                    hover:bg-brand-solid/90 disabled:opacity-40 disabled:cursor-not-allowed transition"
       >
@@ -1775,22 +1849,33 @@ function MarkdownPreview({
 }
 
 function MarkdownEditor({
-  value, onChange,
-}: { value: string; onChange: (v: string) => void }): JSX.Element {
+  value, onChange, onSave,
+}: { value: string; onChange: (v: string) => void; onSave?: () => void }): JSX.Element {
   // Simple textarea — no codemirror / monaco. Keeps the bundle slim and the
   // editing experience predictable. Tab key inserts two spaces (otherwise
   // it'd shift focus away, which is awful in a long edit).
+  //
+  // That must not trap keyboard users (WCAG 2.1.2): Shift+Tab always moves
+  // focus back, and Escape releases the next Tab so it moves focus forward.
   const ref = useRef<HTMLTextAreaElement>(null);
+  const tabReleased = useRef(false);
+  const hintId = useId();
   // Track line count so we can grow the textarea proportionally without
   // clipping; capped at 60vh so the toolbar stays visible.
   const lineCount = useMemo(() => Math.max(8, value.split('\n').length + 2), [value]);
   return (
+    <div className="min-w-0">
     <textarea
       ref={ref}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={() => { tabReleased.current = false; }}
       onKeyDown={(e) => {
+        // Cmd/Ctrl+S saves without leaving the editor (#298).
+        if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 's') { e.preventDefault(); onSave?.(); return; }
+        if (e.key === 'Escape') { tabReleased.current = true; return; }
         if (e.key === 'Tab') {
+          if (e.shiftKey || tabReleased.current) return; // let focus leave
           e.preventDefault();
           const ta = e.currentTarget;
           const { selectionStart: ss, selectionEnd: se, value: v } = ta;
@@ -1800,8 +1885,12 @@ function MarkdownEditor({
           requestAnimationFrame(() => {
             ta.selectionStart = ta.selectionEnd = ss + 2;
           });
+        } else if (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace') {
+          tabReleased.current = false; // typing again: Tab indents once more
         }
       }}
+      aria-label="Notes (Markdown)"
+      aria-describedby={hintId}
       spellCheck
       className="w-full font-mono text-[13px] leading-relaxed text-ink bg-surface-sunken/40
                  border border-surface-border rounded-lg p-3 resize-none
@@ -1809,6 +1898,8 @@ function MarkdownEditor({
                  max-h-[60vh] overflow-auto"
       style={{ minHeight: `${Math.min(lineCount, 30) * 1.5}rem` }}
     />
+    <p id={hintId} className="mt-1 text-[11px] text-ink-muted">Tab indents. Press Esc then Tab to leave the editor; Shift+Tab goes back. {shortcutMod()}S saves.</p>
+    </div>
   );
 }
 

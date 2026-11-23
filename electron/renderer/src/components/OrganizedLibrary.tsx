@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useMenuKeyboard } from '../lib/menu-keyboard';
+import { useRowKeyboardNav } from '../lib/row-keyboard-nav';
+import { Icon } from './icons';
 import { VirtualGroupRows } from './VirtualGroupRows';
 import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
@@ -47,6 +50,9 @@ export function OrganizedLibrary({
   const [loadedBySection, setLoadedBySection] = useState<Record<string, MeetingSummary[]>>({});
   const ownScrollRef = useRef<HTMLDivElement>(null);
   const scrollRef = parentScrollRef ?? ownScrollRef;
+  // j / k move between meeting rows across every expanded group; Enter opens
+  // the focused one (#298).
+  useRowKeyboardNav(scrollRef, true);
   const searchBuckets = useMemo(() => groupSearchMeetings(sections, searchResults), [sections, searchResults]);
 
   useEffect(() => { setSearchCollapsed(new Set()); }, [searchQuery]);
@@ -138,6 +144,8 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
   const [menuAnchor, setMenuAnchor] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  useMenuKeyboard(menuRef, menuButtonRef, menuOpen && menuAnchor !== null, closeMenu);
   const panelId = `group-rows-${section.key}`;
 
   useEffect(() => {
@@ -189,7 +197,7 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
     <div className="group-heading flex min-h-[56px] items-center gap-1.5 py-1">
       <button type="button" aria-expanded={expanded} aria-controls={panelId}
         onClick={onToggle} className="min-w-0 flex-1 flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">
-        <span aria-hidden="true" className="w-4 shrink-0 text-ink-muted">{expanded ? '⌄' : '›'}</span>
+        <span aria-hidden="true" className="w-4 shrink-0 text-ink-muted"><Icon name={expanded ? 'chevron-down' : 'chevron-right'} className="w-3.5 h-3.5" /></span>
         <svg viewBox="0 0 20 20" className="w-4 h-4 shrink-0 text-brand-indigo" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M2 5h6l2 2h8v9H2z" /></svg>
         <span id={`group-label-${section.key}`} className="truncate text-sm font-semibold" title={section.name}>{section.name}{section.pinned && <span className="ml-2 text-xs text-brand-indigo">Pinned</span>}</span>
         <span className="shrink-0 text-xs font-normal text-ink-muted tabular-nums">{countText}</span>
@@ -203,12 +211,12 @@ function GroupSection({ section, filter, sort, searching, searchRows, expanded, 
         className="shrink-0 rounded-lg px-2 py-1.5 text-xs font-semibold text-brand-indigo hover:bg-brand-indigo/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">View</button>
       {onRename && onDelete && <>
         <button ref={menuButtonRef} type="button" aria-label={`Options for ${section.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((open) => !open)} className="shrink-0 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40">⋯</button>
+          onClick={() => setMenuOpen((open) => !open)} className="shrink-0 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"><Icon name="more-horizontal" /></button>
         {menuOpen && menuAnchor && createPortal(<div ref={menuRef} role="menu"
           style={{ position: 'fixed', top: menuAnchor.top, bottom: menuAnchor.bottom, right: menuAnchor.right, zIndex: 1000 }}
           className="material-popover w-40 rounded-lg border border-surface-border bg-surface p-1 shadow-pop">
-          {onPrepare && <button role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPrepare(); }}>Prepare next meeting</button>}
-          {onPin && <button role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPin(); }}>{section.pinned ? 'Unpin group' : 'Pin group'}</button>}
+          {onPrepare && <button type="button" role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPrepare(); }}>Prepare next meeting</button>}
+          {onPin && <button type="button" role="menuitem" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken" onClick={() => { setMenuOpen(false); onPin(); }}>{section.pinned ? 'Unpin group' : 'Pin group'}</button>}
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onRename(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-sunken">Rename group…</button>
           <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onDelete(); }} className="w-full rounded-md px-2 py-1.5 text-left text-sm text-danger hover:bg-danger-bg">Delete group…</button>
         </div>, document.body)}
