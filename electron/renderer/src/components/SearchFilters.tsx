@@ -87,7 +87,7 @@ export function SearchFilters({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="rounded-lg border border-surface-border px-2 py-1"
+          className="btn-secondary"
         >
           Filters{Object.keys(facets).length ? ` (${Object.keys(facets).length})` : ''}
         </button>
@@ -109,7 +109,7 @@ export function SearchFilters({
           </button>
         ))}
         {Object.keys(facets).length > 0 && (
-          <button type="button" onClick={() => onChange({})}>
+          <button className="btn-secondary" type="button" onClick={() => onChange({})}>
             Clear filters
           </button>
         )}
@@ -117,33 +117,33 @@ export function SearchFilters({
       {open && (
         <div className="mt-2 rounded-lg bg-surface-sunken border border-surface-border p-3 space-y-2">
           <div className="flex flex-wrap gap-3">
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               From{' '}
-              <input
+              <input className="input-sm"
                 type="date"
                 value={facets.from ?? ''}
                 onChange={(e) => set('from', e.target.value)}
               />
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Through{' '}
-              <input
+              <input className="input-sm"
                 type="date"
                 value={facets.to ?? ''}
                 onChange={(e) => set('to', e.target.value)}
               />
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Week{' '}
-              <input
+              <input className="input-sm"
                 type="week"
                 value={facets.week ?? ''}
                 onChange={(e) => set('week', e.target.value)}
               />
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Speaker{' '}
-              <select
+              <select className="input-sm"
                 value={facets.speakerId ?? ''}
                 onChange={(e) => set('speakerId', e.target.value)}
               >
@@ -155,9 +155,9 @@ export function SearchFilters({
                 ))}
               </select>
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Status{' '}
-              <select value={facets.status ?? ''} onChange={(e) => set('status', e.target.value)}>
+              <select className="input-sm" value={facets.status ?? ''} onChange={(e) => set('status', e.target.value)}>
                 <option value="">Any</option>
                 {['pending', 'processing', 'awaiting_user', 'done', 'failed'].map((status) => (
                   <option key={status} value={status}>
@@ -166,32 +166,32 @@ export function SearchFilters({
                 ))}
               </select>
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Actions{' '}
-              <select value={facets.actions ?? ''} onChange={(e) => set('actions', e.target.value)}>
+              <select className="input-sm" value={facets.actions ?? ''} onChange={(e) => set('actions', e.target.value)}>
                 <option value="">Any</option>
                 <option value="open">Has open actions</option>
                 <option value="mine">Has my open actions</option>
               </select>
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Source{' '}
-              <select value={facets.source ?? ''} onChange={(e) => set('source', e.target.value)}>
+              <select className="input-sm" value={facets.source ?? ''} onChange={(e) => set('source', e.target.value)}>
                 <option value="">Any</option>
                 <option value="capture">Built-in recording</option>
                 <option value="import">Imported</option>
               </select>
             </label>
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Search in{' '}
-              <select value={facets.content ?? ''} onChange={(e) => set('content', e.target.value)}>
+              <select className="input-sm" value={facets.content ?? ''} onChange={(e) => set('content', e.target.value)}>
                 <option value="">Titles, notes & transcript</option>
                 <option value="summary">Notes only</option>
                 <option value="transcript">Transcript only</option>
               </select>
             </label>
-            <label>
-              <input
+            <label className="inline-flex items-center gap-1.5">
+              <input className="accent-brand-solid"
                 type="checkbox"
                 checked={!!facets.warning}
                 onChange={(e) => set('warning', e.target.checked ? true : '')}
@@ -200,9 +200,9 @@ export function SearchFilters({
             </label>
           </div>
           <div className="border-t border-surface-border pt-2 flex flex-wrap items-center gap-2">
-            <label>
+            <label className="inline-flex items-center gap-1.5">
               Saved{' '}
-              <select
+              <select className="input-sm"
                 value={selected}
                 onChange={(e) => {
                   setSelected(e.target.value);
@@ -217,7 +217,7 @@ export function SearchFilters({
                 ))}
               </select>
             </label>
-            <button
+            <button className="btn-secondary"
               type="button"
               disabled={!selected}
               onClick={() => {
@@ -236,9 +236,9 @@ export function SearchFilters({
               maxLength={80}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="rounded border border-surface-border px-2 py-1"
+              className="input-sm"
             />
-            <button
+            <button className="btn-secondary"
               type="button"
               disabled={!name.trim() || (!selected && saved.length >= 30)}
               onClick={() => {
@@ -252,7 +252,7 @@ export function SearchFilters({
             >
               Save / rename
             </button>
-            <button
+            <button className="btn-secondary"
               type="button"
               disabled={!selected}
               onClick={() => {

@@ -158,7 +158,7 @@ export function MoveToGroupDialog({ ids, meeting, hiddenCount = 0, onClose, onCh
         <label htmlFor="move-new-group" className="text-sm font-semibold">New destination group</label>
         <input id="move-new-group" ref={input} maxLength={80} value={name} onChange={(event) => setName(event.target.value)}
           disabled={busy} placeholder="Group name"
-          className="mt-1.5 w-full rounded-lg border border-surface-border px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo disabled:opacity-50" />
+          className="mt-1.5 w-full rounded-lg border border-surface-border bg-surface text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand-indigo disabled:opacity-50" />
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" disabled={busy} onClick={() => { setCreating(false); setError(null); }}
             className="px-3 py-1.5 text-sm text-ink-muted disabled:opacity-50">Back to groups</button>

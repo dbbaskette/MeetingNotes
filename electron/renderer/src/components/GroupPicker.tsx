@@ -114,7 +114,7 @@ export function GroupPicker({
           </> : <form onSubmit={(event) => { event.preventDefault(); void createGroup(); }}>
             <label className="block text-xs font-semibold mb-1" htmlFor="new-group-name">New group</label>
             <input id="new-group-name" ref={searchRef} maxLength={80} value={newName} onChange={(event) => setNewName(event.target.value)}
-              placeholder="Group name" className="w-full rounded-lg border border-surface-border px-2.5 py-1.5 text-sm outline-none focus:border-brand-indigo" />
+              placeholder="Group name" className="w-full rounded-lg border border-surface-border bg-surface text-ink px-2.5 py-1.5 text-sm outline-none focus:border-brand-indigo" />
             {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
             <div className="mt-2 flex justify-end gap-2">
               <button type="button" onClick={() => setCreating(false)} className="text-xs text-ink-muted px-2 py-1">Cancel</button>

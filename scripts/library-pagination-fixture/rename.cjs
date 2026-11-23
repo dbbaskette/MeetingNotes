@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
   const before = await run(`${scroller}.scrollTop`);
   const viewport = await run('({ width: innerWidth, height: innerHeight })');
   await open('Synthetic meeting 205');
-  await inlineRename('Updated grouped meeting'); await click('← Back');
+  await inlineRename('Updated grouped meeting'); await click('Back');
   await until(`!!${row('Updated grouped meeting')}`);
   await settleLayout();
   assert.deepEqual(await run('({ width: innerWidth, height: innerHeight })'), viewport, 'Navigation does not resize the fixture viewport');
@@ -72,31 +72,31 @@ app.whenReady().then(async () => {
   assert.ok(await run(`${planning}.textContent.includes('Load more (100 of 200)')`), 'Return preserves loaded pages');
   // A stale group page pending before rename cannot win after navigation.
   await run('window.fixture.holdGroupRefresh()'); await until('window.fixture.groupPageHeld()');
-  await open('Updated grouped meeting'); await inlineRename('Fresh after pending page'); await click('← Back');
+  await open('Updated grouped meeting'); await inlineRename('Fresh after pending page'); await click('Back');
   await run('window.fixture.releaseGroupPage()');
   await until(`!!${row('Fresh after pending page')}`);
   // Both detail rename entry points and rejected writes retain correct titles.
   await open('Fresh after pending page');
-  await run('[...document.querySelectorAll("button[aria-label=Actions]")].find(b => b.getClientRects().length).click()');
-  await menuRename('Details menu title'); await click('← Back'); await until(`!!${row('Details menu title')}`);
+  await run('[...document.querySelectorAll("button[aria-label^=Actions]")].find(b => b.getClientRects().length).click()');
+  await menuRename('Details menu title'); await click('Back'); await until(`!!${row('Details menu title')}`);
   await open('Details menu title'); await run('window.fixture.rejectRename(true)');
-  await run('[...document.querySelectorAll("button[aria-label=Actions]")].find(b => b.getClientRects().length).click()');
-  await menuRename('Not saved', true); await click('Cancel'); await click('← Back');
+  await run('[...document.querySelectorAll("button[aria-label^=Actions]")].find(b => b.getClientRects().length).click()');
+  await menuRename('Not saved', true); await click('Cancel'); await click('Back');
   await until(`!!${row('Details menu title')}`);
   assert.equal(await run(`!!${row('Not saved')}`), false);
   await run('window.fixture.rejectRename(false)');
   // Existing Library row rename still updates its section without navigation.
-  await run(`${row('Details menu title')}.querySelector('button[aria-label=Actions]').click()`);
+  await run(`${row('Details menu title')}.querySelector('button[aria-label^=Actions]').click()`);
   await menuRename('Library row title'); await until(`!!${row('Library row title')}`);
   // Flat list and focused-group browsing use the same activation boundary.
   await click('All meetings'); await until(`!!${row('Synthetic meeting 0')}`);
-  await open('Synthetic meeting 0'); await inlineRename('Updated flat meeting'); await click('← Back');
+  await open('Synthetic meeting 0'); await inlineRename('Updated flat meeting'); await click('Back');
   await until(`!!${row('Updated flat meeting')}`);
   await click('Organized');
   await until(`!!document.querySelector('[aria-label="View only Planning"]')`);
   await run(`document.querySelector('[aria-label="View only Planning"]').click()`);
   await until(`!!${row('Synthetic meeting 200')}`);
-  await open('Synthetic meeting 200'); await inlineRename('Updated scoped meeting'); await click('← Back');
+  await open('Synthetic meeting 200'); await inlineRename('Updated scoped meeting'); await click('Back');
   await until(`!!${row('Updated scoped meeting')}`);
   assert.equal(await run('window.fixture.store.getState().query.groupId'), group);
   // An unchanged search must rehydrate titles, rather than keeping old hits.
@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
   await until('window.fixture?.store.getState().items.length === 50');
   await input('input[placeholder^="Search titles"]', 'synthetic');
   await until(`!!${row('Synthetic meeting 110')}`);
-  await open('Synthetic meeting 110'); await inlineRename('Updated search title'); await click('← Back');
+  await open('Synthetic meeting 110'); await inlineRename('Updated search title'); await click('Back');
   await until(`!!${row('Updated search title')}`);
   assert.equal(await run(`document.querySelector('input[placeholder^="Search titles"]').value`), 'synthetic');
   // One real click on the group button while the title is being edited saves

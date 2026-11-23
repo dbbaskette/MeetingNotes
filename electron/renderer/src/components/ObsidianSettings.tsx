@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
+import { ModalShell } from './ModalShell';
 import { useSettingsSectionShown } from './SettingsNavigation';
 import type {
   ObsidianOptions,
@@ -27,8 +28,7 @@ export function ObsidianSettings(): JSX.Element {
   const [confirm, setConfirm] = useState<'replace' | 'repair' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const modal = useRef<HTMLDialogElement>(null),
-    trigger = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let active = true;
     const refresh = () =>
@@ -50,9 +50,6 @@ export function ObsidianSettings(): JSX.Element {
       clearInterval(timer);
     };
   }, [shown]);
-  useEffect(() => {
-    if (open && !modal.current?.open) modal.current?.showModal();
-  }, [open]);
   async function perform(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(null);
@@ -75,7 +72,6 @@ export function ObsidianSettings(): JSX.Element {
       setComparison(null);
       return;
     }
-    modal.current?.close();
     setOpen(false);
     trigger.current?.focus();
   }
@@ -137,15 +133,7 @@ export function ObsidianSettings(): JSX.Element {
         </p>
       ) : null}
       {open && (
-        <dialog
-          ref={modal}
-          aria-labelledby="obsidian-title"
-          onCancel={(e) => {
-            e.preventDefault();
-            close();
-          }}
-          className="material-dialog m-auto w-[calc(100%-2rem)] max-w-2xl max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
-        >
+        <ModalShell size="lg" labelledBy="obsidian-title" busy={busy} onClose={close} className="p-0 flex flex-col">
           <header className="flex shrink-0 justify-between items-center border-b border-surface-border p-5">
             <h2 id="obsidian-title" className="font-semibold">
               Obsidian sync
@@ -422,7 +410,7 @@ export function ObsidianSettings(): JSX.Element {
               </>
             )}
           </div>
-        </dialog>
+        </ModalShell>
       )}
     </section>
   );

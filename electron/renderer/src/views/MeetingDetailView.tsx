@@ -1,5 +1,5 @@
 // electron/renderer/src/views/MeetingDetailView.tsx
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { MeetingTemplatePicker } from '../components/SummaryTemplates';
 import ReactMarkdown from 'react-markdown';
@@ -11,7 +11,7 @@ import { MeetingRowMenu } from '../components/MeetingRowMenu';
 import { MoveToGroupDialog } from '../components/MoveToGroupDialog';
 import { setUnsavedGuard } from '../lib/unsaved-guard';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { nextPlaybackRate, fmtPlaybackRate, guardedSeek, SKIP_SECONDS } from '../lib/audio-controls';
 import { toFileUrl } from '../lib/file-url';
 import { createPlaybackClock, usePlaybackTime, type PlaybackClock } from '../lib/playback-clock';
@@ -27,6 +27,7 @@ import { RememberTerms, TerminologyPanel } from '../components/Terminology';
 import { correctionCandidates, type TermCandidate } from '../../../shared/terminology-matcher';
 import { NotesHistory } from '../components/NotesHistory';
 import { SlidingPill } from '../components/motion/SlidingPill';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { nextTabIndex } from '../lib/tab-keys';
 import { processingDiagnosis, primaryProcessingStatus } from '../../../shared/processing-recovery';
 
@@ -232,6 +233,11 @@ export function MeetingDetailView({
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input,textarea,select,[contenteditable]')) return;
+      // A focused <audio> handles Space and the arrows itself; acting here
+      // too toggled playback twice. And while any dialog is open the keys
+      // belong to the dialog, not to the player behind it (#296).
+      if (t?.closest('audio,video')) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const el = audioRef.current;
       if (!el) return;
       if (e.code === 'Space') {
@@ -449,7 +455,7 @@ export function MeetingDetailView({
           onClick={onBack}
           className="text-ink-muted hover:text-ink text-sm shrink-0"
         >
-          ← Back
+          <IconLabel icon="arrow-left">Back</IconLabel>
         </button>
         {/* min-w-0 lets the truncate actually clip long titles instead of
             forcing the flex row to overflow — otherwise a long title would
@@ -703,7 +709,7 @@ function EditableTitle({
                    hover:underline decoration-dotted underline-offset-4"
       >
         {title}
-        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity">✎</span>
+        <span aria-hidden className="ml-1.5 text-xs opacity-0 group-hover:opacity-40 transition-opacity"><Icon name="pencil" className="inline w-3 h-3" /></span>
       </button>
     );
   }
@@ -762,7 +768,7 @@ function DetailUnavailable({ problem, onBack, onRetry }: {
   return (
     <div className="detail-view max-w-6xl mx-auto my-6 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
-        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">← Back</button>
+        <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0"><IconLabel icon="arrow-left">Back</IconLabel></button>
       </div>
       <div role="alert" className="px-6 py-16 text-center">
         <h2 className="text-base font-semibold text-ink">
@@ -805,7 +811,7 @@ function DetailSkeleton({
       {/* Title bar — uses real title when available */}
       <div className="flex items-center gap-3 px-5 py-3 border-b border-surface-border">
         <button onClick={onBack} className="text-ink-muted hover:text-ink text-sm shrink-0">
-          ← Back
+          <IconLabel icon="arrow-left">Back</IconLabel>
         </button>
         <div className="flex-1 min-w-0 text-center font-semibold truncate px-2">
           {hint?.title ?? (
@@ -971,9 +977,9 @@ function SpeakerIdControls({
         </label>
         <button
           onClick={() => void continueNow()}
-          className="text-sm font-semibold bg-status-warn hover:opacity-90 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+          className="text-sm font-semibold bg-status-warnSolid hover:brightness-90 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
         >
-          Continue →
+          <IconLabel icon="arrow-right" className="flex-row-reverse">Continue</IconLabel>
         </button>
         </div>
         {unidentified > 0 && <div className="mt-3 max-w-xl"><SpeakersPanel meeting={meeting} onReload={onReload} compact /></div>}
@@ -1069,9 +1075,9 @@ export function FailureBanner({
       <button
         onClick={() => void retry()}
         disabled={retrying}
-        className="shrink-0 text-sm font-semibold bg-danger-solid hover:bg-danger-solid disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
+        className="shrink-0 text-sm font-semibold bg-danger-solid hover:brightness-90 disabled:opacity-60 text-white px-4 py-1.5 rounded-lg shadow-sm transition"
       >
-        {retrying ? 'Retrying…' : 'Retry ↻'}
+        {retrying ? 'Retrying…' : <IconLabel icon="rotate-cw" className="flex-row-reverse">Retry</IconLabel>}
       </button>
     </div>
   );
@@ -1202,7 +1208,7 @@ function StageTimeline({ meeting }: { meeting: MeetingDetail }): JSX.Element {
                 <span className="font-normal opacity-80">
                   {fmtElapsed(elapsed)}
                   {' · '}
-                  <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnText font-semibold' : ''}>
+                  <span className={isRunningLong(elapsed, meeting.stageEtaMs) ? 'text-status-warnOnSolid font-semibold' : ''}>
                     {fmtEta(meeting.stageEtaMs, meeting.stageEtaRough)}
                     {isRunningLong(elapsed, meeting.stageEtaMs) ? ' · running long' : ''}
                   </span>
@@ -1328,7 +1334,7 @@ function ProcessingMenu({
           onClick={() => setOpen((v) => !v)}
           className="text-xs font-medium text-ink-muted hover:text-ink border border-surface-border rounded-lg px-2.5 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo"
         >
-          Processing ▾
+          <IconLabel icon="chevron-down" className="flex-row-reverse">Processing</IconLabel>
         </button>
       )}
       {operationError && <p role="alert" className="absolute right-0 top-full mt-1 w-64 text-xs text-danger bg-surface border border-surface-border rounded-lg p-2 z-30">Could not queue processing: {operationError}</p>}
@@ -1361,7 +1367,7 @@ function ProcessingMenu({
                   disabled={busy}
                   className="w-full text-left border border-surface-border rounded-lg py-1.5 px-2.5 text-[13px] text-ink-soft hover:border-brand-indigo/50 hover:text-ink transition disabled:opacity-50"
                 >
-                  <span className="mr-1.5">↻</span>{label}
+                  <Icon name="rotate-cw" className="inline w-3.5 h-3.5 mr-1.5 align-[-2px]" />{label}
                 </button>
               ))}
             </div>
@@ -1681,25 +1687,14 @@ function SummaryToolbar({
 }): JSX.Element {
   return (
     <div className="flex items-center gap-2">
-      <div className="inline-flex bg-surface-sunken rounded-lg p-0.5 text-xs font-semibold">
-        {(['view', 'edit'] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => onMode(m)}
-            className={`px-2.5 py-1 rounded-md transition-colors ${
-              mode === m ? 'bg-surface text-ink shadow-sm' : 'text-ink-muted hover:text-ink'
-            }`}
-          >
-            {m === 'view' ? 'View' : 'Edit'}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl label="Notes mode" value={mode} onChange={onMode}
+        options={[{ value: 'view', label: 'View' }, { value: 'edit', label: 'Edit' }]} />
       <div className="flex-1 min-w-0">
         {error && <span className="text-xs text-danger truncate" title={error}>{error}</span>}
         {!error && dirty && <span className="text-xs text-ink-muted">Unsaved changes</span>}
         {!error && !dirty && savedAt && (
           <span className="text-xs text-status-ok">
-            ✓ Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            <Icon name="check" className="inline w-3.5 h-3.5 mr-1 align-[-2px]" />Saved {savedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
       </div>
@@ -1780,17 +1775,26 @@ function MarkdownEditor({
   // Simple textarea — no codemirror / monaco. Keeps the bundle slim and the
   // editing experience predictable. Tab key inserts two spaces (otherwise
   // it'd shift focus away, which is awful in a long edit).
+  //
+  // That must not trap keyboard users (WCAG 2.1.2): Shift+Tab always moves
+  // focus back, and Escape releases the next Tab so it moves focus forward.
   const ref = useRef<HTMLTextAreaElement>(null);
+  const tabReleased = useRef(false);
+  const hintId = useId();
   // Track line count so we can grow the textarea proportionally without
   // clipping; capped at 60vh so the toolbar stays visible.
   const lineCount = useMemo(() => Math.max(8, value.split('\n').length + 2), [value]);
   return (
+    <div className="min-w-0">
     <textarea
       ref={ref}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onBlur={() => { tabReleased.current = false; }}
       onKeyDown={(e) => {
+        if (e.key === 'Escape') { tabReleased.current = true; return; }
         if (e.key === 'Tab') {
+          if (e.shiftKey || tabReleased.current) return; // let focus leave
           e.preventDefault();
           const ta = e.currentTarget;
           const { selectionStart: ss, selectionEnd: se, value: v } = ta;
@@ -1800,8 +1804,12 @@ function MarkdownEditor({
           requestAnimationFrame(() => {
             ta.selectionStart = ta.selectionEnd = ss + 2;
           });
+        } else if (e.key.length === 1 || e.key === 'Enter' || e.key === 'Backspace') {
+          tabReleased.current = false; // typing again: Tab indents once more
         }
       }}
+      aria-label="Notes (Markdown)"
+      aria-describedby={hintId}
       spellCheck
       className="w-full font-mono text-[13px] leading-relaxed text-ink bg-surface-sunken/40
                  border border-surface-border rounded-lg p-3 resize-none
@@ -1809,6 +1817,8 @@ function MarkdownEditor({
                  max-h-[60vh] overflow-auto"
       style={{ minHeight: `${Math.min(lineCount, 30) * 1.5}rem` }}
     />
+    <p id={hintId} className="mt-1 text-[11px] text-ink-muted">Tab indents. Press Esc then Tab to leave the editor; Shift+Tab goes back.</p>
+    </div>
   );
 }
 

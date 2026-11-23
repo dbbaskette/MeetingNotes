@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useDialogSurface } from '../lib/dialog-surface';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { exportTarget } from '../../../main/ipc/export-targets';
 import type { MeetingDetail } from './MeetingDetailView';
 
@@ -108,7 +108,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             onClick={() => setExporting({ id: 'reminders', label: 'Apple Reminders' })}
             className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           >
-            → Apple Reminders
+            <IconLabel icon="arrow-right">Apple Reminders</IconLabel>
           </button>
           {!canTaskExport && (
             <DisabledHint text={taskDisabledReason ?? 'Needs action items — run Extract first'} />
@@ -120,7 +120,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             onClick={() => void exportFile('markdown')}
             className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           >
-            ↓ Markdown
+            <IconLabel icon="download">Markdown</IconLabel>
           </button>
           {!canDocumentExport && <DisabledHint text="Needs notes or action items to export" />}
         </div>
@@ -130,7 +130,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             onClick={() => void exportFile('pdf')}
             className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           >
-            ↓ PDF
+            <IconLabel icon="download">PDF</IconLabel>
           </button>
           {!canDocumentExport && <DisabledHint text="Needs notes or action items to export" />}
         </div>
@@ -160,7 +160,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             onClick={() => setExporting({ id: 'google-tasks', label: 'Google Tasks' })}
             className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           >
-            → Google Tasks{googleSignedIn ? '' : ' (connect in Settings)'}
+            <IconLabel icon="arrow-right">Google Tasks{googleSignedIn ? '' : ' (connect in Settings)'}</IconLabel>
           </button>
           {!googleSignedIn && <DisabledHint text={googleError ? 'Connection status unavailable — retry above' : 'Connect a Google account in Settings'} />}
           {googleSignedIn && !canTaskExport && taskDisabledReason && (
@@ -173,7 +173,7 @@ export function MeetingExportPanel({ meeting, onReload }: {
             onClick={() => setExporting({ id: 'google-doc', label: 'Google Doc' })}
             className="w-full bg-surface border border-surface-border text-xs font-semibold rounded-lg py-2 disabled:opacity-40 disabled:cursor-not-allowed hover:border-ink/30 hover:text-ink transition"
           >
-            → Google Doc{googleSignedIn ? '' : ' (connect in Settings)'}
+            <IconLabel icon="arrow-right">Google Doc{googleSignedIn ? '' : ' (connect in Settings)'}</IconLabel>
           </button>
           {!googleSignedIn && <DisabledHint text={googleError ? 'Connection status unavailable — retry above' : 'Connect a Google account in Settings'} />}
           {googleSignedIn && !canDocumentExport && <DisabledHint text="Needs a summary — run Summarize first" />}
@@ -403,12 +403,12 @@ function ExportPickerModal({
           {error && <div className="text-xs text-danger flex-1 truncate" title={error}>{error}</div>}
           {result && /^https?:\/\//.test(result) ? (
             <div className="text-xs text-status-ok flex-1 truncate" title={result}>
-              ✓ Google Doc created —{' '}
+              <Icon name="check" className="inline w-3.5 h-3.5 mr-1 align-[-2px]" />Google Doc created —{' '}
               <a href={result} target="_blank" rel="noreferrer" className="underline">open</a>
               {' '}(link copied)
             </div>
           ) : result ? (
-            <div className="text-xs text-status-ok flex-1 truncate" title={result}>✓ {result}</div>
+            <div className="text-xs text-status-ok flex-1 truncate" title={result}><Icon name="check" className="inline w-3.5 h-3.5 mr-1 align-[-2px]" />{result}</div>
           ) : null}
           {!error && !result && <div className="flex-1" />}
           <button

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { shortcutMod } from '../lib/shortcut';
 import type { MeetingDetail } from './MeetingDetailView';
 
@@ -101,7 +101,7 @@ export function ActionItemsPanel({
               disabled={reextracting}
               className="text-xs font-semibold text-brand-indigo hover:underline disabled:opacity-50 disabled:no-underline"
             >
-              {reextracting ? 'Re-extracting…' : '↻ Re-extract from summary'}
+              {reextracting ? 'Re-extracting…' : <IconLabel icon="rotate-cw">Re-extract from summary</IconLabel>}
             </button>
           </div>
           <div className="text-[11px] text-ink-muted">
@@ -129,7 +129,7 @@ function ActionItemDisplay({
 }): JSX.Element {
   const done = item.status === 'done';
   return (
-    <div className="relative flex items-start gap-2">
+    <div className="flex items-start gap-2">
       {/* Click-to-toggle done circle. A sibling of the open-editor button
           (nested buttons are invalid HTML), so checking an item off never
           accidentally opens the editor. */}
@@ -137,6 +137,7 @@ function ActionItemDisplay({
         type="button"
         onClick={onToggleStatus}
         aria-pressed={done}
+        aria-label={`${done ? 'Mark as open' : 'Mark as done'}: ${item.text}`}
         title={done ? 'Mark as open' : 'Mark as done'}
         className={`mt-2.5 w-4 h-4 rounded-full border shrink-0 flex items-center justify-center transition-colors
           ${done
@@ -176,18 +177,19 @@ function ActionItemDisplay({
           )}
         </div>
       </button>
+      {/* A real button beside the item, not a span floated over it: it is
+          reachable by keyboard and can never cover long item text. */}
       {item.sourceQuote && (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={() => onShowSource(item.sourceQuote!)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onShowSource(item.sourceQuote!); } }}
           title="Show the summary bullet this came from"
-          className="absolute top-2 right-2 text-[11px] font-semibold text-brand-indigo/80
-                     hover:text-brand-indigo hover:underline cursor-pointer select-none"
+          aria-label={`Show source for: ${item.text}`}
+          className="shrink-0 mt-2 inline-flex items-center gap-1 rounded px-1 text-[11px] font-semibold text-brand-indigo
+                     hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-indigo/40"
         >
-          ↦ source
-        </span>
+          <Icon name="corner-down-right" className="w-3 h-3" />source
+        </button>
       )}
     </div>
   );
@@ -265,6 +267,7 @@ function ActionItemEditor({
           if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
         }}
         placeholder="What needs to happen?"
+        aria-label="Action item"
         rows={2}
         className="w-full text-sm p-2 border border-surface-border rounded-md bg-surface
                    focus:outline-none focus:border-brand-indigo focus:shadow-[0_0_0_3px_rgba(99,102,241,0.15)]
@@ -275,12 +278,14 @@ function ActionItemEditor({
           value={owner}
           onChange={(e) => setOwner(e.target.value)}
           placeholder="Owner (optional)"
+          aria-label="Owner"
           maxLength={200}
           className="flex-1 text-sm p-2 border border-surface-border rounded-md bg-surface
                      focus:outline-none focus:border-brand-indigo"
         />
         <input
           type="date"
+          aria-label="Due date"
           value={due}
           onChange={(e) => setDue(e.target.value)}
           className="text-sm p-2 border border-surface-border rounded-md bg-surface

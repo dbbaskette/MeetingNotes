@@ -86,7 +86,7 @@ A template sets which sections the notes have for a kind of meeting. Six are bui
 Every template keeps **Overview**, **Decisions**, **Action Items** and **Off-topic Conversation**, because action-item extraction, the Weekly view and exports rely on them.
 
 - **For a group:** Settings → Processing → **Notes template by group**. Meetings in that group use it from then on.
-- **For one meeting:** the meeting page's **Processing ▾** menu → **Notes template**. *Automatic* follows the group.
+- **For one meeting:** the meeting page's **Processing** menu → **Notes template**. *Automatic* follows the group.
 
 Choosing a template never rewrites notes that already exist. To apply it to a finished meeting, pick the template and then use **Processing ▾ → Re-run from… → Notes and action items only**; the previous notes are kept in notes history. Templates are built in and cannot be edited yet.
 
@@ -94,7 +94,7 @@ Choosing a template never rewrites notes that already exist. To apply it to a fi
 
 Notes, transcript and action items fill the page. The header shows the meeting's date and length and holds two controls:
 
-- **Processing ▾** lists the models that produced the notes and the three re-run options: from transcription, from speaker separation, or notes and action items only. Each asks for confirmation before replacing results. A recording that has never been processed shows **Process recording** here instead.
+- **Processing** lists the models that produced the notes and the three re-run options: from transcription, from speaker separation, or notes and action items only. Each asks for confirmation before replacing results. A recording that has never been processed shows **Process recording** here instead.
 - The **panel button** beside it hides or shows the speakers and export rail, so a finished meeting can be read at full width. The choice is remembered.
 
 In the speakers rail, voices that need review are always listed in full. When more than four voices are already named, they fold into one **N named voices** row; **Show all** expands it.

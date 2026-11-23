@@ -42,6 +42,28 @@
   --status-warn-text: 146 64 14;
   --status-processing: 91 83 204;
   --status-processing-bg: 224 231 255;
+
+  /* Filled controls carry white labels, so these stay dark enough for AA in
+     BOTH appearances — unlike --brand-indigo / --status-warn, which turn
+     into light text/indicator colors in dark mode (#296). */
+  --brand-solid-end: 112 66 190;
+  --status-warn-solid: 180 83 9;
+  --status-warn-on-solid: 254 243 199;
+
+  /* Speaker colors. --speaker-N is a fill for avatars with white initials;
+     --speaker-N-text is the same hue as foreground text on app surfaces. */
+  --speaker-1: 79 70 229;
+  --speaker-2: 118 52 230;
+  --speaker-3: 190 24 93;
+  --speaker-4: 3 105 161;
+  --speaker-5: 20 115 55;
+  --speaker-6: 180 58 12;
+  --speaker-1-text: 79 70 229;
+  --speaker-2-text: 118 52 230;
+  --speaker-3-text: 190 24 93;
+  --speaker-4-text: 3 105 161;
+  --speaker-5-text: 20 115 55;
+  --speaker-6-text: 180 58 12;
 }
 
 /* Independent dark materials, not translucent light-mode content. */
@@ -77,6 +99,24 @@
   --status-warn-text: 252 211 77;
   --status-processing: 129 140 248;
   --status-processing-bg: 30 27 75;
+
+  /* Same values as light: fills under white labels (see :root). */
+  --brand-solid-end: 112 66 190;
+  --status-warn-solid: 180 83 9;
+  --status-warn-on-solid: 254 243 199;
+
+  --speaker-1: 79 70 229;
+  --speaker-2: 118 52 230;
+  --speaker-3: 190 24 93;
+  --speaker-4: 3 105 161;
+  --speaker-5: 20 115 55;
+  --speaker-6: 180 58 12;
+  --speaker-1-text: 165 180 252;
+  --speaker-2-text: 196 181 253;
+  --speaker-3-text: 249 168 212;
+  --speaker-4-text: 125 211 252;
+  --speaker-5-text: 134 239 172;
+  --speaker-6-text: 253 186 116;
 }
 
 html,
@@ -100,6 +140,31 @@ body {
   @apply w-full p-2 border border-surface-border rounded-lg text-sm bg-surface;
   box-shadow: inset 0 1px 2px rgb(var(--material-shadow) / 0.04);
 }
+/* Compact themed field for toolbars and inline rows (date/week pickers,
+   selects, find boxes). Native controls otherwise render with the browser's
+   own background and border, which ignores the dark palette. */
+.input-sm {
+  @apply px-2 py-1 border border-surface-border rounded-md text-xs bg-surface text-ink;
+  box-shadow: inset 0 1px 2px rgb(var(--material-shadow) / 0.04);
+}
+.input-sm:disabled { opacity: 0.5; }
+
+/* Buttons. Call sites keep their own padding/size classes. */
+.brand-fill { background: linear-gradient(145deg, rgb(var(--brand-solid)), rgb(var(--brand-solid-end))); }
+.btn-primary {
+  @apply font-semibold text-white rounded-lg transition;
+  background: linear-gradient(145deg, rgb(var(--brand-solid)), rgb(var(--brand-solid-end)));
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(0.92); }
+.btn-primary:disabled { opacity: 0.45; }
+.btn-secondary {
+  @apply px-2.5 py-1 text-xs font-semibold rounded-md border border-surface-border bg-surface text-ink-soft transition;
+}
+.btn-secondary:hover:not(:disabled) { background: rgb(var(--surface-sunken)); color: rgb(var(--ink)); }
+.btn-secondary:disabled { opacity: 0.45; }
+.btn-danger { @apply font-semibold text-white rounded-lg transition; background: rgb(var(--danger-solid)); }
+.btn-danger:hover:not(:disabled) { filter: brightness(0.9); }
+.btn-danger:disabled { opacity: 0.45; }
 
 /* Golden Gate-inspired CSS material. No native window-glass claim or
    window-compositor dependency. Keep filters off scrolling content/rows. */
@@ -141,7 +206,7 @@ body {
 }
 .segmented-control { background: rgb(var(--chrome)); }
 .record-command {
-  background: linear-gradient(145deg, rgb(var(--brand-solid)), #7042be);
+  background: linear-gradient(145deg, rgb(var(--brand-solid)), rgb(var(--brand-solid-end)));
   border: 1px solid rgb(255 255 255 / 0.3);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 2px 5px rgb(var(--brand-solid) / 0.2);
 }

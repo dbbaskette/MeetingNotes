@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { api } from '../ipc/client';
-import { colorForSpeakerIndex } from '../theme/tokens';
+import { speakerFill } from '../theme/tokens';
 import { partitionSpeakerReview, speakerReviewLayout } from '../lib/speaker-review-layout';
 import { SPEAKER_AUTO_MATCH, suggestedMatch } from '../../../shared/speaker-matching';
 import type { MeetingDetail } from './MeetingDetailView';
@@ -149,6 +149,7 @@ export function SpeakersPanel({
           </div>
           <div className="flex gap-1.5">
             <select
+              aria-label="Assign the selected speakers to"
               value={bulkRosterId}
               disabled={bulkBusy}
               onChange={(event) => setBulkRosterId(event.target.value)}
@@ -240,7 +241,7 @@ function SpeakerRow({
   onSelect: () => void;
 }): JSX.Element {
   const named = rosterId !== null;
-  const color = colorForSpeakerIndex(colorIdx);
+  const color = speakerFill(colorIdx);
   const layout = speakerReviewLayout();
   // One clear best guess is offered on the row itself, so a likely name is
   // a single click instead of open, listen, pick.
@@ -483,6 +484,7 @@ function SpeakerEditor({
         <div>
           <div className="text-[10px] font-bold text-ink-muted uppercase mb-1">Assign to</div>
           <select
+            aria-label={`Assign ${localLabel} to a saved speaker`}
             disabled={busy}
             value=""
             onChange={(e) => {
@@ -505,6 +507,7 @@ function SpeakerEditor({
         <div className="text-[10px] font-bold text-ink-muted uppercase mb-1">Or add new</div>
         <div className="flex gap-1.5">
           <input
+            aria-label={`New speaker name for ${localLabel}`}
             disabled={busy}
             value={newName}
             placeholder="Full name"

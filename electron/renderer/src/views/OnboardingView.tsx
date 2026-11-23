@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { api } from '../ipc/client';
 import { type StepStatus, statusFromProbe } from '../lib/setup-wizard';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
+import logoUrl from '../assets/logo.png';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
 
 interface Props {
@@ -12,16 +13,18 @@ interface Props {
 
 type StepKey = 'permissions' | 'native' | 'llm';
 const STEPS: StepKey[] = ['permissions', 'native', 'llm'];
+const STEP_LABELS: Record<StepKey, string> = { permissions: 'Permissions', native: 'Speech', llm: 'Summary model' };
 
 /** Small colored pip a step reports up so the stepper bar reflects
  *  pending / checking / ok / warn without each step owning its own chrome. */
-function StatusPip({ status }: { status: StepStatus }): JSX.Element {
+function StatusPip({ status, step }: { status: StepStatus; step?: string }): JSX.Element {
   const cls =
     status === 'ok' ? 'bg-status-ok'
       : status === 'warn' ? 'bg-status-warn'
         : status === 'checking' ? 'bg-brand-solid animate-pulse'
           : 'bg-surface-border';
-  return <span className={`inline-block w-2 h-2 rounded-full ${cls}`} aria-label={status} />;
+  const label = status === 'ok' ? 'ready' : status === 'warn' ? 'needs attention' : status === 'checking' ? 'checking' : 'not started';
+  return <span role="img" className={`inline-block w-2 h-2 rounded-full ${cls}`} aria-label={step ? `${step}: ${label}` : label} />;
 }
 
 export function OnboardingView({ onFinished }: Props): JSX.Element {
@@ -45,10 +48,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
   return (
     <div className="onboarding-view max-w-xl mx-auto my-10 bg-surface rounded-xl shadow-pop border border-surface-border overflow-hidden">
       <div className="app-chrome detail-chrome px-6 py-4 border-b border-surface-border flex items-center gap-3">
-        <div
-          className="w-6 h-6 rounded-md"
-          style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}
-        />
+        <img src={logoUrl} alt="" className="h-7 w-auto" />
         <div className="flex-1">
           <div className="font-semibold">Welcome to MeetingNotes</div>
           <div className="text-xs text-ink-muted">Setup · step {idx + 1} of {STEPS.length}</div>
@@ -79,7 +79,7 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
               <div
                 className={`h-1 flex-1 rounded-full ${i <= idx ? 'bg-brand-solid' : 'bg-surface-border'}`}
               />
-              <StatusPip status={stepStatus[k]} />
+              <StatusPip status={stepStatus[k]} step={STEP_LABELS[k]} />
             </div>
           ))}
         </div>
@@ -99,16 +99,16 @@ export function OnboardingView({ onFinished }: Props): JSX.Element {
             </button>
             <button
               onClick={next}
-              className="text-sm font-semibold bg-gradient-to-br from-brand-indigo to-brand-violet text-white px-4 py-1.5 rounded-lg"
+              className="btn-primary text-sm px-4 py-1.5"
             >
-              Next →
+              <IconLabel icon="arrow-right" className="flex-row-reverse">Next</IconLabel>
             </button>
           </>
         )}
         {done && (
           <button
             onClick={() => void finish()}
-            className="text-sm font-semibold bg-gradient-to-br from-brand-indigo to-brand-violet text-white px-4 py-1.5 rounded-lg"
+            className="btn-primary text-sm px-4 py-1.5"
           >
             Finish
           </button>
@@ -205,8 +205,8 @@ function PermRow({
   const cls = state === 'granted' ? 'text-status-ok'
     : state === 'denied' ? 'text-danger'
       : 'text-ink-muted';
-  const txt = state === 'granted' ? '✓ Granted'
-    : state === 'denied' ? '✗ Denied'
+  const txt = state === 'granted' ? <IconLabel icon="check">Granted</IconLabel>
+    : state === 'denied' ? <IconLabel icon="x">Denied</IconLabel>
       : state === 'not-determined' ? 'Not granted yet'
         : 'Unknown';
   return (
@@ -278,7 +278,7 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
       {providers && (
         <div className="text-xs text-ink-muted mb-2">
           {providers.lmStudio.binary
-            ? providers.lmStudio.running ? '✓ LM Studio detected and running.' : 'LM Studio CLI found — start its local server to load a model.'
+            ? providers.lmStudio.running ? <IconLabel icon="check">LM Studio detected and running.</IconLabel> : 'LM Studio CLI found — start its local server to load a model.'
             : 'LM Studio CLI not found.'}
           {providers.ollama.binary ? ' Ollama also detected.' : ''}
         </div>
@@ -306,6 +306,7 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
       {!checking && (loaded?.length ?? 0) > 0 && (
         <>
           <select
+            aria-label="Summary model"
             value={picked}
             onChange={(e) => void pick(e.target.value)}
             className="input mb-2"
@@ -326,7 +327,7 @@ function LlmStep({ onStatus }: { onStatus: (s: StepStatus) => void }): JSX.Eleme
                 ? 'Checking whether this model tends to loop on structured tasks…'
                 : health === 'loops'
                   ? 'This model looped on a quick extraction test — expect it to fail on real meetings too. You can continue, but consider a non-reasoning model.'
-                  : '✓ Passed a quick extraction canary.'}
+                  : <IconLabel icon="check">Passed a quick extraction canary.</IconLabel>}
             </div>
           )}
           {picked && isKnownReasoningModel(picked) && (

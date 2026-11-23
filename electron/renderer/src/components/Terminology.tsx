@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../ipc/client';
+import { ModalShell } from './ModalShell';
 import type {
   TermScope,
   TermHistory,
@@ -528,7 +529,6 @@ export function TerminologySettings(): JSX.Element {
   const [managerOpen, setManagerOpen] = useState(false);
   const [scope, setScope] = useState('*');
   const [discarding, setDiscarding] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
   const managerButton = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const sourceInput = useRef<HTMLInputElement>(null);
@@ -560,7 +560,6 @@ export function TerminologySettings(): JSX.Element {
   const confirmingDelete = deleting !== null;
   useEffect(() => {
     if (!managerOpen) return;
-    if (!dialog.current?.open) dialog.current?.showModal();
     if (discarding) discardCancel.current?.focus();
     else if (confirmingDelete) deleteCancel.current?.focus();
     else if (editingForm) sourceInput.current?.focus();
@@ -577,7 +576,6 @@ export function TerminologySettings(): JSX.Element {
       setDeleting(null);
       return;
     }
-    dialog.current?.close();
     setManagerOpen(false);
     managerButton.current?.focus();
   }
@@ -635,16 +633,9 @@ export function TerminologySettings(): JSX.Element {
         </p>
       )}
       {managerOpen && (
-        <dialog
-          ref={dialog}
-          aria-labelledby="dictionary-title"
-          onCancel={(event) => {
-            event.preventDefault();
-            if (discarding) setDiscarding(false);
-            else closeManager();
-          }}
-          className="material-dialog m-auto w-[calc(100%-2rem)] max-w-2xl h-[min(40rem,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] rounded-xl border border-surface-border bg-surface text-ink p-0 shadow-pop backdrop:bg-black/30 open:flex open:flex-col"
-        >
+        <ModalShell size="lg" labelledBy="dictionary-title" busy={busy}
+          onClose={() => { if (discarding) setDiscarding(false); else closeManager(); }}
+          className="p-0 flex flex-col h-[min(40rem,calc(100dvh-2rem))]">
           <header className="shrink-0 flex items-center justify-between gap-3 border-b border-surface-border p-5">
             <h2 id="dictionary-title" className="font-semibold">
               {form ? (editing ? 'Edit correction' : 'Add correction') : 'Dictionary'}
@@ -739,6 +730,7 @@ export function TerminologySettings(): JSX.Element {
                   <div className="flex-1 min-w-[10rem]">
                     <input
                       ref={searchInput}
+                      data-dialog-initial-focus
                       aria-label="Search terminology"
                       placeholder="Find a term…"
                       className={field}
@@ -903,7 +895,7 @@ export function TerminologySettings(): JSX.Element {
               </form>
             )}
           </div>
-        </dialog>
+        </ModalShell>
       )}
     </section>
   );

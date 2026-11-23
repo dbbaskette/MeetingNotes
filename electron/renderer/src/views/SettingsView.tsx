@@ -5,12 +5,14 @@ import { GroupTemplateDefaults } from '../components/SummaryTemplates';
 import { api } from '../ipc/client';
 import {LibraryBackupPanel} from '../components/LibraryBackupPanel';
 import { isKnownReasoningModel } from '../lib/reasoning-models';
-import { AppNav, type NavTarget } from '../components/AppNav';
+import type { NavTarget } from '../components/AppNav';
+import { AppHeader, APP_SHELL_CLASS } from '../components/AppHeader';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { NativeSpeechPanel } from '../components/NativeSpeechPanel';
 import { SPEAKER_AUTO_MATCH } from '../../../shared/speaker-matching';
 import { SetupHealth } from '../components/SetupHealth';
-import { Icon } from '../components/icons';
+import { Icon, IconLabel } from '../components/icons';
 import { TerminologySettings } from '../components/Terminology';
 import { ObsidianSettings } from '../components/ObsidianSettings';
 import { SettingsNavigation, SettingsSection, PathSetting } from '../components/SettingsNavigation';
@@ -168,13 +170,11 @@ export function SettingsView({
   }
 
   return (
-    <div className="settings-view h-full flex flex-col max-w-2xl mx-auto w-full">
+    // Same shell and header as the other top-level views so the navigation
+    // does not shift; the form itself stays a narrow column inside it (#296).
+    <div className={APP_SHELL_CLASS}>
       <ConfirmDialog open={leaveOpen} title="Leave Settings with unsaved changes?" body="Some changes have not been saved. Stay to finish saving or correct any errors." confirmLabel="Leave Settings" onCancel={() => {leaveResolver.current?.(false); leaveResolver.current = null; setLeaveOpen(false);}} onConfirm={() => {leaveResolver.current?.(true); leaveResolver.current = null; setLeaveOpen(false);}}/>
-      <header className="app-chrome shrink-0 flex items-center gap-3 px-8 pt-8 pb-4 border-b border-surface-border">
-        <AppNav active="settings" onNav={onNav} />
-        {/* Visually redundant with the active nav tab, kept for the
-            accessibility tree / screen-reader page title. */}
-        <h1 className="sr-only">Settings</h1>
+      <AppHeader active="settings" onNav={onNav} pageTitle="Settings" className="mb-0">
         {onRunSetupAgain && (
           <button
             onClick={onRunSetupAgain}
@@ -183,8 +183,8 @@ export function SettingsView({
             Run setup again
           </button>
         )}
-      </header>
-
+      </AppHeader>
+      <div className="settings-view flex-1 min-h-0 flex flex-col max-w-2xl mx-auto w-full">
       <div className="shrink-0 px-8 py-2 text-xs max-h-24 overflow-auto" aria-live="polite">
         {Object.entries(saveStates).map(([key, state]) => <div key={key} className={state.startsWith('Couldn') ? 'text-danger' : 'text-ink-muted'}>{key}: {state}
           {state.startsWith('Couldn') && !['libraryPath','audioWatchPath'].includes(key) && <button className="ml-2 underline" onClick={() => void update(key as keyof Settings, s[key as keyof Settings])}>Retry</button>}
@@ -297,7 +297,7 @@ export function SettingsView({
               ? 'Checking whether this model tends to loop on structured tasks…'
               : healthCheck.state === 'loops'
                 ? 'This model looped on a quick extraction test — expect it to fail on real meetings too.'
-                : '✓ Passed a quick extraction canary.'}
+                : <IconLabel icon="check">Passed a quick extraction canary.</IconLabel>}
           </div>
         )}
         {s.llmModel && isKnownReasoningModel(s.llmModel) && (
@@ -381,23 +381,11 @@ export function SettingsView({
       </SettingsSection>
       <SettingsSection section="Organization" keywords="appearance theme light dark system">
       <Field label="Appearance">
-        <div className="inline-flex rounded-lg border border-surface-border overflow-hidden">
-          {(['system', 'light', 'dark'] as const).map((opt) => (
-            <button
-              key={opt}
-              onClick={() => {
-                void update('theme', opt).then(saved => {if (saved) window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));});
-              }}
-              className={`px-4 py-1.5 text-sm capitalize transition border-l border-surface-border first:border-l-0 ${
-                s.theme === opt
-                  ? 'bg-surface-sunken text-ink font-medium'
-                  : 'text-ink-muted hover:text-ink hover:bg-surface-sunken'
-              }`}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl label="Appearance" size="md" value={s.theme}
+          onChange={(opt) => {
+            void update('theme', opt).then(saved => {if (saved) window.dispatchEvent(new CustomEvent('mn:theme-changed', { detail: opt }));});
+          }}
+          options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
         <div className="text-xs text-ink-muted mt-1">
           System follows macOS appearance. Light and Dark override it.
         </div>
@@ -642,6 +630,7 @@ export function SettingsView({
       <DiagnosticsSection />
       </SettingsSection>
       </SettingsNavigation>
+      </div>
     </div>
   );
 }
@@ -717,6 +706,7 @@ function DiagnosticsSection(): JSX.Element {
         ] as const).map(([val, label]) => (
           <button
             key={val}
+            type="button" aria-pressed={filter === val}
             onClick={() => setFilter(val)}
             className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition ${
               filter === val
@@ -784,8 +774,8 @@ function PermRow({ label, state }: { label: string; state: PermState }): JSX.Ele
     : state === 'denied'
       ? 'text-danger'
       : 'text-ink-muted';
-  const txt = state === 'granted' ? '✓ Granted'
-    : state === 'denied' ? '✗ Denied'
+  const txt = state === 'granted' ? <IconLabel icon="check">Granted</IconLabel>
+    : state === 'denied' ? <IconLabel icon="x">Denied</IconLabel>
       : state === 'not-determined' ? 'Not granted yet'
         : 'Unknown';
   return (
@@ -923,7 +913,7 @@ function TestButton({ url, lazySpawn = false }: { kind: 'llm'; url: string; lazy
       </button>
       {result?.ok && (
         <span className="text-xs text-status-ok font-medium whitespace-nowrap">
-          ✓ reachable{result.detail ? ` · ${result.detail}` : ''}
+          <IconLabel icon="check">reachable{result.detail ? ` · ${result.detail}` : ''}</IconLabel>
         </span>
       )}
       {result && !result.ok && (
@@ -933,11 +923,11 @@ function TestButton({ url, lazySpawn = false }: { kind: 'llm'; url: string; lazy
         // (wrong port answering with 404s, timeouts mid-request) stay red.
         isIdleProbe(lazySpawn, result.code) ? (
           <span className="text-xs text-ink-muted whitespace-nowrap">
-            ○ not running — starts on demand when needed
+            <IconLabel icon="circle">not running — starts on demand when needed</IconLabel>
           </span>
         ) : (
           <span className="text-xs text-danger truncate max-w-[16rem]" title={result.error}>
-            ✗ {result.error}
+            <IconLabel icon="x">{result.error}</IconLabel>
           </span>
         )
       )}
@@ -999,7 +989,7 @@ function GoogleAccountCard({
 
       {status?.signedIn ? (
         <div className="flex items-center gap-3 bg-status-okBg/40 border border-status-ok/30 rounded-lg px-3 py-2.5">
-          <span className="text-status-ok">✓</span>
+          <span className="text-status-ok"><Icon name="check" className="w-3.5 h-3.5" /></span>
           <div className="flex-1 min-w-0">
             <div className="text-sm text-ink">Connected</div>
             <div className="text-xs text-ink-muted truncate">{status.email ?? 'Google account'}</div>
@@ -1178,12 +1168,12 @@ function WebhookExporterCard({
             </button>
             {lastResult && lastResult.error == null && (
               <span className="text-xs text-status-ok font-medium">
-                ✓ HTTP {lastResult.status} at {new Date(lastResult.ts).toLocaleTimeString()}
+                <IconLabel icon="check">HTTP {lastResult.status} at {new Date(lastResult.ts).toLocaleTimeString()}</IconLabel>
               </span>
             )}
             {lastResult && lastResult.error != null && (
               <span className="text-xs text-danger truncate max-w-[20rem]" title={lastResult.error}>
-                ✗ {lastResult.error}
+                <IconLabel icon="x">{lastResult.error}</IconLabel>
               </span>
             )}
           </div>
@@ -1280,7 +1270,7 @@ function SpeakerRosterRow({
             aria-label={`Rename ${speaker.displayName}`}
             className="text-xs text-ink-muted hover:text-ink px-1.5 py-0.5 rounded transition disabled:opacity-50"
           >
-            ✎
+            <Icon name="pencil" className="w-3.5 h-3.5" />
           </button>
         </>
       )}

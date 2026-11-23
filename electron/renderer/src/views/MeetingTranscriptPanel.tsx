@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TranscriptWindow } from '../components/TranscriptWindow';
 import { api } from '../ipc/client';
 import { useToast } from '../components/Toasts';
-import { colorForSpeakerIndex } from '../theme/tokens';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { speakerText } from '../theme/tokens';
 import { speakerColorIndex } from '../lib/speaker-colors';
 import { parseTranscript, fmtTimestamp, groupConsecutiveBySpeaker, formatTranscriptForExport, activeLineIndexAt, type TranscriptLine, type TranscriptGroup, type ExportFormat } from '../lib/transcript-lines';
 import type { MeetingDetail } from './MeetingDetailView';
@@ -42,7 +43,7 @@ export function TranscriptPanel({
   // a PRIMITIVE string prop so React.memo on the rows keeps bailing.
   const colorIdxBySpeaker = useMemo(() => speakerColorIndex(parsed.lines), [parsed.lines]);
   const speakerColor = (speaker: string): string =>
-    colorForSpeakerIndex(colorIdxBySpeaker.get(speaker) ?? 0);
+    speakerText(colorIdxBySpeaker.get(speaker) ?? 0);
 
   // Active line = the one whose [start, nextStart) window covers currentTime.
   // Computed ONCE per render here so each row receives a stable primitive
@@ -118,20 +119,11 @@ export function TranscriptPanel({
           active state is unambiguous; export is a separate group with
           a menu for the format choice. */}
       <div className="flex items-center justify-end gap-2 -mt-2 mb-1">
-        <div className="inline-flex items-center text-[11px] font-semibold rounded-full border border-surface-border bg-surface overflow-hidden">
-          <ViewToggleButton
-            active={viewMode === 'lines'}
-            onClick={() => setViewMode('lines')}
-            label="Per line"
-            title="Show every timestamped line as its own row"
-          />
-          <ViewToggleButton
-            active={viewMode === 'grouped'}
-            onClick={() => setViewMode('grouped')}
-            label="Grouped"
-            title="Collapse consecutive same-speaker lines into one paragraph"
-          />
-        </div>
+        <SegmentedControl label="Transcript layout" value={viewMode} onChange={setViewMode}
+          options={[
+            { value: 'lines', label: 'Per line', title: 'Show every timestamped line as its own row' },
+            { value: 'grouped', label: 'Grouped', title: 'Collapse consecutive same-speaker lines into one paragraph' },
+          ]} />
         <ExportTranscriptButton
           lines={parsed.lines}
           viewMode={viewMode}
@@ -140,10 +132,10 @@ export function TranscriptPanel({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <input ref={findRef} aria-label="Find in full transcript" value={find} onChange={event=>setFind(event.target.value)} placeholder="Find in transcript…" className="rounded border border-surface-border px-2 py-1"
+        <input ref={findRef} aria-label="Find in full transcript" value={find} onChange={event=>setFind(event.target.value)} placeholder="Find in transcript…" className="input-sm"
           onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();goMatch(matchIndex+(event.shiftKey?-1:1));}}}/>
-        {find&&<><span>{matches.length?Math.min(matchIndex+1,matches.length):0} / {matches.length} matches</span><button disabled={!matches.length} onClick={()=>goMatch(matchIndex-1)}>Previous</button><button disabled={!matches.length} onClick={()=>goMatch(matchIndex+1)}>Next</button></>}
-        <button onClick={()=>{void navigator.clipboard.writeText(body).catch(error=>toast.show({message:`Could not copy transcript: ${(error as Error).message}`,variant:'error'}));}}>Copy full transcript</button>
+        {find&&<><span role="status" aria-live="polite">{matches.length?Math.min(matchIndex+1,matches.length):0} / {matches.length} matches</span><button className="btn-secondary" disabled={!matches.length} onClick={()=>goMatch(matchIndex-1)}>Previous</button><button className="btn-secondary" disabled={!matches.length} onClick={()=>goMatch(matchIndex+1)}>Next</button></>}
+        <button className="btn-secondary" onClick={()=>{void navigator.clipboard.writeText(body).catch(error=>toast.show({message:`Could not copy transcript: ${(error as Error).message}`,variant:'error'}));}}>Copy full transcript</button>
         <span className="text-ink-muted">Up / Down moves between transcript rows.</span>
       </div>
       {/* Scrolling is delegated to the parent rail now that the detail
@@ -160,28 +152,6 @@ export function TranscriptPanel({
         />
       </div>
     </div>
-  );
-}
-
-function ViewToggleButton({
-  active, onClick, label, title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  title: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={`px-2.5 py-1 transition-colors ${
-        active ? 'bg-ink text-surface' : 'text-ink-muted hover:text-ink hover:bg-surface-sunken'
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 

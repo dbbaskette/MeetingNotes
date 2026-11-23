@@ -15,11 +15,11 @@ app.whenReady().then(async () => {
   await until(`!!document.querySelector('button')`);
   assert(await run(`document.querySelector('section').getBoundingClientRect().height < 180`));
   await click('Configure…');
-  await until(`document.querySelector('dialog').open`);
+  await until(`!!document.querySelector('.material-dialog')`);
   await click('Choose…');
   await click('Preview sync');
   assert.deepEqual(await run('window.fixture.calls'), ['preview']);
-  assert(await run(`document.querySelector('dialog').textContent.includes('500 completed meetings')`));
+  assert(await run(`document.querySelector('.material-dialog').textContent.includes('500 completed meetings')`));
   await click('Enable and sync');
   await click('Close');
   assert(await run(`document.activeElement.textContent === 'Configure…'`));
@@ -29,7 +29,7 @@ app.whenReady().then(async () => {
   await run('window.fixture.issues()');
   await click('Sync now / retry');
   assert.equal(await run(`document.querySelectorAll('[aria-label="Sync issues"] > div').length`), 100);
-  assert(await run(`document.querySelector('dialog').getBoundingClientRect().height <= innerHeight - 30`));
+  assert(await run(`document.querySelector('.material-dialog').getBoundingClientRect().height <= innerHeight - 30`));
   await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   fs.writeFileSync(path.join(profile, 'configured.png'), (await win.webContents.capturePage()).toPNG());
   await click('Review note');
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
   assert(await run(`document.querySelector('section').textContent.includes('Automatic sync is off')`));
   win.setContentSize(440, 620);
   await click('Configure…');
-  assert(await run(`document.querySelector('dialog').getBoundingClientRect().width <= innerWidth`));
+  assert(await run(`document.querySelector('.material-dialog').getBoundingClientRect().width <= innerWidth`));
   fs.writeFileSync(path.join(profile, 'narrow.png'), (await win.webContents.capturePage()).toPNG());
   console.log('Obsidian UI fixture passed: preview/enable, reconfigure, 100 issues, bounded layout, conflict/repair confirmations, disable, focus restoration. Screenshots:', profile);
   clearTimeout(timeout); win.destroy(); app.quit();

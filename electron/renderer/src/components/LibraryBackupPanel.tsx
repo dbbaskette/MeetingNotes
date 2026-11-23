@@ -60,7 +60,7 @@ export function LibraryBackupPanel(): JSX.Element {
         type="button"
         disabled={busy}
         onClick={() => void choose()}
-        className="text-sm font-semibold text-brand-indigo disabled:opacity-40"
+        className="btn-secondary"
       >
         {busy ? 'Backing up…' : 'Choose backup destination…'}
       </button>

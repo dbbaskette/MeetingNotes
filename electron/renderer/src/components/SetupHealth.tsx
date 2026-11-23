@@ -37,11 +37,11 @@ export function SetupHealth(): JSX.Element {
         <p className="text-ink-muted break-words">{row.detail}</p>
       </li>)}</ul>
       <div className="relative mt-3 flex gap-3">
-        <button type="button" className="underline" onClick={() => void refresh()}>Recheck setup</button>
-        <button type="button" className="font-semibold underline disabled:opacity-40" disabled={busy} onClick={() => setPicking(true)}>{busy ? 'Testing capture for 8 seconds…' : 'Test recording…'}</button>
+        <button type="button" className="btn-secondary" onClick={() => void refresh()}>Recheck setup</button>
+        <button type="button" className="btn-secondary" disabled={busy} onClick={() => setPicking(true)}>{busy ? 'Testing capture for 8 seconds…' : 'Test recording…'}</button>
         {picking && <SourcePicker showGroupPicker={false} onCancel={() => setPicking(false)} onPick={source => { setPicking(false); setInput({ targetPid: source.targetPid, targetLabel: source.targetLabel, mic: withMic }); }} />}
       </div>
-      <label className="flex gap-2 mt-2"><input type="checkbox" checked={withMic} disabled={busy} onChange={e => setWithMic(e.target.checked)} />Include microphone in test</label>
+      <label className="flex gap-2 mt-2"><input type="checkbox" className="accent-brand-solid" checked={withMic} disabled={busy} onChange={e => setWithMic(e.target.checked)} />Include microphone in test</label>
       <p className="text-ink-muted mt-2">The test is disposable: no Library meeting, processing, or export. Speak a short phrase after starting; play app audio only if you want to test both sources.</p>
       {result && <div className="mt-2" role="status"><p>{result.message}</p><ul>{Object.entries(result.streams).map(([label, stream]) => <li key={label}>{label}: {stream.playable ? 'playable container' : 'no playable audio'} · {stream.peakDb === null ? 'no level samples' : `${stream.peakDb.toFixed(1)} dBFS peak`}</li>)}</ul></div>}
       {error && <p role="alert" className="text-danger mt-2">{error}</p>}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { IconLabel } from './icons';
 import { useDialogSurface } from '../lib/dialog-surface';
 import { api } from '../ipc/client';
 
@@ -60,7 +61,7 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
           <div className="flex-1">
             <div className="text-sm font-semibold">Microphone</div>
             <div className="text-xs text-ink-muted">
-              {mic === 'granted' ? '✓ Granted' : mic === 'denied' ? '✗ Denied' : 'Not granted yet'}
+              {mic === 'granted' ? <IconLabel icon="check">Granted</IconLabel> : mic === 'denied' ? <IconLabel icon="x">Denied</IconLabel> : 'Not granted yet'}
             </div>
           </div>
           {mic !== 'granted' && (
@@ -79,9 +80,9 @@ export function PermissionsModal({ onAllGranted }: { onAllGranted: () => void })
             <div className="text-sm font-semibold">System audio</div>
             <div className="text-xs text-ink-muted">
               {audioCapture === 'granted'
-                ? '✓ Granted'
+                ? <IconLabel icon="check">Granted</IconLabel>
                 : audioCapture === 'denied'
-                ? '✗ Denied — open System Settings → Privacy & Security → Screen & System Audio Recording'
+                ? <IconLabel icon="x" className="items-start">Denied — open System Settings → Privacy &amp; Security → Screen &amp; System Audio Recording</IconLabel>
                 : (
                   <>
                     macOS will prompt the first time you click &#9210; Record. If you missed

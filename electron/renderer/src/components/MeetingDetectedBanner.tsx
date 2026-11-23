@@ -116,7 +116,7 @@ export function MeetingDetectedBanner({
       <button
         onClick={() => void record()}
         disabled={busy}
-        className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-br from-brand-indigo to-brand-violet disabled:opacity-50"
+        className="btn-primary px-3 py-1.5 text-xs"
       >
         {busy ? 'Starting…' : 'Record'}
       </button>

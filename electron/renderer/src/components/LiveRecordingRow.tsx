@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { api } from '../ipc/client';
 import { VuMeter } from './VuMeter';
-import { Icon } from './icons';
+import { Icon, IconLabel } from './icons';
 import { ConfirmDialog } from './ConfirmDialog';
 import { stopRecording } from '../lib/stop-recording';
 import { recordingStartFeedback } from '../lib/recording-start-feedback';
@@ -185,9 +185,9 @@ export function LiveRecordingRow({
           disabled={stopping}
           className={confirmingStop
             ? 'text-xs font-semibold bg-danger-solid text-white px-3 py-1.5 rounded-md ring-2 ring-danger-border ring-offset-1 animate-pulse disabled:opacity-40'
-            : 'text-xs font-semibold bg-danger-solid text-white px-3 py-1.5 rounded-md hover:bg-danger-solid disabled:opacity-40'}
+            : 'text-xs font-semibold bg-danger-solid text-white px-3 py-1.5 rounded-md hover:brightness-90 disabled:opacity-40'}
         >
-          {stopping ? 'Stopping…' : confirmingStop ? 'Confirm stop' : '■ Stop'}
+          {stopping ? 'Stopping…' : confirmingStop ? 'Confirm stop' : <IconLabel icon="stop" iconClassName="w-3 h-3 shrink-0">Stop</IconLabel>}
         </button>
       </div>
       {health.state === 'checking' && !stopping && (
@@ -220,10 +220,13 @@ export function LiveRecordingRow({
 }
 
 function StreamIndicator({ label, active, checking }: { label: string; active: boolean; checking: boolean }): JSX.Element {
-  const dot = checking ? 'bg-gray-400 animate-pulse' : active ? 'bg-emerald-500' : 'bg-amber-500';
+  // State is carried by shape and text as well as color: a filled dot is
+  // audible, a hollow ring is silent, and the state is spoken and in the tooltip.
+  const state = checking ? 'checking' : active ? 'audio detected' : 'no audio detected';
+  const dot = checking ? 'bg-ink-muted animate-pulse' : active ? 'bg-status-ok' : 'border border-status-warnText';
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted">
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />{label}
+    <span className="inline-flex items-center gap-1 text-[11px] text-ink-muted" title={`${label}: ${state}`}>
+      <span aria-hidden="true" className={`w-2 h-2 rounded-full ${dot}`} />{label}<span className="sr-only">: {state}</span>
     </span>
   );
 }

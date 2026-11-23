@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
     await run(`document.querySelector('#outside').click()`); await settle();
     await run(`document.querySelector('[data-meeting-id="fixture-0"] .group').click()`);
     assert.deepEqual(await run('window.fixture.opened'), ['fixture-0']);
-    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Actions"]').focus(); document.activeElement.click()`); await settle();
+    await run(`document.querySelector('[data-meeting-id="fixture-0"] button[aria-haspopup="menu"]').focus(); document.activeElement.click()`); await settle();
     assert.equal(await run(`Array.from(document.querySelectorAll('button')).some(button => button.textContent === 'Rename…')`), true);
     fs.writeFileSync(path.join(profile, `menu-${width}.png`), (await win.webContents.capturePage()).toPNG());
     await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Rename…').click()`); await settle();
@@ -87,7 +87,7 @@ app.whenReady().then(async () => {
     assert.equal(await run(`window.fixture.commits.length`), hiddenCommits, 'Hidden retained libraries do not own navigation keys');
     await run(`document.querySelector('#viewport').style.display = 'flex'`); await settle();
     await scroll(0);
-    await run(`window.fixture.holdDelete = true; document.querySelector('[data-meeting-id="fixture-0"] button[aria-label="Actions"]').click()`); await settle();
+    await run(`window.fixture.holdDelete = true; document.querySelector('[data-meeting-id="fixture-0"] button[aria-haspopup="menu"]').click()`); await settle();
     await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Delete…').click()`); await settle();
     await run(`Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Delete').click()`); await settle();
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' }); await settle();
@@ -98,7 +98,7 @@ app.whenReady().then(async () => {
     // Native Tab moves through the final currently rendered row, mounting
     // more rows as browser focus scrolling approaches the overscan edge.
     await scroll(0);
-    await run(`document.querySelector('[data-meeting-id="fixture-14"] button[aria-label="Actions"]').focus()`); await settle();
+    await run(`document.querySelector('[data-meeting-id="fixture-14"] button[aria-haspopup="menu"]').focus()`); await settle();
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' }); await settle();
     assert.equal(await run(`document.activeElement.closest('[data-meeting-id]')?.dataset.meetingId`), 'fixture-15');

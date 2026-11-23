@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { IconLabel } from './icons';
 import { ModalShell } from './ModalShell';
 import { api } from '../ipc/client';
 import { GroupPicker } from './GroupPicker';
@@ -106,7 +107,7 @@ export function SourcePicker({
             className="w-full text-left px-2 py-1 rounded-md text-[11px] font-mono uppercase tracking-wider text-ink-muted/70 hover:text-ink-muted"
             aria-expanded={showBackground}
           >
-            {showBackground ? '▾' : '▸'} Background processes ({background.length})
+            <IconLabel icon={showBackground ? 'chevron-down' : 'chevron-right'}>Background processes ({background.length})</IconLabel>
           </button>
           {showBackground && <SourceRows sources={background} onPick={pickOrConfirm} />}
         </>
@@ -191,7 +192,7 @@ function IdleConfirmDialog({
           </button>
           <button
             data-dialog-initial-focus onClick={onClose}
-            className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg bg-gradient-to-br from-brand-indigo to-brand-violet"
+            className="btn-primary px-3 py-1.5 text-sm"
           >
             Cancel
           </button>
