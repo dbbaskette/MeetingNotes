@@ -19,5 +19,10 @@
          entitlements must live on the parent here, not just on the helper. -->
     <key>com.apple.security.device.audio-input</key>
     <true/>
+
+    <!-- Calendar-aware recording (#253): the helper's read-only `calendar`
+         subcommand reads the event happening now. Opt-in, off by default. -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
 </dict>
 </plist>

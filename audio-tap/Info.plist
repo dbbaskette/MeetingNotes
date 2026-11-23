@@ -20,6 +20,8 @@
     <string>MeetingNotes captures your microphone to record meetings.</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>MeetingNotes captures audio you're playing to record meetings.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>MeetingNotes reads the calendar event happening now to title your recording and suggest speaker names. Nothing is changed or sent anywhere.</string>
     <key>NSSystemAdministrationUsageDescription</key>
     <string>MeetingNotes captures system audio to record meetings.</string>
 </dict>

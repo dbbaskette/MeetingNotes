@@ -4,6 +4,7 @@ import { captureTitle } from '../../shared/capture-title.js';
 import { assertBackupIdle } from '../storage/backup-gate.js';
 import path from 'node:path';
 import type { RecordingSessionsRepo } from '../storage/recording-sessions-repo.js';
+import type { CalendarEventSnapshot } from '../calendar/service.js';
 
 export type RecordingState = 'idle' | 'starting' | 'recording' | 'stopping' | 'error';
 
@@ -134,11 +135,24 @@ export class RecordingManager {
     onAutoStop?: (sessionId: string, silentForMs: number) => void;
     onFinalized?: (sessionId: string, outputPath: string) => void;
     onDiagnostic?: (sessionId: string, diagnostic: CaptureDiagnostic) => void;
+    /** Calendar-aware recording (#253): the event happening at `now`, or
+     *  null. Expected never to throw and to call nothing when the feature
+     *  is off (CalendarService.eventAt). */
+    calendarEventAt?: (now: Date) => Promise<CalendarEventSnapshot | null>;
   }) {}
 
   async start(input: StartInput, internal: { outputDir?: string; disposable?: boolean; expectedRevision?: number } = {}): Promise<StartResult> {
     assertBackupIdle();
     input = { ...input, title: captureTitle(input.title) };
+    // Calendar-aware recording (#253). Looked up before the slot is claimed:
+    // the check-and-claim below stays synchronous. An explicit title (from
+    // the UI or the URL scheme's `title=`) always wins over the event title.
+    // Capture tests are disposable and never consult the calendar.
+    let calendarEvent: CalendarEventSnapshot | null = null;
+    if (!internal.disposable && this.deps.calendarEventAt && this.sessions.size === 0) {
+      calendarEvent = await this.deps.calendarEventAt(this.deps.clock?.() ?? new Date()).catch(() => null);
+      if (!input.title && calendarEvent?.title) input = { ...input, title: calendarEvent.title };
+    }
     // All entry points converge here, AFTER any asynchronous enumeration.
     // Claim synchronously before spawning; a starting/stopping capture also
     // owns the slot. Persisted orphan detection must finish before a new start.
@@ -173,6 +187,7 @@ export class RecordingManager {
       outputPath,
       groupId: input.groupId ?? null,
       title: input.title,
+      calendarEvent,
     });
     const spawnFn = this.deps.spawn ?? nodeSpawn;
     let proc!: ChildProcessWithoutNullStreams;

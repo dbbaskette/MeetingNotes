@@ -176,6 +176,8 @@ Native profiles live at `<library>/voice-profiles/`; legacy profiles stay at `<l
 
 **What stays on your Mac:** audio, transcripts, notes, the speaker roster and the database. With the default settings, transcription, diarization and summarization all run locally, and the app sends no telemetry and needs no account.
 
+**Your calendar, only if you turn it on:** calendar-aware recording is off by default. When you turn it on in Settings › Recording, macOS asks for calendar access; MeetingNotes then reads, on this Mac only, the event happening when a recording starts. It keeps that event's title, start and end, recurring-series identifier and the attendees' display names with the meeting, uses the title for the recording (a title you type always wins) and offers the names when you name voices. It never stores attendee e-mail addresses, never writes to a calendar and never sends calendar data anywhere. While the setting is off, or access is denied, no calendar API is called. See [Recording](docs/guide/recording.md#calendar-aware-recording).
+
 **What can leave, and only if you set it up:**
 
 | You configure | What is sent | Where |

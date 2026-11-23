@@ -13,7 +13,7 @@ window.api = {
   }, cancel: async () => {nativeState.error = 'Setup cancelled. You can retry at any time.'; finishSpeech?.();}},
   settings: {getAll: async () => ({summaryProvider: 'external',llmContextLength: 0,summaryDetail: 'standard',lmStudioUrl: 'http://localhost:1234',llmModel: 'fixture-model',disableThinking: true,reasoningEffort: 'none',speechProvider: 'legacy',sttUrl: 'http://localhost:8080',sttModel: 'fixture',sttLanguage: 'en',libraryPath: '/fixture/library',audioWatchPath: '',userName: 'Dan',userSpeakerId: null,theme: 'system',autoDetectMeetings: {browserTabs: false,nativeApps: false,silenceMs: 5000},autoRecordZoom: false,exporterWebhook: false,googleClientId: '',googleClientSecret: ''}),
     set: async (key: string,value: unknown) => {fixture.saves.push({key,value}); if(fixture.fail) throw new Error('Fixture save failed'); return value;},chooseFolder: async () => fixture.chosen},
-  models: {list: async () => []},permissions: {micStatus: async () => 'granted', audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [
+  models: {list: async () => []},permissions: {calendar: async () => ({enabled: false, state: 'off'}), micStatus: async () => 'granted', audio: async () => ({mic: 'granted',audioCapture: 'granted'}), setupHealth: async () => [
     {label: 'Transcription', state: 'check', detail: 'Apple language assets need preparation', section: 'Processing'},
     {label: 'Exporters', state: 'optional', detail: 'Optional; does not block recording', section: 'Integrations'},
   ]},speakers: {list: async () => []},

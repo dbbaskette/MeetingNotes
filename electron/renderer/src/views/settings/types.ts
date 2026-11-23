@@ -26,6 +26,8 @@ export interface Settings {
   silenceCountdownS: number;
   autoProcessRecordings: boolean;
   autoMatchSpeakers: boolean;
+  /** Calendar-aware recording (#253); off by default. */
+  calendarAware?: boolean;
   notesFirst: boolean;
   showMenuBarIcon: boolean;
   recordShortcut: string;

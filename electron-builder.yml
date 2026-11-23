@@ -114,6 +114,7 @@ mac:
     NSSpeechRecognitionUsageDescription: MeetingNotes transcribes your selected meeting recordings locally on this Mac.
     NSMicrophoneUsageDescription: MeetingNotes records meetings by capturing your microphone.
     NSAudioCaptureUsageDescription: MeetingNotes records meetings by capturing audio from other apps.
+    NSCalendarsFullAccessUsageDescription: MeetingNotes reads the calendar event happening now to title your recording and suggest speaker names. Nothing is changed or sent anywhere.
 # Post-package hook trims dead weight from Chromium's bundled Electron
 # Framework. Strips ~55 unused locale .lproj dirs (~37 MB across 50+
 # languages). Keep software-rendering libraries/manifests for supported

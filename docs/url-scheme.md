@@ -20,6 +20,7 @@ If MeetingNotes is not running when one of these URLs is opened, macOS launches 
 - **Already-recording guard.** `record` is a no-op when a recording is already active. A macOS notification confirms which session blocked the request.
 - **Source resolution.** Keyword and bundle-id sources resolve against the live set of audio-producing processes (the same list the in-app source picker uses). If the named app isn't producing audio yet, the verb fails fast with a notification ("Zoom isn't producing audio right now") rather than starting a silent recording.
 - **Always-on audit log.** Every dispatch — including malformed URLs and ignored verbs — gets a JSON line in `~/Library/Logs/MeetingNotes/app.log` so you can see what fired and when.
+- **Title precedence.** A `title=` in the URL always names the meeting. Without one, and only when calendar-aware recording is on and calendar access is granted, the meeting is titled after the calendar event happening when the recording starts; otherwise it gets the usual title from the recording time. See [Recording](guide/recording.md#calendar-aware-recording).
 - **Validated input.** Source must be alphanumeric (`A–Z`, `a–z`, `0–9`, `.`, `_`, `-`); title is capped at 200 chars; meeting ids must match `[A-Za-z0-9_-]{1,64}`. Anything else is rejected with a notification.
 
 ## Examples

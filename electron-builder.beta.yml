@@ -35,4 +35,5 @@ mac:
   extendInfo:
     CFBundleDisplayName: MeetingNotes Beta
     NSSpeechRecognitionUsageDescription: MeetingNotes Beta transcribes selected copied meeting recordings locally.
+    NSCalendarsFullAccessUsageDescription: MeetingNotes Beta reads the calendar event happening now to title your recording and suggest speaker names. Nothing is changed or sent anywhere.
 compression: maximum

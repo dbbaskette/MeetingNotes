@@ -1,7 +1,7 @@
 // electron/renderer/src/views/settings/RecordingSettings.tsx
 // Recording section: meeting auto-detect and silence, menu bar and shortcut,
 // and audio permissions.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from '../../ipc/client';
 import { IconLabel } from '../../components/icons';
@@ -110,7 +110,57 @@ export function MeetingDetectionSettings({ s, update }: { s: Settings; update: U
           </label>
         </div>
       </section>
+
+      <CalendarAwareSettings s={s} update={update} />
     </>
+  );
+}
+
+type CalendarStatus = Awaited<ReturnType<typeof api.permissions.calendar>>;
+
+function calendarStateText(status: CalendarStatus | null): string {
+  if (!status) return 'Checking…';
+  switch (status.state) {
+    case 'off': return 'Off';
+    case 'fullAccess': return 'Calendar access granted';
+    case 'notDetermined': return 'Calendar access not asked yet. Turn this off and on to ask.';
+    case 'unavailable': return 'Calendar access could not be checked';
+    default: return 'Calendar access not allowed. Recordings keep their usual title.';
+  }
+}
+
+/** Calendar-aware recording (#253). Off by default. Turning it on is the
+ *  only thing that asks macOS for calendar access. */
+function CalendarAwareSettings({ s, update }: { s: Settings; update: UpdateSetting }): JSX.Element {
+  const [status, setStatus] = useState<CalendarStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = (): Promise<void> => api.permissions.calendar()
+    .then(setStatus, () => setStatus({ enabled: s.calendarAware ?? false, state: 'unavailable' }));
+  useEffect(() => { void refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once on open; toggling refreshes
+  const denied = status && ['denied', 'restricted', 'writeOnly'].includes(status.state);
+  return (
+    <section className="border-t border-surface-border pt-5 space-y-2">
+      <div className="settings-section-title text-ink-muted font-semibold">Calendar</div>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" className="mt-0.5" checked={s.calendarAware ?? false} disabled={busy}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setBusy(true);
+            void update('calendarAware', on).finally(() => { setBusy(false); void refresh(); });
+          }} />
+        <div className="flex-1">
+          <div className="text-sm text-ink">Use my calendar to title recordings and suggest speaker names</div>
+          <div className="text-xs text-ink-muted mt-0.5">
+            A recording that starts during a calendar event is named after it, and the people invited are offered when you name voices. Read only; nothing leaves this Mac.
+          </div>
+          <div className="text-xs mt-1 flex flex-wrap items-center gap-2" role="status">
+            <span className={status?.state === 'fullAccess' ? 'text-status-ok font-semibold' : 'text-ink-muted'}>{busy ? 'Waiting for your answer…' : calendarStateText(status)}</span>
+            {denied && <button type="button" className="btn-secondary"
+              onClick={() => void api.onboarding.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars')}>Open System Settings</button>}
+          </div>
+        </div>
+      </label>
+    </section>
   );
 }
 

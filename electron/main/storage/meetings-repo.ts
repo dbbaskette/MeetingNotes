@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { meetingInstant } from '../lib/meeting-instant.js';
 import { FacetedMeetings } from '../search/facets.js';
+import type { CalendarEventSnapshot } from '../calendar/service.js';
 
 export interface MeetingRow {
   id: string; slug: string; title: string;
@@ -494,5 +495,28 @@ export class MeetingsRepo {
   setStartedAt(id: string, startedAtIso: string): void {
     this.db.prepare('UPDATE meetings SET started_at = ?, updated_at = ? WHERE id = ?')
       .run(meetingInstant(startedAtIso, this.findById(id)?.audioPath), new Date().toISOString(), id);
+  }
+
+  /** Keeps the calendar event a recording started in (#253). Attendees are
+   *  display names; callers never pass e-mail addresses. */
+  setCalendarEvent(id: string, event: CalendarEventSnapshot): void {
+    this.db.prepare(`
+      INSERT INTO meeting_calendar_events (meeting_id, title, starts_at, ends_at, attendees_json, series_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(meeting_id) DO UPDATE SET title = excluded.title, starts_at = excluded.starts_at,
+        ends_at = excluded.ends_at, attendees_json = excluded.attendees_json, series_id = excluded.series_id
+    `).run(id, event.title, event.start, event.end, JSON.stringify(event.attendees), event.seriesId);
+  }
+
+  calendarEventFor(id: string): CalendarEventSnapshot | null {
+    const r = this.db.prepare('SELECT * FROM meeting_calendar_events WHERE meeting_id = ?').get(id) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    let attendees: string[] = [];
+    try {
+      const parsed = JSON.parse(r.attendees_json as string) as unknown;
+      if (Array.isArray(parsed)) attendees = parsed.filter((n): n is string => typeof n === 'string');
+    } catch { /* unreadable row reads as no attendees */ }
+    return { title: r.title as string, start: r.starts_at as string, end: r.ends_at as string,
+      attendees, seriesId: (r.series_id as string | null) ?? null };
   }
 }

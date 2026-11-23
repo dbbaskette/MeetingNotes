@@ -34,3 +34,8 @@ it('rejects prototype keys, managed settings, malformed and unsafe endpoints', (
   expect(() => validateSetting('webhookUrl', 'http://example.org')).toThrow('HTTPS');
   expect(validateSetting('webhookUrl', 'http://localhost:8080/hook')).toBe('http://localhost:8080/hook');
 });
+it('accepts only explicit booleans for calendar-aware recording, off by default (#253)', () => {
+  expect(validateSetting('calendarAware', true)).toBe(true);
+  expect(validateSetting('calendarAware', false)).toBe(false);
+  for (const value of ['true', 1, null, undefined, { on: true }]) expect(() => validateSetting('calendarAware', value)).toThrow();
+});

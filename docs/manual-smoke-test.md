@@ -102,6 +102,19 @@ Paths below use the default Library, `~/Documents/MeetingNotes`. If **Settings �
 - [ ] After granting permissions, revoke "Screen & System Audio Recording" for MeetingNotes in System Settings.
 - [ ] Click Record. Recording fails with a clear error (not a silent 0-byte file).
 
+### Calendar-aware recording
+
+Run on a Mac with at least one calendar event you can schedule. To start over, `tccutil reset Calendar com.dbbaskette.meetingnotes`.
+
+- [ ] With **Settings → Recording → Calendar** off (the default), record during an event. The meeting keeps its usual title, **Setup & health** shows **Calendar · Optional**, and no Calendars dialog appears. MeetingNotes is not listed under System Settings → Privacy & Security → Calendars.
+- [ ] Turn the setting on. macOS asks for calendar access, naming MeetingNotes and showing the usage text. Choose **Don't Allow**: the setting shows that access is not allowed with **Open System Settings**, the **Calendar** row says the same, and a recording made during an event keeps its usual title.
+- [ ] Allow MeetingNotes in System Settings → Privacy & Security → Calendars, then reopen Settings: it shows **Calendar access granted** and the **Calendar** row is Ready.
+- [ ] Create an event that has started (or starts within five minutes) with two or more invitees. Record from the source picker without a title: the meeting is titled after the event.
+- [ ] Record again with a title typed in the picker, then with `open "meetingnotes://record?source=system&title=URL%20title"`: both keep the given title.
+- [ ] An all-day event, or an event you declined, does not name a recording.
+- [ ] Process the meeting and open its speakers. **From the calendar invite** lists the attendees' names, no e-mail addresses. No voice is named until you pick one; picking a name that is already a saved speaker reuses that speaker.
+- [ ] `~/Library/Logs/MeetingNotes/app.log` has `calendar:lookup` lines with counts only, never an event title or attendee name.
+
 ## Source picker
 
 - [ ] Multiple audible helpers of one app remain separately selectable beneath the app heading. Labels identify each PID; selecting one records that stream, not every sibling.

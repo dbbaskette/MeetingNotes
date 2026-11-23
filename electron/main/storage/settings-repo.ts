@@ -75,6 +75,12 @@ export interface Settings {
   silenceCountdownS: number;
   /** Explicit opt-in to conservative native voiceprint auto-assignment. */
   autoMatchSpeakers: boolean;
+  /** Calendar-aware recording (#253), off by default. When on and macOS
+   *  calendar access is granted, a recording that starts during an event is
+   *  titled from it (an explicit title still wins) and the event's attendee
+   *  names are offered when naming voices. Read-only; nothing leaves the Mac.
+   *  While off, no calendar API is called. */
+  calendarAware: boolean;
   notesFirst: boolean;
   /** Show the macOS menu-bar item with recording status and controls. */
   showMenuBarIcon: boolean;
@@ -178,6 +184,7 @@ export const DEFAULT_SETTINGS: Settings = {
   silencePromptAfterS: 120,
   silenceCountdownS: 60,
   autoMatchSpeakers: false,
+  calendarAware: false,
   notesFirst: false,
   showMenuBarIcon: true,
   recordShortcut: '',

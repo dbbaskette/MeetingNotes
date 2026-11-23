@@ -6,10 +6,13 @@ enum Command {
   case record(RecordOptions)
   case probePermissions
   case listAudioProcesses
+  case calendar(CalendarSubcommand)
 
   static func parse(_ args: [String]) -> Command {
     var args = args
     args.removeFirst() // executable path
+    // Read-only calendar lookups (#253): `calendar status|request|events`.
+    if args.first == "calendar" { return .calendar(CalendarTool.parse(Array(args.dropFirst()))) }
     if args.contains("--probe-permissions") { return .probePermissions }
     if args.contains("--list-audio-processes") { return .listAudioProcesses }
     return .record(RecordOptions.parse(args))

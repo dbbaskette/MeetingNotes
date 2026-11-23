@@ -5,6 +5,7 @@ import type { IpcServices } from './handlers.js';
 import { testCapture } from '../recording/capture-test.js';
 import { setupHealth } from './setup-health.js';
 import { probeAudioPermissions, requestMicAccess, getMicAccessStatus } from '../permissions/audio.js';
+import { calendarFromServices } from '../calendar/service.js';
 
 export function registerRecordingMeetingHandler(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.recordingMeeting,async(_event,sessionId:unknown)=>{
@@ -112,4 +113,9 @@ export function registerRecordingHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.permissionsAudioGet, () => probeAudioPermissions({ helperPath: s.helperPath }));
   ipc.handle(IPC_CHANNELS.permissionsRequestMic, () => requestMicAccess());
   ipc.handle(IPC_CHANNELS.permissionsMicStatus, () => getMicAccessStatus());
+  // Never prompts; 'off' without spawning anything while the setting is off.
+  ipc.handle(IPC_CHANNELS.calendarStatus, async () => ({
+    enabled: s.settings.get('calendarAware'),
+    state: await calendarFromServices(s).status(),
+  }));
 }

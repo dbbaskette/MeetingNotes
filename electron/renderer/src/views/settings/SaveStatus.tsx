@@ -8,7 +8,7 @@ const SETTING_LABELS: Record<string, string> = {
   summaryDetail: 'Summary detail', disableThinking: 'Disable model thinking', reasoningEffort: 'Reasoning effort',
   libraryPath: 'Library folder', audioWatchPath: 'Watched audio folder', sttLanguage: 'Transcription language', transcriptionEngine: 'Transcription engine',
   autoStopOnSilence: 'Ask before stopping a silent recording', silencePromptAfterS: 'Silence before asking', silenceCountdownS: 'Countdown before stopping',
-  autoProcessRecordings: 'Process recordings automatically', autoMatchSpeakers: 'Match speakers automatically', notesFirst: 'Notes before speaker naming',
+  autoProcessRecordings: 'Process recordings automatically', autoMatchSpeakers: 'Match speakers automatically', calendarAware: 'Calendar-aware recording', notesFirst: 'Notes before speaker naming',
   showMenuBarIcon: 'Menu bar icon', recordShortcut: 'Start/stop shortcut', userName: 'Your name', userSpeakerId: 'You are…',
   theme: 'Appearance', googleClientId: 'Google client ID', googleClientSecret: 'Google client secret',
   webhookUrl: 'Webhook URL', webhookToken: 'Webhook token', webhookEnabled: 'Webhook exporter',

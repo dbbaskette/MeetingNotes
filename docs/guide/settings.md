@@ -6,7 +6,7 @@ Speech uses **Apple transcription + SpeakerKit**, set up under **Settings → Pr
 
 | Section | What is in it |
 | --- | --- |
-| **Recording** | Meeting auto-detect, **When audio goes silent**, **Menu bar and shortcut**, Permissions |
+| **Recording** | Meeting auto-detect, **When audio goes silent**, **Calendar**, **Menu bar and shortcut**, Permissions |
 | **Processing** | Native speech setup and **STT Language**, **Automatically match known voices**, **Generate notes before naming every voice**, **Process recordings automatically when capture finishes**, **Notes template by group**, **Summary detail level**, **Model thinking / reasoning effort** |
 | **Organization** | **Dictionary**, **Appearance**, **Your name**, **You are…**, the **Speakers** roster |
 | **Integrations** | **Obsidian sync**, **Webhook exporter**, **Google account** |
@@ -59,6 +59,7 @@ Every key in the `Settings` interface ([`settings-repo.ts`](../../electron/main/
 | `autoStopOnSilence` | `true` | Ask whether to stop when every audio source has gone silent, and stop if nobody answers. `false` = never ask and never stop a recording for silence. |
 | `silencePromptAfterS` | `120` | Seconds of continuous silence before asking. Whole seconds, 30–1800. Doubles after each **Continue recording**, up to 30 minutes. |
 | `silenceCountdownS` | `60` | Seconds the question waits before the recording is stopped and saved. Whole seconds, 10–600. |
+| `calendarAware` | `false` | **Calendar-aware recording.** Titles a recording from the calendar event happening when it starts (a typed or URL title wins) and offers the event's attendees as speaker names. Turning it on asks macOS for calendar access. Read only; nothing leaves the Mac. See [Recording](recording.md#calendar-aware-recording). |
 | `showMenuBarIcon` | `true` | Show the macOS menu-bar item with recording time and start/stop controls. |
 | `recordShortcut` | `""` | Global start/stop shortcut, as an Electron accelerator. Empty = none. Recorded under Settings → Recording → **Menu bar and shortcut**; a combination that cannot be registered is refused. |
 | `obsidian` | `null` (off) | Vault, owned subfolder, content options, and sync state. Configure through the preview/confirmation flow, not generic settings writes. |

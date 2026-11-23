@@ -10,6 +10,7 @@ import { meetingFolderPath } from '../storage/meeting-folder.js';
 import { extractSpeakerSample, embeddingForLabel, type DiarizationArtifact } from '../speakers/sample-extractor.js';
 import { remergeTranscript } from '../pipeline/stages/merging.js';
 import { listMeetingSpeakers, speakerReviewForFolder } from './meeting-speakers.js';
+import { calendarCandidates } from '../speakers/calendar-candidates.js';
 
 export function registerSpeakerHandlers(ipc: IpcMain, s: IpcServices): void {
   ipc.handle(IPC_CHANNELS.speakersList, () => s.speakers.list());
@@ -197,8 +198,14 @@ export function registerSpeakerHandlers(ipc: IpcMain, s: IpcServices): void {
     const matches = s.roster.identifyUnknowns(detected.filter(item => !linked.get(item.label)), { enabled: s.settings.get('autoMatchSpeakers'), space: diar.embeddingSpace, segments: diar.segments,
       reservedRosterIds: [...linked.values()].filter((id): id is string => !!id) });
     const suggestions = s.roster.suggestionsBatch(detected, diar.embeddingSpace);
+    // Calendar-aware recording (#253): attendee names from the stored event,
+    // offered as candidates only. Hidden while the setting is off; reading
+    // the stored event calls no calendar API.
+    const event = s.settings.get('calendarAware') ? s.meetings.calendarEventFor(meetingId) : null;
+    const calendarSuggestions = event ? calendarCandidates({ attendees: event.attendees, roster: s.speakers.list(),
+      linkedRosterIds: [...linked.values()] }) : [];
     return detected.map(item => ({ label: item.label, reason: matches.find(match => match.label === item.label)?.reason,
-      suggestions: suggestions.get(item.label) ?? [] }));
+      suggestions: suggestions.get(item.label) ?? [], calendarSuggestions }));
   });
   ipc.handle(IPC_CHANNELS.speakersProfiles, (_e, id: string) => new VoiceProfiles(s.libraryRoot).info(id));
   ipc.handle(IPC_CHANNELS.speakersUndoProfile, (_e, id: string, space: string) => {
